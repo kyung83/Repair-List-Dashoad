@@ -5,6 +5,7 @@
  */
 
 const REPAIR_SPREADSHEET_ID = PropertiesService.getScriptProperties().getProperty('REPAIR_SPREADSHEET_ID');
+const DASHBOARD_API_TOKEN = PropertiesService.getScriptProperties().getProperty('DASHBOARD_API_TOKEN');
 const REPAIR_SHEET = 'Repair List';
 const DVIR_SHEET = 'DVIR Defects';
 const PM_SHEET = "Truck PM'S";
@@ -12,6 +13,7 @@ const EQUIPMENT_SHEET = 'Equipment Info';
 
 function doGet(e) {
   try {
+    if (!dashboardAuthorized_((e && e.parameter && e.parameter.token) || '')) return json_({ ok: false, error: 'Unauthorized' });
     const action = String((e && e.parameter && e.parameter.action) || 'dashboard');
     if (action !== 'dashboard') return json_({ ok: false, error: 'Unknown action' });
     return json_(getDashboardData_());
@@ -23,6 +25,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (!dashboardAuthorized_(body.token || '')) return json_({ ok: false, error: 'Unauthorized' });
     if (body.action === 'markRepaired') return json_(markDashboardDefectRepaired_(body));
     return json_({ ok: false, error: 'Unknown action' });
   } catch (error) {
@@ -116,4 +119,8 @@ function extractLink_(cell) {
 
 function json_(value) {
   return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function dashboardAuthorized_(token) {
+  return Boolean(DASHBOARD_API_TOKEN) && String(token) === String(DASHBOARD_API_TOKEN);
 }
