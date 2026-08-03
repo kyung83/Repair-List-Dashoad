@@ -27,6 +27,8 @@ function doPost(e) {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (!dashboardAuthorized_(body.token || '')) return json_({ ok: false, error: 'Unauthorized' });
     if (body.action === 'markRepaired') return json_(markDashboardDefectRepaired_(body));
+    if (body.action === 'saveRepair') return json_(saveRepair_(body));
+    if (body.action === 'completeRepair') return json_(completeRepair_(body));
     return json_({ ok: false, error: 'Unknown action' });
   } catch (error) {
     return json_({ ok: false, error: String(error && error.message || error) });
@@ -47,11 +49,40 @@ function getDashboardData_() {
 }
 
 function readRepairs_(sheet) {
-  if (!sheet) return [];
-  const rows = sheet.getRange(2, 1, Math.min(30, Math.max(1, sheet.getLastRow() - 1)), 7).getDisplayValues();
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getDisplayValues();
   return rows.map(function(row, index) {
     return { id: 'repair-' + (index + 2), unit: row[0], issue: row[1], parts: row[2], status: row[4], driver: row[5], location: row[6] };
   }).filter(function(item) { return item.unit && item.issue; });
+}
+
+function saveRepair_(body) {
+  if (!REPAIR_SPREADSHEET_ID) throw new Error('Repair spreadsheet is not configured');
+  const sheet = SpreadsheetApp.openById(REPAIR_SPREADSHEET_ID).getSheetByName(REPAIR_SHEET);
+  if (!sheet) throw new Error('Repair List sheet not found');
+  const values = [
+    String(body.unit || '').trim(),
+    String(body.issue || '').trim(),
+    String(body.parts || '').trim(),
+    new Date(),
+    String(body.status || 'New').trim(),
+    String(body.driver || '').trim(),
+    String(body.location || '').trim()
+  ];
+  if (!values[0] || !values[1]) throw new Error('Unit and repair needed are required');
+  const match = String(body.id || '').match(/repair-(\d+)/);
+  const row = match ? Number(match[1]) : Math.max(2, sheet.getLastRow() + 1);
+  sheet.getRange(row, 1, 1, 7).setValues([values]);
+  return { ok: true, id: 'repair-' + row };
+}
+
+function completeRepair_(body) {
+  const match = String(body.id || '').match(/repair-(\d+)/);
+  if (!match) throw new Error('Repair row not found');
+  const sheet = SpreadsheetApp.openById(REPAIR_SPREADSHEET_ID).getSheetByName(REPAIR_SHEET);
+  if (!sheet) throw new Error('Repair List sheet not found');
+  sheet.getRange(Number(match[1]), 5).setValue('Completed');
+  return { ok: true, id: body.id };
 }
 
 function readDvir_(sheet) {
