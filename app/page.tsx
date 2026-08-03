@@ -19,6 +19,7 @@ const previewData: DashboardData = {
 
 const tabs = ["Repairs", "DVIR Defects", "PM Status", "Equipment"] as const;
 type Tab = (typeof tabs)[number];
+const emptyRepair: Repair = { id: "", unit: "", issue: "", parts: "", status: "New", driver: "", location: "" };
 
 function statusClass(status: string) {
   const s = status.toLowerCase();
@@ -34,6 +35,8 @@ export default function Home() {
   const [data, setData] = useState<DashboardData>(previewData);
   const [loading, setLoading] = useState(true);
   const [connectionMessage, setConnectionMessage] = useState("");
+  const [editingRepair, setEditingRepair] = useState<Repair | null>(null);
+  const [saving, setSaving] = useState(false);
 
   async function loadData() {
     setLoading(true);
@@ -91,6 +94,19 @@ export default function Home() {
     await loadData();
   }
 
+  async function repairAction(action: "saveRepair" | "completeRepair", repair: Repair) {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/repairs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...repair }) });
+      const result = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || "The repair could not be saved.");
+      setEditingRepair(null);
+      await loadData();
+    } catch (error) {
+      setConnectionMessage(error instanceof Error ? error.message : "The repair could not be saved.");
+    } finally { setSaving(false); }
+  }
+
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => ({
     repairs: data.repairs.filter((r) => Object.values(r).join(" ").toLowerCase().includes(q)),
@@ -124,6 +140,7 @@ export default function Home() {
           <div className="topbar-actions">
             <label className="search"><span>⌕</span><input aria-label="Search all repair records" placeholder="Search unit, driver, issue…" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
             <button className="refresh" onClick={() => void loadData()} disabled={loading}>{loading ? "Loading…" : "Refresh data"}</button>
+            <button className="primary-action" onClick={() => { setActiveTab("Repairs"); setEditingRepair({ ...emptyRepair }); }}>+ New repair</button>
           </div>
         </header>
 
@@ -137,9 +154,9 @@ export default function Home() {
         </section>
 
         <section className="panel">
-          <div className="panel-heading"><div><p className="eyebrow">LIVE WORK QUEUE</p><h2>{activeTab}</h2></div><span>Updated {new Date(data.updatedAt).toLocaleString()}</span></div>
+          <div className="panel-heading"><div><p className="eyebrow">LIVE WORK QUEUE</p><h2>{activeTab}</h2></div><span suppressHydrationWarning>Updated {new Date(data.updatedAt).toLocaleString()}</span></div>
 
-          {activeTab === "Repairs" && <div className="table-wrap"><table><thead><tr><th>Unit</th><th>Repair needed</th><th>Parts</th><th>Status</th><th>Driver</th><th>Location</th></tr></thead><tbody>{filtered.repairs.map((r) => <tr key={r.id}><td className="unit">{r.unit}</td><td>{r.issue}</td><td>{r.parts || "—"}</td><td><span className={`pill ${statusClass(r.status)}`}>{r.status || "Open"}</span></td><td>{r.driver || "—"}</td><td>{r.location || "—"}</td></tr>)}</tbody></table></div>}
+          {activeTab === "Repairs" && <div className="table-wrap"><table><thead><tr><th>Unit</th><th>Repair needed</th><th>Parts</th><th>Status</th><th>Driver</th><th>Location</th><th>Actions</th></tr></thead><tbody>{filtered.repairs.map((r) => <tr key={r.id}><td className="unit">{r.unit}</td><td>{r.issue}</td><td>{r.parts || "—"}</td><td><span className={`pill ${statusClass(r.status)}`}>{r.status || "Open"}</span></td><td>{r.driver || "—"}</td><td>{r.location || "—"}</td><td><div className="row-actions"><button onClick={() => setEditingRepair({ ...r })}>Edit</button>{!r.status.toLowerCase().includes("complete") && <button className="complete" onClick={() => void repairAction("completeRepair", r)}>Complete</button>}</div></td></tr>)}</tbody></table></div>}
 
           {activeTab === "DVIR Defects" && <div className="card-grid">{filtered.dvir.map((d) => <article className="defect-card" key={d.id}><div className="defect-head"><div><span className="asset">{d.asset}</span><h3>{d.defect}</h3></div><span className={`pill ${d.repaired ? "success" : "danger"}`}>{d.repaired ? "Repaired" : "Needs repair"}</span></div><p>{d.comments || "No driver comments"}</p><div className="defect-meta"><span>Driver: {d.driver || "Unknown"}</span>{d.photos && d.photos !== "None" ? <a href={d.photos} target="_blank" rel="noreferrer">View photos</a> : <span>No photos</span>}</div>{!d.repaired && <button className="repair-button" onClick={() => void markRepaired(d)}>Mark repaired</button>}</article>)}</div>}
 
@@ -150,6 +167,7 @@ export default function Home() {
           {((activeTab === "Repairs" && !filtered.repairs.length) || (activeTab === "DVIR Defects" && !filtered.dvir.length) || (activeTab === "PM Status" && !filtered.pm.length) || (activeTab === "Equipment" && !filtered.equipment.length)) && <div className="empty-state"><strong>No matching records</strong><span>Try a different search.</span></div>}
         </section>
       </section>
+      {editingRepair && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingRepair(null); }}><form className="repair-modal" onSubmit={(e) => { e.preventDefault(); void repairAction("saveRepair", editingRepair); }}><div className="modal-head"><div><p className="eyebrow">REPAIR RECORD</p><h2>{editingRepair.id ? "Edit repair" : "Add a new repair"}</h2></div><button type="button" className="close-modal" aria-label="Close" onClick={() => setEditingRepair(null)}>×</button></div><div className="form-grid"><label>Unit number<input required value={editingRepair.unit} onChange={(e) => setEditingRepair({ ...editingRepair, unit: e.target.value })} /></label><label>Status<select value={editingRepair.status} onChange={(e) => setEditingRepair({ ...editingRepair, status: e.target.value })}><option>New</option><option>Assigned</option><option>Waiting for Parts</option><option>In Progress</option><option>Completed</option></select></label><label className="wide">Repair needed<textarea required rows={3} value={editingRepair.issue} onChange={(e) => setEditingRepair({ ...editingRepair, issue: e.target.value })} /></label><label className="wide">Parts needed<input value={editingRepair.parts} onChange={(e) => setEditingRepair({ ...editingRepair, parts: e.target.value })} /></label><label>Assigned mechanic / driver<input value={editingRepair.driver} onChange={(e) => setEditingRepair({ ...editingRepair, driver: e.target.value })} /></label><label>Location<input value={editingRepair.location} onChange={(e) => setEditingRepair({ ...editingRepair, location: e.target.value })} /></label></div><div className="modal-actions"><button type="button" onClick={() => setEditingRepair(null)}>Cancel</button><button className="primary-action" disabled={saving}>{saving ? "Saving…" : "Save repair"}</button></div></form></div>}
     </main>
   );
 }
