@@ -1,0 +1,58 @@
+name: Bootstrap Cloudflare
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - ".github/workflows/cloudflare-bootstrap.yml"
+      - "scripts/cloudflare-bootstrap.sh"
+      - "wrangler.template.jsonc"
+      - "migrations/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: norlow-cloudflare-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Check authorization
+        id: auth
+        shell: bash
+        run: |
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare is not authorized yet. Add the CLOUDFLARE_API_TOKEN repository secret, then push or rerun this workflow."
+          fi
+
+      - name: Check out project
+        if: steps.auth.outputs.ready == 'true'
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        if: steps.auth.outputs.ready == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.auth.outputs.ready == 'true'
+        run: npm ci
+
+      - name: Create resources, migrate, and deploy
+        if: steps.auth.outputs.ready == 'true'
+        run: bash scripts/cloudflare-bootstrap.sh
