@@ -52,6 +52,11 @@ cat /tmp/r2-create.log
 sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" "$TEMPLATE_FILE" > "$CONFIG_FILE"
 
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
+
+# The repository stores some helper scripts without executable mode metadata.
+# Restore it on Linux runners before the npm build invokes them directly.
+chmod +x scripts/*.sh
+
 npm run build
 npx wrangler deploy --config "$CONFIG_FILE" --name "$WORKER_NAME" "${ACCOUNT_ARG[@]}"
 
