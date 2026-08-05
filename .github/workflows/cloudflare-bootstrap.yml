@@ -64,3 +64,5 @@ jobs:
       - name: Create resources, migrate, and deploy
         if: steps.auth.outputs.ready == 'true'
         run: bash scripts/cloudflare-bootstrap.sh
+
+# Token-authorized bootstrap trigger.
