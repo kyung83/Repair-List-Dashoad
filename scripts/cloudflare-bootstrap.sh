@@ -12,6 +12,20 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   exit 1
 fi
 
+# GitHub secrets can accidentally contain copied line breaks, labels, or quotes.
+# Normalize the token without printing it.
+CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
+CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
+CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
+CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
+CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
+export CLOUDFLARE_API_TOKEN
+
+if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+  echo "Cloudflare token is empty after normalization."
+  exit 1
+fi
+
 ACCOUNT_ARG=()
 if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   ACCOUNT_ARG=(--account-id "$CLOUDFLARE_ACCOUNT_ID")
