@@ -3,7 +3,6 @@ set -euo pipefail
 
 DB_NAME="norlow-repair-production"
 BUCKET_NAME="norlow-repair-files"
-WORKER_NAME="norlow-repair-dashboard"
 CONFIG_FILE="wrangler.jsonc"
 TEMPLATE_FILE="wrangler.template.jsonc"
 
@@ -57,7 +56,12 @@ npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${
 # Restore it on Linux runners before the npm build invokes them directly.
 chmod +x scripts/*.sh
 
+# Build through the Cloudflare Vite plugin using the generated production config.
+export CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH="$CONFIG_FILE"
 npm run build
-npx wrangler deploy --config "$CONFIG_FILE" --name "$WORKER_NAME" "${ACCOUNT_ARG[@]}"
+
+# The Vite plugin writes .wrangler/deploy/config.json, which redirects Wrangler
+# to the built Worker bundle and its generated output configuration.
+npx wrangler deploy "${ACCOUNT_ARG[@]}"
 
 echo "Cloudflare bootstrap completed."
