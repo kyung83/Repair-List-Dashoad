@@ -77,9 +77,10 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/repairs" -o /tmp/repairs-api.json
           geotab_status="$(curl --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors -o /tmp/geotab-check.json -w '%{http_code}' "$site_url/api/repairs?checkGeotab=1")"
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/inventory" -o /tmp/inventory-api.json
+          echo "Sanitized Geotab diagnostic:"
+          cat /tmp/geotab-check.json
           if [ "$geotab_status" != "200" ]; then
             echo "Geotab diagnostic returned HTTP $geotab_status."
-            cat /tmp/geotab-check.json || true
             exit 1
           fi
           node - <<'NODE'
