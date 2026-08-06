@@ -71,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          site_url="https://norlow-repair-dashboard.jtomaski.workers.dev"
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/" -o /tmp/dashboard.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/inventory" -o /tmp/inventory.html
           repair_status="$(curl --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors -o /tmp/repairs-api.json -w '%{http_code}' "$site_url/api/repairs?sync=1")"
