@@ -66,3 +66,4 @@ jobs:
         run: bash scripts/cloudflare-bootstrap.sh
 
 # Token-authorized bootstrap trigger.
+# Redeploy latest repair-board interface.
