@@ -1,16 +1,9 @@
 import { env } from 'cloudflare:workers';
 import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db';
-import { diagnoseGeotabConnection } from '@/lib/geotab-diagnostic';
 import { isGeotabConfigured, markGeotabDefectRepaired } from '@/lib/geotab';
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const url = new URL(request.url);
-    if (url.searchParams.get('checkGeotab') === '1') {
-      const diagnostic = await diagnoseGeotabConnection(env);
-      const status = diagnostic.ok ? 200 : diagnostic.authenticated ? 403 : 401;
-      return Response.json(diagnostic, { status, headers: { 'cache-control': 'no-store' } });
-    }
     const payload = await getDashboardData(env.DB, isGeotabConfigured(env));
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
