@@ -34,9 +34,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      GEOTAB_DATABASE: ${{ secrets.GEOTAB_DATABASE }}
-      GEOTAB_USERNAME: ${{ secrets.GEOTAB_USERNAME }}
-      GEOTAB_PASSWORD: ${{ secrets.GEOTAB_PASSWORD }}
 
     steps:
       - name: Check authorization
@@ -69,26 +66,7 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         run: bash scripts/cloudflare-bootstrap.sh
 
-      - name: Sync Geotab secrets
-        if: steps.auth.outputs.ready == 'true'
-        id: geotab
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${GEOTAB_DATABASE:-}" ] || [ -z "${GEOTAB_USERNAME:-}" ] || [ -z "${GEOTAB_PASSWORD:-}" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Geotab secrets are not configured. D1 repairs and inventory remain available; live DVIR sync is disabled."
-            exit 0
-          fi
-          account_args=()
-          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID"); fi
-          printf '%s' "$GEOTAB_DATABASE" | npx wrangler secret put GEOTAB_DATABASE --name norlow-repair-dashboard "${account_args[@]}"
-          printf '%s' "$GEOTAB_USERNAME" | npx wrangler secret put GEOTAB_USERNAME --name norlow-repair-dashboard "${account_args[@]}"
-          printf '%s' "$GEOTAB_PASSWORD" | npx wrangler secret put GEOTAB_PASSWORD --name norlow-repair-dashboard "${account_args[@]}"
-          echo "configured=true" >> "$GITHUB_OUTPUT"
-          echo "Geotab secrets synchronized."
-
-      - name: Verify live dashboard and inventory
+      - name: Verify live dashboard, Geotab, and inventory
         if: steps.auth.outputs.ready == 'true'
         shell: bash
         run: |
@@ -96,7 +74,7 @@ jobs:
           site_url="https://norlow-repair-dashboard.jtomaski.workers.dev"
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/" -o /tmp/dashboard.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/inventory" -o /tmp/inventory.html
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/repairs" -o /tmp/repairs-api.json
+          curl --fail --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors "$site_url/api/repairs?sync=1" -o /tmp/repairs-api.json
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/inventory" -o /tmp/inventory-api.json
           node - <<'NODE'
           const fs = require('fs');
@@ -104,7 +82,8 @@ jobs:
           for (const key of ['repairs', 'dvir', 'pm', 'equipment']) {
             if (!Array.isArray(repairs[key])) throw new Error(`Missing dashboard array: ${key}`);
           }
+          if (repairs.geotabConfigured !== true) throw new Error('Encrypted Geotab configuration is not active');
           const inventory = JSON.parse(fs.readFileSync('/tmp/inventory-api.json', 'utf8'));
           if (!Array.isArray(inventory.parts) || !Array.isArray(inventory.vendors)) throw new Error('Invalid inventory payload');
-          console.log('Repair, Geotab-ready, and inventory APIs returned valid payloads.');
+          console.log('Repair, direct Geotab, and inventory APIs returned valid payloads.');
           NODE

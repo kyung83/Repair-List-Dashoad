@@ -10,6 +10,7 @@ interface Env {
   GEOTAB_DATABASE?: string;
   GEOTAB_USERNAME?: string;
   GEOTAB_PASSWORD?: string;
+  GEOTAB_CONFIG_PRIVATE_KEY?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
