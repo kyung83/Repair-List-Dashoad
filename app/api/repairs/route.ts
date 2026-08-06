@@ -1,14 +1,19 @@
 import { env } from 'cloudflare:workers';
 import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db';
-import { isGeotabConfigured, markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
+import {
+  hasGeotabCredential,
+  markGeotabDefectRepaired,
+  syncGeotabDvir,
+} from '@/lib/geotab-direct';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    if (url.searchParams.get('sync') === '1' && isGeotabConfigured(env)) {
+    const geotabConfigured = await hasGeotabCredential(env);
+    if (url.searchParams.get('sync') === '1' && geotabConfigured) {
       await syncGeotabDvir(env);
     }
-    const payload = await getDashboardData(env.DB, isGeotabConfigured(env));
+    const payload = await getDashboardData(env.DB, geotabConfigured);
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'repair_api_get_failed', error: String(error) }));
@@ -33,6 +38,8 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unknown repair action' }, { status: 400 });
   } catch (error) {
     console.error(JSON.stringify({ event: 'repair_api_post_failed', error: String(error) }));
-    return Response.json({ error: error instanceof Error ? error.message : 'Repair action failed' }, { status: 400 });
+    return Response.json({
+      error: error instanceof Error ? error.message : 'Repair action failed',
+    }, { status: 400 });
   }
 }
