@@ -3,7 +3,12 @@ import { geotabProtectedConfig } from './geotab-protected-config';
 type JsonRecord = Record<string, unknown>;
 type Credentials = { database: string; userName: string; sessionId: string };
 type Auth = { endpoint: string; endpointHost: string; credentials: Credentials };
-type DiagnosticEnv = { GEOTAB_CONFIG_PRIVATE_KEY?: string };
+type DiagnosticEnv = {
+  GEOTAB_CONFIG_PRIVATE_KEY?: string;
+  GEOTAB_DATABASE?: string;
+  GEOTAB_USERNAME?: string;
+  GEOTAB_PASSWORD?: string;
+};
 type ServiceConfig = { database: string; serviceUsername: string; servicePassword: string };
 type CheckResult = { ok: boolean; error?: string };
 type GeotabPayload<T> = { result?: T; error?: { message?: string; name?: string } };
@@ -72,6 +77,17 @@ async function decryptServiceConfig(env: DiagnosticEnv): Promise<ServiceConfig> 
   return config as ServiceConfig;
 }
 
+async function resolveServiceConfig(env: DiagnosticEnv): Promise<ServiceConfig> {
+  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
+    return {
+      database: env.GEOTAB_DATABASE,
+      serviceUsername: env.GEOTAB_USERNAME,
+      servicePassword: env.GEOTAB_PASSWORD,
+    };
+  }
+  return decryptServiceConfig(env);
+}
+
 async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Promise<T> {
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -114,7 +130,7 @@ async function call<T>(auth: Auth, method: string, params: JsonRecord): Promise<
 export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<GeotabDiagnosticResult> {
   let config: ServiceConfig;
   try {
-    config = await decryptServiceConfig(env);
+    config = await resolveServiceConfig(env);
   } catch (error) {
     return { ok: false, authenticated: false, stage: 'configuration', checks: {}, error: safeError(error) };
   }
@@ -153,6 +169,6 @@ export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<Geot
     stage: ok ? 'ready' : 'permissions',
     endpointHost: auth.endpointHost,
     checks,
-    ...(ok ? {} : { error: 'The service account authenticated, but one or more API calls failed.' }),
+    ...(ok ? {} : { error: 'The Geotab account authenticated, but one or more API calls failed.' }),
   };
 }
