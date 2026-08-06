@@ -19,6 +19,12 @@ on:
       - "vite.config.ts"
       - "wrangler.template.jsonc"
   workflow_dispatch:
+    inputs:
+      run_geotab_admin_test:
+        description: "Temporarily test Geotab with the encrypted administrator secrets"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,10 +36,13 @@ concurrency:
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      GEOTAB_TEST_DATABASE: ${{ secrets.GEOTAB_TEST_DATABASE }}
+      GEOTAB_TEST_USERNAME: ${{ secrets.GEOTAB_TEST_USERNAME }}
+      GEOTAB_TEST_PASSWORD: ${{ secrets.GEOTAB_TEST_PASSWORD }}
 
     steps:
       - name: Check authorization
@@ -61,6 +70,22 @@ jobs:
       - name: Install dependencies
         if: steps.auth.outputs.ready == 'true'
         run: npm ci
+
+      - name: Validate temporary Geotab test secrets
+        if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in GEOTAB_TEST_DATABASE GEOTAB_TEST_USERNAME GEOTAB_TEST_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf 'Missing required GitHub Actions secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
 
       - name: Create resources, migrate, and deploy
         if: steps.auth.outputs.ready == 'true'
@@ -104,3 +129,58 @@ jobs:
           }
           console.log('Vendor records are loaded and the inventory API remains protected.');
           NODE
+
+      - name: Install temporary Geotab administrator credentials
+        id: geotab_test_credentials
+        if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE' | npx wrangler secret bulk --config wrangler.jsonc --name norlow-repair-dashboard
+          const values = {
+            GEOTAB_DATABASE: process.env.GEOTAB_TEST_DATABASE,
+            GEOTAB_USERNAME: process.env.GEOTAB_TEST_USERNAME,
+            GEOTAB_PASSWORD: process.env.GEOTAB_TEST_PASSWORD,
+          };
+          if (Object.values(values).some((value) => !value)) {
+            throw new Error('Temporary Geotab test secrets are incomplete.');
+          }
+          process.stdout.write(JSON.stringify(values));
+          NODE
+
+      - name: Run Geotab administrator diagnostic
+        if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          http_status="$(curl --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -o /tmp/geotab-admin-diagnostic.json -w '%{http_code}' \
+            "$site_url/api/repairs?checkGeotab=1")"
+          node - "$http_status" <<'NODE'
+          const fs = require('fs');
+          const httpStatus = Number(process.argv[2]);
+          const result = JSON.parse(fs.readFileSync('/tmp/geotab-admin-diagnostic.json', 'utf8'));
+          const summary = {
+            httpStatus,
+            ok: result.ok === true,
+            authenticated: result.authenticated === true,
+            stage: result.stage,
+            endpointHost: result.endpointHost,
+            checks: result.checks,
+            error: result.error,
+          };
+          console.log(JSON.stringify(summary, null, 2));
+          if (result.ok !== true) {
+            throw new Error(`Geotab administrator diagnostic failed at stage ${result.stage || 'unknown'}.`);
+          }
+          NODE
+
+      - name: Remove temporary Geotab administrator credentials
+        if: always() && steps.geotab_test_credentials.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' '{"GEOTAB_DATABASE":null,"GEOTAB_USERNAME":null,"GEOTAB_PASSWORD":null}' \
+            | npx wrangler secret bulk --config wrangler.jsonc --name norlow-repair-dashboard
+          echo "Temporary Geotab administrator credentials were removed."
