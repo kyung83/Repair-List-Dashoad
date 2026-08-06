@@ -1,12 +1,15 @@
 import { env } from 'cloudflare:workers';
 import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db';
-import { isGeotabConfigured, markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
+import { diagnoseGeotabConnection } from '@/lib/geotab-diagnostic';
+import { isGeotabConfigured, markGeotabDefectRepaired } from '@/lib/geotab';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    if (url.searchParams.get('sync') === '1' && isGeotabConfigured(env)) {
-      await syncGeotabDvir(env);
+    if (url.searchParams.get('checkGeotab') === '1') {
+      const diagnostic = await diagnoseGeotabConnection(env);
+      const status = diagnostic.ok ? 200 : diagnostic.authenticated ? 403 : 401;
+      return Response.json(diagnostic, { status, headers: { 'cache-control': 'no-store' } });
     }
     const payload = await getDashboardData(env.DB, isGeotabConfigured(env));
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
@@ -29,7 +32,9 @@ export async function POST(request: Request) {
         String(body.defectId ?? ''),
       ));
     }
-    if (action === 'syncGeotab') return Response.json(await syncGeotabDvir(env));
+    if (action === 'syncGeotab') {
+      return Response.json({ error: 'Geotab imports remain disabled until dashboard access control is enabled.' }, { status: 503 });
+    }
     return Response.json({ error: 'Unknown repair action' }, { status: 400 });
   } catch (error) {
     console.error(JSON.stringify({ event: 'repair_api_post_failed', error: String(error) }));
