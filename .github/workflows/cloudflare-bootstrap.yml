@@ -24,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: norlow-cloudflare-bootstrap-v2
+  group: norlow-cloudflare-bootstrap-v3
   cancel-in-progress: true
 
 jobs:
@@ -66,7 +66,24 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         run: bash scripts/cloudflare-bootstrap.sh
 
-      - name: Verify live dashboard, Geotab, and inventory
+      - name: Import protected vendor records
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -X POST "$site_url/api/internal/vendor-bootstrap" -o /tmp/vendor-import.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/vendor-import.json', 'utf8'));
+          if (result.ok !== true || result.imported !== 46) {
+            throw new Error(`Protected vendor import failed: ${JSON.stringify(result)}`);
+          }
+          console.log(`Protected vendor import completed for ${result.imported} vendors.`);
+          NODE
+
+      - name: Verify live dashboard and Geotab
         if: steps.auth.outputs.ready == 'true'
         shell: bash
         run: |
@@ -75,10 +92,14 @@ jobs:
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/" -o /tmp/dashboard.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/inventory" -o /tmp/inventory.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/repairs" -o /tmp/repairs-api.json
+          inventory_status="$(curl --silent --show-error -o /tmp/inventory-lock.json -w '%{http_code}' "$site_url/api/inventory")"
           geotab_status="$(curl --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors -o /tmp/geotab-check.json -w '%{http_code}' "$site_url/api/repairs?checkGeotab=1")"
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/inventory" -o /tmp/inventory-api.json
           echo "Sanitized Geotab diagnostic:"
           cat /tmp/geotab-check.json
+          if [ "$inventory_status" != "503" ]; then
+            echo "Inventory API was expected to remain locked but returned HTTP $inventory_status."
+            exit 1
+          fi
           if [ "$geotab_status" != "200" ]; then
             echo "Geotab diagnostic returned HTTP $geotab_status."
             exit 1
@@ -92,9 +113,9 @@ jobs:
           if (repairs.geotabConfigured !== true) throw new Error('Encrypted Geotab configuration is not active');
           const diagnostic = JSON.parse(fs.readFileSync('/tmp/geotab-check.json', 'utf8'));
           if (diagnostic.authenticated !== true || diagnostic.ok !== true) {
-            throw new Error(`Geotab diagnostic failed at stage: ${diagnostic.stage || 'unknown'}`);
+            throw new Error(Geotab diagnostic failed at stage: ${diagnostic.stage || 'unknown'}`);
           }
-          const inventory = JSON.parse(fs.readFileSync('/tmp/inventory-api.json', 'utf8'));
-          if (!Array.isArray(inventory.parts) || !Array.isArray(inventory.vendors)) throw new Error('Invalid inventory payload');
-          console.log('Repair, Geotab authentication/permissions, and inventory APIs returned valid payloads.');
+          const lock = JSON.parse(fs.readFileSync('/tmp/inventory-lock.json', 'utf8'));
+          if (!String(lock.error || '').includes('temporarily locked')) throw new Error('Inventory lock response is invalid');
+          console.log('Dashboard and Geotab checks passed; inventory remains protected.');
           NODE
