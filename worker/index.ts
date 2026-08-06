@@ -1,10 +1,15 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
-import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
-import handler from "vinext/server/app-router-entry";
+/** Cloudflare Worker entry point for the Norlow repair and inventory application. */
+import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from 'vinext/server/image-optimization';
+import handler from 'vinext/server/app-router-entry';
+import { syncGeotabDvir } from '../lib/geotab';
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  FILES: R2Bucket;
+  GEOTAB_DATABASE?: string;
+  GEOTAB_USERNAME?: string;
+  GEOTAB_PASSWORD?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -19,17 +24,10 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-// Image security config. SVG sources with .svg extension auto-skip the
-// optimization endpoint on the client side (served directly, no proxy).
-// To route SVGs through the optimizer (with security headers), set
-// dangerouslyAllowSVG: true in next.config.js and uncomment below:
-// const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
-
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-
-    if (url.pathname === "/_vinext/image") {
+    if (url.pathname === '/_vinext/image') {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
@@ -39,8 +37,12 @@ const worker = {
         },
       }, allowedWidths);
     }
-
     return handler.fetch(request, env, ctx);
+  },
+
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    const result = await syncGeotabDvir(env);
+    console.log(JSON.stringify({ event: 'geotab_dvir_sync', ...result }));
   },
 };
 

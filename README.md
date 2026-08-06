@@ -1,22 +1,27 @@
-# Norlow Repair Dashboard
+# Norlow Fleet Operations
 
-Fleet repair software backed by the **Repair Dashboad code** Google Sheet.
+Standalone Cloudflare application for repairs, direct Geotab DVIR synchronization, PM/equipment visibility, and parts inventory.
 
-## Included
+## Architecture
 
-- Open repair list
-- DVIR defect cards, comments, photos, and mark-repaired action
-- PM status
-- Truck and trailer equipment lookup
-- Global search and responsive mobile layout
-- Google Apps Script connector that keeps credentials out of GitHub
+- Cloudflare Worker and vinext application
+- D1 as the source of truth for repairs, equipment, PM status, DVIR cache, parts, vendors, and repair-part usage
+- R2 for future repair attachments and inventory documents
+- Direct MyGeotab API integration; no Google Apps Script dependency
+- Cron-triggered DVIR synchronization every 15 minutes
 
-## Connect the live Google Sheet
+## Required encrypted Worker secrets
 
-1. Open the Google Sheet and choose **Extensions → Apps Script**.
-2. Add `google-apps-script/Code.gs` to the existing Apps Script project. Keep the existing Geotab functions in the same project.
-3. In **Project Settings → Script Properties**, add `REPAIR_SPREADSHEET_ID` with the spreadsheet ID from the sheet URL.
-4. Deploy the Apps Script project as a Web App that executes as the owner. Choose the narrowest access setting that works for your company; this repository does not make that choice automatically.
-5. Set the deployed URL as the hosted app's `SHEET_API_URL` environment variable.
+- `GEOTAB_DATABASE`
+- `GEOTAB_USERNAME`
+- `GEOTAB_PASSWORD`
 
-Until the connector URL is configured, the dashboard clearly displays preview data.
+Use a dedicated limited-permission MyGeotab service account. Never commit real credentials or fleet data to this public repository.
+
+## Inventory
+
+The `/inventory` workspace supports parts, stock levels, reorder thresholds, costs, locations, preferred vendors, and stock adjustment. The API also supports applying a part to a repair, which records repair usage and decrements available stock transactionally.
+
+## Private data migration
+
+Existing Google Sheet repair and inventory records must be loaded directly into D1 through an authenticated administrative import or Wrangler command. They must not be stored in repository migration files because this repository is public.

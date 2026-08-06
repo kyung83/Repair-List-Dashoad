@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/cloudflare-bootstrap.yml"
       - "app/**"
+      - "lib/**"
       - "build/**"
       - "migrations/**"
       - "public/**"
@@ -33,8 +34,9 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
-      SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+      GEOTAB_DATABASE: ${{ secrets.GEOTAB_DATABASE }}
+      GEOTAB_USERNAME: ${{ secrets.GEOTAB_USERNAME }}
+      GEOTAB_PASSWORD: ${{ secrets.GEOTAB_PASSWORD }}
 
     steps:
       - name: Check authorization
@@ -45,7 +47,7 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Cloudflare is not authorized yet. Add the CLOUDFLARE_API_TOKEN repository secret, then rerun this workflow."
+            echo "Cloudflare is not authorized. Add CLOUDFLARE_API_TOKEN and rerun."
           fi
 
       - name: Check out project
@@ -67,55 +69,42 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         run: bash scripts/cloudflare-bootstrap.sh
 
-      - name: Sync Google Sheet connector secrets
+      - name: Sync Geotab secrets
         if: steps.auth.outputs.ready == 'true'
-        id: connector
+        id: geotab
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${SHEET_API_URL:-}" ] || [ -z "${SHEET_API_TOKEN:-}" ]; then
+          if [ -z "${GEOTAB_DATABASE:-}" ] || [ -z "${GEOTAB_USERNAME:-}" ] || [ -z "${GEOTAB_PASSWORD:-}" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "SHEET_API_URL and SHEET_API_TOKEN are not both configured in GitHub Actions. The site will remain in preview mode."
+            echo "Geotab secrets are not configured. D1 repairs and inventory remain available; live DVIR sync is disabled."
             exit 0
           fi
-
           account_args=()
-          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID")
-          fi
-
-          printf '%s' "$SHEET_API_URL" | npx wrangler secret put SHEET_API_URL --name norlow-repair-dashboard "${account_args[@]}"
-          printf '%s' "$SHEET_API_TOKEN" | npx wrangler secret put SHEET_API_TOKEN --name norlow-repair-dashboard "${account_args[@]}"
+          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID"); fi
+          printf '%s' "$GEOTAB_DATABASE" | npx wrangler secret put GEOTAB_DATABASE --name norlow-repair-dashboard "${account_args[@]}"
+          printf '%s' "$GEOTAB_USERNAME" | npx wrangler secret put GEOTAB_USERNAME --name norlow-repair-dashboard "${account_args[@]}"
+          printf '%s' "$GEOTAB_PASSWORD" | npx wrangler secret put GEOTAB_PASSWORD --name norlow-repair-dashboard "${account_args[@]}"
           echo "configured=true" >> "$GITHUB_OUTPUT"
-          echo "Google Sheet connector secrets synchronized."
+          echo "Geotab secrets synchronized."
 
-      - name: Verify live dashboard
+      - name: Verify live dashboard and inventory
         if: steps.auth.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
           site_url="https://norlow-repair-dashboard.jtomaski.workers.dev"
-
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-            "$site_url/" -o /tmp/dashboard.html
-          echo "Dashboard homepage returned successfully."
-
-          api_status="$(curl --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-            --output /tmp/repairs-api.json --write-out '%{http_code}' "$site_url/api/repairs")"
-          echo "Repair API HTTP status: $api_status"
-
-          if [ "$api_status" = "200" ]; then
-            node - <<'NODE'
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/" -o /tmp/dashboard.html
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/inventory" -o /tmp/inventory.html
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/repairs" -o /tmp/repairs-api.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/inventory" -o /tmp/inventory-api.json
+          node - <<'NODE'
           const fs = require('fs');
-          const payload = JSON.parse(fs.readFileSync('/tmp/repairs-api.json', 'utf8'));
+          const repairs = JSON.parse(fs.readFileSync('/tmp/repairs-api.json', 'utf8'));
           for (const key of ['repairs', 'dvir', 'pm', 'equipment']) {
-            if (!Array.isArray(payload[key])) throw new Error(`Missing dashboard array: ${key}`);
+            if (!Array.isArray(repairs[key])) throw new Error(`Missing dashboard array: ${key}`);
           }
-          console.log('Repair API returned the expected live dashboard payload.');
+          const inventory = JSON.parse(fs.readFileSync('/tmp/inventory-api.json', 'utf8'));
+          if (!Array.isArray(inventory.parts) || !Array.isArray(inventory.vendors)) throw new Error('Invalid inventory payload');
+          console.log('Repair, Geotab-ready, and inventory APIs returned valid payloads.');
           NODE
-          elif [ "$api_status" = "503" ]; then
-            echo "Dashboard deployment is healthy, but the Google Sheet connector is not configured."
-          else
-            echo "Unexpected repair API response."
-            exit 1
-          fi

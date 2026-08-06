@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "norlow-repair-dashboard",
   "main": "./worker/index.ts",
-  "compatibility_date": "2026-08-04",
+  "compatibility_date": "2026-08-06",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "binding": "ASSETS",
@@ -22,7 +22,11 @@
       "bucket_name": "norlow-repair-files"
     }
   ],
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 1
   }
 }
