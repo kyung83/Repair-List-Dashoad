@@ -74,8 +74,21 @@ jobs:
           site_url="https://norlow-repair-dashboard.jtomaski.workers.dev"
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/" -o /tmp/dashboard.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/inventory" -o /tmp/inventory.html
-          curl --fail --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors "$site_url/api/repairs?sync=1" -o /tmp/repairs-api.json
+          repair_status="$(curl --silent --show-error --retry 2 --retry-delay 2 --retry-all-errors -o /tmp/repairs-api.json -w '%{http_code}' "$site_url/api/repairs?sync=1")"
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/api/inventory" -o /tmp/inventory-api.json
+          if [ "$repair_status" != "200" ]; then
+            echo "Repair API returned HTTP $repair_status."
+            cat /tmp/repairs-api.json || true
+            account_args=()
+            if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID"); fi
+            echo "Configured Worker secret names:"
+            npx wrangler secret list --name norlow-repair-dashboard "${account_args[@]}" || true
+            echo "Sanitized Geotab synchronization state:"
+            npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc \
+              --command "SELECT feed_name, last_success_at, last_error FROM sync_state WHERE feed_name LIKE 'geotab%';" \
+              "${account_args[@]}" || true
+            exit 1
+          fi
           node - <<'NODE'
           const fs = require('fs');
           const repairs = JSON.parse(fs.readFileSync('/tmp/repairs-api.json', 'utf8'));
