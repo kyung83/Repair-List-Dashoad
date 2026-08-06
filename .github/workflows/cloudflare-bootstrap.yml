@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   bootstrap:
-    runs-on: macos-14
+    runs-on: windows-latest
     timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -60,10 +60,12 @@ jobs:
 
       - name: Install dependencies
         if: steps.auth.outputs.ready == 'true'
+        shell: bash
         run: npm ci
 
       - name: Create resources, migrate, and deploy
         if: steps.auth.outputs.ready == 'true'
+        shell: bash
         run: bash scripts/cloudflare-bootstrap.sh
 
       - name: Verify live dashboard, Geotab, and inventory
