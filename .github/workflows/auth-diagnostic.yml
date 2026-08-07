@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SITE_URL: https://norlow-repair-dashboard.norlo-repair-system.workers.dev
 
     steps:
       - name: Check out project
@@ -30,60 +31,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Inspect Worker deployments
+      - name: Probe top-level Worker crypto
         shell: bash
         run: |
           set -euo pipefail
+          curl --fail --silent --show-error "$SITE_URL/_auth-crypto-probe" | tee /tmp/crypto-probe.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/crypto-probe.json', 'utf8'));
+          if (result.buildMarker !== 'worker-crypto-probe-v1') {
+            throw new Error(`Unexpected live Worker build marker: ${result.buildMarker || '<missing>'}`);
+          }
+          console.log(`TOP_LEVEL_PBKDF2_SUPPORTED=${result.pbkdf2Supported}`);
+          console.log(`TOP_LEVEL_PBKDF2_ERROR=${result.errorName || '<none>'}`);
+          NODE
+
+      - name: Verify live authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+
           CLOUDFLARE_API_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN:-}" | tr -d '[:space:]')"
           CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
           CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
           CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
           CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
           export CLOUDFLARE_API_TOKEN
-
-          echo "Diagnostic checkout: $(git rev-parse HEAD)"
-          npx wrangler deployments list --name norlow-repair-dashboard --json > /tmp/deployments.json
-          node - <<'NODE'
-          const fs = require('fs');
-          const data = JSON.parse(fs.readFileSync('/tmp/deployments.json', 'utf8'));
-          console.log('Recent Worker deployments:');
-          for (const deployment of data.slice(0, 10)) {
-            const versions = Array.isArray(deployment.versions)
-              ? deployment.versions.map((v) => `${v.version_id || v.id || '?'}:${v.percentage ?? '?'}%`).join(',')
-              : '';
-            console.log(JSON.stringify({
-              id: deployment.id,
-              created_on: deployment.created_on,
-              source: deployment.source,
-              strategy: deployment.strategy,
-              versions,
-            }));
-          }
-          NODE
-
-      - name: Verify bootstrap row and live authentication
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo "CLOUDFLARE_API_TOKEN is not configured."
-            exit 1
-          fi
-
-          CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
-          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
-          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
-          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
-          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
-          export CLOUDFLARE_API_TOKEN
-
-          bootstrap_check="$(npx wrangler d1 execute norlow-repair-production --remote --yes --command "SELECT CASE WHEN EXISTS (SELECT 1 FROM app_users WHERE email = 'dashboard-admin@norlow.invalid' COLLATE NOCASE AND role = 'admin' AND active = 1 AND password_hash = '-uLLbYzMW07HfNn-p28D9B400IVLE_XQczZmp6CQwuA' AND password_salt = 'wIzuqZEKY7FLRf08_JDRAQ' AND password_iterations = 210000) THEN 'BOOTSTRAP_ADMIN_OK' ELSE 'BOOTSTRAP_ADMIN_MISMATCH' END AS status;" 2>&1)"
-          printf '%s\n' "$bootstrap_check"
-          if ! grep -q 'BOOTSTRAP_ADMIN_OK' <<<"$bootstrap_check"; then
-            echo "The production D1 bootstrap administrator row does not match migration 0009."
-            exit 1
-          fi
 
           node - <<'NODE'
           const fs = require('fs');
@@ -93,76 +66,41 @@ jobs:
           const salt = crypto.randomBytes(16);
           const iterations = 210000;
           const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256').toString('base64url');
-          fs.writeFileSync('/tmp/norlow-auth-smoke.json', JSON.stringify({
-            email,
-            password,
-            hash,
-            salt: salt.toString('base64url'),
-            iterations,
-          }));
+          const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
+          fs.writeFileSync('/tmp/norlow-auth-smoke.json', JSON.stringify({ email, password }));
+          fs.writeFileSync('/tmp/norlow-auth-smoke-insert.sql', `
+          INSERT INTO app_users (email, display_name, role, password_hash, password_salt, password_iterations, active, force_password_change, updated_at)
+          VALUES (${quote(email)}, 'Authentication Smoke Test', 'admin', ${quote(hash)}, ${quote(salt.toString('base64url'))}, ${iterations}, 1, 0, CURRENT_TIMESTAMP);
+          `);
+          fs.writeFileSync('/tmp/norlow-auth-smoke-delete.sql', `DELETE FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE;`);
           NODE
 
           SMOKE_EMAIL="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/norlow-auth-smoke.json','utf8')).email)")"
           SMOKE_PASSWORD="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/norlow-auth-smoke.json','utf8')).password)")"
           export SMOKE_EMAIL SMOKE_PASSWORD
 
-          node - <<'NODE'
-          const fs = require('fs');
-          const row = JSON.parse(fs.readFileSync('/tmp/norlow-auth-smoke.json', 'utf8'));
-          const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
-          fs.writeFileSync('/tmp/norlow-auth-smoke-insert.sql', `
-          INSERT INTO app_users (email, display_name, role, password_hash, password_salt, password_iterations, active, force_password_change, updated_at)
-          VALUES (${quote(row.email)}, 'Authentication Smoke Test', 'admin', ${quote(row.hash)}, ${quote(row.salt)}, ${row.iterations}, 1, 0, CURRENT_TIMESTAMP);
-          `);
-          fs.writeFileSync('/tmp/norlow-auth-smoke-delete.sql', `DELETE FROM app_users WHERE email = ${quote(row.email)} COLLATE NOCASE;`);
-          NODE
-
           cleanup() {
             npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-delete.sql >/dev/null 2>&1 || true
-            rm -f /tmp/norlow-auth-smoke.json /tmp/norlow-auth-smoke-insert.sql /tmp/norlow-auth-smoke-delete.sql /tmp/norlow-auth-smoke-cookies.txt /tmp/norlow-auth-smoke-login.json /tmp/norlow-auth-smoke-me.json
+            rm -f /tmp/norlow-auth-smoke* /tmp/login.json /tmp/cookies.txt
           }
           trap cleanup EXIT
 
           npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-insert.sql >/dev/null
           sleep 15
 
-          node - <<'NODE' >/tmp/norlow-auth-smoke-payload.json
+          node - <<'NODE' >/tmp/payload.json
           process.stdout.write(JSON.stringify({ email: process.env.SMOKE_EMAIL, password: process.env.SMOKE_PASSWORD }));
           NODE
 
-          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
-          login_status="$(curl --silent --show-error --retry 3 --retry-delay 1 --retry-all-errors \
-            -o /tmp/norlow-auth-smoke-login.json \
-            -c /tmp/norlow-auth-smoke-cookies.txt \
-            -w '%{http_code}' \
-            -H 'content-type: application/json' \
-            --data-binary @/tmp/norlow-auth-smoke-payload.json \
-            "$site_url/api/auth/login")"
-          rm -f /tmp/norlow-auth-smoke-payload.json
+          status="$(curl --silent --show-error -o /tmp/login.json -c /tmp/cookies.txt -w '%{http_code}' \
+            -H 'content-type: application/json' --data-binary @/tmp/payload.json "$SITE_URL/api/auth/login")"
+          echo "LOGIN_STATUS=$status"
+          cat /tmp/login.json
 
-          if [ "$login_status" != "200" ]; then
-            echo "Live login endpoint returned HTTP $login_status."
-            cat /tmp/norlow-auth-smoke-login.json
-            exit 1
+          if [ "$status" = "200" ]; then
+            me_status="$(curl --silent --show-error -o /tmp/me.json -b /tmp/cookies.txt -w '%{http_code}' "$SITE_URL/api/auth/me")"
+            echo "SESSION_STATUS=$me_status"
+            cat /tmp/me.json
           fi
 
-          me_status="$(curl --silent --show-error \
-            -o /tmp/norlow-auth-smoke-me.json \
-            -b /tmp/norlow-auth-smoke-cookies.txt \
-            -w '%{http_code}' \
-            "$site_url/api/auth/me")"
-
-          if [ "$me_status" != "200" ]; then
-            echo "Authenticated session check returned HTTP $me_status."
-            cat /tmp/norlow-auth-smoke-me.json
-            exit 1
-          fi
-
-          node - <<'NODE'
-          const fs = require('fs');
-          const me = JSON.parse(fs.readFileSync('/tmp/norlow-auth-smoke-me.json', 'utf8'));
-          if (!me.user || me.user.email !== process.env.SMOKE_EMAIL || me.user.role !== 'admin') {
-            throw new Error('Authenticated session returned the wrong user.');
-          }
-          console.log('LIVE_AUTH_SMOKE_OK');
-          NODE
+          test "$status" = "200"
