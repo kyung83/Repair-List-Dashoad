@@ -1,5 +1,8 @@
 import { geotabProtectedConfig } from './geotab-protected-config';
 
+const GEOTAB_SERVER = 'https://my.geotab.com';
+const GEOTAB_AUTH_URL = `${GEOTAB_SERVER}/apiv1`;
+
 type JsonRecord = Record<string, unknown>;
 type Credentials = { database: string; userName: string; sessionId: string };
 type Auth = { endpoint: string; endpointHost: string; credentials: Credentials };
@@ -10,7 +13,7 @@ type DiagnosticEnv = {
   GEOTAB_PASSWORD?: string;
 };
 type ServiceConfig = { database: string; serviceUsername: string; servicePassword: string };
-type CheckResult = { ok: boolean; error?: string };
+type CheckResult = { ok: boolean; count?: number; error?: string };
 type GeotabPayload<T> = { result?: T; error?: { message?: string; name?: string } };
 
 export type GeotabDiagnosticResult = {
@@ -106,8 +109,8 @@ async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Pro
 
 function endpointFromPath(pathValue: unknown) {
   const path = text(pathValue).trim();
-  if (!path || path.toLowerCase() === 'thisserver') {
-    return { endpoint: 'https://my.geotab.com/apiv1', endpointHost: 'my.geotab.com' };
+  if (!path || path === 'ThisServer') {
+    return { endpoint: GEOTAB_AUTH_URL, endpointHost: 'my.geotab.com' };
   }
   const host = path.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
   if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Geotab returned an invalid API path');
@@ -116,15 +119,24 @@ function endpointFromPath(pathValue: unknown) {
 
 async function authenticate(config: ServiceConfig): Promise<Auth> {
   const result = await rpc<{ credentials: Credentials; path?: string }>(
-    'https://my.geotab.com/apiv1',
+    GEOTAB_AUTH_URL,
     'Authenticate',
-    { database: config.database, userName: config.serviceUsername, password: config.servicePassword },
+    { userName: config.serviceUsername, password: config.servicePassword, database: config.database },
   );
   return { ...endpointFromPath(result.path), credentials: result.credentials };
 }
 
 async function call<T>(auth: Auth, method: string, params: JsonRecord): Promise<T> {
   return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
+}
+
+async function runGet(auth: Auth, params: JsonRecord): Promise<CheckResult> {
+  try {
+    const result = await call<unknown[]>(auth, 'Get', params);
+    return { ok: true, count: Array.isArray(result) ? result.length : 0 };
+  } catch (error) {
+    return { ok: false, error: safeError(error) };
+  }
 }
 
 export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<GeotabDiagnosticResult> {
@@ -142,25 +154,23 @@ export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<Geot
     return { ok: false, authenticated: false, stage: 'authentication', checks: {}, error: safeError(error) };
   }
 
-  const fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const toDate = new Date().toISOString();
-  const probes: Array<[string, () => Promise<unknown>]> = [
-    ['devices', () => call(auth, 'Get', { typeName: 'Device', resultsLimit: 1 })],
-    ['trailers', () => call(auth, 'Get', { typeName: 'Trailer', resultsLimit: 1 })],
-    ['users', () => call(auth, 'Get', { typeName: 'User', resultsLimit: 1 })],
-    ['defects', () => call(auth, 'Get', { typeName: 'Defect', resultsLimit: 1 })],
-    ['dvirLogs', () => call(auth, 'Get', { typeName: 'DVIRLog', resultsLimit: 1, search: { fromDate, toDate } })],
-  ];
+  // Match the proven Apps Script request sequence exactly: plain Get calls for
+  // the lookup collections and a date-bounded Get for the last 24 hours of DVIRLog.
+  const now = new Date();
+  const pastDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
   const checks: Record<string, CheckResult> = {};
-  for (const [name, probe] of probes) {
-    try {
-      await probe();
-      checks[name] = { ok: true };
-    } catch (error) {
-      checks[name] = { ok: false, error: safeError(error) };
-    }
-  }
+  checks.devices = await runGet(auth, { typeName: 'Device' });
+  checks.trailers = await runGet(auth, { typeName: 'Trailer' });
+  checks.users = await runGet(auth, { typeName: 'User' });
+  checks.defects = await runGet(auth, { typeName: 'Defect', search: { includeAllTrees: true } });
+  checks.defectLists = await runGet(auth, { typeName: 'DefectList', search: { includeAllTrees: true } });
+  checks.defectParts = await runGet(auth, { typeName: 'DefectPart', search: {} });
+  checks.defectListParts = await runGet(auth, { typeName: 'DefectListPart', search: {} });
+  checks.dvirLogs = await runGet(auth, {
+    typeName: 'DVIRLog',
+    search: { fromDate: pastDate.toISOString(), toDate: now.toISOString() },
+  });
 
   const ok = Object.values(checks).every((check) => check.ok);
   return {
@@ -169,6 +179,6 @@ export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<Geot
     stage: ok ? 'ready' : 'permissions',
     endpointHost: auth.endpointHost,
     checks,
-    ...(ok ? {} : { error: 'The Geotab account authenticated, but one or more API calls failed.' }),
+    ...(ok ? {} : { error: 'The Geotab account authenticated, but one or more Apps Script-compatible API calls failed.' }),
   };
 }
