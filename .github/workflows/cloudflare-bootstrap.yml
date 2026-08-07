@@ -130,6 +130,32 @@ jobs:
           console.log('Vendor records are loaded and the inventory API remains protected.');
           NODE
 
+      - name: Test Apps Script-compatible Geotab reads
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          http_status="$(curl --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -o /tmp/geotab-appscript-diagnostic.json -w '%{http_code}' \
+            "$site_url/api/repairs?checkGeotab=1")"
+          node - "$http_status" <<'NODE'
+          const fs = require('fs');
+          const httpStatus = Number(process.argv[2]);
+          const result = JSON.parse(fs.readFileSync('/tmp/geotab-appscript-diagnostic.json', 'utf8'));
+          const summary = {
+            httpStatus,
+            ok: result.ok === true,
+            authenticated: result.authenticated === true,
+            stage: result.stage,
+            endpointHost: result.endpointHost,
+            checks: result.checks,
+            error: result.error,
+          };
+          console.log('Apps Script-compatible Geotab diagnostic:');
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+
       - name: Install temporary Geotab administrator credentials
         id: geotab_test_credentials
         if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
