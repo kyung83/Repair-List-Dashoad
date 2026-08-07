@@ -33,6 +33,19 @@ function objectId(value: unknown) {
   return text(get(valueRecord, 'id', 'Id')).trim();
 }
 
+function dateValue(value: unknown) {
+  const raw = text(value).trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isCurrentlyActiveDevice(device: JsonRecord, now = Date.now()) {
+  const activeFrom = dateValue(get(device, 'activeFrom', 'ActiveFrom'));
+  const activeTo = dateValue(get(device, 'activeTo', 'ActiveTo'));
+  return (activeFrom == null || activeFrom <= now) && (activeTo == null || activeTo > now);
+}
+
 function decodeBase64(value: string) {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -128,7 +141,7 @@ async function currentOdometers(auth: Auth) {
       }
     }
   } catch (error) {
-    // Odometer freshness must not prevent DVIR sync. A later cron run will retry.
+    // Odometer freshness must not prevent the fleet/DVIR sync. A later cron run will retry.
     console.error(JSON.stringify({ event: 'geotab_odometer_sync_failed', error: String(error) }));
   }
   return milesByDevice;
@@ -141,11 +154,27 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     currentOdometers(auth),
   ]);
 
+  if (!devices.length) throw new Error('Geotab returned no devices; refusing to change active fleet state.');
+  const activeDevices = devices.filter((device) => {
+    const id = objectId(device);
+    return id && id.toLowerCase() !== 'nodeviceid' && isCurrentlyActiveDevice(device);
+  });
+  if (!activeDevices.length) throw new Error('Geotab returned no currently active devices; refusing to deactivate the fleet.');
+
+  // Geotab keeps historical devices in the Device collection. Reset the Geotab
+  // device rows to inactive first, then reactivate only devices whose ActiveFrom/
+  // ActiveTo window contains the current time.
+  await env.DB.prepare(`
+    UPDATE equipment
+    SET active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE geotab_device_id IS NOT NULL
+  `).run();
+
   const statements: D1PreparedStatement[] = [];
   let vehicles = 0;
   let mileageUpdates = 0;
 
-  for (const device of devices) {
+  for (const device of activeDevices) {
     const id = objectId(device);
     const unit = text(get(device, 'name', 'Name')).trim();
     if (!id || !unit) continue;
@@ -192,5 +221,12 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     console.error(JSON.stringify({ event: 'vin_decode_failed', error: String(error) }));
   }
 
-  return { ok: true, vehicles, mileageUpdates, vinDecode };
+  return {
+    ok: true,
+    receivedDevices: devices.length,
+    activeVehicles: vehicles,
+    historicalDevicesIgnored: Math.max(0, devices.length - activeDevices.length),
+    mileageUpdates,
+    vinDecode,
+  };
 }
