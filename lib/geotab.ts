@@ -207,7 +207,6 @@ async function safeGetAll(auth: Auth, typeName: string, search?: JsonRecord) {
   try {
     return await call<JsonRecord[]>(auth, 'Get', {
       typeName,
-      resultsLimit: 50000,
       ...(search ? { search } : {}),
     });
   } catch (error) {
@@ -293,20 +292,13 @@ export async function syncGeotabDvir(env: GeotabEnv) {
   const auth = await authenticate(env);
 
   try {
-    const state = await env.DB.prepare(
-      "SELECT last_success_at FROM sync_state WHERE feed_name = 'geotab_dvir'",
-    ).first<{ last_success_at: string | null }>();
-    const previous = state?.last_success_at ? Date.parse(state.last_success_at) : Number.NaN;
-    const fromMs = Number.isFinite(previous)
-      ? Math.max(previous - 24 * 60 * 60 * 1000, Date.now() - 120 * 24 * 60 * 60 * 1000)
-      : Date.now() - 120 * 24 * 60 * 60 * 1000;
     const toDate = new Date().toISOString();
-    const fromDate = new Date(fromMs).toISOString();
+    const fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
+    // Match the proven Apps Script: a date-bounded DVIRLog Get with no resultsLimit.
     const logs = await call<JsonRecord[]>(auth, 'Get', {
       typeName: 'DVIRLog',
       search: { fromDate, toDate },
-      resultsLimit: 50000,
     });
 
     const [devices, trailers, users, defects, defectLists, defectParts, defectListParts] = await Promise.all([
@@ -425,10 +417,12 @@ export async function syncGeotabDvir(env: GeotabEnv) {
 export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, defectId: string) {
   if (!logId || !defectId) throw new Error('Geotab log ID and defect ID are required');
   const auth = await authenticate(env);
+
+  // Match the Apps Script repair flow: fetch the exact DVIRLog, fetch the
+  // current Geotab user, mutate the nested defect, then Set the full DVIRLog.
   const logs = await call<JsonRecord[]>(auth, 'Get', {
     typeName: 'DVIRLog',
     search: { id: logId },
-    resultsLimit: 1,
   });
   const log = record(logs[0]);
   if (!objectId(log)) throw new Error('Geotab DVIR log not found');
@@ -436,7 +430,6 @@ export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, de
   const users = await call<JsonRecord[]>(auth, 'Get', {
     typeName: 'User',
     search: { name: auth.credentials.userName },
-    resultsLimit: 10,
   });
   const repairUser = users.find(
     (candidate) => objectName(candidate).toLowerCase() === auth.credentials.userName.toLowerCase(),
