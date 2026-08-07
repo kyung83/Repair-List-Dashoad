@@ -1,4 +1,6 @@
 /** Cloudflare Worker entry point for the Norlow repair and inventory application. */
+import { pbkdf2Sync } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from 'vinext/server/image-optimization';
 import handler from 'vinext/server/app-router-entry';
 import {
@@ -120,6 +122,21 @@ function bytesToBase64UrlNative(bytes: Uint8Array) {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
+async function deriveWebPbkdf2(password: string, salt: Uint8Array, iterations: number) {
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits'],
+  );
+  return new Uint8Array(await globalThis.crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    key,
+    256,
+  ));
+}
+
 async function smokeLegacyDiagnostic(env: Env, email: string, password: string) {
   if (!email.startsWith('auth-smoke-') || !email.endsWith('@norlow.invalid')) return null;
   const row = await env.DB.prepare(`
@@ -136,48 +153,47 @@ async function smokeLegacyDiagnostic(env: Env, email: string, password: string) 
 
   if (!row) return { rowVisible: false };
 
-  try {
-    const salt = base64UrlToBytesNative(row.password_salt);
-    const key = await globalThis.crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(password),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits'],
-    );
-    const bits = new Uint8Array(await globalThis.crypto.subtle.deriveBits(
-      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Number(row.password_iterations) },
-      key,
-      256,
-    ));
-    const expectedBytes = base64UrlToBytesNative(row.password_hash);
-    const directHashMatches = bytesToBase64UrlNative(bits) === row.password_hash;
-    const timingMatches = bits.byteLength === expectedBytes.byteLength
-      && (globalThis.crypto.subtle as SubtleCrypto & {
-        timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
-      }).timingSafeEqual(bits, expectedBytes);
+  const salt = base64UrlToBytesNative(row.password_salt);
+  const result: Record<string, unknown> = {
+    rowVisible: true,
+    active: Boolean(row.active),
+    algorithm: row.password_algorithm,
+    iterations: Number(row.password_iterations),
+    passwordLength: password.length,
+    saltLength: salt.byteLength,
+    saltRoundTrip: bytesToBase64UrlNative(salt) === row.password_salt,
+  };
 
-    return {
-      rowVisible: true,
-      active: Boolean(row.active),
-      algorithm: row.password_algorithm,
-      iterations: Number(row.password_iterations),
-      passwordLength: password.length,
-      saltLength: salt.byteLength,
-      hashLength: expectedBytes.byteLength,
-      derivedLength: bits.byteLength,
-      saltRoundTrip: bytesToBase64UrlNative(salt) === row.password_salt,
-      directHashMatches,
-      timingMatches,
-    };
-  } catch (error) {
-    return {
-      rowVisible: true,
-      active: Boolean(row.active),
-      algorithm: row.password_algorithm,
-      errorName: error instanceof Error ? error.name : 'UnknownError',
-    };
+  for (const iterations of [1000, 10000, 100000, Number(row.password_iterations)]) {
+    const key = `web${iterations}`;
+    try {
+      const bits = await deriveWebPbkdf2(password, salt, iterations);
+      result[`${key}Supported`] = true;
+      if (iterations === Number(row.password_iterations)) {
+        result.webDirectHashMatches = bytesToBase64UrlNative(bits) === row.password_hash;
+      }
+    } catch (error) {
+      result[`${key}Supported`] = false;
+      result[`${key}Error`] = error instanceof Error ? error.name : 'UnknownError';
+    }
   }
+
+  try {
+    const nodeBits = new Uint8Array(pbkdf2Sync(
+      Buffer.from(password, 'utf8'),
+      Buffer.from(salt),
+      Number(row.password_iterations),
+      32,
+      'sha256',
+    ));
+    result.nodeSupported = true;
+    result.nodeDirectHashMatches = bytesToBase64UrlNative(nodeBits) === row.password_hash;
+  } catch (error) {
+    result.nodeSupported = false;
+    result.nodeError = error instanceof Error ? error.name : 'UnknownError';
+  }
+
+  return result;
 }
 
 async function handleLogin(request: Request, env: Env, url: URL) {
@@ -267,8 +283,6 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    // Password verification stays at the Worker boundary so legacy PBKDF2 accounts
-    // use the native Workers Web Crypto implementation rather than Vinext's RSC shim.
     if (url.pathname === '/api/auth/login') return handleLogin(request, env, url);
 
     if (url.pathname === '/_vinext/image') {
