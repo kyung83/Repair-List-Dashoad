@@ -1,4 +1,4 @@
-import { scryptSync, timingSafeEqual } from 'node:crypto';
+import { scryptSync } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
 export type AppRole = 'viewer' | 'mechanic' | 'manager' | 'admin';
@@ -23,6 +23,10 @@ const LOGIN_WINDOW_MINUTES = 15;
 const MAX_LOGIN_FAILURES = 5;
 const encoder = new TextEncoder();
 
+type WorkerSubtleCrypto = SubtleCrypto & {
+  timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
+};
+
 function bytesToBase64Url(bytes: Uint8Array) {
   return Buffer.from(bytes)
     .toString('base64')
@@ -38,8 +42,11 @@ function base64UrlToBytes(value: string) {
 }
 
 function secureEqual(left: Uint8Array, right: Uint8Array) {
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(Buffer.from(left), Buffer.from(right));
+  const subtle = globalThis.crypto.subtle as WorkerSubtleCrypto;
+  const lengthsMatch = left.byteLength === right.byteLength;
+  return lengthsMatch
+    ? subtle.timingSafeEqual(left, right)
+    : !subtle.timingSafeEqual(left, left);
 }
 
 async function sha256(value: string) {
