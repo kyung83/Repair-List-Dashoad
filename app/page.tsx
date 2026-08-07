@@ -10,6 +10,7 @@ type Repair = {
   status: string;
   driver: string;
   location: string;
+  geotabDefectId?: string;
 };
 
 type Dvir = {
@@ -330,6 +331,7 @@ export default function Home() {
         unit: defect.asset,
         driver: defect.driver,
         status: "New",
+        geotabDefectId: defect.defectId,
       },
       {
         label: "Additional issue found during DVIR work",
