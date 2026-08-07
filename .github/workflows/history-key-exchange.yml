@@ -16,14 +16,14 @@ jobs:
     steps:
       - name: Check wrapping secret
         env:
-          HISTORY_WRAP_KEY: ${{ secrets.AUTH_BOOTSTRAP_TOKEN }}
+          HISTORY_WRAP_KEY: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$HISTORY_WRAP_KEY"
 
       - name: Generate one-time import keypair
         env:
-          HISTORY_WRAP_KEY: ${{ secrets.AUTH_BOOTSTRAP_TOKEN }}
+          HISTORY_WRAP_KEY: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           umask 077
