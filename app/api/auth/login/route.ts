@@ -1,5 +1,32 @@
 import { env } from 'cloudflare:workers';
-import { appUserCount, authenticateUser, createSession, sessionCookie } from '@/lib/auth';
+import { appUserCount, authenticateUser, createSession, sessionCookie, verifyPassword } from '@/lib/auth';
+
+async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
+  const email = String(emailValue ?? '').trim().toLowerCase();
+  if (!email.startsWith('auth-smoke-') || !email.endsWith('@norlow.invalid')) return null;
+
+  const row = await env.DB.prepare(`
+    SELECT password_hash, password_salt, password_iterations, active
+    FROM app_users
+    WHERE email = ? COLLATE NOCASE
+  `).bind(email).first<{
+    password_hash: string;
+    password_salt: string;
+    password_iterations: number;
+    active: number;
+  }>();
+
+  return {
+    rowVisible: Boolean(row),
+    active: Boolean(row?.active),
+    passwordValid: row ? await verifyPassword(
+      String(passwordValue ?? ''),
+      row.password_hash,
+      row.password_salt,
+      Number(row.password_iterations),
+    ) : false,
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -22,7 +49,13 @@ export async function POST(request: Request) {
     }
 
     if (!result.user) {
-      return Response.json({ error: 'Email or password is incorrect.' }, { status: 401 });
+      const diagnostic = await smokeDiagnostic(body.email, body.password);
+      return Response.json(
+        diagnostic
+          ? { error: 'Email or password is incorrect.', diagnostic }
+          : { error: 'Email or password is incorrect.' },
+        { status: 401 },
+      );
     }
 
     const token = await createSession(env.DB, result.user.id);
