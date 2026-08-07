@@ -30,6 +30,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Inspect Worker deployments
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLOUDFLARE_API_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN:-}" | tr -d '[:space:]')"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
+          export CLOUDFLARE_API_TOKEN
+
+          echo "Diagnostic checkout: $(git rev-parse HEAD)"
+          npx wrangler deployments list --name norlow-repair-dashboard --json > /tmp/deployments.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/deployments.json', 'utf8'));
+          console.log('Recent Worker deployments:');
+          for (const deployment of data.slice(0, 10)) {
+            const versions = Array.isArray(deployment.versions)
+              ? deployment.versions.map((v) => `${v.version_id || v.id || '?'}:${v.percentage ?? '?'}%`).join(',')
+              : '';
+            console.log(JSON.stringify({
+              id: deployment.id,
+              created_on: deployment.created_on,
+              source: deployment.source,
+              strategy: deployment.strategy,
+              versions,
+            }));
+          }
+          NODE
+
       - name: Verify bootstrap row and live authentication
         shell: bash
         run: |
@@ -93,10 +124,6 @@ jobs:
           trap cleanup EXIT
 
           npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-insert.sql >/dev/null
-
-          # Remote D1 writes can take a short time to become visible to a Worker
-          # invocation served from another location. Avoid diagnosing replica lag
-          # as a password-verification failure.
           sleep 15
 
           node - <<'NODE' >/tmp/norlow-auth-smoke-payload.json
