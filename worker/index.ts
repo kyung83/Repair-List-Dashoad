@@ -103,22 +103,6 @@ async function userCanAccess(request: Request, user: AppUser, url: URL) {
   return false;
 }
 
-async function userCanAccess(request: Request, user: AppUser, url: URL) {
-  const pathname = url.pathname;
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin') || pathname.startsWith('/api/internal')) {
-    return user.role === 'admin';
-  }
-  if (pathname === '/api/repairs' && url.searchParams.get('checkGeotab') === '1') {
-    return user.role === 'admin';
-  }
-
-  const method = request.method.toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
-  if (user.role === 'admin' || user.role === 'manager') return true;
-  if (user.role === 'mechanic') return mechanicCanWrite(request, pathname);
-  return false;
-}
-
 async function cryptoProbe() {
   const encoder = new TextEncoder();
   const password = encoder.encode('norlow-fixed-probe-password');
