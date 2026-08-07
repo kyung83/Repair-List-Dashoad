@@ -80,6 +80,31 @@ type RepairContext = {
   detail?: string;
 };
 
+type InventoryWarehouseStock = {
+  warehouseCode: string;
+  warehouseName: string;
+  quantityOnHand: number;
+  unitOfMeasure: string;
+};
+
+type InventoryPart = {
+  id: number;
+  partNumber: string;
+  description: string;
+  quantityOnHand: number;
+  warehouseStocks: InventoryWarehouseStock[];
+};
+
+type InventoryData = {
+  parts: InventoryPart[];
+};
+
+type PartSelection = {
+  partId: string;
+  warehouseCode: string;
+  quantity: number;
+};
+
 const previewData: DashboardData = {
   preview: true,
   updatedAt: new Date().toISOString(),
@@ -101,6 +126,9 @@ const emptyRepair: Repair = {
   driver: "",
   location: "",
 };
+
+const emptyInventory: InventoryData = { parts: [] };
+const emptyPartSelection: PartSelection = { partId: "", warehouseCode: "", quantity: 1 };
 
 function statusClass(status: string) {
   const s = status.toLowerCase();
@@ -269,6 +297,10 @@ export default function Home() {
   const [editingRepair, setEditingRepair] = useState<Repair | null>(null);
   const [repairContext, setRepairContext] = useState<RepairContext | null>(null);
   const [saving, setSaving] = useState(false);
+  const [attachingPart, setAttachingPart] = useState(false);
+  const [inventory, setInventory] = useState<InventoryData>(emptyInventory);
+  const [partSelection, setPartSelection] = useState<PartSelection>(emptyPartSelection);
+  const [partMessage, setPartMessage] = useState("");
   const [selectedPmUnits, setSelectedPmUnits] = useState<string[]>([]);
 
   async function loadData() {
@@ -279,9 +311,11 @@ export default function Home() {
       const fresh = (await response.json()) as DashboardData;
       setData(fresh);
       setConnectionMessage("");
+      return fresh;
     } catch (error) {
       setData(previewData);
       setConnectionMessage(error instanceof Error ? error.message : "Unable to reach the Google Sheet.");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -314,9 +348,30 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/inventory", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as InventoryData & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Inventory could not be loaded.");
+        return payload;
+      })
+      .then((payload) => {
+        if (!cancelled) setInventory(payload);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setPartMessage(error instanceof Error ? error.message : "Inventory could not be loaded.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function closeRepairEditor() {
     setEditingRepair(null);
     setRepairContext(null);
+    setPartSelection(emptyPartSelection);
+    setPartMessage("");
   }
 
   function openNewRepair(prefill: Partial<Repair> = {}, context: RepairContext | null = null) {
@@ -370,8 +425,20 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action, ...repair }),
       });
-      const result = (await response.json()) as { ok?: boolean; error?: string };
+      const result = (await response.json()) as { ok?: boolean; error?: string; id?: string };
       if (!response.ok || !result.ok) throw new Error(result.error || "The repair could not be saved.");
+
+      if (action === "saveRepair" && !repair.id && result.id) {
+        const fresh = await loadData();
+        const created = fresh?.repairs.find((item) => item.id === result.id);
+        if (created) {
+          setEditingRepair(created);
+          setRepairContext(null);
+          setPartMessage("Repair saved. You can attach inventory parts below.");
+          return;
+        }
+      }
+
       closeRepairEditor();
       await loadData();
     } catch (error) {
@@ -381,6 +448,61 @@ export default function Home() {
     }
   }
 
+  async function attachPartToRepair() {
+    if (!editingRepair?.id) {
+      setPartMessage("Save the repair before attaching inventory parts.");
+      return;
+    }
+    const partId = Number(partSelection.partId);
+    const quantity = Number(partSelection.quantity);
+    const warehouseCode = partSelection.warehouseCode;
+    if (!partId || !warehouseCode || !Number.isFinite(quantity) || quantity <= 0) {
+      setPartMessage("Choose a part, warehouse, and positive quantity.");
+      return;
+    }
+    setAttachingPart(true);
+    setPartMessage("");
+    try {
+      const response = await fetch("/api/work-orders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "usePart", repairId: editingRepair.id, partId, quantity, warehouseCode }),
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string; warehouseCode?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || "The part could not be attached.");
+
+      const [repairResponse, inventoryResponse] = await Promise.all([
+        fetch("/api/repairs", { cache: "no-store" }),
+        fetch("/api/inventory", { cache: "no-store" }),
+      ]);
+      if (!repairResponse.ok) throw new Error("The repair was updated, but the repair board could not refresh.");
+      if (!inventoryResponse.ok) throw new Error("The part was attached, but inventory could not refresh.");
+
+      const freshRepairs = (await repairResponse.json()) as DashboardData;
+      const freshInventory = (await inventoryResponse.json()) as InventoryData;
+      setData(freshRepairs);
+      setInventory(freshInventory);
+
+      const refreshedRepair = freshRepairs.repairs.find((item) => item.id === editingRepair.id);
+      if (refreshedRepair) {
+        setEditingRepair((current) => current && current.id === refreshedRepair.id
+          ? { ...current, parts: refreshedRepair.parts }
+          : current);
+      }
+
+      const attachedPart = freshInventory.parts.find((item) => item.id === partId);
+      setPartSelection(emptyPartSelection);
+      setPartMessage(`Attached ${attachedPart?.partNumber || "part"} x${quantity} from ${result.warehouseCode || warehouseCode}.`);
+    } catch (error) {
+      setPartMessage(error instanceof Error ? error.message : "The part could not be attached.");
+    } finally {
+      setAttachingPart(false);
+    }
+  }
+
+  const selectedInventoryPart = inventory.parts.find((item) => String(item.id) === partSelection.partId);
+  const availableWarehouseStocks = (selectedInventoryPart?.warehouseStocks ?? []).filter((stock) => stock.quantityOnHand > 0);
+  const selectedWarehouseStock = availableWarehouseStocks.find((stock) => stock.warehouseCode === partSelection.warehouseCode);
   const q = query.trim().toLowerCase();
 
   const equipmentTypeByUnit = useMemo(() => {
@@ -896,13 +1018,51 @@ export default function Home() {
                   placeholder={repairContext ? "Describe the additional issue you found…" : undefined}
                 />
               </label>
-              <label className="wide">
-                Parts needed
-                <input
-                  value={editingRepair.parts}
-                  onChange={(event) => setEditingRepair({ ...editingRepair, parts: event.target.value })}
-                />
+                            <label className="wide">
+                Attached inventory parts
+                <input value={editingRepair.parts} readOnly placeholder="No inventory parts attached yet." />
               </label>
+              {editingRepair.id ? (
+                <div className="wide" style={{ display: "grid", gap: 8, padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa" }}>
+                  <strong>Attach inventory part</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.8fr) minmax(180px, 1fr) 90px auto", gap: 8, alignItems: "end" }}>
+                    <label>
+                      Part
+                      <select aria-label="Inventory part" value={partSelection.partId} onChange={(event) => { setPartSelection({ partId: event.target.value, warehouseCode: "", quantity: 1 }); setPartMessage(""); }}>
+                        <option value="">Choose inventory part</option>
+                        {inventory.parts.map((inventoryPart) => (
+                          <option key={inventoryPart.id} value={inventoryPart.id} disabled={inventoryPart.quantityOnHand <= 0}>
+                            {inventoryPart.partNumber} — {inventoryPart.description} ({inventoryPart.quantityOnHand} total)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Warehouse
+                      <select aria-label="Inventory warehouse" value={partSelection.warehouseCode} disabled={!selectedInventoryPart} onChange={(event) => setPartSelection({ ...partSelection, warehouseCode: event.target.value })}>
+                        <option value="">Choose warehouse</option>
+                        {availableWarehouseStocks.map((stock) => (
+                          <option key={stock.warehouseCode} value={stock.warehouseCode}>
+                            {stock.warehouseName} ({stock.quantityOnHand}{stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ""})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Qty
+                      <input aria-label="Part quantity" type="number" min="0.01" step="any" max={selectedWarehouseStock?.quantityOnHand} value={partSelection.quantity} onChange={(event) => setPartSelection({ ...partSelection, quantity: Number(event.target.value) })} />
+                    </label>
+                    <button type="button" className="primary-action" disabled={attachingPart || !partSelection.partId || !partSelection.warehouseCode || partSelection.quantity <= 0} onClick={() => void attachPartToRepair()}>
+                      {attachingPart ? "Attaching…" : "Attach part"}
+                    </button>
+                  </div>
+                  {partMessage && <span style={{ fontSize: 13, color: "#5c6670" }}>{partMessage}</span>}
+                </div>
+              ) : (
+                <div className="wide" style={{ padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa", color: "#5c6670" }}>
+                  Save this repair first; the editor will stay open so you can attach inventory parts immediately afterward.
+                </div>
+              )}
               <label>
                 Assigned mechanic / driver
                 <input
