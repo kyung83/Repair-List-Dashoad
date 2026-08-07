@@ -9,7 +9,6 @@ on:
       - ".github/workflows/cloudflare-bootstrap.yml"
       - "app/**"
       - "lib/**"
-      - "build/**"
       - "migrations/**"
       - "public/**"
       - "scripts/**"

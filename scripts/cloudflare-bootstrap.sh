@@ -5,6 +5,7 @@ DB_NAME="norlow-repair-production"
 BUCKET_NAME="norlow-repair-files"
 CONFIG_FILE="wrangler.jsonc"
 TEMPLATE_FILE="wrangler.template.jsonc"
+OUTPUT_CONFIG="dist/server/wrangler.json"
 
 if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   echo "Missing CLOUDFLARE_API_TOKEN"
@@ -52,16 +53,18 @@ sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" "$TEMPLATE_FILE" > "$CON
 
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
-# The repository stores some helper scripts without executable mode metadata.
-# Restore it on Linux runners before the npm build invokes them directly.
 chmod +x scripts/*.sh
 
-# Build through the Cloudflare Vite plugin using the generated production config.
+# Build with the Cloudflare Vite plugin using the generated production config.
 export CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH="$CONFIG_FILE"
 npm run build
 
-# The Vite plugin writes .wrangler/deploy/config.json, which redirects Wrangler
-# to the built Worker bundle and its generated output configuration.
-npx wrangler deploy "${ACCOUNT_ARG[@]}"
+if [ ! -s "$OUTPUT_CONFIG" ]; then
+  echo "Cloudflare output configuration was not produced at $OUTPUT_CONFIG"
+  exit 1
+fi
+
+# Deploy the exact build snapshot produced by the Cloudflare Vite plugin.
+npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"
 
 echo "Cloudflare bootstrap completed."
