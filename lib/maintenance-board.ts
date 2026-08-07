@@ -1,5 +1,4 @@
 import { completeAnnual } from './annual-schedules';
-import { recordPmCompletion } from './pm-schedules';
 
 type MaintenanceRow = {
   id: number;
@@ -19,6 +18,26 @@ type MaintenanceRow = {
   annual_date: string | null;
 };
 
+type PmCompletionRow = {
+  id: number;
+  current_mileage: number | null;
+  sequence_json: string;
+  pm_type: string | null;
+};
+
+type MaintenanceRepair = {
+  id: string;
+  unit: string;
+  issue: string;
+  parts: string;
+  status: string;
+  driver: string;
+  location: string;
+  relatedGeotabDefectId: string;
+  usedParts: never[];
+  maintenanceKind: 'pm' | 'annual';
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function daysUntil(date: string | null, intervalDays: number | null) {
@@ -29,8 +48,13 @@ function daysUntil(date: string | null, intervalDays: number | null) {
   return Math.ceil((due - Date.now()) / DAY_MS);
 }
 
-function maintenanceType(row: MaintenanceRow) {
-  return row.equipment_type === 'trailer' ? 'Trailer' : 'Truck';
+function parseSequence(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.map(String).map((item) => item.trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function getMaintenanceBoardItems(db: D1Database) {
@@ -49,7 +73,7 @@ export async function getMaintenanceBoardItems(db: D1Database) {
     ORDER BY e.unit
   `).all<MaintenanceRow>();
 
-  const repairs: Array<Record<string, unknown>> = [];
+  const repairs: MaintenanceRepair[] = [];
 
   for (const row of result.results) {
     if (row.profile_name) {
@@ -76,8 +100,9 @@ export async function getMaintenanceBoardItems(db: D1Database) {
           status: overdue ? 'PM Overdue' : 'PM Due Soon',
           driver: row.driver ?? '',
           location: row.location ?? '',
+          relatedGeotabDefectId: '',
+          usedParts: [],
           maintenanceKind: 'pm',
-          equipmentType: maintenanceType(row),
         });
       }
     }
@@ -95,8 +120,9 @@ export async function getMaintenanceBoardItems(db: D1Database) {
           status: annualRemaining <= 0 ? 'Annual Overdue' : 'Annual Due Soon',
           driver: row.driver ?? '',
           location: row.location ?? '',
+          relatedGeotabDefectId: '',
+          usedParts: [],
           maintenanceKind: 'annual',
-          equipmentType: maintenanceType(row),
         });
       }
     }
@@ -105,10 +131,47 @@ export async function getMaintenanceBoardItems(db: D1Database) {
   return repairs;
 }
 
+async function completePmFromBoard(db: D1Database, equipmentId: number) {
+  const row = await db.prepare(`
+    SELECT e.id, e.current_mileage, p.sequence_json, ps.pm_type
+    FROM equipment e
+    JOIN equipment_pm_settings s ON s.equipment_id = e.id
+    JOIN pm_profiles p ON p.id = s.profile_id
+    LEFT JOIN pm_status ps ON ps.equipment_id = e.id
+    WHERE e.id = ? AND e.active = 1
+  `).bind(equipmentId).first<PmCompletionRow>();
+  if (!row) throw new Error('The PM schedule is no longer active.');
+
+  const serviceSequence = parseSequence(row.sequence_json);
+  if (!serviceSequence.length) throw new Error('The PM option has no service sequence.');
+  const currentType = row.pm_type && serviceSequence.includes(row.pm_type) ? row.pm_type : serviceSequence[0];
+  const currentIndex = Math.max(0, serviceSequence.indexOf(currentType));
+  const nextPmType = serviceSequence[(currentIndex + 1) % serviceSequence.length];
+  const completedDate = new Date().toISOString().slice(0, 10);
+
+  await db.batch([
+    db.prepare(`
+      INSERT INTO pm_status (equipment_id, pm_type, status, last_mileage, service_date, updated_at)
+      VALUES (?, ?, 'Current', ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(equipment_id) DO UPDATE SET
+        pm_type = excluded.pm_type,
+        status = 'Current',
+        last_mileage = COALESCE(excluded.last_mileage, pm_status.last_mileage),
+        service_date = excluded.service_date,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(equipmentId, nextPmType, row.current_mileage, completedDate),
+    db.prepare(`
+      UPDATE equipment SET service_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).bind(completedDate, equipmentId),
+  ]);
+
+  return { ok: true, equipmentId, completedPmType: currentType, nextPmType, mileage: row.current_mileage, completedDate };
+}
+
 export async function completeMaintenanceBoardItem(db: D1Database, idValue: unknown) {
   const id = String(idValue ?? '');
   const pmMatch = id.match(/^pm-(\d+)$/);
-  if (pmMatch) return recordPmCompletion(db, { equipmentId: Number(pmMatch[1]) });
+  if (pmMatch) return completePmFromBoard(db, Number(pmMatch[1]));
 
   const annualMatch = id.match(/^annual-(\d+)$/);
   if (annualMatch) return completeAnnual(db, { equipmentId: Number(annualMatch[1]) });
