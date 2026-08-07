@@ -1,7 +1,8 @@
-import { pbkdf2Sync, timingSafeEqual } from 'node:crypto';
+import { scryptSync, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
 export type AppRole = 'viewer' | 'mechanic' | 'manager' | 'admin';
+export type PasswordAlgorithm = 'pbkdf2-sha256' | 'scrypt-v1';
 
 export type AppUser = {
   id: number;
@@ -13,7 +14,11 @@ export type AppUser = {
 
 const SESSION_COOKIE = '__Host-norlow_session';
 const SESSION_HOURS = 12;
-const PASSWORD_ITERATIONS = 210000;
+const LEGACY_PASSWORD_ITERATIONS = 210000;
+const SCRYPT_N = 16384;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_MAXMEM = 64 * 1024 * 1024;
 const LOGIN_WINDOW_MINUTES = 15;
 const MAX_LOGIN_FAILURES = 5;
 const encoder = new TextEncoder();
@@ -38,13 +43,35 @@ function secureEqual(left: Uint8Array, right: Uint8Array) {
 }
 
 async function sha256(value: string) {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)));
+  return new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', encoder.encode(value)));
 }
 
-async function derivePassword(password: string, salt: Uint8Array, iterations: number) {
-  return new Uint8Array(
-    pbkdf2Sync(Buffer.from(password, 'utf8'), Buffer.from(salt), iterations, 32, 'sha256'),
+async function deriveLegacyPbkdf2(password: string, salt: Uint8Array, iterations: number) {
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits'],
   );
+  return new Uint8Array(await globalThis.crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    key,
+    256,
+  ));
+}
+
+function deriveScrypt(password: string, salt: Uint8Array) {
+  return new Uint8Array(scryptSync(
+    Buffer.from(password, 'utf8'),
+    Buffer.from(salt),
+    32,
+    { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM },
+  ));
+}
+
+function normalizePasswordAlgorithm(value: unknown): PasswordAlgorithm {
+  return value === 'scrypt-v1' ? 'scrypt-v1' : 'pbkdf2-sha256';
 }
 
 export function normalizeEmail(value: unknown) {
@@ -57,18 +84,29 @@ export function isAppRole(value: unknown): value is AppRole {
 
 export async function hashPassword(password: string) {
   if (password.length < 12) throw new Error('Password must be at least 12 characters.');
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await derivePassword(password, salt, PASSWORD_ITERATIONS);
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  const hash = deriveScrypt(password, salt);
   return {
     hash: bytesToBase64Url(hash),
     salt: bytesToBase64Url(salt),
-    iterations: PASSWORD_ITERATIONS,
+    iterations: 0,
+    algorithm: 'scrypt-v1' as const,
   };
 }
 
-export async function verifyPassword(password: string, hash: string, salt: string, iterations: number) {
+export async function verifyPassword(
+  password: string,
+  hash: string,
+  salt: string,
+  iterations: number,
+  algorithmValue: unknown = 'pbkdf2-sha256',
+) {
   try {
-    const actual = await derivePassword(password, base64UrlToBytes(salt), iterations);
+    const algorithm = normalizePasswordAlgorithm(algorithmValue);
+    const saltBytes = base64UrlToBytes(salt);
+    const actual = algorithm === 'scrypt-v1'
+      ? deriveScrypt(password, saltBytes)
+      : await deriveLegacyPbkdf2(password, saltBytes, iterations || LEGACY_PASSWORD_ITERATIONS);
     return secureEqual(actual, base64UrlToBytes(hash));
   } catch {
     return false;
@@ -104,7 +142,7 @@ export function clearSessionCookie(requestUrl: string) {
 }
 
 export async function createSession(db: D1Database, userId: number) {
-  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const raw = globalThis.crypto.getRandomValues(new Uint8Array(32));
   const token = bytesToBase64Url(raw);
   const tokenHash = bytesToBase64Url(await sha256(token));
   await db.prepare(`
@@ -197,7 +235,8 @@ export async function authenticateUser(
   if (await loginBlocked(db, attemptKey)) return { user: null, blocked: true };
 
   const row = email ? await db.prepare(`
-    SELECT id, email, display_name, role, password_hash, password_salt, password_iterations, active
+    SELECT id, email, display_name, role, password_hash, password_salt, password_iterations,
+           password_algorithm, active
     FROM app_users
     WHERE email = ? COLLATE NOCASE
   `).bind(email).first<{
@@ -208,14 +247,25 @@ export async function authenticateUser(
     password_hash: string;
     password_salt: string;
     password_iterations: number;
+    password_algorithm: string;
     active: number;
   }>() : null;
 
   let valid = false;
   if (row?.active && isAppRole(row.role)) {
-    valid = await verifyPassword(password, row.password_hash, row.password_salt, Number(row.password_iterations));
+    valid = await verifyPassword(
+      password,
+      row.password_hash,
+      row.password_salt,
+      Number(row.password_iterations),
+      row.password_algorithm,
+    );
   } else {
-    await derivePassword(password || 'invalid-password', new Uint8Array(16), PASSWORD_ITERATIONS);
+    await deriveLegacyPbkdf2(
+      password || 'invalid-password',
+      new Uint8Array(16),
+      LEGACY_PASSWORD_ITERATIONS,
+    );
   }
 
   if (!row || !row.active || !isAppRole(row.role) || !valid) {
