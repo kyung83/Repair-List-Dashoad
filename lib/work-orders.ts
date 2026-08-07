@@ -36,6 +36,13 @@ type UsageRow = {
   quantity: number;
 };
 
+type DvirRow = {
+  geotab_defect_id: string;
+  asset_unit: string;
+  driver: string | null;
+  defect: string;
+};
+
 function repairNumber(value: unknown) {
   const match = String(value ?? '').match(/^repair-(\d+)$/);
   if (!match) throw new Error('Repair row not found');
@@ -48,7 +55,7 @@ function finiteNumber(value: unknown, fallback = 0) {
 }
 
 export async function getWorkOrderData(db: D1Database) {
-  const [repairsResult, techniciansResult, partsResult, usageResult] = await Promise.all([
+  const [repairsResult, techniciansResult, partsResult, usageResult, dvirResult] = await Promise.all([
     db.prepare(`
       SELECT r.id, COALESCE(e.unit, '') AS unit, r.title, r.status, r.parts_text,
              r.driver, r.location, r.technician_id, t.name AS technician_name,
@@ -77,6 +84,12 @@ export async function getWorkOrderData(db: D1Database) {
       JOIN parts p ON p.id = rp.part_id
       ORDER BY rp.created_at, rp.id
     `).all<UsageRow>(),
+    db.prepare(`
+      SELECT geotab_defect_id, asset_unit, driver, defect
+      FROM dvir_defects
+      WHERE repaired = 0
+      ORDER BY updated_at DESC
+    `).all<DvirRow>(),
   ]);
 
   const usageByRepair = new Map<number, UsageRow[]>();
@@ -116,6 +129,12 @@ export async function getWorkOrderData(db: D1Database) {
       description: row.description,
       quantityOnHand: Number(row.quantity_on_hand),
       location: row.location ?? '',
+    })),
+    dvir: dvirResult.results.map((row) => ({
+      defectId: row.geotab_defect_id,
+      asset: row.asset_unit,
+      driver: row.driver ?? '',
+      defect: row.defect,
     })),
     updatedAt: new Date().toISOString(),
   };
