@@ -58,6 +58,21 @@ function objectName(value: unknown) {
   return text(get(record(value), 'name', 'Name'));
 }
 
+function dateValue(value: unknown) {
+  const raw = text(value).trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isCurrentlyActiveDevice(device: JsonRecord, now = Date.now()) {
+  const id = objectId(device).trim();
+  if (!id || id.toLowerCase() === 'nodeviceid') return false;
+  const activeFrom = dateValue(get(device, 'activeFrom', 'ActiveFrom'));
+  const activeTo = dateValue(get(device, 'activeTo', 'ActiveTo'));
+  return (activeFrom == null || activeFrom <= now) && (activeTo == null || activeTo > now);
+}
+
 function dvirDefects(log: JsonRecord) {
   return array(get(log, 'dVIRDefects', 'dvirDefects', 'DVIRDefects'));
 }
@@ -317,7 +332,7 @@ export async function syncGeotabDvir(env: GeotabEnv) {
     const translations = lookupById([...defects, ...defectLists, ...defectParts, ...defectListParts]);
 
     const equipmentStatements: D1PreparedStatement[] = [];
-    for (const device of devices) {
+    for (const device of devices.filter((candidate) => isCurrentlyActiveDevice(candidate))) {
       const id = objectId(device);
       const unit = objectName(device);
       if (!id || !unit) continue;
