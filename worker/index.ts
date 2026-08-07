@@ -1,7 +1,16 @@
 /** Cloudflare Worker entry point for the Norlow repair and inventory application. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from 'vinext/server/image-optimization';
 import handler from 'vinext/server/app-router-entry';
-import { appUserCount, getSessionUser, type AppUser } from '../lib/auth';
+import {
+  appUserCount,
+  authenticateUser,
+  clearSessionCookie,
+  createSession,
+  deleteSession,
+  getSessionUser,
+  sessionCookie,
+  type AppUser,
+} from '../lib/auth';
 import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 
@@ -64,6 +73,63 @@ function setupRedirect(url: URL) {
 function accessDenied(url: URL, message = 'Your clearance does not allow this action.') {
   if (isApi(url.pathname)) return Response.json({ error: message }, { status: 403 });
   return new Response(message, { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+}
+
+async function handleWorkerAuthRoute(request: Request, env: Env, url: URL): Promise<Response | null> {
+  if (url.pathname === '/api/auth/login' && request.method.toUpperCase() === 'POST') {
+    try {
+      if (await appUserCount(env.DB) === 0) {
+        return Response.json(
+          { error: 'Administrator setup is required.', setupRequired: true },
+          { status: 428 },
+        );
+      }
+
+      const body = await request.json() as Record<string, unknown>;
+      const ip = request.headers.get('cf-connecting-ip') || '';
+      const result = await authenticateUser(env.DB, body.email, body.password, ip);
+
+      if (result.blocked) {
+        return Response.json(
+          { error: 'Too many failed sign-in attempts. Try again in about 15 minutes.' },
+          { status: 429, headers: { 'retry-after': '900' } },
+        );
+      }
+
+      if (!result.user) {
+        return Response.json({ error: 'Email or password is incorrect.' }, { status: 401 });
+      }
+
+      const token = await createSession(env.DB, result.user.id);
+      return Response.json(
+        { ok: true, user: result.user },
+        { headers: { 'set-cookie': sessionCookie(token, request.url), 'cache-control': 'no-store' } },
+      );
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'worker_login_failed', error: String(error) }));
+      return Response.json({ error: 'Sign in could not be completed.' }, { status: 500 });
+    }
+  }
+
+  if (url.pathname === '/api/auth/me' && request.method.toUpperCase() === 'GET') {
+    const user = await getSessionUser(env.DB, request);
+    if (!user) return Response.json({ error: 'Not signed in.' }, { status: 401 });
+    return Response.json({ user }, { headers: { 'cache-control': 'no-store' } });
+  }
+
+  if (url.pathname === '/api/auth/logout' && request.method.toUpperCase() === 'POST') {
+    try {
+      await deleteSession(env.DB, request);
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'worker_logout_session_delete_failed', error: String(error) }));
+    }
+    return Response.json(
+      { ok: true },
+      { headers: { 'set-cookie': clearSessionCookie(request.url), 'cache-control': 'no-store' } },
+    );
+  }
+
+  return null;
 }
 
 async function mechanicCanWrite(request: Request, pathname: string) {
@@ -136,6 +202,9 @@ const worker = {
         },
       }, allowedWidths);
     }
+
+    const authResponse = await handleWorkerAuthRoute(request, env, url);
+    if (authResponse) return authResponse;
 
     const denied = await enforceDashboardAccess(request, env, url);
     if (denied) return denied;
