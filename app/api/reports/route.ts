@@ -1,10 +1,12 @@
 import { env } from 'cloudflare:workers';
 import { getReportingData, handleReportingAction } from '@/lib/reports';
+import { mergeHistoricalReportingData } from '@/lib/reports-history-merge';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    return Response.json(await getReportingData(env.DB, url.searchParams.get('year')), {
+    const base = await getReportingData(env.DB, url.searchParams.get('year'));
+    return Response.json(await mergeHistoricalReportingData(env.DB, base), {
       headers: { 'cache-control': 'no-store' },
     });
   } catch (error) {
