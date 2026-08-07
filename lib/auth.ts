@@ -268,11 +268,7 @@ export async function authenticateUser(
       row.password_algorithm,
     );
   } else {
-    await deriveLegacyPbkdf2(
-      password || 'invalid-password',
-      new Uint8Array(16),
-      LEGACY_PASSWORD_ITERATIONS,
-    );
+    deriveScrypt(password || 'invalid-password', new Uint8Array(16));
   }
 
   if (!row || !row.active || !isAppRole(row.role) || !valid) {
