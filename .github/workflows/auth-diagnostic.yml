@@ -31,22 +31,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Probe top-level Worker crypto
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error "$SITE_URL/_auth-crypto-probe" | tee /tmp/crypto-probe.json
-          node - <<'NODE'
-          const fs = require('fs');
-          const result = JSON.parse(fs.readFileSync('/tmp/crypto-probe.json', 'utf8'));
-          if (result.buildMarker !== 'worker-crypto-probe-v1') {
-            throw new Error(`Unexpected live Worker build marker: ${result.buildMarker || '<missing>'}`);
-          }
-          console.log(`TOP_LEVEL_PBKDF2_SUPPORTED=${result.pbkdf2Supported}`);
-          console.log(`TOP_LEVEL_PBKDF2_ERROR=${result.errorName || '<none>'}`);
-          NODE
-
-      - name: Verify live authentication
+      - name: Verify legacy PBKDF2 login and session
         shell: bash
         run: |
           set -euo pipefail
@@ -69,8 +54,13 @@ jobs:
           const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
           fs.writeFileSync('/tmp/norlow-auth-smoke.json', JSON.stringify({ email, password }));
           fs.writeFileSync('/tmp/norlow-auth-smoke-insert.sql', `
-          INSERT INTO app_users (email, display_name, role, password_hash, password_salt, password_iterations, active, force_password_change, updated_at)
-          VALUES (${quote(email)}, 'Authentication Smoke Test', 'admin', ${quote(hash)}, ${quote(salt.toString('base64url'))}, ${iterations}, 1, 0, CURRENT_TIMESTAMP);
+          INSERT INTO app_users (
+            email, display_name, role, password_hash, password_salt, password_iterations,
+            password_algorithm, active, force_password_change, updated_at
+          ) VALUES (
+            ${quote(email)}, 'Authentication Smoke Test', 'admin', ${quote(hash)},
+            ${quote(salt.toString('base64url'))}, ${iterations}, 'pbkdf2-sha256', 1, 0, CURRENT_TIMESTAMP
+          );
           `);
           fs.writeFileSync('/tmp/norlow-auth-smoke-delete.sql', `DELETE FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE;`);
           NODE
@@ -81,7 +71,7 @@ jobs:
 
           cleanup() {
             npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-delete.sql >/dev/null 2>&1 || true
-            rm -f /tmp/norlow-auth-smoke* /tmp/login.json /tmp/cookies.txt
+            rm -f /tmp/norlow-auth-smoke* /tmp/payload.json /tmp/login.json /tmp/me.json /tmp/cookies.txt
           }
           trap cleanup EXIT
 
@@ -92,15 +82,26 @@ jobs:
           process.stdout.write(JSON.stringify({ email: process.env.SMOKE_EMAIL, password: process.env.SMOKE_PASSWORD }));
           NODE
 
-          status="$(curl --silent --show-error -o /tmp/login.json -c /tmp/cookies.txt -w '%{http_code}' \
+          login_status="$(curl --silent --show-error -o /tmp/login.json -c /tmp/cookies.txt -w '%{http_code}' \
             -H 'content-type: application/json' --data-binary @/tmp/payload.json "$SITE_URL/api/auth/login")"
-          echo "LOGIN_STATUS=$status"
-          cat /tmp/login.json
-
-          if [ "$status" = "200" ]; then
-            me_status="$(curl --silent --show-error -o /tmp/me.json -b /tmp/cookies.txt -w '%{http_code}' "$SITE_URL/api/auth/me")"
-            echo "SESSION_STATUS=$me_status"
-            cat /tmp/me.json
+          if [ "$login_status" != "200" ]; then
+            echo "Live login returned HTTP $login_status"
+            cat /tmp/login.json
+            exit 1
           fi
 
-          test "$status" = "200"
+          me_status="$(curl --silent --show-error -o /tmp/me.json -b /tmp/cookies.txt -w '%{http_code}' "$SITE_URL/api/auth/me")"
+          if [ "$me_status" != "200" ]; then
+            echo "Authenticated session returned HTTP $me_status"
+            cat /tmp/me.json
+            exit 1
+          fi
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const me = JSON.parse(fs.readFileSync('/tmp/me.json', 'utf8'));
+          if (!me.user || me.user.email !== process.env.SMOKE_EMAIL || me.user.role !== 'admin') {
+            throw new Error('Session resolved the wrong user');
+          }
+          console.log('LIVE_LEGACY_LOGIN_AND_SESSION_OK');
+          NODE
