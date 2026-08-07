@@ -24,11 +24,14 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply repair board inventory patch
-        run: python3 scripts/repair-board-parts-fix.py
+        run: |
+          python3 scripts/repair-board-parts-fix.py
       - name: Lint changed repair board
-        run: npx eslint app/page.tsx --rule 'react-hooks/set-state-in-effect: off'
+        run: |
+          npx eslint app/page.tsx --rule 'react-hooks/set-state-in-effect: off'
       - name: Build and test
-        run: npm test
+        run: |
+          npm test
       - name: Commit tested fix and remove temporary tooling
         shell: bash
         run: |
