@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   if (auth.response) return auth.response;
 
   const result = await env.DB.prepare(`
-    SELECT id, email, display_name, role, active, force_password_change, last_login_at, created_at, updated_at
+    SELECT id, email, display_name, role, active, last_login_at, created_at, updated_at
     FROM app_users
     ORDER BY active DESC, display_name COLLATE NOCASE, email COLLATE NOCASE
   `).all<{
@@ -22,7 +22,6 @@ export async function GET(request: Request) {
     display_name: string;
     role: string;
     active: number;
-    force_password_change: number;
     last_login_at: string | null;
     created_at: string;
     updated_at: string;
@@ -35,7 +34,6 @@ export async function GET(request: Request) {
       displayName: row.display_name,
       role: row.role,
       active: Boolean(row.active),
-      forcePasswordChange: Boolean(row.force_password_change),
       lastLoginAt: row.last_login_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -64,7 +62,7 @@ export async function POST(request: Request) {
       const result = await env.DB.prepare(`
         INSERT INTO app_users (
           email, display_name, role, password_hash, password_salt, password_iterations, active, force_password_change
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, 0)
       `).bind(
         email,
         displayName,
@@ -113,19 +111,12 @@ export async function POST(request: Request) {
       await env.DB.batch([
         env.DB.prepare(`
           UPDATE app_users
-          SET password_hash = ?, password_salt = ?, password_iterations = ?, force_password_change = 1,
+          SET password_hash = ?, password_salt = ?, password_iterations = ?, force_password_change = 0,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `).bind(passwordData.hash, passwordData.salt, passwordData.iterations, id),
         env.DB.prepare('DELETE FROM app_sessions WHERE user_id = ?').bind(id),
       ]);
-      return Response.json({ ok: true, id });
-    }
-
-    if (action === 'acknowledgePasswordChange') {
-      if (id !== auth.user.id) return Response.json({ error: 'You can only update your own password state.' }, { status: 403 });
-      await env.DB.prepare('UPDATE app_users SET force_password_change = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .bind(id).run();
       return Response.json({ ok: true, id });
     }
 
