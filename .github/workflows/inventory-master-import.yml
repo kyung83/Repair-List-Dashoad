@@ -1,0 +1,106 @@
+name: One-time master inventory import
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - ".github/workflows/inventory-master-import.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SITE_URL: https://norlow-repair-dashboard.norlo-repair-system.workers.dev
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Import encrypted inventory into D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLOUDFLARE_API_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN:-}" | tr -d '[:space:]')"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
+          export CLOUDFLARE_API_TOKEN
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const email = `inventory-import-${crypto.randomUUID()}@norlow.invalid`;
+          const password = crypto.randomBytes(24).toString('base64url');
+          const salt = crypto.randomBytes(16);
+          const hash = crypto.scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString('base64url');
+          const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
+          fs.writeFileSync('/tmp/inventory-import-user.json', JSON.stringify({ email, password }));
+          fs.writeFileSync('/tmp/inventory-import-insert.sql', `INSERT INTO app_users (email, display_name, role, password_hash, password_salt, password_iterations, password_algorithm, active, force_password_change, updated_at) VALUES (${quote(email)}, 'One-time Inventory Importer', 'admin', ${quote(hash)}, ${quote(salt.toString('base64url'))}, 0, 'scrypt-v1', 1, 0, CURRENT_TIMESTAMP);`);
+          fs.writeFileSync('/tmp/inventory-import-delete.sql', `DELETE FROM app_sessions WHERE user_id IN (SELECT id FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE); DELETE FROM app_login_attempts; DELETE FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE;`);
+          NODE
+
+          cleanup() {
+            npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/inventory-import-delete.sql >/dev/null 2>&1 || true
+            rm -f /tmp/inventory-import-* /tmp/login-payload.json /tmp/login.json /tmp/cookies.txt /tmp/import-response.json /tmp/status.json
+          }
+          trap cleanup EXIT
+
+          npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/inventory-import-insert.sql >/dev/null
+          sleep 3
+          export IMPORT_EMAIL="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/inventory-import-user.json','utf8')).email)")"
+          export IMPORT_PASSWORD="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/inventory-import-user.json','utf8')).password)")"
+          node - <<'NODE' >/tmp/login-payload.json
+          process.stdout.write(JSON.stringify({ email: process.env.IMPORT_EMAIL, password: process.env.IMPORT_PASSWORD }));
+          NODE
+          login_status="$(curl --silent --show-error -o /tmp/login.json -c /tmp/cookies.txt -w '%{http_code}' -H 'content-type: application/json' --data-binary @/tmp/login-payload.json "$SITE_URL/api/auth/login")"
+          test "$login_status" = "200" || { echo "Importer sign-in failed with HTTP $login_status"; exit 1; }
+
+          post_import() {
+            local phase="$1"
+            local offset="${2:-0}"
+            node -e 'process.stdout.write(JSON.stringify({phase:process.argv[1],offset:Number(process.argv[2]),limit:75}))' "$phase" "$offset" >/tmp/import-request.json
+            local status
+            status="$(curl --silent --show-error --retry 4 --retry-delay 1 --retry-all-errors -o /tmp/import-response.json -w '%{http_code}' -b /tmp/cookies.txt -H 'content-type: application/json' --data-binary @/tmp/import-request.json "$SITE_URL/api/internal/inventory-bootstrap")"
+            if [ "$status" != "200" ]; then
+              echo "Inventory import phase $phase failed with HTTP $status."
+              exit 1
+            fi
+          }
+
+          post_import prepare 0
+          for spec in "vendors 46" "parts 2369" "stocks 2933"; do
+            set -- $spec
+            phase="$1"
+            total="$2"
+            offset=0
+            while [ "$offset" -lt "$total" ]; do
+              post_import "$phase" "$offset"
+              offset="$(node -e 'const r=JSON.parse(require("fs").readFileSync("/tmp/import-response.json","utf8")); if(!Number.isInteger(r.nextOffset)) process.exit(2); process.stdout.write(String(r.nextOffset));')"
+            done
+            echo "$phase import complete: $total source records."
+          done
+
+          post_import status 0
+          cp /tmp/import-response.json /tmp/status.json
+          node - <<'NODE'
+          const status = JSON.parse(require('fs').readFileSync('/tmp/status.json', 'utf8'));
+          const expected = { vendors: 46, parts: 2369, stockRows: 2933 };
+          for (const [key, value] of Object.entries(expected)) {
+            if (status.actual?.[key] !== value) throw new Error(`${key} verification failed: expected ${value}, got ${status.actual?.[key]}`);
+          }
+          const expectedWarehouses = { BOYNE: 278, CADILLAC: 217, CLARE: 2251, LUDINGTON: 94, NO_WAREHOUSE: 93 };
+          const actualWarehouses = Object.fromEntries((status.actual?.warehouses ?? []).map((row) => [row.code, row.rows]));
+          for (const [code, rows] of Object.entries(expectedWarehouses)) {
+            if (actualWarehouses[code] !== rows) throw new Error(`${code} verification failed: expected ${rows} rows, got ${actualWarehouses[code]}`);
+          }
+          console.log('Master inventory verified: 46 vendors, 2,369 parts, 2,933 warehouse stock rows across all five warehouses.');
+          NODE
