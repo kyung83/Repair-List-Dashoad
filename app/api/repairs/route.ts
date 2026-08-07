@@ -3,6 +3,7 @@ import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db
 import { diagnoseGeotabConnection } from '@/lib/geotab-diagnostic';
 import { isGeotabConfigured, markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
 import { syncGeotabFleetMaster } from '@/lib/geotab-fleet';
+import { completeMaintenanceBoardItem, getMaintenanceBoardItems } from '@/lib/maintenance-board';
 
 export async function GET(request: Request) {
   try {
@@ -13,12 +14,16 @@ export async function GET(request: Request) {
       return Response.json(diagnostic, { status, headers: { 'cache-control': 'no-store' } });
     }
 
-    const payload = await getDashboardData(env.DB, isGeotabConfigured(env));
+    const [payload, maintenanceRepairs] = await Promise.all([
+      getDashboardData(env.DB, isGeotabConfigured(env)),
+      getMaintenanceBoardItems(env.DB),
+    ]);
 
     // Match the working Apps Script behavior: the active DVIR list contains
     // only defects that still need repair. Repaired rows may remain in D1 for
     // audit/history, but they must never be returned to the live dashboard.
     payload.dvir = payload.dvir.filter((defect) => !defect.repaired);
+    payload.repairs = [...maintenanceRepairs, ...payload.repairs] as typeof payload.repairs;
 
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
@@ -32,7 +37,11 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
     if (action === 'saveRepair') return Response.json(await saveRepair(env.DB, body));
-    if (action === 'completeRepair') return Response.json(await completeRepair(env.DB, body.id));
+    if (action === 'completeRepair') {
+      const maintenance = await completeMaintenanceBoardItem(env.DB, body.id);
+      if (maintenance) return Response.json({ ok: true, ...maintenance });
+      return Response.json(await completeRepair(env.DB, body.id));
+    }
     if (action === 'markRepaired') {
       return Response.json(await markGeotabDefectRepaired(
         env,
