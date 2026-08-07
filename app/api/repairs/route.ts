@@ -11,7 +11,14 @@ export async function GET(request: Request) {
       const status = diagnostic.ok ? 200 : diagnostic.authenticated ? 403 : 401;
       return Response.json(diagnostic, { status, headers: { 'cache-control': 'no-store' } });
     }
+
     const payload = await getDashboardData(env.DB, isGeotabConfigured(env));
+
+    // Match the working Apps Script behavior: the active DVIR list contains
+    // only defects that still need repair. Repaired rows may remain in D1 for
+    // audit/history, but they must never be returned to the live dashboard.
+    payload.dvir = payload.dvir.filter((defect) => !defect.repaired);
+
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'repair_api_get_failed', error: String(error) }));
