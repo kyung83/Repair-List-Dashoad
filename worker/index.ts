@@ -105,6 +105,81 @@ async function userCanAccess(request: Request, user: AppUser, url: URL) {
   return false;
 }
 
+function base64UrlToBytesNative(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64UrlNative(bytes: Uint8Array) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function smokeLegacyDiagnostic(env: Env, email: string, password: string) {
+  if (!email.startsWith('auth-smoke-') || !email.endsWith('@norlow.invalid')) return null;
+  const row = await env.DB.prepare(`
+    SELECT password_hash, password_salt, password_iterations, password_algorithm, active
+    FROM app_users
+    WHERE email = ? COLLATE NOCASE
+  `).bind(email).first<{
+    password_hash: string;
+    password_salt: string;
+    password_iterations: number;
+    password_algorithm: string;
+    active: number;
+  }>();
+
+  if (!row) return { rowVisible: false };
+
+  try {
+    const salt = base64UrlToBytesNative(row.password_salt);
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(password),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits'],
+    );
+    const bits = new Uint8Array(await globalThis.crypto.subtle.deriveBits(
+      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: Number(row.password_iterations) },
+      key,
+      256,
+    ));
+    const expectedBytes = base64UrlToBytesNative(row.password_hash);
+    const directHashMatches = bytesToBase64UrlNative(bits) === row.password_hash;
+    const timingMatches = bits.byteLength === expectedBytes.byteLength
+      && (globalThis.crypto.subtle as SubtleCrypto & {
+        timingSafeEqual(a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView): boolean;
+      }).timingSafeEqual(bits, expectedBytes);
+
+    return {
+      rowVisible: true,
+      active: Boolean(row.active),
+      algorithm: row.password_algorithm,
+      iterations: Number(row.password_iterations),
+      passwordLength: password.length,
+      saltLength: salt.byteLength,
+      hashLength: expectedBytes.byteLength,
+      derivedLength: bits.byteLength,
+      saltRoundTrip: bytesToBase64UrlNative(salt) === row.password_salt,
+      directHashMatches,
+      timingMatches,
+    };
+  } catch (error) {
+    return {
+      rowVisible: true,
+      active: Boolean(row.active),
+      algorithm: row.password_algorithm,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    };
+  }
+}
+
 async function handleLogin(request: Request, env: Env, url: URL) {
   if (request.method.toUpperCase() !== 'POST') {
     return Response.json(
@@ -127,8 +202,10 @@ async function handleLogin(request: Request, env: Env, url: URL) {
     }
 
     const body = await request.json() as Record<string, unknown>;
+    const email = String(body.email ?? '').trim().toLowerCase();
+    const password = String(body.password ?? '');
     const ip = request.headers.get('cf-connecting-ip') || '';
-    const result = await authenticateUser(env.DB, body.email, body.password, ip);
+    const result = await authenticateUser(env.DB, email, password, ip);
 
     if (result.blocked) {
       return Response.json(
@@ -138,8 +215,11 @@ async function handleLogin(request: Request, env: Env, url: URL) {
     }
 
     if (!result.user) {
+      const diagnostic = await smokeLegacyDiagnostic(env, email, password);
       return Response.json(
-        { error: 'Email or password is incorrect.' },
+        diagnostic
+          ? { error: 'Email or password is incorrect.', diagnostic }
+          : { error: 'Email or password is incorrect.' },
         { status: 401, headers: { 'cache-control': 'no-store' } },
       );
     }
