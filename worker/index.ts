@@ -3,7 +3,10 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from 'vinext/server/app-router-entry';
 import {
   appUserCount,
+  authenticateUser,
+  createSession,
   getSessionUser,
+  sessionCookie,
   type AppUser,
 } from '../lib/auth';
 import { syncGeotabDvir } from '../lib/geotab';
@@ -39,7 +42,6 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/logout',
   '/api/auth/me',
   '/api/auth/setup',
-  '/_auth-crypto-probe',
   '/favicon.svg',
 ]);
 
@@ -103,34 +105,56 @@ async function userCanAccess(request: Request, user: AppUser, url: URL) {
   return false;
 }
 
-async function cryptoProbe() {
-  const encoder = new TextEncoder();
-  const password = encoder.encode('norlow-fixed-probe-password');
-  const salt = encoder.encode('norlow-fixed-salt');
+async function handleLogin(request: Request, env: Env, url: URL) {
+  if (request.method.toUpperCase() !== 'POST') {
+    return Response.json(
+      { error: 'Method not allowed.' },
+      { status: 405, headers: { allow: 'POST', 'cache-control': 'no-store' } },
+    );
+  }
+
+  const origin = request.headers.get('origin');
+  if (origin && origin !== url.origin) {
+    return Response.json({ error: 'Cross-site sign-in request rejected.' }, { status: 403 });
+  }
+
   try {
-    const key = await globalThis.crypto.subtle.importKey(
-      'raw',
-      password,
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits'],
+    if (await appUserCount(env.DB) === 0) {
+      return Response.json(
+        { error: 'Administrator setup is required.', setupRequired: true },
+        { status: 428, headers: { 'cache-control': 'no-store' } },
+      );
+    }
+
+    const body = await request.json() as Record<string, unknown>;
+    const ip = request.headers.get('cf-connecting-ip') || '';
+    const result = await authenticateUser(env.DB, body.email, body.password, ip);
+
+    if (result.blocked) {
+      return Response.json(
+        { error: 'Too many failed sign-in attempts. Try again in about 15 minutes.' },
+        { status: 429, headers: { 'retry-after': '900', 'cache-control': 'no-store' } },
+      );
+    }
+
+    if (!result.user) {
+      return Response.json(
+        { error: 'Email or password is incorrect.' },
+        { status: 401, headers: { 'cache-control': 'no-store' } },
+      );
+    }
+
+    const token = await createSession(env.DB, result.user.id);
+    return Response.json(
+      { ok: true, user: result.user },
+      { headers: { 'set-cookie': sessionCookie(token, request.url), 'cache-control': 'no-store' } },
     );
-    const bits = await globalThis.crypto.subtle.deriveBits(
-      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 1000 },
-      key,
-      256,
-    );
-    return Response.json({
-      buildMarker: 'worker-crypto-probe-v1',
-      pbkdf2Supported: bits.byteLength === 32,
-      errorName: '',
-    }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
-    return Response.json({
-      buildMarker: 'worker-crypto-probe-v1',
-      pbkdf2Supported: false,
-      errorName: error instanceof Error ? error.name : 'UnknownError',
-    }, { headers: { 'cache-control': 'no-store' } });
+    console.error(JSON.stringify({ event: 'worker_login_failed', error: String(error) }));
+    return Response.json(
+      { error: 'Sign in could not be completed.' },
+      { status: 500, headers: { 'cache-control': 'no-store' } },
+    );
   }
 }
 
@@ -162,7 +186,10 @@ async function enforceDashboardAccess(request: Request, env: Env, url: URL): Pro
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === '/_auth-crypto-probe') return cryptoProbe();
+
+    // Password verification stays at the Worker boundary so legacy PBKDF2 accounts
+    // use the native Workers Web Crypto implementation rather than Vinext's RSC shim.
+    if (url.pathname === '/api/auth/login') return handleLogin(request, env, url);
 
     if (url.pathname === '/_vinext/image') {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
@@ -178,7 +205,6 @@ const worker = {
     const denied = await enforceDashboardAccess(request, env, url);
     if (denied) return denied;
 
-    // Authentication endpoints are implemented only in app/api/auth/*.
     return handler.fetch(request, env, ctx);
   },
 
