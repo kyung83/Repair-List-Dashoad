@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify legacy PBKDF2 login and session
+      - name: Verify scrypt login and session
         shell: bash
         run: |
           set -euo pipefail
@@ -49,8 +49,12 @@ jobs:
           const email = `auth-smoke-${crypto.randomUUID()}@norlow.invalid`;
           const password = crypto.randomBytes(24).toString('base64url');
           const salt = crypto.randomBytes(16);
-          const iterations = 210000;
-          const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256').toString('base64url');
+          const hash = crypto.scryptSync(password, salt, 32, {
+            N: 16384,
+            r: 8,
+            p: 1,
+            maxmem: 64 * 1024 * 1024,
+          }).toString('base64url');
           const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
           fs.writeFileSync('/tmp/norlow-auth-smoke.json', JSON.stringify({ email, password }));
           fs.writeFileSync('/tmp/norlow-auth-smoke-insert.sql', `
@@ -59,7 +63,7 @@ jobs:
             password_algorithm, active, force_password_change, updated_at
           ) VALUES (
             ${quote(email)}, 'Authentication Smoke Test', 'admin', ${quote(hash)},
-            ${quote(salt.toString('base64url'))}, ${iterations}, 'pbkdf2-sha256', 1, 0, CURRENT_TIMESTAMP
+            ${quote(salt.toString('base64url'))}, 0, 'scrypt-v1', 1, 0, CURRENT_TIMESTAMP
           );
           `);
           fs.writeFileSync('/tmp/norlow-auth-smoke-delete.sql', `DELETE FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE;`);
@@ -103,5 +107,5 @@ jobs:
           if (!me.user || me.user.email !== process.env.SMOKE_EMAIL || me.user.role !== 'admin') {
             throw new Error('Session resolved the wrong user');
           }
-          console.log('LIVE_LEGACY_LOGIN_AND_SESSION_OK');
+          console.log('LIVE_SCRYPT_LOGIN_AND_SESSION_OK');
           NODE
