@@ -1,6 +1,4 @@
 /** Cloudflare Worker entry point for the Norlow repair and inventory application. */
-import { pbkdf2Sync } from 'node:crypto';
-import { Buffer } from 'node:buffer';
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from 'vinext/server/image-optimization';
 import handler from 'vinext/server/app-router-entry';
 import {
@@ -107,95 +105,6 @@ async function userCanAccess(request: Request, user: AppUser, url: URL) {
   return false;
 }
 
-function base64UrlToBytesNative(value: string) {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function bytesToBase64UrlNative(bytes: Uint8Array) {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-}
-
-async function deriveWebPbkdf2(password: string, salt: Uint8Array, iterations: number) {
-  const key = await globalThis.crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(password),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits'],
-  );
-  return new Uint8Array(await globalThis.crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
-    key,
-    256,
-  ));
-}
-
-async function smokeLegacyDiagnostic(env: Env, email: string, password: string) {
-  if (!email.startsWith('auth-smoke-') || !email.endsWith('@norlow.invalid')) return null;
-  const row = await env.DB.prepare(`
-    SELECT password_hash, password_salt, password_iterations, password_algorithm, active
-    FROM app_users
-    WHERE email = ? COLLATE NOCASE
-  `).bind(email).first<{
-    password_hash: string;
-    password_salt: string;
-    password_iterations: number;
-    password_algorithm: string;
-    active: number;
-  }>();
-
-  if (!row) return { rowVisible: false };
-
-  const salt = base64UrlToBytesNative(row.password_salt);
-  const result: Record<string, unknown> = {
-    rowVisible: true,
-    active: Boolean(row.active),
-    algorithm: row.password_algorithm,
-    iterations: Number(row.password_iterations),
-    passwordLength: password.length,
-    saltLength: salt.byteLength,
-    saltRoundTrip: bytesToBase64UrlNative(salt) === row.password_salt,
-  };
-
-  for (const iterations of [1000, 10000, 100000, Number(row.password_iterations)]) {
-    const key = `web${iterations}`;
-    try {
-      const bits = await deriveWebPbkdf2(password, salt, iterations);
-      result[`${key}Supported`] = true;
-      if (iterations === Number(row.password_iterations)) {
-        result.webDirectHashMatches = bytesToBase64UrlNative(bits) === row.password_hash;
-      }
-    } catch (error) {
-      result[`${key}Supported`] = false;
-      result[`${key}Error`] = error instanceof Error ? error.name : 'UnknownError';
-    }
-  }
-
-  try {
-    const nodeBits = new Uint8Array(pbkdf2Sync(
-      Buffer.from(password, 'utf8'),
-      Buffer.from(salt),
-      Number(row.password_iterations),
-      32,
-      'sha256',
-    ));
-    result.nodeSupported = true;
-    result.nodeDirectHashMatches = bytesToBase64UrlNative(nodeBits) === row.password_hash;
-  } catch (error) {
-    result.nodeSupported = false;
-    result.nodeError = error instanceof Error ? error.name : 'UnknownError';
-  }
-
-  return result;
-}
-
 async function handleLogin(request: Request, env: Env, url: URL) {
   if (request.method.toUpperCase() !== 'POST') {
     return Response.json(
@@ -218,10 +127,8 @@ async function handleLogin(request: Request, env: Env, url: URL) {
     }
 
     const body = await request.json() as Record<string, unknown>;
-    const email = String(body.email ?? '').trim().toLowerCase();
-    const password = String(body.password ?? '');
     const ip = request.headers.get('cf-connecting-ip') || '';
-    const result = await authenticateUser(env.DB, email, password, ip);
+    const result = await authenticateUser(env.DB, body.email, body.password, ip);
 
     if (result.blocked) {
       return Response.json(
@@ -231,11 +138,8 @@ async function handleLogin(request: Request, env: Env, url: URL) {
     }
 
     if (!result.user) {
-      const diagnostic = await smokeLegacyDiagnostic(env, email, password);
       return Response.json(
-        diagnostic
-          ? { error: 'Email or password is incorrect.', diagnostic }
-          : { error: 'Email or password is incorrect.' },
+        { error: 'Email or password is incorrect.' },
         { status: 401, headers: { 'cache-control': 'no-store' } },
       );
     }
