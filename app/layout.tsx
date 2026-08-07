@@ -21,6 +21,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <a href="/work-orders" style={{ padding: "10px 14px", borderRadius: 999, background: "#29465f", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Work orders</a>
           <a href="/inventory" style={{ padding: "10px 14px", borderRadius: 999, background: "#f47b20", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Inventory</a>
         </div>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `document.addEventListener('click',function(event){var target=event.target;if(!(target instanceof Element))return;var link=target.closest('a[href^="geotab-media:"]');if(!link)return;event.preventDefault();var raw=link.getAttribute('href')||'';var ids=raw.slice('geotab-media:'.length);if(ids){window.open('/photos?ids='+encodeURIComponent(ids),'_blank','noopener,noreferrer');}});`,
+          }}
+        />
         {children}
       </body>
     </html>
