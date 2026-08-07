@@ -68,6 +68,33 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         run: bash scripts/cloudflare-bootstrap.sh
 
+      - name: Capture active equipment privately
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
+          token="${token#CLOUDFLARE_API_TOKEN=}"
+          token="${token#Bearer}"
+          token="${token#\"}"
+          token="${token%\"}"
+          export CLOUDFLARE_API_TOKEN="$token"
+          npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc --yes --json \
+            --command "SELECT id, unit FROM equipment WHERE active = 1 ORDER BY id;" > /tmp/active-equipment.json
+          npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc --yes --json \
+            --command "SELECT * FROM data_imports WHERE import_key = 'ro-history-9309499-v1' LIMIT 1;" > /tmp/history-import-status.json
+
+      - name: Store active equipment snapshot
+        if: steps.auth.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: norlow-private-equipment-${{ github.run_id }}
+          path: |
+            /tmp/active-equipment.json
+            /tmp/history-import-status.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Install dashboard bootstrap secret
         if: steps.auth.outputs.ready == 'true'
         shell: bash
