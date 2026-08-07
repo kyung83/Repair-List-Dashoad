@@ -23,30 +23,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Apply multi-part picker patch
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          script_path = Path('scripts/repair-board-multi-parts-fix.py')
-          script = script_path.read_text()
-          old = '''replace_once(
-          ''' + "'''    setPartSelection(emptyPartSelection);\n'''" + ''',
-          ''' + "'''    setPartSelections([{ ...emptyPartSelection }]);\n'''" + ''',
-          'part selection reset',
-          )
-          '''
-          new = '''old_reset = "    setPartSelection(emptyPartSelection);\\n"
-          new_reset = "    setPartSelections([{ ...emptyPartSelection }]);\\n"
-          reset_count = text.count(old_reset)
-          if reset_count != 2:
-              raise SystemExit(f'part selection reset: expected exactly two matches, found {reset_count}')
-          text = text.replace(old_reset, new_reset)
-          '''
-          if old not in script:
-              raise SystemExit('reset patch block not found in multi-part patch script')
-          script_path.write_text(script.replace(old, new, 1))
-          PY
-          python3 scripts/repair-board-multi-parts-fix.py
+      - name: Apply repair parts upgrade
+        run: python3 scripts/repair-board-multi-parts-fix.py
       - name: Lint changed repair board
         run: |
           npx eslint app/page.tsx --rule 'react-hooks/set-state-in-effect: off'
@@ -59,7 +37,7 @@ jobs:
           git config user.name "kyung83"
           git config user.email "161100189+kyung83@users.noreply.github.com"
           git rm .github/workflows/repair-board-multi-parts-fix.yml scripts/repair-board-multi-parts-fix.py
-          git add app/page.tsx
+          git add app/page.tsx app/api/work-orders/route.ts lib/dashboard-db.ts lib/inventory-db.ts migrations/0012_repair_part_stock_source.sql
           git diff --cached --check
-          git commit -m "Support multiple searchable repair parts"
+          git commit -m "Upgrade repair parts attach search and removal"
           git push origin HEAD:agent/cloudflare-standalone
