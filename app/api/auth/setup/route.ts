@@ -48,14 +48,16 @@ export async function POST(request: Request) {
     const passwordData = await hashPassword(password);
     const result = await runtime.DB.prepare(`
       INSERT INTO app_users (
-        email, display_name, role, password_hash, password_salt, password_iterations, active
-      ) VALUES (?, ?, 'admin', ?, ?, ?, 1)
+        email, display_name, role, password_hash, password_salt, password_iterations,
+        password_algorithm, active
+      ) VALUES (?, ?, 'admin', ?, ?, ?, ?, 1)
     `).bind(
       email,
       displayName,
       passwordData.hash,
       passwordData.salt,
       passwordData.iterations,
+      passwordData.algorithm,
     ).run();
 
     const userId = Number(result.meta.last_row_id);
