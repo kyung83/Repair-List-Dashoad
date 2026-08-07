@@ -1,0 +1,46 @@
+name: Generate History Import Key
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - .github/workflows/history-key-exchange.yml
+
+permissions:
+  contents: read
+
+jobs:
+  key-exchange:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check wrapping secret
+        env:
+          HISTORY_WRAP_KEY: ${{ secrets.AUTH_BOOTSTRAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$HISTORY_WRAP_KEY"
+
+      - name: Generate one-time import keypair
+        env:
+          HISTORY_WRAP_KEY: ${{ secrets.AUTH_BOOTSTRAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out history-private.pem
+          openssl pkey -in history-private.pem -pubout -out history-public.pem
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in history-private.pem -out history-private.pem.enc -pass env:HISTORY_WRAP_KEY
+          rm -f history-private.pem
+          echo 'NORLOW_HISTORY_PUBLIC_KEY_BEGIN'
+          cat history-public.pem
+          echo 'NORLOW_HISTORY_PUBLIC_KEY_END'
+          sha256sum history-private.pem.enc
+
+      - name: Store encrypted private key
+        uses: actions/upload-artifact@v4
+        with:
+          name: norlow-history-import-key-${{ github.run_id }}
+          path: history-private.pem.enc
+          if-no-files-found: error
+          retention-days: 1
