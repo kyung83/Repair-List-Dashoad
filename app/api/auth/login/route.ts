@@ -56,10 +56,26 @@ async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
   const password = String(passwordValue ?? '');
   const salt = base64UrlToBuffer(row.password_salt);
   const iterations = Number(row.password_iterations);
-  const nodeHash = bufferToBase64Url(
-    pbkdf2Sync(Buffer.from(password, 'utf8'), salt, iterations, 32, 'sha256'),
-  );
-  const webHash = await webCryptoPbkdf2(password, salt, iterations);
+
+  let nodeMatches: boolean | null = null;
+  let nodeError = '';
+  try {
+    const nodeHash = bufferToBase64Url(
+      pbkdf2Sync(Buffer.from(password, 'utf8'), salt, iterations, 32, 'sha256'),
+    );
+    nodeMatches = nodeHash === row.password_hash;
+  } catch (error) {
+    nodeError = error instanceof Error ? error.name : 'NodeCryptoError';
+  }
+
+  let webMatches: boolean | null = null;
+  let webError = '';
+  try {
+    const webHash = await webCryptoPbkdf2(password, salt, iterations);
+    webMatches = webHash === row.password_hash;
+  } catch (error) {
+    webError = error instanceof Error ? error.name : 'WebCryptoError';
+  }
 
   return {
     rowVisible: true,
@@ -67,8 +83,10 @@ async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
     passwordValid: await verifyPassword(password, row.password_hash, row.password_salt, iterations),
     passwordLength: password.length,
     saltLength: salt.length,
-    nodeMatches: nodeHash === row.password_hash,
-    webMatches: webHash === row.password_hash,
+    nodeMatches,
+    nodeError,
+    webMatches,
+    webError,
   };
 }
 
