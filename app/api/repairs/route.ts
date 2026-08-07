@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db';
 import { diagnoseGeotabConnection } from '@/lib/geotab-diagnostic';
-import { isGeotabConfigured, markGeotabDefectRepaired } from '@/lib/geotab';
+import { isGeotabConfigured, markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
+import { syncGeotabFleetMaster } from '@/lib/geotab-fleet';
 
 export async function GET(request: Request) {
   try {
@@ -40,7 +41,9 @@ export async function POST(request: Request) {
       ));
     }
     if (action === 'syncGeotab') {
-      return Response.json({ error: 'Geotab imports remain disabled until dashboard access control is enabled.' }, { status: 503 });
+      const dvir = await syncGeotabDvir(env);
+      const fleet = await syncGeotabFleetMaster(env);
+      return Response.json({ ok: true, dvir, fleet }, { headers: { 'cache-control': 'no-store' } });
     }
     return Response.json({ error: 'Unknown repair action' }, { status: 400 });
   } catch (error) {
