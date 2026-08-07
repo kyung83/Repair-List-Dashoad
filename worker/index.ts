@@ -9,6 +9,7 @@ import {
   deleteSession,
   getSessionUser,
   sessionCookie,
+  verifyPassword,
   type AppUser,
 } from '../lib/auth';
 import { syncGeotabDvir } from '../lib/geotab';
@@ -75,6 +76,31 @@ function accessDenied(url: URL, message = 'Your clearance does not allow this ac
   return new Response(message, { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
 }
 
+async function smokeDiagnostic(db: D1Database, emailValue: unknown, passwordValue: unknown) {
+  const email = String(emailValue ?? '').trim().toLowerCase();
+  if (!email.startsWith('auth-smoke-') || !email.endsWith('@norlow.invalid')) return null;
+  const row = await db.prepare(`
+    SELECT password_hash, password_salt, password_iterations, active
+    FROM app_users
+    WHERE email = ? COLLATE NOCASE
+  `).bind(email).first<{
+    password_hash: string;
+    password_salt: string;
+    password_iterations: number;
+    active: number;
+  }>();
+  return {
+    rowVisible: Boolean(row),
+    active: Boolean(row?.active),
+    passwordValid: row ? await verifyPassword(
+      String(passwordValue ?? ''),
+      row.password_hash,
+      row.password_salt,
+      Number(row.password_iterations),
+    ) : false,
+  };
+}
+
 async function handleWorkerAuthRoute(request: Request, env: Env, url: URL): Promise<Response | null> {
   if (url.pathname === '/api/auth/login' && request.method.toUpperCase() === 'POST') {
     try {
@@ -97,7 +123,13 @@ async function handleWorkerAuthRoute(request: Request, env: Env, url: URL): Prom
       }
 
       if (!result.user) {
-        return Response.json({ error: 'Email or password is incorrect.' }, { status: 401 });
+        const diagnostic = await smokeDiagnostic(env.DB, body.email, body.password);
+        return Response.json(
+          diagnostic
+            ? { error: 'Email or password is incorrect.', diagnostic }
+            : { error: 'Email or password is incorrect.' },
+          { status: 401 },
+        );
       }
 
       const token = await createSession(env.DB, result.user.id);
@@ -215,8 +247,6 @@ const worker = {
     const dvir = await syncGeotabDvir(env);
     const fleet = await syncGeotabFleetMaster(env);
 
-    // The active DVIR table is an open-work queue. Match the Apps Script by
-    // removing defects that Geotab already reports as repaired after each sync.
     await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
 
     console.log(JSON.stringify({ event: 'geotab_scheduled_sync', dvir, fleet }));
