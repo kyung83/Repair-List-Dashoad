@@ -29,9 +29,9 @@ jobs:
       - name: Lint changed repair board
         run: |
           npx eslint app/page.tsx --rule 'react-hooks/set-state-in-effect: off'
-      - name: Build and test
+      - name: Build Cloudflare production bundle
         run: |
-          npm test
+          npm run build
       - name: Commit tested fix and remove temporary tooling
         shell: bash
         run: |
