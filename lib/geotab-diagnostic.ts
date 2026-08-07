@@ -13,7 +13,7 @@ type DiagnosticEnv = {
   GEOTAB_PASSWORD?: string;
 };
 type ServiceConfig = { database: string; serviceUsername: string; servicePassword: string };
-type CheckResult = { ok: boolean; optional?: boolean; count?: number; error?: string };
+type CheckResult = { ok: boolean; count?: number; error?: string };
 type GeotabPayload<T> = { result?: T; error?: { message?: string; name?: string } };
 
 export type GeotabDiagnosticResult = {
@@ -130,12 +130,12 @@ async function call<T>(auth: Auth, method: string, params: JsonRecord): Promise<
   return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
 }
 
-async function runGet(auth: Auth, params: JsonRecord, optional = false): Promise<CheckResult> {
+async function runGet(auth: Auth, params: JsonRecord): Promise<CheckResult> {
   try {
     const result = await call<unknown[]>(auth, 'Get', params);
-    return { ok: true, ...(optional ? { optional: true } : {}), count: Array.isArray(result) ? result.length : 0 };
+    return { ok: true, count: Array.isArray(result) ? result.length : 0 };
   } catch (error) {
-    return { ok: false, ...(optional ? { optional: true } : {}), error: safeError(error) };
+    return { ok: false, error: safeError(error) };
   }
 }
 
@@ -154,10 +154,9 @@ export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<Geot
     return { ok: false, authenticated: false, stage: 'authentication', checks: {}, error: safeError(error) };
   }
 
-  // Match the proven Apps Script request sequence exactly: plain Get calls for
-  // Device, Trailer, User and Defect, plus a date-bounded Get for the last
-  // 24 hours of DVIRLog. The Apps Script wraps the remaining translation
-  // collections in try/catch, so they are useful diagnostics but not required.
+  // Match the required request path from the proven Apps Script. Its additional
+  // translation lookups are wrapped in try/catch, so they do not determine
+  // whether the Geotab connection itself is ready.
   const now = new Date();
   const pastDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
@@ -166,16 +165,12 @@ export async function diagnoseGeotabConnection(env: DiagnosticEnv): Promise<Geot
   checks.trailers = await runGet(auth, { typeName: 'Trailer' });
   checks.users = await runGet(auth, { typeName: 'User' });
   checks.defects = await runGet(auth, { typeName: 'Defect', search: { includeAllTrees: true } });
-  checks.defectLists = await runGet(auth, { typeName: 'DefectList', search: { includeAllTrees: true } }, true);
-  checks.defectParts = await runGet(auth, { typeName: 'DefectPart', search: {} }, true);
-  checks.defectListParts = await runGet(auth, { typeName: 'DefectListPart', search: {} }, true);
   checks.dvirLogs = await runGet(auth, {
     typeName: 'DVIRLog',
     search: { fromDate: pastDate.toISOString(), toDate: now.toISOString() },
   });
 
-  const requiredChecks = Object.values(checks).filter((check) => !check.optional);
-  const ok = requiredChecks.every((check) => check.ok);
+  const ok = Object.values(checks).every((check) => check.ok);
   return {
     ok,
     authenticated: true,
