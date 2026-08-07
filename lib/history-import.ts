@@ -56,6 +56,13 @@ function normalizeUnit(value: unknown) {
   return clean(value, 100).toUpperCase().replace(/\s+/g, ' ');
 }
 
+function historicalNumericUnit(value: unknown) {
+  const unit = normalizeUnit(value);
+  if (!/^\d+$/.test(unit)) return null;
+  const number = Number(unit);
+  return Number.isInteger(number) && number >= 300 ? String(number) : null;
+}
+
 function validDate(value: unknown) {
   const text = clean(value, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) {
@@ -234,6 +241,14 @@ export async function importHistoryBatch(db: D1Database, body: Record<string, un
 
   const equipmentRows = await db.prepare(`SELECT id, unit FROM equipment WHERE active = 1`).all<EquipmentMatchRow>();
   const equipmentByUnit = new Map(equipmentRows.results.map((row) => [normalizeUnit(row.unit), Number(row.id)]));
+  const equipmentByHistoricalNumber = new Map<string, number | null>();
+  for (const row of equipmentRows.results) {
+    const match = normalizeUnit(row.unit).match(/^(\d+)\s*\(\s*(DC|BT|SC)\s*\)$/);
+    if (!match) continue;
+    const key = String(Number(match[1]));
+    const id = Number(row.id);
+    equipmentByHistoricalNumber.set(key, equipmentByHistoricalNumber.has(key) ? null : id);
+  }
 
   const matched: Array<{ ro: ReturnType<typeof parseRo>; equipmentId: number }> = [];
   const unmatchedStatements: D1PreparedStatement[] = [];
@@ -246,7 +261,9 @@ export async function importHistoryBatch(db: D1Database, body: Record<string, un
       `).bind(IMPORT_KEY, ro.roNumber, ro.status || 'UNKNOWN'));
       continue;
     }
-    const equipmentId = equipmentByUnit.get(normalizeUnit(ro.unit));
+    const historicalNumber = historicalNumericUnit(ro.unit);
+    const equipmentId = equipmentByUnit.get(normalizeUnit(ro.unit))
+      ?? (historicalNumber ? equipmentByHistoricalNumber.get(historicalNumber) ?? undefined : undefined);
     if (!equipmentId) {
       const totalCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.totalCost), 0);
       unmatchedStatements.push(db.prepare(`
