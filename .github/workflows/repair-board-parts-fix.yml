@@ -67,7 +67,6 @@ jobs:
 
           type InventoryData = {
             parts: InventoryPart[];
-            warehouses: { code: string; name: string }[];
           };
 
           type PartSelection = {
@@ -100,7 +99,7 @@ jobs:
             location: "",
           };
 
-          const emptyInventory: InventoryData = { parts: [], warehouses: [] };
+          const emptyInventory: InventoryData = { parts: [] };
           const emptyPartSelection: PartSelection = { partId: "", warehouseCode: "", quantity: 1 };
           ''',
           'inventory defaults',
@@ -258,13 +257,7 @@ jobs:
                 const response = await fetch("/api/work-orders", {
                   method: "POST",
                   headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    action: "usePart",
-                    repairId: editingRepair.id,
-                    partId,
-                    quantity,
-                    warehouseCode,
-                  }),
+                  body: JSON.stringify({ action: "usePart", repairId: editingRepair.id, partId, quantity, warehouseCode }),
                 });
                 const result = (await response.json()) as { ok?: boolean; error?: string; warehouseCode?: string };
                 if (!response.ok || !result.ok) throw new Error(result.error || "The part could not be attached.");
@@ -283,9 +276,7 @@ jobs:
 
                 const refreshedRepair = freshRepairs.repairs.find((item) => item.id === editingRepair.id);
                 if (refreshedRepair) {
-                  setEditingRepair((current) => current && current.id === refreshedRepair.id
-                    ? { ...current, parts: refreshedRepair.parts }
-                    : current);
+                  setEditingRepair((current) => current && current.id === refreshedRepair.id ? { ...current, parts: refreshedRepair.parts } : current);
                 }
 
                 const attachedPart = freshInventory.parts.find((item) => item.id === partId);
@@ -306,92 +297,82 @@ jobs:
           'repair save and inventory attach action',
           )
 
-          replace_once(
-          '''              <label className="wide">
-                            Parts needed
-                            <input
-                              value={editingRepair.parts}
-                              onChange={(event) => setEditingRepair({ ...editingRepair, parts: event.target.value })}
-                            />
-                          </label>
-          ''',
-          '''              <label className="wide">
-                            Attached inventory parts
-                            <input
-                              value={editingRepair.parts}
-                              readOnly
-                              placeholder="No inventory parts attached yet."
-                            />
-                          </label>
-                          {editingRepair.id ? (
-                            <div className="wide" style={{ display: "grid", gap: 8, padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa" }}>
-                              <strong>Attach inventory part</strong>
-                              <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.8fr) minmax(180px, 1fr) 90px auto", gap: 8, alignItems: "end" }}>
-                                <label>
-                                  Part
-                                  <select
-                                    aria-label="Inventory part"
-                                    value={partSelection.partId}
-                                    onChange={(event) => {
-                                      setPartSelection({ partId: event.target.value, warehouseCode: "", quantity: 1 });
-                                      setPartMessage("");
-                                    }}
-                                  >
-                                    <option value="">Choose inventory part</option>
-                                    {inventory.parts.map((inventoryPart) => (
-                                      <option key={inventoryPart.id} value={inventoryPart.id} disabled={inventoryPart.quantityOnHand <= 0}>
-                                        {inventoryPart.partNumber} — {inventoryPart.description} ({inventoryPart.quantityOnHand} total)
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label>
-                                  Warehouse
-                                  <select
-                                    aria-label="Inventory warehouse"
-                                    value={partSelection.warehouseCode}
-                                    disabled={!selectedInventoryPart}
-                                    onChange={(event) => setPartSelection({ ...partSelection, warehouseCode: event.target.value })}
-                                  >
-                                    <option value="">Choose warehouse</option>
-                                    {availableWarehouseStocks.map((stock) => (
-                                      <option key={stock.warehouseCode} value={stock.warehouseCode}>
-                                        {stock.warehouseName} ({stock.quantityOnHand}{stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ""})
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                                <label>
-                                  Qty
-                                  <input
-                                    aria-label="Part quantity"
-                                    type="number"
-                                    min="0.01"
-                                    step="any"
-                                    max={selectedWarehouseStock?.quantityOnHand}
-                                    value={partSelection.quantity}
-                                    onChange={(event) => setPartSelection({ ...partSelection, quantity: Number(event.target.value) })}
-                                  />
-                                </label>
-                                <button
-                                  type="button"
-                                  className="primary-action"
-                                  disabled={attachingPart || !partSelection.partId || !partSelection.warehouseCode || partSelection.quantity <= 0}
-                                  onClick={() => void attachPartToRepair()}
-                                >
-                                  {attachingPart ? "Attaching…" : "Attach part"}
-                                </button>
-                              </div>
-                              {partMessage && <span style={{ fontSize: 13, color: "#5c6670" }}>{partMessage}</span>}
-                            </div>
-                          ) : (
-                            <div className="wide" style={{ padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa", color: "#5c6670" }}>
-                              Save this repair first; the editor will stay open so you can attach inventory parts immediately afterward.
-                            </div>
-                          )}
-          ''',
-          'repair modal parts picker',
-          )
+          old_parts = '''                Parts needed
+                <input
+                  value={editingRepair.parts}
+                  onChange={(event) => setEditingRepair({ ...editingRepair, parts: event.target.value })}
+                />
+              </label>'''
+          new_parts = '''                Attached inventory parts
+                <input value={editingRepair.parts} readOnly placeholder="No inventory parts attached yet." />
+              </label>
+              {editingRepair.id ? (
+                <div className="wide" style={{ display: "grid", gap: 8, padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa" }}>
+                  <strong>Attach inventory part</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.8fr) minmax(180px, 1fr) 90px auto", gap: 8, alignItems: "end" }}>
+                    <label>
+                      Part
+                      <select
+                        aria-label="Inventory part"
+                        value={partSelection.partId}
+                        onChange={(event) => {
+                          setPartSelection({ partId: event.target.value, warehouseCode: "", quantity: 1 });
+                          setPartMessage("");
+                        }}
+                      >
+                        <option value="">Choose inventory part</option>
+                        {inventory.parts.map((inventoryPart) => (
+                          <option key={inventoryPart.id} value={inventoryPart.id} disabled={inventoryPart.quantityOnHand <= 0}>
+                            {inventoryPart.partNumber} — {inventoryPart.description} ({inventoryPart.quantityOnHand} total)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Warehouse
+                      <select
+                        aria-label="Inventory warehouse"
+                        value={partSelection.warehouseCode}
+                        disabled={!selectedInventoryPart}
+                        onChange={(event) => setPartSelection({ ...partSelection, warehouseCode: event.target.value })}
+                      >
+                        <option value="">Choose warehouse</option>
+                        {availableWarehouseStocks.map((stock) => (
+                          <option key={stock.warehouseCode} value={stock.warehouseCode}>
+                            {stock.warehouseName} ({stock.quantityOnHand}{stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ""})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Qty
+                      <input
+                        aria-label="Part quantity"
+                        type="number"
+                        min="0.01"
+                        step="any"
+                        max={selectedWarehouseStock?.quantityOnHand}
+                        value={partSelection.quantity}
+                        onChange={(event) => setPartSelection({ ...partSelection, quantity: Number(event.target.value) })}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="primary-action"
+                      disabled={attachingPart || !partSelection.partId || !partSelection.warehouseCode || partSelection.quantity <= 0}
+                      onClick={() => void attachPartToRepair()}
+                    >
+                      {attachingPart ? "Attaching…" : "Attach part"}
+                    </button>
+                  </div>
+                  {partMessage && <span style={{ fontSize: 13, color: "#5c6670" }}>{partMessage}</span>}
+                </div>
+              ) : (
+                <div className="wide" style={{ padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa", color: "#5c6670" }}>
+                  Save this repair first; the editor will stay open so you can attach inventory parts immediately afterward.
+                </div>
+              )}'''
+          replace_once(old_parts, new_parts, 'repair modal parts picker')
 
           replace_once(
           '''        <button type="button" className="secondary-card-action" onClick={() => onEditRepair(repair)}>
