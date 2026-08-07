@@ -5,6 +5,10 @@ import { isGeotabConfigured, markGeotabDefectRepaired, syncGeotabDvir } from '@/
 import { syncGeotabFleetMaster } from '@/lib/geotab-fleet';
 import { completeMaintenanceBoardItem, getMaintenanceBoardItems } from '@/lib/maintenance-board';
 
+function isMaintenanceId(value: unknown) {
+  return /^(?:pm|annual)-\d+$/.test(String(value ?? ''));
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -33,7 +37,10 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
-    if (action === 'saveRepair') return Response.json(await saveRepair(env.DB, body));
+    if (action === 'saveRepair') {
+      if (isMaintenanceId(body.id)) throw new Error('PM and annual cards are completed with the Complete button on the Repair Board.');
+      return Response.json(await saveRepair(env.DB, body));
+    }
     if (action === 'completeRepair') {
       const maintenance = await completeMaintenanceBoardItem(env.DB, body.id);
       if (maintenance) return Response.json({ ok: true, ...maintenance });
