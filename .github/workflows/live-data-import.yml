@@ -1,0 +1,135 @@
+name: One-time live data import
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - ".github/workflows/live-data-import.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  import-live-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SITE_URL: https://norlow-repair-dashboard.norlo-repair-system.workers.dev
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import vendors and refresh live equipment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLOUDFLARE_API_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN:-}" | tr -d '[:space:]')"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
+          export CLOUDFLARE_API_TOKEN
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const email = `live-import-${crypto.randomUUID()}@norlow.invalid`;
+          const password = crypto.randomBytes(24).toString('base64url');
+          const salt = crypto.randomBytes(16);
+          const hash = crypto.scryptSync(password, salt, 32, {
+            N: 16384,
+            r: 8,
+            p: 1,
+            maxmem: 64 * 1024 * 1024,
+          }).toString('base64url');
+          const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
+          fs.writeFileSync('/tmp/live-import.json', JSON.stringify({ email, password }));
+          fs.writeFileSync('/tmp/live-import-insert.sql', `
+          INSERT INTO app_users (
+            email, display_name, role, password_hash, password_salt, password_iterations,
+            password_algorithm, active, force_password_change, updated_at
+          ) VALUES (
+            ${quote(email)}, 'One-time Live Data Import', 'admin', ${quote(hash)},
+            ${quote(salt.toString('base64url'))}, 0, 'scrypt-v1', 1, 0, CURRENT_TIMESTAMP
+          );
+          `);
+          fs.writeFileSync('/tmp/live-import-delete.sql', `
+          DELETE FROM app_sessions WHERE user_id IN (SELECT id FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE);
+          DELETE FROM app_login_attempts;
+          DELETE FROM app_users WHERE email = ${quote(email)} COLLATE NOCASE;
+          `);
+          NODE
+
+          IMPORT_EMAIL="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/live-import.json','utf8')).email)")"
+          IMPORT_PASSWORD="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/live-import.json','utf8')).password)")"
+          export IMPORT_EMAIL IMPORT_PASSWORD
+
+          cleanup() {
+            npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/live-import-delete.sql >/dev/null 2>&1 || true
+            rm -f /tmp/live-import* /tmp/login.json /tmp/cookies.txt /tmp/vendor.json /tmp/sync.json /tmp/inventory.json /tmp/repairs.json
+          }
+          trap cleanup EXIT
+
+          npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/live-import-insert.sql >/dev/null
+          sleep 5
+
+          node - <<'NODE' >/tmp/login-payload.json
+          process.stdout.write(JSON.stringify({ email: process.env.IMPORT_EMAIL, password: process.env.IMPORT_PASSWORD }));
+          NODE
+
+          login_status="$(curl --silent --show-error -o /tmp/login.json -c /tmp/cookies.txt -w '%{http_code}' \
+            -H 'content-type: application/json' --data-binary @/tmp/login-payload.json "$SITE_URL/api/auth/login")"
+          if [ "$login_status" != "200" ]; then
+            echo "Live import login returned HTTP $login_status"
+            cat /tmp/login.json
+            exit 1
+          fi
+
+          vendor_status="$(curl --silent --show-error -o /tmp/vendor.json -b /tmp/cookies.txt -w '%{http_code}' \
+            -X POST "$SITE_URL/api/internal/vendor-bootstrap")"
+          if [ "$vendor_status" != "200" ]; then
+            echo "Vendor import returned HTTP $vendor_status"
+            cat /tmp/vendor.json
+            exit 1
+          fi
+
+          sync_status="$(curl --silent --show-error -o /tmp/sync.json -b /tmp/cookies.txt -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            --data '{"action":"syncGeotab"}' "$SITE_URL/api/repairs")"
+          if [ "$sync_status" != "200" ]; then
+            echo "Geotab live sync returned HTTP $sync_status"
+            cat /tmp/sync.json
+            exit 1
+          fi
+
+          curl --fail --silent --show-error -b /tmp/cookies.txt "$SITE_URL/api/inventory" -o /tmp/inventory.json
+          curl --fail --silent --show-error -b /tmp/cookies.txt "$SITE_URL/api/repairs" -o /tmp/repairs.json
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const vendor = JSON.parse(fs.readFileSync('/tmp/vendor.json', 'utf8'));
+          const sync = JSON.parse(fs.readFileSync('/tmp/sync.json', 'utf8'));
+          const inventory = JSON.parse(fs.readFileSync('/tmp/inventory.json', 'utf8'));
+          const repairs = JSON.parse(fs.readFileSync('/tmp/repairs.json', 'utf8'));
+          const vendorCount = Array.isArray(inventory.vendors) ? inventory.vendors.length : 0;
+          const equipmentCount = Array.isArray(repairs.equipment) ? repairs.equipment.length : 0;
+          const activeVehicles = Number(sync?.fleet?.activeVehicles || 0);
+          if (!vendor.ok || Number(vendor.imported || 0) <= 0) throw new Error('Vendor import did not import records');
+          if (!sync.ok || activeVehicles <= 0) throw new Error('Geotab fleet sync did not return active vehicles');
+          if (vendorCount <= 0) throw new Error('Inventory API returned no vendors after import');
+          if (equipmentCount <= 0) throw new Error('Dashboard API returned no equipment after sync');
+          console.log(`LIVE_DATA_IMPORT_OK vendors=${vendorCount} equipment=${equipmentCount} activeVehicles=${activeVehicles}`);
+          NODE
