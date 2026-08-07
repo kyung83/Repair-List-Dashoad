@@ -165,20 +165,12 @@ jobs:
 
           media_id="$(cat /tmp/geotab-media-id.txt)"
           if [ -n "$media_id" ]; then
+            encoded_media_id="$(node -p 'encodeURIComponent(process.argv[1])' "$media_id")"
             curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
               -D /tmp/geotab-photo-headers.txt \
-              "$site_url/api/geotab-media?id=$(node -p 'encodeURIComponent(process.argv[1])' "$media_id")" \
+              "$site_url/api/geotab-media?id=$encoded_media_id" \
               -o /tmp/geotab-photo.bin
-            node - <<'NODE'
-            const fs = require('fs');
-            const headers = fs.readFileSync('/tmp/geotab-photo-headers.txt', 'utf8');
-            const size = fs.statSync('/tmp/geotab-photo.bin').size;
-            const contentType = headers.match(/^content-type:\s*([^\r\n]+)/im)?.[1]?.trim() || '';
-            if (!contentType.toLowerCase().startsWith('image/') || size <= 0) {
-              throw new Error('Geotab photo smoke check did not return a valid image');
-            }
-            console.log(`Geotab photo download ready: ${contentType}, ${size} bytes.`);
-            NODE
+            node -e "const fs=require('fs'); const headers=fs.readFileSync('/tmp/geotab-photo-headers.txt','utf8'); const size=fs.statSync('/tmp/geotab-photo.bin').size; const match=headers.match(/^content-type:\\s*([^\\r\\n]+)/im); const contentType=match ? match[1].trim() : ''; if(!contentType.toLowerCase().startsWith('image/') || size<=0) throw new Error('Geotab photo smoke check did not return a valid image'); console.log('Geotab photo download ready: '+contentType+', '+size+' bytes.');"
           fi
 
       - name: Test Apps Script-compatible Geotab reads
