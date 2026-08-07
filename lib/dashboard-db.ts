@@ -6,6 +6,7 @@ export type RepairInput = {
   status?: string;
   driver?: string;
   location?: string;
+  geotabDefectId?: string;
 };
 
 type RepairRow = {
@@ -16,6 +17,7 @@ type RepairRow = {
   status: string;
   driver: string | null;
   location: string | null;
+  geotab_defect_id: string | null;
 };
 
 type DvirRow = {
@@ -50,7 +52,8 @@ export async function getDashboardData(db: D1Database, geotabConfigured: boolean
     db.prepare(`
       SELECT r.id, COALESCE(e.unit, '') AS unit, r.title AS issue,
              COALESCE(r.parts_text, '') AS parts, r.status,
-             COALESCE(r.driver, '') AS driver, COALESCE(r.location, '') AS location
+             COALESCE(r.driver, '') AS driver, COALESCE(r.location, '') AS location,
+             r.geotab_defect_id
       FROM repairs r
       LEFT JOIN equipment e ON e.id = r.equipment_id
       ORDER BY CASE WHEN lower(r.status) LIKE '%complete%' THEN 1 ELSE 0 END, r.updated_at DESC
@@ -85,6 +88,7 @@ export async function getDashboardData(db: D1Database, geotabConfigured: boolean
       status: row.status,
       driver: row.driver ?? '',
       location: row.location ?? '',
+      relatedGeotabDefectId: row.geotab_defect_id ?? '',
     })),
     dvir: dvirResult.results.map((row) => ({
       id: `dvir-${row.geotab_defect_id}`,
@@ -135,6 +139,7 @@ export async function saveRepair(db: D1Database, input: RepairInput) {
 
   const equipmentId = await equipmentIdForUnit(db, unit);
   const status = String(input.status ?? 'New').trim() || 'New';
+  const geotabDefectId = String(input.geotabDefectId ?? '').trim() || null;
   const match = String(input.id ?? '').match(/^repair-(\d+)$/);
 
   if (match) {
@@ -142,7 +147,7 @@ export async function saveRepair(db: D1Database, input: RepairInput) {
     await db.prepare(`
       UPDATE repairs
       SET equipment_id = ?, title = ?, parts_text = ?, status = ?, driver = ?,
-          location = ?, updated_at = CURRENT_TIMESTAMP,
+          location = ?, geotab_defect_id = COALESCE(?, geotab_defect_id), updated_at = CURRENT_TIMESTAMP,
           completed_at = CASE WHEN lower(?) LIKE '%complete%' THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END
       WHERE id = ?
     `).bind(
@@ -152,6 +157,7 @@ export async function saveRepair(db: D1Database, input: RepairInput) {
       status,
       String(input.driver ?? '').trim(),
       String(input.location ?? '').trim(),
+      geotabDefectId,
       status,
       id,
     ).run();
@@ -159,8 +165,8 @@ export async function saveRepair(db: D1Database, input: RepairInput) {
   }
 
   const result = await db.prepare(`
-    INSERT INTO repairs (equipment_id, title, parts_text, status, driver, location, source)
-    VALUES (?, ?, ?, ?, ?, ?, 'manual')
+    INSERT INTO repairs (equipment_id, title, parts_text, status, driver, location, source, geotab_defect_id)
+    VALUES (?, ?, ?, ?, ?, ?, 'manual', ?)
   `).bind(
     equipmentId,
     issue,
@@ -168,6 +174,7 @@ export async function saveRepair(db: D1Database, input: RepairInput) {
     status,
     String(input.driver ?? '').trim(),
     String(input.location ?? '').trim(),
+    geotabDefectId,
   ).run();
 
   return { ok: true, id: `repair-${result.meta.last_row_id}` };
