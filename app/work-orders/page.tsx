@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 type Technician = { id: number; name: string; email: string; phone: string };
 type Part = { id: number; partNumber: string; description: string; quantityOnHand: number; location: string };
 type UsedPart = { partId: number; partNumber: string; description: string; quantity: number };
+type Dvir = { defectId: string; asset: string; driver: string; defect: string };
 type Repair = {
   id: string;
   unit: string;
@@ -17,11 +18,11 @@ type Repair = {
   relatedGeotabDefectId: string;
   usedParts: UsedPart[];
 };
-type WorkOrderData = { repairs: Repair[]; technicians: Technician[]; parts: Part[]; updatedAt: string };
+type WorkOrderData = { repairs: Repair[]; technicians: Technician[]; parts: Part[]; dvir: Dvir[]; updatedAt: string };
 
 type RowSelection = { partId: string; quantity: number };
 
-const blankRepair = { unit: "", issue: "", status: "New", location: "" };
+const blankRepair = { unit: "", issue: "", status: "New", location: "", geotabDefectId: "" };
 const blankTechnician = { name: "", email: "", phone: "" };
 const blankPart = { partNumber: "", description: "", quantityOnHand: 0, reorderLevel: 0, location: "" };
 
@@ -107,12 +108,13 @@ export default function WorkOrdersPage() {
 
   const visibleRepairs = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (data?.repairs ?? []).filter((item) =>
-      [item.unit, item.issue, item.status, item.assignedTo, item.partsText, item.location]
+    return (data?.repairs ?? []).filter((item) => {
+      const related = data?.dvir.find((row) => row.defectId === item.relatedGeotabDefectId);
+      return [item.unit, item.issue, item.status, item.assignedTo, item.partsText, item.location, related?.defect ?? ""]
         .join(" ")
         .toLowerCase()
-        .includes(q),
-    );
+        .includes(q);
+    });
   }, [data, query]);
 
   const openCount = (data?.repairs ?? []).filter((item) => !item.status.toLowerCase().includes("complete")).length;
@@ -123,7 +125,7 @@ export default function WorkOrdersPage() {
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 800, letterSpacing: ".16em" }}>SHOP OPERATIONS</p>
           <h1 style={{ margin: "8px 0 0", color: "#0d1b2b", fontSize: 34 }}>Work orders</h1>
-          <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Other repairs, technician assignments, and parts used on each repair.</p>
+          <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Other repairs, technician assignments, parts used, and links back to the exact DVIR defect.</p>
         </div>
         <div style={{ textAlign: "right", color: "#6c7886" }}>
           <strong style={{ display: "block", color: "#0d1b2b", fontSize: 28 }}>{openCount}</strong>
@@ -136,6 +138,20 @@ export default function WorkOrdersPage() {
       <section style={{ marginTop: 24, display: "grid", gridTemplateColumns: "repeat(3, minmax(260px, 1fr))", gap: 16 }}>
         <form onSubmit={createRepair} style={formStyle}>
           <h2 style={formTitleStyle}>Add repair</h2>
+          <select
+            value={repair.geotabDefectId}
+            onChange={(event) => {
+              const geotabDefectId = event.target.value;
+              const related = data?.dvir.find((row) => row.defectId === geotabDefectId);
+              setRepair({ ...repair, geotabDefectId, unit: related?.asset ?? repair.unit });
+            }}
+            style={inputStyle}
+          >
+            <option value="">Not tied to a DVIR</option>
+            {(data?.dvir ?? []).map((row) => (
+              <option key={row.defectId} value={row.defectId}>{row.asset} — {row.defect}</option>
+            ))}
+          </select>
           <input required placeholder="Unit" value={repair.unit} onChange={(event) => setRepair({ ...repair, unit: event.target.value })} style={inputStyle} />
           <input required placeholder="Repair needed" value={repair.issue} onChange={(event) => setRepair({ ...repair, issue: event.target.value })} style={inputStyle} />
           <input placeholder="Location" value={repair.location} onChange={(event) => setRepair({ ...repair, location: event.target.value })} style={inputStyle} />
@@ -173,6 +189,7 @@ export default function WorkOrdersPage() {
           {visibleRepairs.map((item) => {
             const selection = selectionFor(item.id);
             const complete = item.status.toLowerCase().includes("complete");
+            const related = data?.dvir.find((row) => row.defectId === item.relatedGeotabDefectId);
             return (
               <article key={item.id} style={{ border: "1px solid #e0e5e9", borderRadius: 12, padding: 18, background: complete ? "#f7f9fa" : "white" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -180,6 +197,11 @@ export default function WorkOrdersPage() {
                     <span style={{ color: "#f47b20", fontSize: 12, fontWeight: 800 }}>UNIT {item.unit || "—"}</span>
                     <h3 style={{ margin: "5px 0 4px", fontSize: 20 }}>{item.issue}</h3>
                     <span style={{ color: "#6c7886", fontSize: 13 }}>{item.location || "No location"} · {item.status}</span>
+                    {item.relatedGeotabDefectId && (
+                      <div style={{ marginTop: 7, fontSize: 12, fontWeight: 700, color: "#29465f" }}>
+                        Related DVIR: {related?.defect || "linked Geotab defect"}
+                      </div>
+                    )}
                   </div>
                   {!complete && <button disabled={busy} onClick={() => void post({ action: "completeRepair", id: item.id })} style={secondaryButtonStyle}>Complete</button>}
                 </div>
