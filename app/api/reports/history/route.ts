@@ -1,3 +1,4 @@
+// Historical RO reporting endpoint.
 import { env } from 'cloudflare:workers';
 import { getHistoricalReportingData } from '@/lib/history-reporting';
 
