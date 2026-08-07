@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { pbkdf2Sync } from 'node:crypto';
+import { pbkdf2Sync, scryptSync } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { appUserCount, authenticateUser, createSession, sessionCookie, verifyPassword } from '@/lib/auth';
 
@@ -77,6 +77,20 @@ async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
     webError = error instanceof Error ? error.name : 'WebCryptoError';
   }
 
+  let scryptSupported = false;
+  let scryptError = '';
+  try {
+    const probe = scryptSync(Buffer.from('norlow-auth-probe', 'utf8'), Buffer.from('norlow-salt', 'utf8'), 32, {
+      N: 16384,
+      r: 8,
+      p: 1,
+      maxmem: 64 * 1024 * 1024,
+    });
+    scryptSupported = probe.length === 32;
+  } catch (error) {
+    scryptError = error instanceof Error ? error.name : 'ScryptError';
+  }
+
   return {
     rowVisible: true,
     active: Boolean(row.active),
@@ -87,6 +101,8 @@ async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
     nodeError,
     webMatches,
     webError,
+    scryptSupported,
+    scryptError,
   };
 }
 
