@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { adjustStock, getInventoryData, savePart, saveVendor } from '@/lib/dashboard-db';
+import { adjustStock, getInventoryData, savePart, saveVendor } from '@/lib/inventory-db';
 
 export async function GET() {
   try {
