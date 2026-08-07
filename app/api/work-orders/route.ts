@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { removePartFromRepair, usePartOnRepair } from '@/lib/inventory-db';
 import { getWorkOrderData, handleWorkOrderAction } from '@/lib/work-orders';
 
+// Repair-part mutations stay centralized here so attach/remove always refresh the repair summary.
 async function refreshRepairPartsText(repairId: number) {
   const rows = await env.DB.prepare(`
     SELECT p.part_number, SUM(rp.quantity) AS quantity
