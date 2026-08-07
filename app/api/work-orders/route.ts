@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { usePartOnRepair } from '@/lib/inventory-db';
+import { removePartFromRepair, usePartOnRepair } from '@/lib/inventory-db';
 import { getWorkOrderData, handleWorkOrderAction } from '@/lib/work-orders';
 
 async function refreshRepairPartsText(repairId: number) {
@@ -34,6 +34,11 @@ export async function POST(request: Request) {
       const result = await usePartOnRepair(env.DB, body);
       const match = String(body.repairId ?? '').match(/^repair-(\d+)$/);
       if (match) await refreshRepairPartsText(Number(match[1]));
+      return Response.json(result);
+    }
+    if (String(body.action ?? '') === 'removePart') {
+      const result = await removePartFromRepair(env.DB, body);
+      await refreshRepairPartsText(result.repairId);
       return Response.json(result);
     }
     return Response.json(await handleWorkOrderAction(env.DB, body));

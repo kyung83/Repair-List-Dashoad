@@ -260,8 +260,8 @@ export async function usePartOnRepair(db: D1Database, body: Record<string, unkno
       SET quantity_on_hand = quantity_on_hand - ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND quantity_on_hand >= ?
     `).bind(quantity, stock.id, quantity),
-    db.prepare('INSERT INTO repair_parts (repair_id, part_id, quantity, unit_cost) VALUES (?, ?, ?, ?)')
-      .bind(repairId, partId, quantity, stock.unit_cost ?? part.unit_cost),
+    db.prepare('INSERT INTO repair_parts (repair_id, part_id, quantity, unit_cost, warehouse_stock_id) VALUES (?, ?, ?, ?, ?)')
+      .bind(repairId, partId, quantity, stock.unit_cost ?? part.unit_cost, stock.id),
     db.prepare(`
       UPDATE parts
       SET quantity_on_hand = COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id = ?), quantity_on_hand),
@@ -271,4 +271,46 @@ export async function usePartOnRepair(db: D1Database, body: Record<string, unkno
   ]);
 
   return { ok: true, partId, repairId, warehouseCode: stock.warehouse_code };
+}
+
+
+export async function removePartFromRepair(db: D1Database, body: Record<string, unknown>) {
+  const usageId = finiteNumber(body.usageId, 0);
+  if (!usageId) throw new Error('Attached part row is required');
+
+  const usage = await db.prepare(`
+    SELECT id, repair_id, part_id, quantity, warehouse_stock_id
+    FROM repair_parts
+    WHERE id = ?
+  `).bind(usageId).first<{
+    id: number;
+    repair_id: number;
+    part_id: number;
+    quantity: number;
+    warehouse_stock_id: number | null;
+  }>();
+  if (!usage) throw new Error('Attached part was not found');
+
+  const requestedRepair = String(body.repairId ?? '').match(/^repair-(\d+)$/);
+  if (requestedRepair && Number(requestedRepair[1]) !== usage.repair_id) throw new Error('Attached part does not belong to this repair');
+  if (usage.warehouse_stock_id == null) {
+    throw new Error('This older attachment does not record its source warehouse, so it cannot be safely returned automatically.');
+  }
+
+  await db.batch([
+    db.prepare(`
+      UPDATE part_warehouse_stock
+      SET quantity_on_hand = quantity_on_hand + ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND part_id = ?
+    `).bind(Number(usage.quantity), usage.warehouse_stock_id, usage.part_id),
+    db.prepare('DELETE FROM repair_parts WHERE id = ?').bind(usage.id),
+    db.prepare(`
+      UPDATE parts
+      SET quantity_on_hand = COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id = ?), quantity_on_hand),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(usage.part_id, usage.part_id),
+  ]);
+
+  return { ok: true, usageId: usage.id, repairId: usage.repair_id, partId: usage.part_id };
 }

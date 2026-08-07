@@ -2,6 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+type RepairPartUsage = {
+  id: number;
+  partId: number;
+  partNumber: string;
+  description: string;
+  quantity: number;
+  warehouseCode: string;
+  warehouseName: string;
+  removable: boolean;
+};
+
 type Repair = {
   id: string;
   unit: string;
@@ -11,6 +22,7 @@ type Repair = {
   driver: string;
   location: string;
   geotabDefectId?: string;
+  usedParts?: RepairPartUsage[];
 };
 
 type Dvir = {
@@ -100,6 +112,7 @@ type InventoryData = {
 };
 
 type PartSelection = {
+  search: string;
   partId: string;
   warehouseCode: string;
   quantity: number;
@@ -128,7 +141,7 @@ const emptyRepair: Repair = {
 };
 
 const emptyInventory: InventoryData = { parts: [] };
-const emptyPartSelection: PartSelection = { partId: "", warehouseCode: "", quantity: 1 };
+const emptyPartSelection: PartSelection = { search: "", partId: "", warehouseCode: "", quantity: 1 };
 
 function statusClass(status: string) {
   const s = status.toLowerCase();
@@ -299,8 +312,9 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [attachingPart, setAttachingPart] = useState(false);
   const [inventory, setInventory] = useState<InventoryData>(emptyInventory);
-  const [partSelection, setPartSelection] = useState<PartSelection>(emptyPartSelection);
+  const [partSelections, setPartSelections] = useState<PartSelection[]>([{ ...emptyPartSelection }]);
   const [partMessage, setPartMessage] = useState("");
+  const [removingPartId, setRemovingPartId] = useState<number | null>(null);
   const [selectedPmUnits, setSelectedPmUnits] = useState<string[]>([]);
 
   async function loadData() {
@@ -370,7 +384,7 @@ export default function Home() {
   function closeRepairEditor() {
     setEditingRepair(null);
     setRepairContext(null);
-    setPartSelection(emptyPartSelection);
+    setPartSelections([{ ...emptyPartSelection }]);
     setPartMessage("");
   }
 
@@ -448,61 +462,185 @@ export default function Home() {
     }
   }
 
-  async function attachPartToRepair() {
+  function updatePartSelection(index: number, patch: Partial<PartSelection>) {
+    setPartSelections((current) => current.map((selection, selectionIndex) =>
+      selectionIndex === index ? { ...selection, ...patch } : selection,
+    ));
+    setPartMessage("");
+  }
+
+  function addPartSelection() {
+    setPartSelections((current) => [...current, { ...emptyPartSelection }]);
+    setPartMessage("");
+  }
+
+  function removePartSelection(index: number) {
+    setPartSelections((current) => {
+      const next = current.filter((_, selectionIndex) => selectionIndex !== index);
+      return next.length ? next : [{ ...emptyPartSelection }];
+    });
+    setPartMessage("");
+  }
+
+  function matchingInventoryParts(search: string) {
+    const needle = search.trim().toLowerCase();
+    const terms = needle.split(/\s+/).filter(Boolean);
+    const candidates = inventory.parts.filter((part) => {
+      if (part.quantityOnHand <= 0) return false;
+      if (!terms.length) return true;
+      const haystack = `${part.partNumber} ${part.description}`.toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    });
+    if (!terms.length) return candidates.slice(0, 30);
+
+    const score = (part: InventoryPart) => {
+      const partNumber = part.partNumber.toLowerCase();
+      const description = part.description.toLowerCase();
+      if (partNumber === needle) return 0;
+      if (partNumber.startsWith(needle)) return 1;
+      if (description.startsWith(needle)) return 2;
+      if (partNumber.includes(needle)) return 3;
+      return 4;
+    };
+    return [...candidates]
+      .sort((left, right) => score(left) - score(right) || left.partNumber.localeCompare(right.partNumber))
+      .slice(0, 80);
+  }
+
+  async function refreshRepairAndInventory(repairId: string) {
+    const [repairResponse, inventoryResponse] = await Promise.all([
+      fetch("/api/repairs", { cache: "no-store" }),
+      fetch("/api/inventory", { cache: "no-store" }),
+    ]);
+    if (!repairResponse.ok) throw new Error("Parts changed, but the repair board could not refresh.");
+    if (!inventoryResponse.ok) throw new Error("Parts changed, but inventory could not refresh.");
+
+    const freshRepairs = (await repairResponse.json()) as DashboardData;
+    const freshInventory = (await inventoryResponse.json()) as InventoryData;
+    setData(freshRepairs);
+    setInventory(freshInventory);
+
+    const refreshedRepair = freshRepairs.repairs.find((item) => item.id === repairId);
+    if (refreshedRepair) setEditingRepair(refreshedRepair);
+  }
+
+  async function attachPartsToRepair() {
     if (!editingRepair?.id) {
       setPartMessage("Save the repair before attaching inventory parts.");
       return;
     }
-    const partId = Number(partSelection.partId);
-    const quantity = Number(partSelection.quantity);
-    const warehouseCode = partSelection.warehouseCode;
-    if (!partId || !warehouseCode || !Number.isFinite(quantity) || quantity <= 0) {
-      setPartMessage("Choose a part, warehouse, and positive quantity.");
+
+    const touchedSelections = partSelections.filter((selection) =>
+      Boolean(selection.partId || selection.search.trim() || selection.warehouseCode),
+    );
+    if (!touchedSelections.length) {
+      setPartMessage("Search for and choose at least one inventory part.");
       return;
     }
+
+    const requestedByStock = new Map<string, number>();
+    for (let index = 0; index < touchedSelections.length; index += 1) {
+      const selection = touchedSelections[index];
+      const part = inventory.parts.find((item) => String(item.id) === selection.partId);
+      const quantity = Number(selection.quantity);
+      if (!part) {
+        setPartMessage(`Part ${index + 1}: choose a part from the search results.`);
+        return;
+      }
+      if (!selection.warehouseCode) {
+        setPartMessage(`Part ${index + 1}: choose a warehouse.`);
+        return;
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        setPartMessage(`Part ${index + 1}: enter a positive quantity.`);
+        return;
+      }
+      const stock = part.warehouseStocks.find((item) => item.warehouseCode === selection.warehouseCode);
+      if (!stock || stock.quantityOnHand <= 0) {
+        setPartMessage(`Part ${index + 1}: ${part.partNumber} has no available stock in that warehouse.`);
+        return;
+      }
+      const stockKey = `${part.id}|${selection.warehouseCode}`;
+      requestedByStock.set(stockKey, (requestedByStock.get(stockKey) ?? 0) + quantity);
+    }
+
+    for (const [stockKey, requestedQuantity] of requestedByStock) {
+      const [partIdText, warehouseCode] = stockKey.split("|");
+      const part = inventory.parts.find((item) => item.id === Number(partIdText));
+      const stock = part?.warehouseStocks.find((item) => item.warehouseCode === warehouseCode);
+      if (!part || !stock || requestedQuantity > stock.quantityOnHand) {
+        setPartMessage(`${part?.partNumber || "Part"}: requested ${requestedQuantity}, but only ${stock?.quantityOnHand ?? 0} is available in ${warehouseCode}.`);
+        return;
+      }
+    }
+
     setAttachingPart(true);
     setPartMessage("");
+    let attachedCount = 0;
+    let attachError = "";
+
     try {
-      const response = await fetch("/api/work-orders", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "usePart", repairId: editingRepair.id, partId, quantity, warehouseCode }),
-      });
-      const result = (await response.json()) as { ok?: boolean; error?: string; warehouseCode?: string };
-      if (!response.ok || !result.ok) throw new Error(result.error || "The part could not be attached.");
-
-      const [repairResponse, inventoryResponse] = await Promise.all([
-        fetch("/api/repairs", { cache: "no-store" }),
-        fetch("/api/inventory", { cache: "no-store" }),
-      ]);
-      if (!repairResponse.ok) throw new Error("The repair was updated, but the repair board could not refresh.");
-      if (!inventoryResponse.ok) throw new Error("The part was attached, but inventory could not refresh.");
-
-      const freshRepairs = (await repairResponse.json()) as DashboardData;
-      const freshInventory = (await inventoryResponse.json()) as InventoryData;
-      setData(freshRepairs);
-      setInventory(freshInventory);
-
-      const refreshedRepair = freshRepairs.repairs.find((item) => item.id === editingRepair.id);
-      if (refreshedRepair) {
-        setEditingRepair((current) => current && current.id === refreshedRepair.id
-          ? { ...current, parts: refreshedRepair.parts }
-          : current);
+      for (const selection of touchedSelections) {
+        const response = await fetch("/api/work-orders", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "usePart",
+            repairId: editingRepair.id,
+            partId: Number(selection.partId),
+            quantity: Number(selection.quantity),
+            warehouseCode: selection.warehouseCode,
+          }),
+        });
+        const result = (await response.json()) as { ok?: boolean; error?: string };
+        if (!response.ok || !result.ok) {
+          attachError = result.error || `Part ${attachedCount + 1} could not be attached.`;
+          break;
+        }
+        attachedCount += 1;
       }
 
-      const attachedPart = freshInventory.parts.find((item) => item.id === partId);
-      setPartSelection(emptyPartSelection);
-      setPartMessage(`Attached ${attachedPart?.partNumber || "part"} x${quantity} from ${result.warehouseCode || warehouseCode}.`);
+      await refreshRepairAndInventory(editingRepair.id);
+
+      if (attachError) {
+        const remaining = touchedSelections.slice(attachedCount);
+        setPartSelections(remaining.length ? remaining : [{ ...emptyPartSelection }]);
+        setPartMessage(attachedCount
+          ? `Attached ${attachedCount} part line${attachedCount === 1 ? "" : "s"}, then stopped: ${attachError}`
+          : attachError);
+        return;
+      }
+
+      setPartSelections([{ ...emptyPartSelection }]);
+      setPartMessage(`Attached ${attachedCount} part line${attachedCount === 1 ? "" : "s"} to this repair.`);
     } catch (error) {
-      setPartMessage(error instanceof Error ? error.message : "The part could not be attached.");
+      setPartMessage(error instanceof Error ? error.message : "The parts could not be attached.");
     } finally {
       setAttachingPart(false);
     }
   }
 
-  const selectedInventoryPart = inventory.parts.find((item) => String(item.id) === partSelection.partId);
-  const availableWarehouseStocks = (selectedInventoryPart?.warehouseStocks ?? []).filter((stock) => stock.quantityOnHand > 0);
-  const selectedWarehouseStock = availableWarehouseStocks.find((stock) => stock.warehouseCode === partSelection.warehouseCode);
+  async function removeAttachedPart(usage: RepairPartUsage) {
+    if (!editingRepair?.id || !usage.removable) return;
+    setRemovingPartId(usage.id);
+    setPartMessage("");
+    try {
+      const response = await fetch("/api/work-orders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "removePart", repairId: editingRepair.id, usageId: usage.id }),
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || "The attached part could not be removed.");
+      await refreshRepairAndInventory(editingRepair.id);
+      setPartMessage(`Removed ${usage.partNumber} x${usage.quantity} and returned it to ${usage.warehouseName}.`);
+    } catch (error) {
+      setPartMessage(error instanceof Error ? error.message : "The attached part could not be removed.");
+    } finally {
+      setRemovingPartId(null);
+    }
+  }
+
   const q = query.trim().toLowerCase();
 
   const equipmentTypeByUnit = useMemo(() => {
@@ -1023,37 +1161,105 @@ export default function Home() {
                 <input value={editingRepair.parts} readOnly placeholder="No inventory parts attached yet." />
               </label>
               {editingRepair.id ? (
-                <div className="wide" style={{ display: "grid", gap: 8, padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa" }}>
-                  <strong>Attach inventory part</strong>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1.8fr) minmax(180px, 1fr) 90px auto", gap: 8, alignItems: "end" }}>
-                    <label>
-                      Part
-                      <select aria-label="Inventory part" value={partSelection.partId} onChange={(event) => { setPartSelection({ partId: event.target.value, warehouseCode: "", quantity: 1 }); setPartMessage(""); }}>
-                        <option value="">Choose inventory part</option>
-                        {inventory.parts.map((inventoryPart) => (
-                          <option key={inventoryPart.id} value={inventoryPart.id} disabled={inventoryPart.quantityOnHand <= 0}>
-                            {inventoryPart.partNumber} — {inventoryPart.description} ({inventoryPart.quantityOnHand} total)
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Warehouse
-                      <select aria-label="Inventory warehouse" value={partSelection.warehouseCode} disabled={!selectedInventoryPart} onChange={(event) => setPartSelection({ ...partSelection, warehouseCode: event.target.value })}>
-                        <option value="">Choose warehouse</option>
-                        {availableWarehouseStocks.map((stock) => (
-                          <option key={stock.warehouseCode} value={stock.warehouseCode}>
-                            {stock.warehouseName} ({stock.quantityOnHand}{stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ""})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Qty
-                      <input aria-label="Part quantity" type="number" min="0.01" step="any" max={selectedWarehouseStock?.quantityOnHand} value={partSelection.quantity} onChange={(event) => setPartSelection({ ...partSelection, quantity: Number(event.target.value) })} />
-                    </label>
-                    <button type="button" className="primary-action" disabled={attachingPart || !partSelection.partId || !partSelection.warehouseCode || partSelection.quantity <= 0} onClick={() => void attachPartToRepair()}>
-                      {attachingPart ? "Attaching…" : "Attach part"}
+                <div className="wide" style={{ display: "grid", gap: 12, padding: 12, border: "1px solid #dce2e7", borderRadius: 10, background: "#f7f9fa" }}>
+                  {(editingRepair.usedParts ?? []).length > 0 && (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <strong>Attached parts</strong>
+                      {(editingRepair.usedParts ?? []).map((usage) => (
+                        <div key={usage.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: "8px 10px", border: "1px solid #e5e9ec", borderRadius: 8, background: "white", flexWrap: "wrap" }}>
+                          <div>
+                            <strong>{usage.partNumber}</strong> — {usage.description} · x{usage.quantity}
+                            <div style={{ fontSize: 12, color: "#6b747c", marginTop: 2 }}>
+                              {usage.warehouseName || "Original warehouse not recorded"}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary-card-action"
+                            disabled={!usage.removable || removingPartId === usage.id || attachingPart}
+                            title={usage.removable ? "Return this quantity to its source warehouse" : "Legacy attachment: source warehouse was not recorded"}
+                            onClick={() => void removeAttachedPart(usage)}
+                          >
+                            {removingPartId === usage.id ? "Removing…" : usage.removable ? "Remove / return" : "Legacy part"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <div>
+                      <strong>Attach inventory parts</strong>
+                      <div style={{ fontSize: 13, color: "#5c6670", marginTop: 2 }}>Search by part number or description, then choose warehouse and quantity.</div>
+                    </div>
+                    <button type="button" className="secondary-card-action" onClick={addPartSelection} disabled={attachingPart}>
+                      + Add another part
+                    </button>
+                  </div>
+
+                  {partSelections.map((selection, index) => {
+                    const matches = matchingInventoryParts(selection.search);
+                    const selectedPart = inventory.parts.find((item) => String(item.id) === selection.partId);
+                    const warehouseStocks = (selectedPart?.warehouseStocks ?? []).filter((stock) => stock.quantityOnHand > 0);
+                    const selectedStock = warehouseStocks.find((stock) => stock.warehouseCode === selection.warehouseCode);
+                    return (
+                      <div key={index} style={{ display: "grid", gap: 8, padding: 10, border: "1px solid #e5e9ec", borderRadius: 8, background: "white" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                          <strong style={{ fontSize: 13 }}>Part {index + 1}</strong>
+                          {partSelections.length > 1 && (
+                            <button type="button" className="secondary-card-action" onClick={() => removePartSelection(index)} disabled={attachingPart}>
+                              Remove row
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, alignItems: "end" }}>
+                          <label>
+                            Search parts
+                            <input
+                              aria-label={`Search inventory part ${index + 1}`}
+                              value={selection.search}
+                              placeholder="Part # or description"
+                              onChange={(event) => updatePartSelection(index, { search: event.target.value, partId: "", warehouseCode: "" })}
+                            />
+                            <span style={{ fontSize: 12, color: "#6b747c" }}>
+                              {selection.search.trim() ? `${matches.length} best matches` : "Start typing to narrow 2,000+ parts"}
+                            </span>
+                          </label>
+                          <label>
+                            Matching part
+                            <select aria-label={`Inventory part ${index + 1}`} value={selection.partId} onChange={(event) => updatePartSelection(index, { partId: event.target.value, warehouseCode: "" })}>
+                              <option value="">Choose part</option>
+                              {matches.map((inventoryPart) => (
+                                <option key={inventoryPart.id} value={inventoryPart.id}>
+                                  {inventoryPart.partNumber} — {inventoryPart.description} ({inventoryPart.quantityOnHand} total)
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Warehouse
+                            <select aria-label={`Inventory warehouse ${index + 1}`} value={selection.warehouseCode} disabled={!selectedPart} onChange={(event) => updatePartSelection(index, { warehouseCode: event.target.value })}>
+                              <option value="">Choose warehouse</option>
+                              {warehouseStocks.map((stock) => (
+                                <option key={stock.warehouseCode} value={stock.warehouseCode}>
+                                  {stock.warehouseName} ({stock.quantityOnHand}{stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ""})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            Qty
+                            <input aria-label={`Part quantity ${index + 1}`} type="number" min="0.01" step="any" max={selectedStock?.quantityOnHand} value={selection.quantity} onChange={(event) => updatePartSelection(index, { quantity: Number(event.target.value) })} />
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                    <button type="button" className="secondary-card-action" onClick={addPartSelection} disabled={attachingPart}>+ Add another part</button>
+                    <button type="button" className="primary-action" disabled={attachingPart || !partSelections.some((selection) => selection.partId)} onClick={() => void attachPartsToRepair()}>
+                      {attachingPart ? "Attaching parts…" : "Attach all parts"}
                     </button>
                   </div>
                   {partMessage && <span style={{ fontSize: 13, color: "#5c6670" }}>{partMessage}</span>}

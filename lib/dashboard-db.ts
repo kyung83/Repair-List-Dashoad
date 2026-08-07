@@ -47,8 +47,20 @@ type EquipmentRow = {
   equipment_type: string;
 };
 
+type RepairPartUsageRow = {
+  id: number;
+  repair_id: number;
+  part_id: number;
+  part_number: string;
+  description: string;
+  quantity: number;
+  warehouse_stock_id: number | null;
+  warehouse_code: string | null;
+  warehouse_name: string | null;
+};
+
 export async function getDashboardData(db: D1Database, geotabConfigured: boolean) {
-  const [repairsResult, dvirResult, pmResult, equipmentResult] = await Promise.all([
+  const [repairsResult, dvirResult, pmResult, equipmentResult, repairPartsResult] = await Promise.all([
     db.prepare(`
       SELECT r.id, COALESCE(e.unit, '') AS unit, r.title AS issue,
              COALESCE(r.parts_text, '') AS parts, r.status,
@@ -77,7 +89,23 @@ export async function getDashboardData(db: D1Database, geotabConfigured: boolean
       WHERE active = 1
       ORDER BY unit
     `).all<EquipmentRow>(),
+    db.prepare(`
+      SELECT rp.id, rp.repair_id, rp.part_id, p.part_number, p.description, rp.quantity,
+             rp.warehouse_stock_id, w.code AS warehouse_code, w.name AS warehouse_name
+      FROM repair_parts rp
+      JOIN parts p ON p.id = rp.part_id
+      LEFT JOIN part_warehouse_stock s ON s.id = rp.warehouse_stock_id
+      LEFT JOIN warehouses w ON w.id = s.warehouse_id
+      ORDER BY rp.created_at, rp.id
+    `).all<RepairPartUsageRow>(),
   ]);
+
+  const repairPartsByRepair = new Map<number, RepairPartUsageRow[]>();
+  for (const usage of repairPartsResult.results) {
+    const list = repairPartsByRepair.get(usage.repair_id) ?? [];
+    list.push(usage);
+    repairPartsByRepair.set(usage.repair_id, list);
+  }
 
   return {
     repairs: repairsResult.results.map((row) => ({
@@ -89,6 +117,16 @@ export async function getDashboardData(db: D1Database, geotabConfigured: boolean
       driver: row.driver ?? '',
       location: row.location ?? '',
       relatedGeotabDefectId: row.geotab_defect_id ?? '',
+      usedParts: (repairPartsByRepair.get(row.id) ?? []).map((usage) => ({
+        id: usage.id,
+        partId: usage.part_id,
+        partNumber: usage.part_number,
+        description: usage.description,
+        quantity: Number(usage.quantity),
+        warehouseCode: usage.warehouse_code ?? '',
+        warehouseName: usage.warehouse_name ?? '',
+        removable: usage.warehouse_stock_id != null,
+      })),
     })),
     dvir: dvirResult.results.map((row) => ({
       id: `dvir-${row.geotab_defect_id}`,
