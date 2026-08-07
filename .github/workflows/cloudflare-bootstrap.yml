@@ -17,6 +17,8 @@ on:
       - "package-lock.json"
       - "vite.config.ts"
       - "wrangler.template.jsonc"
+  # Manual dispatch is useful after a workflow-authored commit because GitHub does not
+  # trigger downstream workflows from pushes made with the default GITHUB_TOKEN.
   workflow_dispatch:
 
 permissions:
