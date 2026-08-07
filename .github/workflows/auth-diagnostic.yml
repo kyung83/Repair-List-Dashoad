@@ -1,0 +1,136 @@
+name: One-time authentication diagnostic
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - ".github/workflows/auth-diagnostic.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify bootstrap row and live authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "CLOUDFLARE_API_TOKEN is not configured."
+            exit 1
+          fi
+
+          CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
+          export CLOUDFLARE_API_TOKEN
+
+          bootstrap_check="$(npx wrangler d1 execute norlow-repair-production --remote --yes --command "SELECT CASE WHEN EXISTS (SELECT 1 FROM app_users WHERE email = 'dashboard-admin@norlow.invalid' COLLATE NOCASE AND role = 'admin' AND active = 1 AND password_hash = '-uLLbYzMW07HfNn-p28D9B400IVLE_XQczZmp6CQwuA' AND password_salt = 'wIzuqZEKY7FLRf08_JDRAQ' AND password_iterations = 210000) THEN 'BOOTSTRAP_ADMIN_OK' ELSE 'BOOTSTRAP_ADMIN_MISMATCH' END AS status;" 2>&1)"
+          printf '%s\n' "$bootstrap_check"
+          if ! grep -q 'BOOTSTRAP_ADMIN_OK' <<<"$bootstrap_check"; then
+            echo "The production D1 bootstrap administrator row does not match migration 0009."
+            exit 1
+          fi
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const email = `auth-smoke-${crypto.randomUUID()}@norlow.invalid`;
+          const password = crypto.randomBytes(24).toString('base64url');
+          const salt = crypto.randomBytes(16);
+          const iterations = 210000;
+          const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256').toString('base64url');
+          fs.writeFileSync('/tmp/norlow-auth-smoke.json', JSON.stringify({
+            email,
+            password,
+            hash,
+            salt: salt.toString('base64url'),
+            iterations,
+          }));
+          NODE
+
+          SMOKE_EMAIL="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/norlow-auth-smoke.json','utf8')).email)")"
+          SMOKE_PASSWORD="$(node -e "process.stdout.write(JSON.parse(require('fs').readFileSync('/tmp/norlow-auth-smoke.json','utf8')).password)")"
+          export SMOKE_EMAIL SMOKE_PASSWORD
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const row = JSON.parse(fs.readFileSync('/tmp/norlow-auth-smoke.json', 'utf8'));
+          const quote = (value) => `'${String(value).replaceAll("'", "''")}'`;
+          fs.writeFileSync('/tmp/norlow-auth-smoke-insert.sql', `
+          INSERT INTO app_users (email, display_name, role, password_hash, password_salt, password_iterations, active, force_password_change, updated_at)
+          VALUES (${quote(row.email)}, 'Authentication Smoke Test', 'admin', ${quote(row.hash)}, ${quote(row.salt)}, ${row.iterations}, 1, 0, CURRENT_TIMESTAMP);
+          `);
+          fs.writeFileSync('/tmp/norlow-auth-smoke-delete.sql', `DELETE FROM app_users WHERE email = ${quote(row.email)} COLLATE NOCASE;`);
+          NODE
+
+          cleanup() {
+            npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-delete.sql >/dev/null 2>&1 || true
+            rm -f /tmp/norlow-auth-smoke.json /tmp/norlow-auth-smoke-insert.sql /tmp/norlow-auth-smoke-delete.sql /tmp/norlow-auth-smoke-cookies.txt /tmp/norlow-auth-smoke-login.json /tmp/norlow-auth-smoke-me.json
+          }
+          trap cleanup EXIT
+
+          npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-insert.sql >/dev/null
+
+          node - <<'NODE' >/tmp/norlow-auth-smoke-payload.json
+          process.stdout.write(JSON.stringify({ email: process.env.SMOKE_EMAIL, password: process.env.SMOKE_PASSWORD }));
+          NODE
+
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          login_status="$(curl --silent --show-error --retry 3 --retry-delay 1 --retry-all-errors \
+            -o /tmp/norlow-auth-smoke-login.json \
+            -c /tmp/norlow-auth-smoke-cookies.txt \
+            -w '%{http_code}' \
+            -H 'content-type: application/json' \
+            --data-binary @/tmp/norlow-auth-smoke-payload.json \
+            "$site_url/api/auth/login")"
+          rm -f /tmp/norlow-auth-smoke-payload.json
+
+          if [ "$login_status" != "200" ]; then
+            echo "Live login endpoint returned HTTP $login_status."
+            cat /tmp/norlow-auth-smoke-login.json
+            exit 1
+          fi
+
+          me_status="$(curl --silent --show-error \
+            -o /tmp/norlow-auth-smoke-me.json \
+            -b /tmp/norlow-auth-smoke-cookies.txt \
+            -w '%{http_code}' \
+            "$site_url/api/auth/me")"
+
+          if [ "$me_status" != "200" ]; then
+            echo "Authenticated session check returned HTTP $me_status."
+            cat /tmp/norlow-auth-smoke-me.json
+            exit 1
+          fi
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const me = JSON.parse(fs.readFileSync('/tmp/norlow-auth-smoke-me.json', 'utf8'));
+          if (!me.user || me.user.email !== process.env.SMOKE_EMAIL || me.user.role !== 'admin') {
+            throw new Error('Authenticated session returned the wrong user.');
+          }
+          console.log('LIVE_AUTH_SMOKE_OK');
+          NODE
