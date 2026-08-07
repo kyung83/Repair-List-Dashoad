@@ -57,6 +57,22 @@ function parseSequence(value: string) {
   }
 }
 
+async function recordMaintenanceEvent(
+  db: D1Database,
+  equipmentId: number,
+  eventType: 'pm' | 'annual',
+  eventDate: string,
+  pmType: string | null,
+  mileage: number | null,
+  source = 'repair-board',
+) {
+  await db.prepare(`
+    INSERT OR IGNORE INTO maintenance_events (
+      equipment_id, event_type, pm_type, event_date, mileage, source
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(equipmentId, eventType, pmType, eventDate, mileage, source).run();
+}
+
 export async function getMaintenanceBoardItems(db: D1Database) {
   const result = await db.prepare(`
     SELECT e.id, e.unit, e.equipment_type, e.current_mileage, e.driver, e.location,
@@ -165,6 +181,7 @@ async function completePmFromBoard(db: D1Database, equipmentId: number) {
     `).bind(completedDate, equipmentId),
   ]);
 
+  await recordMaintenanceEvent(db, equipmentId, 'pm', completedDate, currentType, row.current_mileage);
   return { ok: true, equipmentId, completedPmType: currentType, nextPmType, mileage: row.current_mileage, completedDate };
 }
 
@@ -174,7 +191,12 @@ export async function completeMaintenanceBoardItem(db: D1Database, idValue: unkn
   if (pmMatch) return completePmFromBoard(db, Number(pmMatch[1]));
 
   const annualMatch = id.match(/^annual-(\d+)$/);
-  if (annualMatch) return completeAnnual(db, { equipmentId: Number(annualMatch[1]) });
+  if (annualMatch) {
+    const equipmentId = Number(annualMatch[1]);
+    const result = await completeAnnual(db, { equipmentId });
+    await recordMaintenanceEvent(db, equipmentId, 'annual', result.completedDate, null, null);
+    return result;
+  }
 
   return null;
 }
