@@ -40,6 +40,22 @@ const config = JSON.parse(await readFile(process.argv[2], "utf8"));
 if (!config || typeof config !== "object" || typeof config.main !== "string") {
   throw new Error("Cloudflare output config must contain a Worker main entry");
 }
+
+const compatibilityDate = String(config.compatibility_date ?? "");
+const compatibilityFlags = Array.isArray(config.compatibility_flags)
+  ? config.compatibility_flags.map(String)
+  : [];
+
+console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missing>"}`);
+console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
+console.log(`Generated Worker main=${config.main}`);
+
+if (!compatibilityDate) {
+  throw new Error("Cloudflare output config is missing compatibility_date");
+}
+if (!compatibilityFlags.includes("nodejs_compat")) {
+  throw new Error("Cloudflare output config is missing nodejs_compat");
+}
 NODE
 
 echo "Validated Cloudflare Worker bundle and output configuration."
