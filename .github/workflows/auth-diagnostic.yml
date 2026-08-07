@@ -94,6 +94,11 @@ jobs:
 
           npx wrangler d1 execute norlow-repair-production --remote --yes --file=/tmp/norlow-auth-smoke-insert.sql >/dev/null
 
+          # Remote D1 writes can take a short time to become visible to a Worker
+          # invocation served from another location. Avoid diagnosing replica lag
+          # as a password-verification failure.
+          sleep 15
+
           node - <<'NODE' >/tmp/norlow-auth-smoke-payload.json
           process.stdout.write(JSON.stringify({ email: process.env.SMOKE_EMAIL, password: process.env.SMOKE_PASSWORD }));
           NODE
