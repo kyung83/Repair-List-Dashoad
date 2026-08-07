@@ -43,6 +43,11 @@ const worker = {
 
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     const result = await syncGeotabDvir(env);
+
+    // The active DVIR table is an open-work queue. Match the Apps Script by
+    // removing defects that Geotab already reports as repaired after each sync.
+    await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
+
     console.log(JSON.stringify({ event: 'geotab_dvir_sync', ...result }));
   },
 };
