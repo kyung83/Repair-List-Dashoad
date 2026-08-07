@@ -1,0 +1,255 @@
+name: Bootstrap Cloudflare
+
+on:
+  push:
+    branches:
+      - main
+      - agent/cloudflare-standalone
+    paths:
+      - ".github/workflows/cloudflare-bootstrap.yml"
+      - "app/**"
+      - "lib/**"
+      - "build/**"
+      - "migrations/**"
+      - "public/**"
+      - "scripts/**"
+      - "worker/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.ts"
+      - "wrangler.template.jsonc"
+  workflow_dispatch:
+    inputs:
+      run_geotab_admin_test:
+        description: "Temporarily test Geotab with the encrypted administrator secrets"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: norlow-cloudflare-bootstrap-v4
+  cancel-in-progress: true
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      GEOTAB_TEST_DATABASE: ${{ secrets.GEOTAB_TEST_DATABASE }}
+      GEOTAB_TEST_USERNAME: ${{ secrets.GEOTAB_TEST_USERNAME }}
+      GEOTAB_TEST_PASSWORD: ${{ secrets.GEOTAB_TEST_PASSWORD }}
+
+    steps:
+      - name: Check authorization
+        id: auth
+        shell: bash
+        run: |
+          if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare is not authorized. Add CLOUDFLARE_API_TOKEN and rerun."
+          fi
+
+      - name: Check out project
+        if: steps.auth.outputs.ready == 'true'
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        if: steps.auth.outputs.ready == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.auth.outputs.ready == 'true'
+        run: npm ci
+
+      - name: Validate temporary Geotab test secrets
+        if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in GEOTAB_TEST_DATABASE GEOTAB_TEST_USERNAME GEOTAB_TEST_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf 'Missing required GitHub Actions secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Create resources, migrate, and deploy
+        if: steps.auth.outputs.ready == 'true'
+        run: bash scripts/cloudflare-bootstrap.sh
+
+      - name: Import protected vendor records
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -X POST "$site_url/api/internal/vendor-bootstrap" -o /tmp/vendor-import.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/vendor-import.json', 'utf8'));
+          if (result.ok !== true || result.imported !== 46) {
+            throw new Error(`Protected vendor import failed: ${JSON.stringify(result)}`);
+          }
+          console.log(`Protected vendor import completed for ${result.imported} vendors.`);
+          NODE
+
+      - name: Verify protected inventory state
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/" -o /tmp/dashboard.html
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors "$site_url/inventory" -o /tmp/inventory.html
+          inventory_status="$(curl --silent --show-error -o /tmp/inventory-lock.json -w '%{http_code}' "$site_url/api/inventory")"
+          if [ "$inventory_status" != "503" ]; then
+            echo "Inventory API was expected to remain locked but returned HTTP $inventory_status."
+            exit 1
+          fi
+          node - <<'NODE'
+          const fs = require('fs');
+          const lock = JSON.parse(fs.readFileSync('/tmp/inventory-lock.json', 'utf8'));
+          if (!String(lock.error || '').includes('temporarily locked')) {
+            throw new Error('Inventory lock response is invalid');
+          }
+          console.log('Vendor records are loaded and the inventory API remains protected.');
+          NODE
+
+      - name: Verify work orders and Geotab photos
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$site_url/work-orders" -o /tmp/work-orders.html
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$site_url/api/work-orders" -o /tmp/work-orders.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/work-orders.json', 'utf8'));
+          if (!Array.isArray(result.repairs) || !Array.isArray(result.technicians) || !Array.isArray(result.parts)) {
+            throw new Error('Work-order API smoke check failed');
+          }
+          console.log(`Work-order API ready: ${result.repairs.length} repairs, ${result.technicians.length} technicians, ${result.parts.length} parts.`);
+          NODE
+
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$site_url/api/repairs" -o /tmp/dashboard-data.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/dashboard-data.json', 'utf8'));
+          const row = Array.isArray(result.dvir)
+            ? result.dvir.find((item) => typeof item.photos === 'string' && item.photos.startsWith('geotab-media:'))
+            : null;
+          const id = row ? row.photos.slice('geotab-media:'.length).split(',').map((value) => value.trim()).find(Boolean) : '';
+          fs.writeFileSync('/tmp/geotab-media-id.txt', id || '');
+          console.log(id ? 'A current DVIR photo is available for a live download test.' : 'No current DVIR photo is available; skipping live image download.');
+          NODE
+
+          media_id="$(cat /tmp/geotab-media-id.txt)"
+          if [ -n "$media_id" ]; then
+            encoded_media_id="$(node -p 'encodeURIComponent(process.argv[1])' "$media_id")"
+            curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+              -D /tmp/geotab-photo-headers.txt \
+              "$site_url/api/geotab-media?id=$encoded_media_id" \
+              -o /tmp/geotab-photo.bin
+            node -e "const fs=require('fs'); const headers=fs.readFileSync('/tmp/geotab-photo-headers.txt','utf8'); const size=fs.statSync('/tmp/geotab-photo.bin').size; const match=headers.match(/^content-type:\\s*([^\\r\\n]+)/im); const contentType=match ? match[1].trim() : ''; if(!contentType.toLowerCase().startsWith('image/') || size<=0) throw new Error('Geotab photo smoke check did not return a valid image'); console.log('Geotab photo download ready: '+contentType+', '+size+' bytes.');"
+          fi
+
+      - name: Test Apps Script-compatible Geotab reads
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          http_status="$(curl --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -o /tmp/geotab-appscript-diagnostic.json -w '%{http_code}' \
+            "$site_url/api/repairs?checkGeotab=1")"
+          node - "$http_status" <<'NODE'
+          const fs = require('fs');
+          const httpStatus = Number(process.argv[2]);
+          const result = JSON.parse(fs.readFileSync('/tmp/geotab-appscript-diagnostic.json', 'utf8'));
+          const summary = {
+            httpStatus,
+            ok: result.ok === true,
+            authenticated: result.authenticated === true,
+            stage: result.stage,
+            endpointHost: result.endpointHost,
+            checks: result.checks,
+            error: result.error,
+          };
+          console.log('Apps Script-compatible Geotab diagnostic:');
+          console.log(JSON.stringify(summary, null, 2));
+          NODE
+
+      - name: Install temporary Geotab administrator credentials
+        id: geotab_test_credentials
+        if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE' | npx wrangler secret bulk --config wrangler.jsonc --name norlow-repair-dashboard
+          const values = {
+            GEOTAB_DATABASE: process.env.GEOTAB_TEST_DATABASE,
+            GEOTAB_USERNAME: process.env.GEOTAB_TEST_USERNAME,
+            GEOTAB_PASSWORD: process.env.GEOTAB_TEST_PASSWORD,
+          };
+          if (Object.values(values).some((value) => !value)) {
+            throw new Error('Temporary Geotab test secrets are incomplete.');
+          }
+          process.stdout.write(JSON.stringify(values));
+          NODE
+
+      - name: Run Geotab administrator diagnostic
+        if: steps.auth.outputs.ready == 'true' && inputs.run_geotab_admin_test == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          http_status="$(curl --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -o /tmp/geotab-admin-diagnostic.json -w '%{http_code}' \
+            "$site_url/api/repairs?checkGeotab=1")"
+          node - "$http_status" <<'NODE'
+          const fs = require('fs');
+          const httpStatus = Number(process.argv[2]);
+          const result = JSON.parse(fs.readFileSync('/tmp/geotab-admin-diagnostic.json', 'utf8'));
+          const summary = {
+            httpStatus,
+            ok: result.ok === true,
+            authenticated: result.authenticated === true,
+            stage: result.stage,
+            endpointHost: result.endpointHost,
+            checks: result.checks,
+            error: result.error,
+          };
+          console.log(JSON.stringify(summary, null, 2));
+          if (result.ok !== true) {
+            throw new Error(`Geotab administrator diagnostic failed at stage ${result.stage || 'unknown'}.`);
+          }
+          NODE
+
+      - name: Remove temporary Geotab administrator credentials
+        if: always() && steps.geotab_test_credentials.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' '{"GEOTAB_DATABASE":null,"GEOTAB_USERNAME":null,"GEOTAB_PASSWORD":null}' \
+            | npx wrangler secret bulk --config wrangler.jsonc --name norlow-repair-dashboard
+          echo "Temporary Geotab administrator credentials were removed."

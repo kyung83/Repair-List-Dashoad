@@ -1,19 +1,43 @@
-const SHEET_API_URL = process.env.SHEET_API_URL;
-const SHEET_API_TOKEN = process.env.SHEET_API_TOKEN;
+import { env } from 'cloudflare:workers';
+import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db';
+import { diagnoseGeotabConnection } from '@/lib/geotab-diagnostic';
+import { isGeotabConfigured, markGeotabDefectRepaired } from '@/lib/geotab';
 
-export async function GET() {
-  if (!SHEET_API_URL || !SHEET_API_TOKEN) return Response.json({ error: "Google Sheet connector is not configured" }, { status: 503 });
-  const url = new URL(SHEET_API_URL);
-  url.searchParams.set("action", "dashboard");
-  url.searchParams.set("token", SHEET_API_TOKEN);
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) return Response.json({ error: "Google Sheet connector failed" }, { status: 502 });
-  return Response.json(await response.json(), { headers: { "cache-control": "no-store" } });
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    if (url.searchParams.get('checkGeotab') === '1') {
+      const diagnostic = await diagnoseGeotabConnection(env);
+      const status = diagnostic.ok ? 200 : diagnostic.authenticated ? 403 : 401;
+      return Response.json(diagnostic, { status, headers: { 'cache-control': 'no-store' } });
+    }
+    const payload = await getDashboardData(env.DB, isGeotabConfigured(env));
+    return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'repair_api_get_failed', error: String(error) }));
+    return Response.json({ error: 'The repair database could not be read.' }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
-  if (!SHEET_API_URL || !SHEET_API_TOKEN) return Response.json({ error: "Google Sheet connector is not configured" }, { status: 503 });
-  const body = await request.json() as Record<string, unknown>;
-  const response = await fetch(SHEET_API_URL, { method: "POST", headers: { "content-type": "text/plain;charset=utf-8" }, body: JSON.stringify({ ...body, token: SHEET_API_TOKEN }) });
-  return Response.json(await response.json(), { status: response.ok ? 200 : 502 });
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const action = String(body.action ?? '');
+    if (action === 'saveRepair') return Response.json(await saveRepair(env.DB, body));
+    if (action === 'completeRepair') return Response.json(await completeRepair(env.DB, body.id));
+    if (action === 'markRepaired') {
+      return Response.json(await markGeotabDefectRepaired(
+        env,
+        String(body.logId ?? ''),
+        String(body.defectId ?? ''),
+      ));
+    }
+    if (action === 'syncGeotab') {
+      return Response.json({ error: 'Geotab imports remain disabled until dashboard access control is enabled.' }, { status: 503 });
+    }
+    return Response.json({ error: 'Unknown repair action' }, { status: 400 });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'repair_api_post_failed', error: String(error) }));
+    return Response.json({ error: error instanceof Error ? error.message : 'Repair action failed' }, { status: 400 });
+  }
 }
