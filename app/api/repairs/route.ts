@@ -19,11 +19,8 @@ export async function GET(request: Request) {
       getMaintenanceBoardItems(env.DB),
     ]);
 
-    // Match the working Apps Script behavior: the active DVIR list contains
-    // only defects that still need repair. Repaired rows may remain in D1 for
-    // audit/history, but they must never be returned to the live dashboard.
     payload.dvir = payload.dvir.filter((defect) => !defect.repaired);
-    payload.repairs = [...maintenanceRepairs, ...payload.repairs] as typeof payload.repairs;
+    payload.repairs = [...maintenanceRepairs, ...payload.repairs];
 
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
