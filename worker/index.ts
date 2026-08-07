@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from 'vinext/server/image-optimization';
 import handler from 'vinext/server/app-router-entry';
 import { syncGeotabDvir } from '../lib/geotab';
+import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 
 interface Env {
   ASSETS: Fetcher;
@@ -42,13 +43,14 @@ const worker = {
   },
 
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    const result = await syncGeotabDvir(env);
+    const dvir = await syncGeotabDvir(env);
+    const fleet = await syncGeotabFleetMaster(env);
 
     // The active DVIR table is an open-work queue. Match the Apps Script by
     // removing defects that Geotab already reports as repaired after each sync.
     await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
 
-    console.log(JSON.stringify({ event: 'geotab_dvir_sync', ...result }));
+    console.log(JSON.stringify({ event: 'geotab_scheduled_sync', dvir, fleet }));
   },
 };
 
