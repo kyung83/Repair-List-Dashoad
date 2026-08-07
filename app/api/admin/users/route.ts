@@ -61,8 +61,9 @@ export async function POST(request: Request) {
       const passwordData = await hashPassword(password);
       const result = await env.DB.prepare(`
         INSERT INTO app_users (
-          email, display_name, role, password_hash, password_salt, password_iterations, active, force_password_change
-        ) VALUES (?, ?, ?, ?, ?, ?, 1, 0)
+          email, display_name, role, password_hash, password_salt, password_iterations,
+          password_algorithm, active, force_password_change
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)
       `).bind(
         email,
         displayName,
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
         passwordData.hash,
         passwordData.salt,
         passwordData.iterations,
+        passwordData.algorithm,
       ).run();
       return Response.json({ ok: true, id: Number(result.meta.last_row_id) });
     }
@@ -111,10 +113,16 @@ export async function POST(request: Request) {
       await env.DB.batch([
         env.DB.prepare(`
           UPDATE app_users
-          SET password_hash = ?, password_salt = ?, password_iterations = ?, force_password_change = 0,
-              updated_at = CURRENT_TIMESTAMP
+          SET password_hash = ?, password_salt = ?, password_iterations = ?, password_algorithm = ?,
+              force_password_change = 0, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).bind(passwordData.hash, passwordData.salt, passwordData.iterations, id),
+        `).bind(
+          passwordData.hash,
+          passwordData.salt,
+          passwordData.iterations,
+          passwordData.algorithm,
+          id,
+        ),
         env.DB.prepare('DELETE FROM app_sessions WHERE user_id = ?').bind(id),
       ]);
       return Response.json({ ok: true, id });
