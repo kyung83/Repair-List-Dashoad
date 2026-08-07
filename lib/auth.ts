@@ -1,4 +1,5 @@
-import { pbkdf2Sync } from 'node:crypto';
+import { pbkdf2Sync, timingSafeEqual } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 
 export type AppRole = 'viewer' | 'mechanic' | 'manager' | 'admin';
 
@@ -18,22 +19,22 @@ const MAX_LOGIN_FAILURES = 5;
 const encoder = new TextEncoder();
 
 function bytesToBase64Url(bytes: Uint8Array) {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return Buffer.from(bytes)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function base64UrlToBytes(value: string) {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
-  const binary = atob(padded);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  return new Uint8Array(Buffer.from(padded, 'base64'));
 }
 
 function secureEqual(left: Uint8Array, right: Uint8Array) {
   if (left.length !== right.length) return false;
-  let mismatch = 0;
-  for (let index = 0; index < left.length; index += 1) mismatch |= left[index] ^ right[index];
-  return mismatch === 0;
+  return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
 async function sha256(value: string) {
@@ -41,8 +42,9 @@ async function sha256(value: string) {
 }
 
 async function derivePassword(password: string, salt: Uint8Array, iterations: number) {
-  const derived = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
-  return new Uint8Array(derived.buffer, derived.byteOffset, derived.byteLength);
+  return new Uint8Array(
+    pbkdf2Sync(Buffer.from(password, 'utf8'), Buffer.from(salt), iterations, 32, 'sha256'),
+  );
 }
 
 export function normalizeEmail(value: unknown) {
