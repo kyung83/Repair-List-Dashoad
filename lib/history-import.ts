@@ -187,7 +187,8 @@ export async function startHistoryImport(db: D1Database, body: Record<string, un
   if (existing && existing.source_sha256 && existing.source_sha256 !== SOURCE_SHA256) {
     throw new Error('A different source is already registered under this import key.');
   }
-  if (existing?.status === 'completed') return { ok: true, alreadyCompleted: true, importKey: IMPORT_KEY };
+  const reprocess = body.reprocess === true;
+  if (existing?.status === 'completed' && !reprocess) return { ok: true, alreadyCompleted: true, importKey: IMPORT_KEY };
 
   await db.prepare(`
     INSERT INTO data_imports (
@@ -200,14 +201,17 @@ export async function startHistoryImport(db: D1Database, body: Record<string, un
       status = 'running',
       source_line_count = excluded.source_line_count,
       source_ro_count = excluded.source_ro_count,
-      notes = excluded.notes
+      notes = excluded.notes,
+      completed_at = NULL
   `).bind(
     IMPORT_KEY,
     SOURCE_NAME,
     SOURCE_SHA256,
     SOURCE_LINE_COUNT,
     SOURCE_RO_COUNT,
-    'Admin browser import; existing equipment only; no equipment creation.',
+    reprocess
+      ? 'Admin browser reprocess; existing equipment only; refreshed matching rules; no equipment creation.'
+      : 'Admin browser import; existing equipment only; no equipment creation.',
   ).run();
   return { ok: true, alreadyCompleted: false, importKey: IMPORT_KEY };
 }
@@ -253,6 +257,7 @@ export async function importHistoryBatch(db: D1Database, body: Record<string, un
   const matched: Array<{ ro: ReturnType<typeof parseRo>; equipmentId: number }> = [];
   const unmatchedStatements: D1PreparedStatement[] = [];
   const skippedStatements: D1PreparedStatement[] = [];
+  const matchedAuditCleanupStatements: D1PreparedStatement[] = [];
   for (const ro of ros) {
     if (!TERMINAL_STATUSES.has(ro.status)) {
       skippedStatements.push(db.prepare(`
@@ -273,6 +278,9 @@ export async function importHistoryBatch(db: D1Database, body: Record<string, un
       continue;
     }
     matched.push({ ro, equipmentId });
+    matchedAuditCleanupStatements.push(db.prepare(`
+      DELETE FROM data_import_unmatched_ros WHERE import_key = ? AND ro_number = ?
+    `).bind(IMPORT_KEY, ro.roNumber));
   }
   await runBatches(db, [...skippedStatements, ...unmatchedStatements]);
 
@@ -334,6 +342,7 @@ export async function importHistoryBatch(db: D1Database, body: Record<string, un
     }
   }
   await runBatches(db, lineStatements);
+  await runBatches(db, matchedAuditCleanupStatements);
 
   return {
     ok: true,
