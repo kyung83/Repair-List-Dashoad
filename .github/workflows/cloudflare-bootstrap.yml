@@ -130,6 +130,57 @@ jobs:
           console.log('Vendor records are loaded and the inventory API remains protected.');
           NODE
 
+      - name: Verify work orders and Geotab photos
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$site_url/work-orders" -o /tmp/work-orders.html
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$site_url/api/work-orders" -o /tmp/work-orders.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/work-orders.json', 'utf8'));
+          if (!Array.isArray(result.repairs) || !Array.isArray(result.technicians) || !Array.isArray(result.parts)) {
+            throw new Error('Work-order API smoke check failed');
+          }
+          console.log(`Work-order API ready: ${result.repairs.length} repairs, ${result.technicians.length} technicians, ${result.parts.length} parts.`);
+          NODE
+
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$site_url/api/repairs" -o /tmp/dashboard-data.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('/tmp/dashboard-data.json', 'utf8'));
+          const row = Array.isArray(result.dvir)
+            ? result.dvir.find((item) => typeof item.photos === 'string' && item.photos.startsWith('geotab-media:'))
+            : null;
+          const id = row ? row.photos.slice('geotab-media:'.length).split(',').map((value) => value.trim()).find(Boolean) : '';
+          fs.writeFileSync('/tmp/geotab-media-id.txt', id || '');
+          console.log(id ? 'A current DVIR photo is available for a live download test.' : 'No current DVIR photo is available; skipping live image download.');
+          NODE
+
+          media_id="$(cat /tmp/geotab-media-id.txt)"
+          if [ -n "$media_id" ]; then
+            curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+              -D /tmp/geotab-photo-headers.txt \
+              "$site_url/api/geotab-media?id=$(node -p 'encodeURIComponent(process.argv[1])' "$media_id")" \
+              -o /tmp/geotab-photo.bin
+            node - <<'NODE'
+            const fs = require('fs');
+            const headers = fs.readFileSync('/tmp/geotab-photo-headers.txt', 'utf8');
+            const size = fs.statSync('/tmp/geotab-photo.bin').size;
+            const contentType = headers.match(/^content-type:\s*([^\r\n]+)/im)?.[1]?.trim() || '';
+            if (!contentType.toLowerCase().startsWith('image/') || size <= 0) {
+              throw new Error('Geotab photo smoke check did not return a valid image');
+            }
+            console.log(`Geotab photo download ready: ${contentType}, ${size} bytes.`);
+            NODE
+          fi
+
       - name: Test Apps Script-compatible Geotab reads
         if: steps.auth.outputs.ready == 'true'
         shell: bash
