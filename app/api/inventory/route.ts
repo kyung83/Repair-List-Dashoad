@@ -1,12 +1,25 @@
-const lockedResponse = () => Response.json(
-  { error: 'Inventory is temporarily locked until dashboard user authentication is enabled.' },
-  { status: 503, headers: { 'cache-control': 'no-store', 'retry-after': '3600' } },
-);
+import { env } from 'cloudflare:workers';
+import { adjustStock, getInventoryData, savePart, saveVendor } from '@/lib/dashboard-db';
 
 export async function GET() {
-  return lockedResponse();
+  try {
+    return Response.json(await getInventoryData(env.DB), { headers: { 'cache-control': 'no-store' } });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'inventory_get_failed', error: String(error) }));
+    return Response.json({ error: 'Inventory could not be loaded.' }, { status: 500 });
+  }
 }
 
-export async function POST() {
-  return lockedResponse();
+export async function POST(request: Request) {
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const action = String(body.action ?? '');
+    if (action === 'savePart') return Response.json(await savePart(env.DB, body));
+    if (action === 'adjustStock') return Response.json(await adjustStock(env.DB, body));
+    if (action === 'saveVendor') return Response.json(await saveVendor(env.DB, body));
+    return Response.json({ error: 'Unknown inventory action.' }, { status: 400 });
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'inventory_post_failed', error: String(error) }));
+    return Response.json({ error: error instanceof Error ? error.message : 'Inventory action failed.' }, { status: 400 });
+  }
 }
