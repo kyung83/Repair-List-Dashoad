@@ -1,3 +1,5 @@
+import { pbkdf2Sync } from 'node:crypto';
+
 export type AppRole = 'viewer' | 'mechanic' | 'manager' | 'admin';
 
 export type AppUser = {
@@ -39,19 +41,8 @@ async function sha256(value: string) {
 }
 
 async function derivePassword(password: string, salt: Uint8Array, iterations: number) {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits'],
-  );
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
-    key,
-    256,
-  );
-  return new Uint8Array(bits);
+  const derived = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+  return new Uint8Array(derived.buffer, derived.byteOffset, derived.byteLength);
 }
 
 export function normalizeEmail(value: unknown) {
@@ -222,7 +213,6 @@ export async function authenticateUser(
   if (row?.active && isAppRole(row.role)) {
     valid = await verifyPassword(password, row.password_hash, row.password_salt, Number(row.password_iterations));
   } else {
-    // Keep invalid-user attempts on a similar cryptographic path to valid-user attempts.
     await derivePassword(password || 'invalid-password', new Uint8Array(16), PASSWORD_ITERATIONS);
   }
 
