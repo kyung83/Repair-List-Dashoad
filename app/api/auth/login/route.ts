@@ -1,5 +1,38 @@
 import { env } from 'cloudflare:workers';
+import { pbkdf2Sync } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { appUserCount, authenticateUser, createSession, sessionCookie, verifyPassword } from '@/lib/auth';
+
+function base64UrlToBuffer(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  return Buffer.from(padded, 'base64');
+}
+
+function bufferToBase64Url(value: ArrayBuffer | Uint8Array) {
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+  return Buffer.from(bytes)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function webCryptoPbkdf2(password: string, salt: Uint8Array, iterations: number) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    key,
+    256,
+  );
+  return bufferToBase64Url(bits);
+}
 
 async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
   const email = String(emailValue ?? '').trim().toLowerCase();
@@ -16,15 +49,26 @@ async function smokeDiagnostic(emailValue: unknown, passwordValue: unknown) {
     active: number;
   }>();
 
+  if (!row) {
+    return { rowVisible: false, active: false, passwordValid: false };
+  }
+
+  const password = String(passwordValue ?? '');
+  const salt = base64UrlToBuffer(row.password_salt);
+  const iterations = Number(row.password_iterations);
+  const nodeHash = bufferToBase64Url(
+    pbkdf2Sync(Buffer.from(password, 'utf8'), salt, iterations, 32, 'sha256'),
+  );
+  const webHash = await webCryptoPbkdf2(password, salt, iterations);
+
   return {
-    rowVisible: Boolean(row),
-    active: Boolean(row?.active),
-    passwordValid: row ? await verifyPassword(
-      String(passwordValue ?? ''),
-      row.password_hash,
-      row.password_salt,
-      Number(row.password_iterations),
-    ) : false,
+    rowVisible: true,
+    active: Boolean(row.active),
+    passwordValid: await verifyPassword(password, row.password_hash, row.password_salt, iterations),
+    passwordLength: password.length,
+    saltLength: salt.length,
+    nodeMatches: nodeHash === row.password_hash,
+    webMatches: webHash === row.password_hash,
   };
 }
 
