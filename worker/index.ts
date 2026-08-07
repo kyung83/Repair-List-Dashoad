@@ -39,6 +39,7 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/logout',
   '/api/auth/me',
   '/api/auth/setup',
+  '/_auth-crypto-probe',
   '/favicon.svg',
 ]);
 
@@ -102,6 +103,53 @@ async function userCanAccess(request: Request, user: AppUser, url: URL) {
   return false;
 }
 
+async function userCanAccess(request: Request, user: AppUser, url: URL) {
+  const pathname = url.pathname;
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin') || pathname.startsWith('/api/internal')) {
+    return user.role === 'admin';
+  }
+  if (pathname === '/api/repairs' && url.searchParams.get('checkGeotab') === '1') {
+    return user.role === 'admin';
+  }
+
+  const method = request.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+  if (user.role === 'admin' || user.role === 'manager') return true;
+  if (user.role === 'mechanic') return mechanicCanWrite(request, pathname);
+  return false;
+}
+
+async function cryptoProbe() {
+  const encoder = new TextEncoder();
+  const password = encoder.encode('norlow-fixed-probe-password');
+  const salt = encoder.encode('norlow-fixed-salt');
+  try {
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      password,
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits'],
+    );
+    const bits = await globalThis.crypto.subtle.deriveBits(
+      { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 1000 },
+      key,
+      256,
+    );
+    return Response.json({
+      buildMarker: 'worker-crypto-probe-v1',
+      pbkdf2Supported: bits.byteLength === 32,
+      errorName: '',
+    }, { headers: { 'cache-control': 'no-store' } });
+  } catch (error) {
+    return Response.json({
+      buildMarker: 'worker-crypto-probe-v1',
+      pbkdf2Supported: false,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    }, { headers: { 'cache-control': 'no-store' } });
+  }
+}
+
 async function enforceDashboardAccess(request: Request, env: Env, url: URL): Promise<Response | null> {
   if (PUBLIC_PATHS.has(url.pathname) || isStaticAsset(url.pathname)) return null;
 
@@ -130,6 +178,8 @@ async function enforceDashboardAccess(request: Request, env: Env, url: URL): Pro
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/_auth-crypto-probe') return cryptoProbe();
+
     if (url.pathname === '/_vinext/image') {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
