@@ -20,6 +20,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <div style={{ position: "fixed", right: 18, bottom: 18, zIndex: 40, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "calc(100vw - 36px)" }}>
           <a href="/" style={{ padding: "10px 14px", borderRadius: 999, background: "#0d1b2b", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Repair board</a>
           <a href="/work-orders" style={{ padding: "10px 14px", borderRadius: 999, background: "#29465f", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Work orders</a>
+          <a href="/pm-schedules" style={{ padding: "10px 14px", borderRadius: 999, background: "#3d5a40", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>PM schedules</a>
           <a href="/inventory" style={{ padding: "10px 14px", borderRadius: 999, background: "#f47b20", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Inventory</a>
           <SessionNav />
         </div>
