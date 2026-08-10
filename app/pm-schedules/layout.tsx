@@ -3,9 +3,9 @@ import SyncGeotabButton from "./sync-geotab-button";
 
 export default function PmSchedulesLayout({ children }: { children: ReactNode }) {
   return (
-    <>
-      {children}
+    <div className="pm-page-compact">
       <SyncGeotabButton />
-    </>
+      {children}
+    </div>
   );
 }
