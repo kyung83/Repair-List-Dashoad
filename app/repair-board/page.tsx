@@ -7,6 +7,7 @@ type Role = "viewer" | "mechanic" | "manager" | "admin";
 type Source = "repair" | "dvir" | "dvir-repair" | "pm" | "annual" | "pm-repair" | "annual-repair";
 type ShopView = "clare" | "cadillac" | "all";
 type RepairMode = "equipment" | "freeform";
+type RepairEquipmentType = "" | "truck" | "trailer" | "other";
 type Technician = { id: number; name: string };
 type EquipmentOption = { id: number; unit: string; equipmentType: string; driver: string; location: string };
 type Timer = { startedAt: string; technician: string };
@@ -70,7 +71,7 @@ type RepairDraft = {
   mode: RepairMode;
   equipmentId: string;
   unit: string;
-  equipmentType: "truck" | "trailer" | "other";
+  equipmentType: RepairEquipmentType;
   location: string;
   issue: string;
   parts: string;
@@ -83,7 +84,7 @@ const blankRepairDraft: RepairDraft = {
   mode: "equipment",
   equipmentId: "",
   unit: "",
-  equipmentType: "other",
+  equipmentType: "",
   location: "",
   issue: "",
   parts: "",
@@ -215,6 +216,7 @@ export default function RepairBoardPage() {
   const [expandedRepairId, setExpandedRepairId] = useState<string | null>(null);
   const [showAddRepair, setShowAddRepair] = useState(false);
   const [newRepair, setNewRepair] = useState<RepairDraft>(blankRepairDraft);
+  const [equipmentLookup, setEquipmentLookup] = useState("");
 
   async function load() {
     const [response, etaResponse] = await Promise.all([
@@ -278,8 +280,12 @@ export default function RepairBoardPage() {
   }
 
   async function createBoardRepair() {
+    if (!newRepair.equipmentType) {
+      setMessage("Choose an equipment type first.");
+      return;
+    }
     if (newRepair.mode === "equipment" && !newRepair.equipmentId) {
-      setMessage("Choose the equipment this repair belongs to.");
+      setMessage("Choose the matching equipment this repair belongs to.");
       return;
     }
     if (newRepair.mode === "freeform" && !newRepair.unit.trim()) {
@@ -315,6 +321,7 @@ export default function RepairBoardPage() {
       setShopView("all");
       setShowAddRepair(false);
       setNewRepair(blankRepairDraft);
+      setEquipmentLookup("");
       setMessage(`Repair added${result.unit ? ` to Unit ${result.unit}` : ""}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Repair could not be added.");
@@ -389,6 +396,19 @@ export default function RepairBoardPage() {
     });
     if (ok) setMessage(`Unit ${unit.unit} returned to service.`);
   }
+
+  const matchingEquipment = useMemo(() => {
+    if (!newRepair.equipmentType) return [];
+    const needle = equipmentLookup.trim().toLowerCase();
+    return (data?.equipment ?? [])
+      .filter((item) => equipmentGroup(item.equipmentType) === newRepair.equipmentType)
+      .filter((item) => {
+        if (!needle) return true;
+        return [item.unit, item.location, displayDriver(item.driver)].join(" ").toLowerCase().includes(needle);
+      })
+      .sort((left, right) => left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: "base" }))
+      .slice(0, 75);
+  }, [data, equipmentLookup, newRepair.equipmentType]);
 
   const searchFiltered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -701,33 +721,49 @@ export default function RepairBoardPage() {
       {showAddRepair && data?.canManage && (
         <section style={{ margin: "4px 0 12px", border: "2px solid #d87816", background: "#fffaf2", padding: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
-            <div><strong style={{ fontSize: 14 }}>Add Repair</strong><div style={{ marginTop: 2, color: "#6b7280", fontSize: 10 }}>Choose existing equipment whenever it is already in the fleet. That attaches the repair to the exact unit and keeps every repair grouped together.</div></div>
+            <div><strong style={{ fontSize: 14 }}>Add Repair</strong><div style={{ marginTop: 2, color: "#6b7280", fontSize: 10 }}>Choose the equipment type first, then type part of the unit number, location, or driver to populate only matching equipment.</div></div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8 }}>
             <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>EQUIPMENT SOURCE
-              <select className={styles.techSelect} value={newRepair.mode} onChange={(event) => setNewRepair((current) => ({ ...current, mode: event.target.value as RepairMode, equipmentId: "" }))}>
+              <select className={styles.techSelect} value={newRepair.mode} onChange={(event) => { setNewRepair((current) => ({ ...current, mode: event.target.value as RepairMode, equipmentId: "", unit: "" })); setEquipmentLookup(""); }}>
                 <option value="equipment">Existing Equipment</option>
                 <option value="freeform">Freeform / Other Equipment</option>
               </select>
             </label>
+            <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>EQUIPMENT TYPE
+              <select className={styles.techSelect} value={newRepair.equipmentType} onChange={(event) => { setNewRepair((current) => ({ ...current, equipmentType: event.target.value as RepairEquipmentType, equipmentId: "" })); setEquipmentLookup(""); }}>
+                <option value="">Choose type…</option>
+                <option value="truck">Truck</option>
+                <option value="trailer">Trailer</option>
+                <option value="other">Other Equipment</option>
+              </select>
+            </label>
             {newRepair.mode === "equipment" ? (
-              <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>UNIT / EQUIPMENT
-                <select className={styles.techSelect} value={newRepair.equipmentId} onChange={(event) => setNewRepair((current) => ({ ...current, equipmentId: event.target.value }))}>
-                  <option value="">Choose equipment…</option>
-                  {data.equipment.map((item) => <option key={item.id} value={item.id}>{item.unit} — {equipmentGroup(item.equipmentType).toUpperCase()}{item.location ? ` — ${item.location}` : ""}</option>)}
-                </select>
-              </label>
+              <>
+                <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>TYPE TO FIND UNIT
+                  <input
+                    className={styles.techSelect}
+                    value={equipmentLookup}
+                    disabled={!newRepair.equipmentType}
+                    onChange={(event) => { setEquipmentLookup(event.target.value); setNewRepair((current) => ({ ...current, equipmentId: "" })); }}
+                    placeholder={newRepair.equipmentType ? "Type unit, location, or driver…" : "Choose type first"}
+                    autoComplete="off"
+                  />
+                </label>
+                <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>MATCHING EQUIPMENT
+                  <select className={styles.techSelect} value={newRepair.equipmentId} disabled={!newRepair.equipmentType} onChange={(event) => setNewRepair((current) => ({ ...current, equipmentId: event.target.value }))}>
+                    <option value="">{!newRepair.equipmentType ? "Choose type first…" : matchingEquipment.length ? `Choose from ${matchingEquipment.length} match${matchingEquipment.length === 1 ? "" : "es"}…` : "No matching equipment"}</option>
+                    {matchingEquipment.map((item) => {
+                      const driver = displayDriver(item.driver);
+                      return <option key={item.id} value={item.id}>{item.unit}{item.location ? ` — ${item.location}` : ""}{driver ? ` — ${driver}` : ""}</option>;
+                    })}
+                  </select>
+                </label>
+              </>
             ) : (
               <>
                 <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>UNIT / NAME
                   <input className={styles.techSelect} value={newRepair.unit} onChange={(event) => setNewRepair((current) => ({ ...current, unit: event.target.value }))} placeholder="454(SC), forklift, plow truck…" />
-                </label>
-                <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>EQUIPMENT TYPE
-                  <select className={styles.techSelect} value={newRepair.equipmentType} onChange={(event) => setNewRepair((current) => ({ ...current, equipmentType: event.target.value as RepairDraft["equipmentType"] }))}>
-                    <option value="other">Other Equipment</option>
-                    <option value="truck">Truck</option>
-                    <option value="trailer">Trailer</option>
-                  </select>
                 </label>
                 <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>LOCATION
                   <input className={styles.techSelect} value={newRepair.location} onChange={(event) => setNewRepair((current) => ({ ...current, location: event.target.value }))} placeholder="Clare, Cadillac, road…" />
@@ -755,7 +791,7 @@ export default function RepairBoardPage() {
             </label>
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 7, justifyContent: "flex-end" }}>
-            <button className={styles.refresh} disabled={busyId === "create-repair"} onClick={() => { setShowAddRepair(false); setNewRepair(blankRepairDraft); }}>Cancel</button>
+            <button className={styles.refresh} disabled={busyId === "create-repair"} onClick={() => { setShowAddRepair(false); setNewRepair(blankRepairDraft); setEquipmentLookup(""); }}>Cancel</button>
             <button className={styles.primaryLink} style={{ cursor: "pointer" }} disabled={busyId === "create-repair"} onClick={() => void createBoardRepair()}>{busyId === "create-repair" ? "Adding…" : "Add Repair"}</button>
           </div>
         </section>
