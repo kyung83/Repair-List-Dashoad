@@ -85,11 +85,11 @@ export default function SetupPage() {
             </label>
             <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
               Password
-              <input type="password" minLength={12} autoComplete="new-password" required value={password} onChange={(event) => setPassword(event.target.value)} style={{ padding: 12, border: "1px solid #ccd5dd", borderRadius: 9 }} />
+              <input type="password" minLength={6} autoComplete="new-password" required value={password} onChange={(event) => setPassword(event.target.value)} style={{ padding: 12, border: "1px solid #ccd5dd", borderRadius: 9 }} />
             </label>
             <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
               Confirm password
-              <input type="password" minLength={12} autoComplete="new-password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} style={{ padding: 12, border: "1px solid #ccd5dd", borderRadius: 9 }} />
+              <input type="password" minLength={6} autoComplete="new-password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} style={{ padding: 12, border: "1px solid #ccd5dd", borderRadius: 9 }} />
             </label>
             <button disabled={busy || configured === false} type="submit" style={{ gridColumn: "1 / -1", border: 0, borderRadius: 9, padding: "13px 18px", background: "#f47b20", color: "white", fontWeight: 900, cursor: busy ? "wait" : "pointer", opacity: busy || configured === false ? .65 : 1 }}>
               {busy ? "Creating administrator…" : "Create administrator"}
