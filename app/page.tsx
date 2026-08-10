@@ -301,6 +301,102 @@ function RepairBoardColumn({
   );
 }
 
+function DvirDefectCard({
+  defect,
+  onAddRelatedRepair,
+  onMarkRepaired,
+}: {
+  defect: Dvir;
+  onAddRelatedRepair: (defect: Dvir) => void;
+  onMarkRepaired: (defect: Dvir) => void;
+}) {
+  return (
+    <article className="defect-card">
+      <div className="defect-head">
+        <div>
+          <span className="asset">{defect.asset}</span>
+          <h3>{defect.defect}</h3>
+        </div>
+        <span className={`pill ${defect.repaired ? "success" : "danger"}`}>
+          {defect.repaired ? "Repaired" : "Needs repair"}
+        </span>
+      </div>
+      <p>{defect.comments || "No driver comments"}</p>
+      <div className="defect-meta">
+        <span>Driver: {defect.driver || "Unknown"}</span>
+        {defect.photos && defect.photos !== "None" ? (
+          <a href={defect.photos} target="_blank" rel="noreferrer">
+            View photos
+          </a>
+        ) : (
+          <span>No photos</span>
+        )}
+      </div>
+      {!defect.repaired && (
+        <div className="defect-actions">
+          <button type="button" className="secondary-card-action" onClick={() => onAddRelatedRepair(defect)}>
+            + Add another repair
+          </button>
+          <button type="button" className="repair-button" onClick={() => onMarkRepaired(defect)}>
+            Mark repaired
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function DvirColumn({
+  title,
+  equipmentType,
+  defects,
+  onAddRepair,
+  onAddRelatedRepair,
+  onMarkRepaired,
+}: {
+  title: string;
+  equipmentType: "Truck" | "Trailer";
+  defects: Dvir[];
+  onAddRepair: () => void;
+  onAddRelatedRepair: (defect: Dvir) => void;
+  onMarkRepaired: (defect: Dvir) => void;
+}) {
+  const openCount = defects.filter((defect) => !defect.repaired).length;
+  const repairedCount = defects.length - openCount;
+  return (
+    <section className={`repair-board-column ${equipmentType.toLowerCase()}-column`}>
+      <header className="repair-board-column-head">
+        <div>
+          <p className="eyebrow">{equipmentType === "Truck" ? "VEHICLE DVIR" : "TRAILER DVIR"}</p>
+          <h3>
+            {title} <span>{defects.length}</span>
+          </h3>
+          <small>{openCount} open · {repairedCount} repaired</small>
+        </div>
+        <button type="button" className="column-add-button" onClick={onAddRepair}>
+          + Add repair
+        </button>
+      </header>
+      <div className="repair-board-column-body">
+        {defects.map((defect) => (
+          <DvirDefectCard
+            key={defect.id}
+            defect={defect}
+            onAddRelatedRepair={onAddRelatedRepair}
+            onMarkRepaired={onMarkRepaired}
+          />
+        ))}
+        {!defects.length && (
+          <div className="column-empty-state">
+            <strong>No matching {equipmentType === "Truck" ? "vehicle" : "trailer"} DVIRs</strong>
+            <span>New pulled DVIR defects will appear here.</span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("Repairs");
   const [query, setQuery] = useState("");
@@ -700,6 +796,9 @@ export default function Home() {
     () => data.dvir.filter((defect) => Object.values(defect).join(" ").toLowerCase().includes(q)),
     [data.dvir, q],
   );
+  const vehicleDvir = filteredDvir.filter((defect) => equipmentTypeByUnit.get(unitKey(defect.asset)) === "Truck");
+  const trailerDvir = filteredDvir.filter((defect) => equipmentTypeByUnit.get(unitKey(defect.asset)) === "Trailer");
+  const unclassifiedDvir = filteredDvir.filter((defect) => !equipmentTypeByUnit.has(unitKey(defect.asset)));
 
   const filteredEquipment = useMemo(
     () => data.equipment.filter((equipment) => Object.values(equipment).join(" ").toLowerCase().includes(q)),
@@ -949,41 +1048,62 @@ export default function Home() {
           )}
 
           {activeTab === "DVIR Defects" && (
-            <div className="card-grid">
-              {filteredDvir.map((defect) => (
-                <article className="defect-card" key={defect.id}>
-                  <div className="defect-head">
+            <div className="repair-board-shell">
+              <div className="repair-board-intro">
+                <div>
+                  <strong>DVIRs separated by equipment type</strong>
+                  <span>Vehicle defects stay on the left, trailer defects stay on the right, with repair actions on both sides.</span>
+                </div>
+                <span className="board-total">{filteredDvir.length} matching DVIRs</span>
+              </div>
+
+              <div className="repair-board-grid">
+                <DvirColumn
+                  title="Vehicle DVIRs"
+                  equipmentType="Truck"
+                  defects={vehicleDvir}
+                  onAddRepair={() =>
+                    openNewRepair({}, { label: "New vehicle repair", detail: "Enter a vehicle unit from Equipment Info." })
+                  }
+                  onAddRelatedRepair={openRelatedDvirRepair}
+                  onMarkRepaired={(defect) => void markRepaired(defect)}
+                />
+                <DvirColumn
+                  title="Trailer DVIRs"
+                  equipmentType="Trailer"
+                  defects={trailerDvir}
+                  onAddRepair={() =>
+                    openNewRepair({}, { label: "New trailer repair", detail: "Enter a trailer unit from Equipment Info." })
+                  }
+                  onAddRelatedRepair={openRelatedDvirRepair}
+                  onMarkRepaired={(defect) => void markRepaired(defect)}
+                />
+              </div>
+
+              {unclassifiedDvir.length > 0 && (
+                <section className="unclassified-work">
+                  <div className="unclassified-work-head">
                     <div>
-                      <span className="asset">{defect.asset}</span>
-                      <h3>{defect.defect}</h3>
+                      <p className="eyebrow">NEEDS EQUIPMENT MATCH</p>
+                      <h3>Unclassified DVIRs</h3>
                     </div>
-                    <span className={`pill ${defect.repaired ? "success" : "danger"}`}>
-                      {defect.repaired ? "Repaired" : "Needs repair"}
-                    </span>
+                    <span>{unclassifiedDvir.length}</span>
                   </div>
-                  <p>{defect.comments || "No driver comments"}</p>
-                  <div className="defect-meta">
-                    <span>Driver: {defect.driver || "Unknown"}</span>
-                    {defect.photos && defect.photos !== "None" ? (
-                      <a href={defect.photos} target="_blank" rel="noreferrer">
-                        View photos
-                      </a>
-                    ) : (
-                      <span>No photos</span>
-                    )}
+                  <p>
+                    These DVIR unit numbers do not match a vehicle or trailer in Equipment Info yet. They stay visible here until the equipment match is corrected.
+                  </p>
+                  <div className="unclassified-card-grid">
+                    {unclassifiedDvir.map((defect) => (
+                      <DvirDefectCard
+                        key={defect.id}
+                        defect={defect}
+                        onAddRelatedRepair={openRelatedDvirRepair}
+                        onMarkRepaired={(item) => void markRepaired(item)}
+                      />
+                    ))}
                   </div>
-                  {!defect.repaired && (
-                    <div className="defect-actions">
-                      <button type="button" className="secondary-card-action" onClick={() => openRelatedDvirRepair(defect)}>
-                        + Add another repair
-                      </button>
-                      <button type="button" className="repair-button" onClick={() => void markRepaired(defect)}>
-                        Mark repaired
-                      </button>
-                    </div>
-                  )}
-                </article>
-              ))}
+                </section>
+              )}
             </div>
           )}
 
