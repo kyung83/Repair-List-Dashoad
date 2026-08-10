@@ -45,6 +45,7 @@ type PresetEquipmentRow = {
   id: number;
   equipment_type: string;
   current_mileage: number | null;
+  pm_type: string | null;
   last_mileage: number | null;
   service_date: string | null;
 };
@@ -110,10 +111,6 @@ function validateCategory(value: unknown) {
   return category;
 }
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 async function runBatches(db: D1Database, statements: D1PreparedStatement[]) {
   for (let index = 0; index < statements.length; index += SQL_ID_BATCH_SIZE) {
     await db.batch(statements.slice(index, index + SQL_ID_BATCH_SIZE));
@@ -142,7 +139,7 @@ async function loadPresetEquipmentRows(db: D1Database, ids: number[]) {
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await db.prepare(`
       SELECT e.id, e.equipment_type, e.current_mileage,
-             ps.last_mileage, COALESCE(ps.service_date, e.service_date) AS service_date
+             ps.pm_type, ps.last_mileage, COALESCE(ps.service_date, e.service_date) AS service_date
       FROM equipment e
       LEFT JOIN pm_status ps ON ps.equipment_id = e.id
       WHERE e.active = 1 AND e.id IN (${placeholders})
@@ -173,20 +170,23 @@ async function applyPresetToIds(db: D1Database, preset: ApplyPreset, ids: number
           updated_at = CURRENT_TIMESTAMP
       `).bind(row.id, preset.profileId, preset.mileageInterval, preset.timeIntervalDays));
 
+      const nextPmType = row.pm_type && preset.sequence.includes(row.pm_type)
+        ? row.pm_type
+        : preset.sequence[0] ?? '40';
       statements.push(db.prepare(`
         INSERT INTO pm_status (equipment_id, pm_type, status, last_mileage, service_date, updated_at)
         VALUES (?, ?, 'Scheduled', ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(equipment_id) DO UPDATE SET
           pm_type = excluded.pm_type,
-          status = 'Scheduled',
+          status = COALESCE(pm_status.status, excluded.status),
           last_mileage = COALESCE(pm_status.last_mileage, excluded.last_mileage),
           service_date = COALESCE(pm_status.service_date, excluded.service_date),
           updated_at = CURRENT_TIMESTAMP
       `).bind(
         row.id,
-        preset.sequence[0] ?? '40',
-        row.last_mileage ?? row.current_mileage,
-        row.service_date ?? today(),
+        nextPmType,
+        row.last_mileage,
+        row.service_date,
       ));
     }
 
