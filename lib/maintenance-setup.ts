@@ -100,7 +100,7 @@ function selectedIds(value: unknown) {
   if (!Array.isArray(value)) throw new Error('Select at least one unit.');
   const ids = [...new Set(value.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
   if (!ids.length) throw new Error('Select at least one unit.');
-  if (ids.length > 500) throw new Error('Select no more than 500 units at once.');
+  if (ids.length > 2000) throw new Error('Select no more than 2,000 units at once.');
   return ids;
 }
 
