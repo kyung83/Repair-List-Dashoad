@@ -127,7 +127,7 @@ async function stopActiveLabor(
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
-    const [repairs, activeTimer, parts, usedParts, laborEntries] = await Promise.all([
+    const [repairs, activeTimer, parts, usedParts, laborEntries, plannedParts] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id, r.equipment_id, COALESCE(e.unit, '') AS unit, r.title, r.status,
                COALESCE(r.location, '') AS location, r.technician_id,
@@ -188,6 +188,26 @@ export async function GET(request: Request) {
         notes: string;
         technician_name: string;
       }>(),
+      env.DB.prepare(`
+        SELECT rpp.id, rpp.repair_id, rpp.part_id, p.part_number, p.description,
+               rpp.quantity, rpp.used_quantity, COALESCE(pk.name, 'PM Kit') AS kit_name
+        FROM repair_planned_parts rpp
+        JOIN parts p ON p.id = rpp.part_id
+        LEFT JOIN pm_kits pk ON pk.id = rpp.pm_kit_id
+        JOIN repairs r ON r.id = rpp.repair_id
+        WHERE rpp.removed_at IS NULL
+          AND lower(COALESCE(r.status, '')) NOT LIKE '%complete%'
+        ORDER BY rpp.repair_id, rpp.id
+      `).all<{
+        id: number;
+        repair_id: number;
+        part_id: number;
+        part_number: string;
+        description: string;
+        quantity: number;
+        used_quantity: number;
+        kit_name: string;
+      }>(),
     ]);
 
     const usedByRepair = new Map<number, { partId: number; partNumber: string; description: string; quantity: number }[]>();
@@ -195,6 +215,20 @@ export async function GET(request: Request) {
       const list = usedByRepair.get(row.repair_id) ?? [];
       list.push({ partId: row.part_id, partNumber: row.part_number, description: row.description, quantity: Number(row.quantity) });
       usedByRepair.set(row.repair_id, list);
+    }
+    const plannedByRepair = new Map<number, { id: number; partId: number; partNumber: string; description: string; quantity: number; usedQuantity: number; kitName: string }[]>();
+    for (const row of plannedParts.results) {
+      const list = plannedByRepair.get(row.repair_id) ?? [];
+      list.push({
+        id: row.id,
+        partId: row.part_id,
+        partNumber: row.part_number,
+        description: row.description,
+        quantity: Number(row.quantity),
+        usedQuantity: Number(row.used_quantity),
+        kitName: row.kit_name,
+      });
+      plannedByRepair.set(row.repair_id, list);
     }
     const laborByRepair = new Map<number, { id: number; technician: string; laborDate: string; hours: number; rate: number; notes: string }[]>();
     for (const row of laborEntries.results) {
@@ -221,6 +255,7 @@ export async function GET(request: Request) {
         technicianId: row.technician_id === null ? null : Number(row.technician_id),
         assignedTo: row.technician_name,
         laborHours: Number(row.labor_hours ?? 0),
+        plannedParts: plannedByRepair.get(row.id) ?? [],
         usedParts: usedByRepair.get(row.id) ?? [],
         laborEntries: laborByRepair.get(row.id) ?? [],
       })),
@@ -355,9 +390,43 @@ export async function POST(request: Request) {
         .first<{ part_number: string; description: string }>();
       if (!part) throw new Error('Part was not found.');
       await usePartOnRepair(env.DB, { ...body, repairId: `repair-${id}` });
+      await env.DB.prepare(`
+        UPDATE repair_planned_parts
+        SET used_quantity = MIN(quantity, used_quantity + ?), updated_at = CURRENT_TIMESTAMP
+        WHERE repair_id = ? AND part_id = ? AND removed_at IS NULL
+      `).bind(quantity, id, partId).run();
       await refreshRepairPartsText(id);
       await recordEvent(id, user, 'part_used', `${technician.name} used ${quantity} x ${part.part_number} — ${part.description}.`);
       return Response.json({ ok: true, repairId: `repair-${id}`, partId, quantity });
+    }
+
+    if (action === 'removePlannedPart') {
+      const id = repairId(body.repairId);
+      await requireAssignedRepair(technician.id, id);
+      const plannedPartId = Number(body.plannedPartId ?? 0);
+      if (!Number.isInteger(plannedPartId) || plannedPartId <= 0) throw new Error('Planned PM part was not found.');
+      const planned = await env.DB.prepare(`
+        SELECT rpp.id, rpp.part_id, rpp.quantity, rpp.used_quantity, p.part_number, p.description
+        FROM repair_planned_parts rpp
+        JOIN parts p ON p.id = rpp.part_id
+        WHERE rpp.id = ? AND rpp.repair_id = ? AND rpp.removed_at IS NULL
+      `).bind(plannedPartId, id).first<{
+        id: number;
+        part_id: number;
+        quantity: number;
+        used_quantity: number;
+        part_number: string;
+        description: string;
+      }>();
+      if (!planned) throw new Error('That planned PM part is no longer active on this repair.');
+      if (Number(planned.used_quantity) > 0) throw new Error('This planned part has already been used. Leave it on the PM record.');
+      await env.DB.prepare(`
+        UPDATE repair_planned_parts
+        SET removed_at = CURRENT_TIMESTAMP, removed_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND repair_id = ? AND removed_at IS NULL
+      `).bind(user.id, plannedPartId, id).run();
+      await recordEvent(id, user, 'planned_part_removed', `${technician.name} marked ${planned.part_number} — ${planned.description} as not needed for this PM.`);
+      return Response.json({ ok: true, repairId: `repair-${id}`, plannedPartId, removed: true });
     }
 
     if (action === 'completeRepair') {

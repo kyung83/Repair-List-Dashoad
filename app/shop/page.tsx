@@ -10,6 +10,7 @@ type User = {
   technicianId: number | null;
 };
 type UsedPart = { partId: number; partNumber: string; description: string; quantity: number };
+type PlannedPart = { id: number; partId: number; partNumber: string; description: string; quantity: number; usedQuantity: number; kitName: string };
 type LaborEntry = { id: number; technician: string; laborDate: string; hours: number; rate: number; notes: string };
 type Repair = {
   id: string;
@@ -21,6 +22,7 @@ type Repair = {
   technicianId: number | null;
   assignedTo: string;
   laborHours: number;
+  plannedParts: PlannedPart[];
   usedParts: UsedPart[];
   laborEntries: LaborEntry[];
 };
@@ -28,7 +30,7 @@ type Part = { id: number; partNumber: string; description: string; quantityOnHan
 type Timer = { repairId: string; startedAt: string; title: string; unit: string };
 type ShopData = { user: User; activeTimer: Timer | null; repairs: Repair[]; parts: Part[]; updatedAt: string };
 type View = "mine" | "available" | "all";
-type ActionResult = { ok?: boolean; error?: string; repairId?: string; hours?: number; laborStarted?: boolean; completed?: boolean };
+type ActionResult = { ok?: boolean; error?: string; repairId?: string; hours?: number; laborStarted?: boolean; completed?: boolean; removed?: boolean };
 
 function timerStartMs(value: string) {
   const normalized = value.includes("T") ? value : value.replace(" ", "T") + "Z";
@@ -45,6 +47,9 @@ function duration(startedAt: string, now: number) {
 function sameUnit(left: Repair, right: Repair) {
   if (left.equipmentId && right.equipmentId) return left.equipmentId === right.equipmentId;
   return left.unit.trim().toLowerCase() === right.unit.trim().toLowerCase();
+}
+function numberText(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 export default function ShopPage() {
@@ -136,6 +141,25 @@ export default function ShopPage() {
       setPartQuantity(1);
       setMessage("Part added to the repair.");
     }
+  }
+
+  async function usePlannedPart(repair: Repair, planned: PlannedPart) {
+    const remaining = Math.max(0, planned.quantity - planned.usedQuantity);
+    if (remaining <= 0) return;
+    const stock = data?.parts.find((part) => part.id === planned.partId)?.quantityOnHand ?? 0;
+    const quantity = Math.min(remaining, Math.max(0, stock));
+    if (quantity <= 0) {
+      setMessage(`${planned.partNumber} does not show available inventory.`);
+      return;
+    }
+    const result = await action({ action: "usePart", repairId: repair.id, partId: planned.partId, quantity });
+    if (result) setMessage(`${numberText(quantity)} × ${planned.partNumber} used from the PM kit plan.`);
+  }
+
+  async function removePlannedPart(repair: Repair, planned: PlannedPart) {
+    if (!window.confirm(`Mark ${planned.partNumber} — ${planned.description} as not needed for this PM?\n\nThis only removes it from this PM. It does not change the master PM kit or inventory.`)) return;
+    const result = await action({ action: "removePlannedPart", repairId: repair.id, plannedPartId: planned.id });
+    if (result) setMessage(`${planned.partNumber} marked not needed for this PM.`);
   }
 
   async function completeJob(repair: Repair) {
@@ -233,13 +257,52 @@ export default function ShopPage() {
             {!mine && !available && <div style={lockedNotice}>This repair is assigned to {selected.assignedTo || "another technician"}. You can see it, but only that technician or a manager can work it.</div>}
             {mine && blockedByOtherTimer && <div style={smallNotice}>You have labor running on another repair. Stop that timer before opening or completing this one.</div>}
 
-            <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16 }}>
+            <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))", gap: 16 }}>
               <div style={workspaceCard}>
                 <h3 style={workspaceHeading}>Parts</h3>
-                <div style={{ minHeight: 32 }}>
+
+                {selected.plannedParts.length > 0 && (
+                  <div style={plannedBox}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                      <strong style={{ color: "#76420a" }}>PM Kit · Planned Parts</strong>
+                      <span style={{ color: "#8c6233", fontSize: 11 }}>{selected.plannedParts[0]?.kitName || "PM Kit"}</span>
+                    </div>
+                    <p style={{ margin: "4px 0 10px", color: "#7c684e", fontSize: 11 }}>These are expected parts only. Inventory is not reduced until you press Use. If a part does not need changing on this PM, mark it Not Needed.</p>
+                    <div style={{ display: "grid", gap: 7 }}>
+                      {selected.plannedParts.map((planned) => {
+                        const remaining = Math.max(0, planned.quantity - planned.usedQuantity);
+                        const inventoryPart = data.parts.find((part) => part.id === planned.partId);
+                        const stock = inventoryPart?.quantityOnHand ?? 0;
+                        const useQty = Math.min(remaining, Math.max(0, stock));
+                        return (
+                          <div key={planned.id} style={plannedRow}>
+                            <div style={{ minWidth: 0 }}>
+                              <strong style={{ display: "block", color: "#253542" }}>{planned.partNumber} · {numberText(planned.quantity)} planned</strong>
+                              <span style={{ display: "block", marginTop: 2, color: "#697782", fontSize: 11 }}>{planned.description}</span>
+                              <span style={{ display: "block", marginTop: 2, color: planned.usedQuantity >= planned.quantity ? "#176440" : "#7c684e", fontSize: 10, fontWeight: 800 }}>
+                                {numberText(planned.usedQuantity)} used · {numberText(remaining)} remaining · {numberText(stock)} on hand
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              {remaining <= 0 ? <span style={usedBadge}>Used</span> : (
+                                <>
+                                  {mine && <button disabled={busy || useQty <= 0} onClick={() => void usePlannedPart(selected, planned)} style={plannedUseButton}>{useQty > 0 ? `Use ${numberText(useQty)}` : "No Stock"}</button>}
+                                  {mine && planned.usedQuantity <= 0 && <button disabled={busy} onClick={() => void removePlannedPart(selected, planned)} style={notNeededButton}>Not Needed</button>}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ minHeight: 32, marginTop: selected.plannedParts.length ? 13 : 0 }}>
+                  <strong style={{ display: "block", marginBottom: 6, color: "#52616c", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>Parts Actually Used</strong>
                   {selected.usedParts.length ? selected.usedParts.map((part) => (
-                    <span key={part.partId} style={chip}>{part.partNumber} × {part.quantity}</span>
-                  )) : <span style={mutedText}>No parts added yet.</span>}
+                    <span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>
+                  )) : <span style={mutedText}>No parts used yet.</span>}
                 </div>
                 {mine && (
                   <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 90px auto", gap: 8 }}>
@@ -255,7 +318,7 @@ export default function ShopPage() {
                     <button disabled={busy} onClick={() => void addPartToRepair(selected)} style={secondaryButton}>Add Part</button>
                   </div>
                 )}
-                {mine && <p style={helperText}>Parts are deducted from inventory and attached to this repair.</p>}
+                {mine && <p style={helperText}>Only parts you actually use are deducted from inventory and attached to this repair.</p>}
               </div>
 
               <div style={workspaceCard}>
@@ -318,7 +381,7 @@ export default function ShopPage() {
               <div style={{ fontSize: 13, color: "#667482", lineHeight: 1.6 }}>
                 <div>{item.location || "No location"}</div>
                 <div>{available ? "Unassigned" : `Assigned to ${item.assignedTo || "technician"}`}</div>
-                <div>{item.laborHours.toFixed(2)} labor hours · {item.usedParts.length} part line{item.usedParts.length === 1 ? "" : "s"}</div>
+                <div>{item.laborHours.toFixed(2)} labor hours · {item.usedParts.length} used part line{item.usedParts.length === 1 ? "" : "s"}{item.plannedParts.length ? ` · ${item.plannedParts.length} PM kit part${item.plannedParts.length === 1 ? "" : "s"}` : ""}</div>
               </div>
               <div style={{ marginTop: 16, display: "flex", gap: 9, flexWrap: "wrap" }}>
                 {canOpen && !running && !data?.activeTimer && <button disabled={busy} onClick={() => void openJob(item.id)} style={primaryButton}>Open Job</button>}
@@ -353,6 +416,11 @@ const workspaceStyle = { marginTop: 18, background: "white", border: "1px solid 
 const workspaceCard = { border: "1px solid #e0e5e9", borderRadius: 11, padding: 15, background: "#fbfcfd" } as const;
 const workspaceHeading = { margin: "0 0 11px", color: "#0d1b2b", fontSize: 17 } as const;
 const chip = { display: "inline-block", padding: "5px 8px", borderRadius: 999, background: "#eef2f5", fontSize: 12, margin: "0 5px 5px 0" } as const;
+const plannedBox = { padding: 12, borderRadius: 10, background: "#fff9ed", border: "1px solid #ebc986" } as const;
+const plannedRow = { display: "grid", gridTemplateColumns: "minmax(180px,1fr) auto", gap: 10, alignItems: "center", padding: "9px 10px", borderRadius: 8, background: "white", border: "1px solid #eadcc3" } as const;
+const plannedUseButton = { border: "1px solid #81ad8f", borderRadius: 7, padding: "7px 9px", background: "#e9f7ed", color: "#176440", fontWeight: 900, fontSize: 11, cursor: "pointer" } as const;
+const notNeededButton = { border: "1px solid #c8b9a1", borderRadius: 7, padding: "7px 9px", background: "#f7f3ed", color: "#6d5a40", fontWeight: 900, fontSize: 11, cursor: "pointer" } as const;
+const usedBadge = { display: "inline-flex", alignItems: "center", minHeight: 29, padding: "0 9px", borderRadius: 999, background: "#e5f6eb", color: "#176440", fontWeight: 900, fontSize: 11 } as const;
 const mutedText = { color: "#7b8792", fontSize: 13 } as const;
 const helperText = { margin: "9px 0 0", color: "#7b8792", fontSize: 11 } as const;
 const smallNotice = { marginTop: 12, padding: "9px 11px", borderRadius: 8, background: "#fff8e6", color: "#7a5316", fontSize: 12 } as const;
