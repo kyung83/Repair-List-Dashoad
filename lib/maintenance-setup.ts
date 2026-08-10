@@ -347,16 +347,19 @@ export async function saveCategoryMaintenanceRule(db: D1Database, body: Record<s
 
 export async function assignMaintenanceCategory(db: D1Database, body: Record<string, unknown>) {
   const category = validateCategory(body.category);
-  const ids = selectedIds(body.equipmentIds);
-  const equipment = await loadActiveEquipmentByIds(db, ids);
-  if (equipment.length !== ids.length) throw new Error('One or more selected units are no longer active.');
+  const selected = selectedIds(body.equipmentIds);
+  const equipment = await loadActiveEquipmentByIds(db, selected);
+  if (equipment.length !== selected.length) throw new Error('One or more selected units are no longer active.');
 
-  if (category === 'Trailers' && equipment.some((row) => row.equipment_type !== 'trailer')) {
-    throw new Error('Only trailers can be assigned to the Trailers category.');
+  const ids = equipment
+    .filter((row) => category === 'Trailers' ? row.equipment_type === 'trailer' : row.equipment_type !== 'trailer')
+    .map((row) => row.id);
+  if (!ids.length) {
+    throw new Error(category === 'Trailers'
+      ? 'No trailers were selected for the Trailers category.'
+      : 'No vehicle units were selected for this maintenance category.');
   }
-  if (category !== 'Trailers' && equipment.some((row) => row.equipment_type === 'trailer')) {
-    throw new Error('Trailers stay in the Trailers category.');
-  }
+  const ignoredCount = selected.length - ids.length;
 
   if (category !== 'Trailers') {
     await runBatches(db, ids.map((id) => db.prepare(`
@@ -390,7 +393,7 @@ export async function assignMaintenanceCategory(db: D1Database, body: Record<str
     }, ids);
   }
 
-  return { ok: true, category, count: ids.length, inheritedRule: Boolean(preset) };
+  return { ok: true, category, count: ids.length, ignoredCount, inheritedRule: Boolean(preset) };
 }
 
 export async function correctEquipmentMaintenance(db: D1Database, body: Record<string, unknown>) {
