@@ -36,6 +36,14 @@ type PartForm = {
   vendorIds: number[];
 };
 
+type VendorForm = {
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  notes: string;
+};
+
 const blankPart: PartForm = {
   id: 0,
   partNumber: "",
@@ -48,13 +56,23 @@ const blankPart: PartForm = {
   vendorIds: [],
 };
 
+const blankVendor: VendorForm = {
+  id: 0,
+  name: "",
+  phone: "",
+  email: "",
+  notes: "",
+};
+
 export default function InventoryPage() {
   const [data, setData] = useState<InventoryData | null>(null);
   const [vendorLinks, setVendorLinks] = useState<Record<string, VendorLink[]>>({});
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [part, setPart] = useState<PartForm>(blankPart);
+  const [vendor, setVendor] = useState<VendorForm>(blankVendor);
   const [showPartForm, setShowPartForm] = useState(false);
+  const [showVendorForm, setShowVendorForm] = useState(false);
 
   async function load() {
     const [inventoryResponse, linksResponse] = await Promise.all([
@@ -81,7 +99,7 @@ export default function InventoryPage() {
   const visibleParts = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (data?.parts ?? []).filter((item) => {
-      const vendorNames = (vendorLinks[String(item.id)] ?? []).map((vendor) => vendor.name).join(" ");
+      const vendorNames = (vendorLinks[String(item.id)] ?? []).map((itemVendor) => itemVendor.name).join(" ");
       return [item.partNumber, item.description, item.location, item.vendorName, vendorNames].join(" ").toLowerCase().includes(q);
     });
   }, [data, query, vendorLinks]);
@@ -113,6 +131,22 @@ export default function InventoryPage() {
     await load();
   }
 
+  async function saveVendor(event: FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    const response = await fetch("/api/inventory", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "saveVendor", ...vendor }),
+    });
+    const result = (await response.json()) as { id?: number; error?: string };
+    if (!response.ok || !result.id) return setMessage(result.error || "Vendor could not be saved");
+    setVendor(blankVendor);
+    setShowVendorForm(false);
+    setMessage("Vendor added. It is now available on every part.");
+    await load();
+  }
+
   async function adjustStock(id: number, delta: number) {
     const response = await fetch("/api/inventory", {
       method: "POST",
@@ -135,7 +169,7 @@ export default function InventoryPage() {
       unitCost: item.unitCost == null ? "" : String(item.unitCost),
       location: item.location,
       preferredVendorId: item.preferredVendorId == null ? "" : String(item.preferredVendorId),
-      vendorIds: links.map((vendor) => vendor.id).filter((id) => id > 0),
+      vendorIds: links.map((itemVendor) => itemVendor.id).filter((id) => id > 0),
     });
     setShowPartForm(true);
   }
@@ -153,7 +187,7 @@ export default function InventoryPage() {
   }
 
   const summary = data?.summary ?? { partCount: 0, lowStockCount: 0, totalUnits: 0, inventoryValue: 0 };
-  const selectedVendors = (data?.vendors ?? []).filter((vendor) => part.vendorIds.includes(vendor.id));
+  const selectedVendors = (data?.vendors ?? []).filter((itemVendor) => part.vendorIds.includes(itemVendor.id));
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "42px", color: "#182331" }}>
@@ -163,7 +197,10 @@ export default function InventoryPage() {
           <h1 style={{ margin: "8px 0 0", color: "#0d1b2b", fontSize: 34 }}>Inventory</h1>
           <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Parts, stock levels, reorder thresholds, multiple vendors, and repair usage.</p>
         </div>
-        <button onClick={() => { setPart(blankPart); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ Add part</button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button onClick={() => { setVendor(blankVendor); setShowVendorForm(true); }} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800 }}>+ Add vendor</button>
+          <button onClick={() => { setPart(blankPart); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ Add part</button>
+        </div>
       </header>
 
       {message && <div style={{ marginTop: 20, padding: 12, background: "#fff8e6", border: "1px solid #f2c66d", borderRadius: 9 }}>{message}</div>}
@@ -200,7 +237,7 @@ export default function InventoryPage() {
                     <td style={{ padding: 13 }}><strong style={{ color: item.lowStock ? "#a85b00" : "#182331" }}>{item.quantityOnHand}</strong></td>
                     <td style={{ padding: 13 }}>{item.reorderLevel}</td>
                     <td style={{ padding: 13 }}>{item.location || "—"}</td>
-                    <td style={{ padding: 13 }}>{links.length ? links.map((vendor) => `${vendor.name}${vendor.preferred ? " ★" : ""}`).join(", ") : "—"}</td>
+                    <td style={{ padding: 13 }}>{links.length ? links.map((itemVendor) => `${itemVendor.name}${itemVendor.preferred ? " ★" : ""}`).join(", ") : "—"}</td>
                     <td style={{ padding: 13 }}>{item.unitCost == null ? "—" : item.unitCost.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
                     <td style={{ padding: 13, whiteSpace: "nowrap" }}>
                       <button onClick={() => void adjustStock(item.id, 1)} style={{ marginRight: 6 }}>+1</button>
@@ -215,6 +252,25 @@ export default function InventoryPage() {
           </table>
         </div>
       </section>
+
+      {showVendorForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 60 }}>
+          <form onSubmit={saveVendor} style={{ width: "min(560px,100%)", background: "white", borderRadius: 14, padding: 24, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <h2 style={{ margin: 0 }}>Add vendor</h2>
+              <p style={{ margin: "7px 0 0", color: "#6c7886", fontSize: 13 }}>New vendors become available immediately in every part's supplier list.</p>
+            </div>
+            <input required placeholder="Vendor name" value={vendor.name} onChange={(event) => setVendor({ ...vendor, name: event.target.value })} style={{ gridColumn: "1 / -1", padding: 11 }} />
+            <input placeholder="Phone" value={vendor.phone} onChange={(event) => setVendor({ ...vendor, phone: event.target.value })} style={{ padding: 11 }} />
+            <input type="email" placeholder="Email" value={vendor.email} onChange={(event) => setVendor({ ...vendor, email: event.target.value })} style={{ padding: 11 }} />
+            <textarea placeholder="Notes" value={vendor.notes} onChange={(event) => setVendor({ ...vendor, notes: event.target.value })} rows={4} style={{ gridColumn: "1 / -1", padding: 11, resize: "vertical" }} />
+            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" onClick={() => { setShowVendorForm(false); setVendor(blankVendor); }} style={{ padding: "11px 16px" }}>Cancel</button>
+              <button type="submit" style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800 }}>Save vendor</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {showPartForm && (
         <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 50, overflowY: "auto" }}>
@@ -231,10 +287,10 @@ export default function InventoryPage() {
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Suppliers</legend>
               <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Select every vendor that can supply this part.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 8, maxHeight: 210, overflowY: "auto" }}>
-                {(data?.vendors ?? []).map((vendor) => (
-                  <label key={vendor.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: 8, border: "1px solid #edf0f2", borderRadius: 8 }}>
-                    <input type="checkbox" checked={part.vendorIds.includes(vendor.id)} onChange={() => toggleVendor(vendor.id)} />
-                    <span>{vendor.name}</span>
+                {(data?.vendors ?? []).map((itemVendor) => (
+                  <label key={itemVendor.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: 8, border: "1px solid #edf0f2", borderRadius: 8 }}>
+                    <input type="checkbox" checked={part.vendorIds.includes(itemVendor.id)} onChange={() => toggleVendor(itemVendor.id)} />
+                    <span>{itemVendor.name}</span>
                   </label>
                 ))}
               </div>
@@ -243,7 +299,7 @@ export default function InventoryPage() {
             <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, fontWeight: 700 }}>Preferred vendor
               <select value={part.preferredVendorId} onChange={(event) => setPart({ ...part, preferredVendorId: event.target.value })} style={{ padding: 11 }}>
                 <option value="">No preferred vendor</option>
-                {selectedVendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                {selectedVendors.map((itemVendor) => <option key={itemVendor.id} value={itemVendor.id}>{itemVendor.name}</option>)}
               </select>
             </label>
 
