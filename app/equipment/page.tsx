@@ -36,6 +36,9 @@ type EquipmentItem = {
   make: string;
   model: string;
   engine: string;
+  purchaseDate: string;
+  purchasePrice: number | null;
+  purchasedFrom: string;
   history: EquipmentHistory;
 };
 
@@ -60,6 +63,9 @@ type EquipmentDraft = {
   make: string;
   model: string;
   engine: string;
+  purchaseDate: string;
+  purchasePrice: string;
+  purchasedFrom: string;
   driver: string;
   location: string;
   notes: string;
@@ -80,6 +86,9 @@ const emptyDraft: EquipmentDraft = {
   make: "",
   model: "",
   engine: "",
+  purchaseDate: "",
+  purchasePrice: "",
+  purchasedFrom: "",
   driver: "",
   location: "",
   notes: "",
@@ -107,6 +116,11 @@ function compactDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
 }
 
+function money(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
 function makeModel(item: EquipmentItem) {
   return [item.modelYear, item.make, item.model].filter(Boolean).join(" ") || "—";
 }
@@ -129,6 +143,9 @@ function draftFor(item: EquipmentItem): EquipmentDraft {
     make: item.make,
     model: item.model,
     engine: item.engine,
+    purchaseDate: item.purchaseDate,
+    purchasePrice: item.purchasePrice == null ? "" : String(item.purchasePrice),
+    purchasedFrom: item.purchasedFrom,
     driver: item.driver,
     location: item.location,
     notes: item.notes,
@@ -202,6 +219,9 @@ export default function EquipmentMasterPage() {
       make: current.make,
       model: current.model,
       engine: current.engine,
+      purchaseDate: current.purchaseDate || null,
+      purchasePrice: current.purchasePrice || null,
+      purchasedFrom: current.purchasedFrom,
       driver: current.driver,
       location: current.location,
       notes: current.notes,
@@ -253,6 +273,9 @@ export default function EquipmentMasterPage() {
         item.location,
         item.notes,
         item.currentMileage,
+        item.purchaseDate,
+        item.purchasePrice,
+        item.purchasedFrom,
       ].join(" ").toLowerCase().includes(needle);
     });
 
@@ -296,7 +319,7 @@ export default function EquipmentMasterPage() {
         <div className="filter-bar">
           <label className="filter-search">
             <span>Search</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Unit, VIN, plate, make, model, engine, driver, location…" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Unit, VIN, plate, make, model, engine, driver, location, purchase…" />
           </label>
           <label><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "active" | "archived" | "all")}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All records</option></select></label>
           <label><span>Type</span><select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option>All</option>{(data?.equipmentTypes ?? []).map((value) => <option key={value} value={value}>{labelType(value)}</option>)}</select></label>
@@ -323,6 +346,7 @@ export default function EquipmentMasterPage() {
                 <th>VIN / plate</th>
                 <th>Mileage</th>
                 <th>Driver / location</th>
+                <th>Acquisition</th>
                 <th>History</th>
                 <th>Actions</th>
               </tr>
@@ -358,6 +382,11 @@ export default function EquipmentMasterPage() {
                   <td>
                     <div>{item.driver || "—"}</div>
                     <div className="cell-muted">{item.location || "No location"}</div>
+                  </td>
+                  <td>
+                    <strong>{money(item.purchasePrice)}</strong>
+                    <div className="cell-muted">{item.purchaseDate ? `Purchased ${compactDate(item.purchaseDate)}` : "Purchase date not set"}</div>
+                    {item.purchasedFrom && <div className="cell-muted clamp-one" title={item.purchasedFrom}>{item.purchasedFrom}</div>}
                   </td>
                   <td>
                     <strong>{historyTotal(item)} records</strong>
@@ -404,12 +433,21 @@ export default function EquipmentMasterPage() {
               <label><span>License plate</span><input value={editing.licensePlate} onChange={(event) => setEditing({ ...editing, licensePlate: event.target.value })} /></label>
               <label><span>Plate state</span><input value={editing.licenseState} onChange={(event) => setEditing({ ...editing, licenseState: event.target.value.toUpperCase() })} /></label>
               <label><span>Current mileage</span><input type="number" min="0" value={editing.currentMileage} onChange={(event) => setEditing({ ...editing, currentMileage: event.target.value })} /></label>
+
+              <div className="wide" style={{ gridColumn: "1 / -1", borderTop: "1px solid #dce3e8", paddingTop: 10, marginTop: 2 }}>
+                <strong style={{ display: "block", color: "#172536" }}>Acquisition</strong>
+                <span className="cell-muted">Purchase price and purchase date feed Reporting automatically.</span>
+              </div>
+              <label><span>Purchase price</span><input type="number" min="0" step="0.01" value={editing.purchasePrice} onChange={(event) => setEditing({ ...editing, purchasePrice: event.target.value })} placeholder="0.00" /></label>
+              <label><span>Purchase date</span><input type="date" value={editing.purchaseDate} onChange={(event) => setEditing({ ...editing, purchaseDate: event.target.value })} /></label>
+              <label className="wide"><span>Purchased from</span><input value={editing.purchasedFrom} onChange={(event) => setEditing({ ...editing, purchasedFrom: event.target.value })} placeholder="Dealer, auction, private seller, transfer…" /></label>
+
               <label><span>Driver / assigned to</span><input value={editing.driver} onChange={(event) => setEditing({ ...editing, driver: event.target.value })} /></label>
               <label className="wide"><span>Location</span><input value={editing.location} onChange={(event) => setEditing({ ...editing, location: event.target.value })} /></label>
               <label className="wide"><span>Notes</span><textarea rows={4} value={editing.notes} onChange={(event) => setEditing({ ...editing, notes: event.target.value })} /></label>
             </div>
 
-            {editing.source === "Geotab" && <div className="form-note">Geotab can refresh VIN, plate and mileage on later syncs. Archiving is protected and will not be undone by Geotab.</div>}
+            {editing.source === "Geotab" && <div className="form-note">Geotab can refresh VIN, plate and mileage on later syncs. Purchase information is maintained by the shop and is not overwritten by Geotab. Archiving is protected and will not be undone by Geotab.</div>}
             <div className="master-modal-actions">
               <button type="button" className="module-button secondary" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
               <button type="button" className="module-button primary" disabled={busy || !editing.unit.trim()} onClick={() => void saveDraft()}>{busy ? "Saving…" : editing.id ? "Save changes" : "Add equipment"}</button>

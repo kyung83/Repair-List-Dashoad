@@ -21,6 +21,9 @@ type EquipmentMasterRow = {
   make: string | null;
   model: string | null;
   engine: string | null;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  purchased_from: string | null;
   mileage_updated_at: string | null;
   archived_at: string | null;
   archive_reason: string | null;
@@ -51,6 +54,22 @@ function optionalWholeNumber(value: unknown, label: string, min = 0, max = Numbe
   return number;
 }
 
+function optionalMoney(value: unknown, label: string) {
+  if (value == null || String(value).trim() === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${label} must be zero or greater.`);
+  return Math.round((number + Number.EPSILON) * 100) / 100;
+}
+
+function optionalDate(value: unknown, label: string) {
+  const candidate = text(value, 10);
+  if (!candidate) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate) || Number.isNaN(Date.parse(`${candidate}T00:00:00Z`))) {
+    throw new Error(`${label} must be a valid date.`);
+  }
+  return candidate;
+}
+
 function equipmentType(value: unknown) {
   const candidate = text(value, 40).toLowerCase();
   if (!(EQUIPMENT_TYPES as readonly string[]).includes(candidate)) throw new Error('Choose a valid equipment type.');
@@ -71,7 +90,8 @@ export async function getEquipmentMaster(db: D1Database) {
     SELECT e.id, e.unit, e.category, e.equipment_type, e.active, e.current_mileage,
            e.service_date, e.annual_date, e.notes, e.geotab_device_id, e.geotab_trailer_id,
            e.driver, e.location, e.vin, e.license_plate, e.license_state, e.model_year,
-           e.make, e.model, e.engine, e.mileage_updated_at, e.archived_at, e.archive_reason,
+           e.make, e.model, e.engine, e.purchase_date, e.purchase_price, e.purchased_from,
+           e.mileage_updated_at, e.archived_at, e.archive_reason,
            (SELECT COUNT(*) FROM repairs r WHERE r.equipment_id = e.id) AS repair_count,
            (SELECT COUNT(*) FROM maintenance_events m WHERE m.equipment_id = e.id) AS maintenance_event_count,
            (SELECT COUNT(*) FROM historical_repairs h WHERE h.equipment_id = e.id) AS historical_ro_count,
@@ -116,6 +136,9 @@ export async function getEquipmentMaster(db: D1Database) {
       make: row.make ?? '',
       model: row.model ?? '',
       engine: row.engine ?? '',
+      purchaseDate: row.purchase_date ?? '',
+      purchasePrice: row.purchase_price == null ? null : Number(row.purchase_price),
+      purchasedFrom: row.purchased_from ?? '',
       history: {
         repairs: Number(row.repair_count ?? 0),
         maintenanceEvents: Number(row.maintenance_event_count ?? 0),
@@ -155,6 +178,9 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
   const make = text(body.make, 100);
   const model = text(body.model, 100);
   const engine = text(body.engine, 160);
+  const purchaseDate = optionalDate(body.purchaseDate, 'Purchase date');
+  const purchasePrice = optionalMoney(body.purchasePrice, 'Purchase price');
+  const purchasedFrom = text(body.purchasedFrom, 200);
   const driver = text(body.driver, 160);
   const location = text(body.location, 160);
   const notes = text(body.notes, 2000);
@@ -164,9 +190,10 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
       INSERT INTO equipment (
         unit, category, equipment_type, active, current_mileage, mileage_updated_at,
         vin, license_plate, license_state, model_year, make, model, engine,
+        purchase_date, purchase_price, purchased_from,
         driver, location, notes, updated_at
       ) VALUES (?, ?, ?, 1, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).bind(
       unitInput,
       category,
@@ -180,6 +207,9 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
       make || null,
       model || null,
       engine || null,
+      purchaseDate,
+      purchasePrice,
+      purchasedFrom || null,
       driver || null,
       location || null,
       notes || null,
@@ -202,8 +232,8 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
     SET unit = ?, category = ?, equipment_type = ?, current_mileage = ?,
         mileage_updated_at = CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
         vin = ?, license_plate = ?, license_state = ?, model_year = ?,
-        make = ?, model = ?, engine = ?, driver = ?, location = ?, notes = ?,
-        updated_at = CURRENT_TIMESTAMP
+        make = ?, model = ?, engine = ?, purchase_date = ?, purchase_price = ?, purchased_from = ?,
+        driver = ?, location = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
     unit,
@@ -218,6 +248,9 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
     make || null,
     model || null,
     engine || null,
+    purchaseDate,
+    purchasePrice,
+    purchasedFrom || null,
     driver || null,
     location || null,
     notes || null,
