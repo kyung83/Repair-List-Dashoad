@@ -29,7 +29,10 @@ type WarehouseStockRow = {
   on_order: number;
 };
 
-type WarehouseRow = { code: string; name: string };
+type WarehouseRow = { id: number; code: string; name: string };
+type WarehouseMinimumRow = { part_id: number; warehouse_code: string; minimum_quantity: number };
+type EquipmentRow = { id: number; unit: string; category: string; equipment_type: string };
+type PartEquipmentRow = { part_id: number; equipment_id: number; unit: string };
 
 function finiteNumber(value: unknown, fallback = 0) {
   const number = Number(value);
@@ -37,7 +40,7 @@ function finiteNumber(value: unknown, fallback = 0) {
 }
 
 export async function getInventoryData(db: D1Database) {
-  const [partsResult, vendorsResult, stockResult, warehousesResult] = await Promise.all([
+  const [partsResult, vendorsResult, stockResult, warehousesResult, minimumsResult, equipmentResult, partEquipmentResult] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.part_number, p.description, p.quantity_on_hand, p.reorder_level,
              p.unit_cost, p.location, p.preferred_vendor_id, v.name AS vendor_name
@@ -55,7 +58,27 @@ export async function getInventoryData(db: D1Database) {
       WHERE w.active = 1
       ORDER BY s.part_id, w.name, s.variant_key
     `).all<WarehouseStockRow>(),
-    db.prepare('SELECT code, name FROM warehouses WHERE active = 1 ORDER BY name').all<WarehouseRow>(),
+    db.prepare('SELECT id, code, name FROM warehouses WHERE active = 1 ORDER BY name').all<WarehouseRow>(),
+    db.prepare(`
+      SELECT m.part_id, w.code AS warehouse_code, m.minimum_quantity
+      FROM part_warehouse_minimums m
+      JOIN warehouses w ON w.id = m.warehouse_id
+      WHERE w.active = 1
+      ORDER BY m.part_id, w.name
+    `).all<WarehouseMinimumRow>(),
+    db.prepare(`
+      SELECT id, unit, category, equipment_type
+      FROM equipment
+      WHERE active = 1
+      ORDER BY category, equipment_type, unit
+    `).all<EquipmentRow>(),
+    db.prepare(`
+      SELECT pe.part_id, pe.equipment_id, e.unit
+      FROM part_equipment pe
+      JOIN equipment e ON e.id = pe.equipment_id
+      WHERE e.active = 1
+      ORDER BY pe.part_id, e.unit
+    `).all<PartEquipmentRow>(),
   ]);
 
   const stockByPart = new Map<number, WarehouseStockRow[]>();
@@ -63,6 +86,18 @@ export async function getInventoryData(db: D1Database) {
     const list = stockByPart.get(stock.part_id) ?? [];
     list.push(stock);
     stockByPart.set(stock.part_id, list);
+  }
+
+  const minimumByPartWarehouse = new Map<string, number>();
+  for (const minimum of minimumsResult.results) {
+    minimumByPartWarehouse.set(`${minimum.part_id}:${minimum.warehouse_code}`, Number(minimum.minimum_quantity));
+  }
+
+  const equipmentByPart = new Map<number, { id: number; unit: string }[]>();
+  for (const row of partEquipmentResult.results) {
+    const list = equipmentByPart.get(row.part_id) ?? [];
+    list.push({ id: row.equipment_id, unit: row.unit });
+    equipmentByPart.set(row.part_id, list);
   }
 
   const parts = partsResult.results.map((row) => {
@@ -75,6 +110,7 @@ export async function getInventoryData(db: D1Database) {
       unitOfMeasure: stock.unit_of_measure ?? '',
       unitCost: stock.unit_cost == null ? null : Number(stock.unit_cost),
       onOrder: Number(stock.on_order),
+      minimumQuantity: minimumByPartWarehouse.get(`${row.id}:${stock.warehouse_code}`) ?? null,
     }));
     const quantityOnHand = rows.length
       ? rows.reduce((sum, stock) => sum + Number(stock.quantity_on_hand), 0)
@@ -85,6 +121,7 @@ export async function getInventoryData(db: D1Database) {
           .map((stock) => `${stock.warehouseName}: ${stock.quantityOnHand}${stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ''}`)
           .join(' | ')
       : (row.location ?? '');
+    const compatibleEquipment = equipmentByPart.get(row.id) ?? [];
 
     return {
       id: row.id,
@@ -97,13 +134,21 @@ export async function getInventoryData(db: D1Database) {
       preferredVendorId: row.preferred_vendor_id,
       vendorName: row.vendor_name ?? '',
       warehouseStocks,
+      compatibleEquipment,
+      compatibleEquipmentIds: compatibleEquipment.map((item) => item.id),
       lowStock: quantityOnHand <= Number(row.reorder_level),
     };
   });
 
   return {
     parts,
-    warehouses: warehousesResult.results.map((row) => ({ code: row.code, name: row.name })),
+    warehouses: warehousesResult.results.map((row) => ({ id: row.id, code: row.code, name: row.name })),
+    equipment: equipmentResult.results.map((row) => ({
+      id: row.id,
+      unit: row.unit,
+      category: row.category,
+      equipmentType: row.equipment_type,
+    })),
     vendors: vendorsResult.results.map((row) => ({
       id: row.id,
       name: row.name,
@@ -153,6 +198,57 @@ export async function savePart(db: D1Database, body: Record<string, unknown>) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(...values).run();
   return { ok: true, id: result.meta.last_row_id };
+}
+
+export async function savePartSettings(db: D1Database, body: Record<string, unknown>) {
+  const partId = finiteNumber(body.partId, 0);
+  if (!partId) throw new Error('Part is required');
+  const part = await db.prepare('SELECT id FROM parts WHERE id = ? AND active = 1').bind(partId).first<{ id: number }>();
+  if (!part) throw new Error('Part not found');
+
+  const rawMinimums = Array.isArray(body.warehouseMinimums) ? body.warehouseMinimums : [];
+  const minimums = rawMinimums
+    .map((entry) => {
+      const value = entry as Record<string, unknown>;
+      const warehouseCode = String(value.warehouseCode ?? '').trim().toUpperCase();
+      const raw = value.minimumQuantity;
+      if (!warehouseCode || raw === '' || raw == null) return null;
+      const minimumQuantity = Number(raw);
+      if (!Number.isFinite(minimumQuantity) || minimumQuantity < 0) throw new Error('Minimum quantities must be zero or greater');
+      return { warehouseCode, minimumQuantity };
+    })
+    .filter((entry): entry is { warehouseCode: string; minimumQuantity: number } => entry !== null);
+
+  const equipmentIds = Array.isArray(body.equipmentIds)
+    ? [...new Set(body.equipmentIds.map((value) => finiteNumber(value, 0)).filter((value) => value > 0))]
+    : [];
+  if (equipmentIds.length > 800) throw new Error('Too many equipment selections for one part');
+
+  const minimumStatements = minimums.map((entry) => db.prepare(`
+    INSERT INTO part_warehouse_minimums (part_id, warehouse_id, minimum_quantity, updated_at)
+    SELECT ?, id, ?, CURRENT_TIMESTAMP FROM warehouses WHERE code = ? AND active = 1
+    ON CONFLICT(part_id, warehouse_id) DO UPDATE SET
+      minimum_quantity = excluded.minimum_quantity,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(partId, entry.minimumQuantity, entry.warehouseCode));
+
+  await db.batch([
+    db.prepare('DELETE FROM part_warehouse_minimums WHERE part_id = ?').bind(partId),
+    ...minimumStatements,
+    db.prepare('DELETE FROM part_equipment WHERE part_id = ?').bind(partId),
+  ]);
+
+  for (let offset = 0; offset < equipmentIds.length; offset += 80) {
+    const chunk = equipmentIds.slice(offset, offset + 80);
+    const placeholders = chunk.map(() => '?').join(',');
+    await db.prepare(`
+      INSERT OR IGNORE INTO part_equipment (part_id, equipment_id)
+      SELECT ?, id FROM equipment
+      WHERE active = 1 AND id IN (${placeholders})
+    `).bind(partId, ...chunk).run();
+  }
+
+  return { ok: true, partId, minimumCount: minimums.length, equipmentCount: equipmentIds.length };
 }
 
 async function preferredStockRow(db: D1Database, partId: number, warehouseCode: string, minimum = 0) {
@@ -272,7 +368,6 @@ export async function usePartOnRepair(db: D1Database, body: Record<string, unkno
 
   return { ok: true, partId, repairId, warehouseCode: stock.warehouse_code };
 }
-
 
 export async function removePartFromRepair(db: D1Database, body: Record<string, unknown>) {
   const usageId = finiteNumber(body.usageId, 0);

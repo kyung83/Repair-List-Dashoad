@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { adjustStock, getInventoryData, savePart, saveVendor } from '@/lib/inventory-db';
+import { adjustStock, getInventoryData, savePart, savePartSettings, saveVendor } from '@/lib/inventory-db';
 
 export async function GET() {
   try {
@@ -15,6 +15,7 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
     if (action === 'savePart') return Response.json(await savePart(env.DB, body));
+    if (action === 'savePartSettings') return Response.json(await savePartSettings(env.DB, body));
     if (action === 'adjustStock') return Response.json(await adjustStock(env.DB, body));
     if (action === 'saveVendor') return Response.json(await saveVendor(env.DB, body));
     return Response.json({ error: 'Unknown inventory action.' }, { status: 400 });
