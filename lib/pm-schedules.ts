@@ -51,6 +51,7 @@ type PmBaselineRow = {
   id: number;
   equipment_type: string;
   current_mileage: number | null;
+  pm_type: string | null;
   last_mileage: number | null;
   service_date: string | null;
   annual_date: string | null;
@@ -114,7 +115,7 @@ async function loadPmBaselines(db: D1Database, ids: number[]) {
     const chunk = ids.slice(index, index + PM_ID_BATCH_SIZE);
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await db.prepare(`
-      SELECT e.id, e.equipment_type, e.current_mileage, ps.last_mileage,
+      SELECT e.id, e.equipment_type, e.current_mileage, ps.pm_type, ps.last_mileage,
              COALESCE(ps.service_date, e.service_date) AS service_date,
              COALESCE(ps.annual_date, e.annual_date) AS annual_date
       FROM equipment e
@@ -233,9 +234,10 @@ export async function applyPmSchedule(db: D1Database, body: Record<string, unkno
 
   const statements: D1PreparedStatement[] = [];
   for (const row of baselines) {
-    const baselineMileage = overrideLastMileage ?? row.last_mileage ?? row.current_mileage;
-    const baselineServiceDate = overrideServiceDate ?? row.service_date ?? todayDate();
+    const baselineMileage = overrideLastMileage ?? row.last_mileage;
+    const baselineServiceDate = overrideServiceDate ?? row.service_date;
     const baselineAnnualDate = overrideAnnualDate ?? row.annual_date;
+    const nextPmType = row.pm_type && sequence.includes(row.pm_type) ? row.pm_type : sequence[0];
 
     statements.push(db.prepare(`
       INSERT INTO equipment_pm_settings (
@@ -255,12 +257,12 @@ export async function applyPmSchedule(db: D1Database, body: Record<string, unkno
       ) VALUES (?, ?, 'Scheduled', ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(equipment_id) DO UPDATE SET
         pm_type = excluded.pm_type,
-        status = 'Scheduled',
+        status = COALESCE(pm_status.status, excluded.status),
         last_mileage = COALESCE(excluded.last_mileage, pm_status.last_mileage),
         service_date = COALESCE(excluded.service_date, pm_status.service_date),
         annual_date = COALESCE(excluded.annual_date, pm_status.annual_date),
         updated_at = CURRENT_TIMESTAMP
-    `).bind(row.id, sequence[0], baselineMileage, baselineServiceDate, baselineAnnualDate));
+    `).bind(row.id, nextPmType, baselineMileage, baselineServiceDate, baselineAnnualDate));
   }
   await runBatches(db, statements);
   return { ok: true, count: ids.length, profile: profile.name, nextPmType: sequence[0] };
