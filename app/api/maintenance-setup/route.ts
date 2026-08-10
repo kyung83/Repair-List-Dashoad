@@ -1,4 +1,6 @@
 import { env } from 'cloudflare:workers';
+import { syncGeotabDvir } from '@/lib/geotab';
+import { syncGeotabFleetMaster } from '@/lib/geotab-fleet';
 import {
   assignMaintenanceCategory,
   correctEquipmentMaintenance,
@@ -24,6 +26,11 @@ export async function POST(request: Request) {
     if (action === 'saveCategoryRule') return Response.json(await saveCategoryMaintenanceRule(env.DB, body));
     if (action === 'assignCategory') return Response.json(await assignMaintenanceCategory(env.DB, body));
     if (action === 'correctUnitMaintenance') return Response.json(await correctEquipmentMaintenance(env.DB, body));
+    if (action === 'syncGeotab') {
+      const fleet = await syncGeotabFleetMaster(env);
+      const dvir = await syncGeotabDvir(env);
+      return Response.json({ ok: true, fleet, dvir }, { headers: { 'cache-control': 'no-store' } });
+    }
     return Response.json({ error: 'Unknown maintenance setup action.' }, { status: 400 });
   } catch (error) {
     console.error(JSON.stringify({ event: 'maintenance_setup_post_failed', error: String(error) }));
