@@ -40,6 +40,16 @@ type ApplyPreset = {
   annualIntervalDays: number | null;
 };
 
+type PresetEquipmentRow = {
+  id: number;
+  equipment_type: string;
+  current_mileage: number | null;
+  last_mileage: number | null;
+  service_date: string | null;
+};
+
+const SQL_ID_BATCH_SIZE = 75;
+
 function sequence(value: string) {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -81,30 +91,49 @@ function today() {
 }
 
 async function runBatches(db: D1Database, statements: D1PreparedStatement[]) {
-  for (let index = 0; index < statements.length; index += 75) {
-    await db.batch(statements.slice(index, index + 75));
+  for (let index = 0; index < statements.length; index += SQL_ID_BATCH_SIZE) {
+    await db.batch(statements.slice(index, index + SQL_ID_BATCH_SIZE));
   }
+}
+
+async function loadActiveEquipmentByIds(db: D1Database, ids: number[]) {
+  const rows: Array<{ id: number; equipment_type: string }> = [];
+  for (let index = 0; index < ids.length; index += SQL_ID_BATCH_SIZE) {
+    const chunk = ids.slice(index, index + SQL_ID_BATCH_SIZE);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const result = await db.prepare(`
+      SELECT id, equipment_type
+      FROM equipment
+      WHERE active = 1 AND id IN (${placeholders})
+    `).bind(...chunk).all<{ id: number; equipment_type: string }>();
+    rows.push(...result.results);
+  }
+  return rows;
+}
+
+async function loadPresetEquipmentRows(db: D1Database, ids: number[]) {
+  const rows: PresetEquipmentRow[] = [];
+  for (let index = 0; index < ids.length; index += SQL_ID_BATCH_SIZE) {
+    const chunk = ids.slice(index, index + SQL_ID_BATCH_SIZE);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const result = await db.prepare(`
+      SELECT e.id, e.equipment_type, e.current_mileage,
+             ps.last_mileage, COALESCE(ps.service_date, e.service_date) AS service_date
+      FROM equipment e
+      LEFT JOIN pm_status ps ON ps.equipment_id = e.id
+      WHERE e.active = 1 AND e.id IN (${placeholders})
+    `).bind(...chunk).all<PresetEquipmentRow>();
+    rows.push(...result.results);
+  }
+  return rows;
 }
 
 async function applyPresetToIds(db: D1Database, preset: ApplyPreset, ids: number[]) {
   if (!ids.length) return;
-  const placeholders = ids.map(() => '?').join(', ');
-  const rows = await db.prepare(`
-    SELECT e.id, e.equipment_type, e.current_mileage,
-           ps.last_mileage, COALESCE(ps.service_date, e.service_date) AS service_date
-    FROM equipment e
-    LEFT JOIN pm_status ps ON ps.equipment_id = e.id
-    WHERE e.active = 1 AND e.id IN (${placeholders})
-  `).bind(...ids).all<{
-    id: number;
-    equipment_type: string;
-    current_mileage: number | null;
-    last_mileage: number | null;
-    service_date: string | null;
-  }>();
+  const rows = await loadPresetEquipmentRows(db, ids);
 
   const statements: D1PreparedStatement[] = [];
-  for (const row of rows.results) {
+  for (const row of rows) {
     if (preset.profileId == null) {
       statements.push(db.prepare('DELETE FROM equipment_pm_settings WHERE equipment_id = ?').bind(row.id));
     } else {
@@ -294,16 +323,13 @@ export async function saveCategoryMaintenanceRule(db: D1Database, body: Record<s
 export async function assignMaintenanceCategory(db: D1Database, body: Record<string, unknown>) {
   const category = validateCategory(body.category);
   const ids = selectedIds(body.equipmentIds);
-  const placeholders = ids.map(() => '?').join(', ');
-  const equipment = await db.prepare(`
-    SELECT id, equipment_type FROM equipment WHERE active = 1 AND id IN (${placeholders})
-  `).bind(...ids).all<{ id: number; equipment_type: string }>();
-  if (equipment.results.length !== ids.length) throw new Error('One or more selected units are no longer active.');
+  const equipment = await loadActiveEquipmentByIds(db, ids);
+  if (equipment.length !== ids.length) throw new Error('One or more selected units are no longer active.');
 
-  if (category === 'Trailers' && equipment.results.some((row) => row.equipment_type !== 'trailer')) {
+  if (category === 'Trailers' && equipment.some((row) => row.equipment_type !== 'trailer')) {
     throw new Error('Only trailers can be assigned to the Trailers category.');
   }
-  if (category !== 'Trailers' && equipment.results.some((row) => row.equipment_type === 'trailer')) {
+  if (category !== 'Trailers' && equipment.some((row) => row.equipment_type === 'trailer')) {
     throw new Error('Trailers stay in the Trailers category.');
   }
 
