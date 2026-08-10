@@ -1,7 +1,22 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
+import { markGeotabDefectRepaired } from '@/lib/geotab';
 
 const STATUSES = new Set(['New', 'Assigned', 'Waiting for Parts', 'In Progress', 'Completed']);
+
+type Technician = { id: number; name: string };
+
+type DvirRow = {
+  geotab_log_id: string;
+  geotab_defect_id: string;
+  asset_unit: string;
+  driver: string;
+  defect: string;
+  comments: string;
+  photos_url: string;
+  location: string;
+  equipment_type: string;
+};
 
 function repairNumber(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
@@ -33,10 +48,38 @@ async function openRepairRow(id: number) {
   return repair;
 }
 
+async function activeTechnician(idValue: unknown) {
+  const id = Number(idValue ?? 0);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return env.DB.prepare('SELECT id, name FROM technicians WHERE id = ? AND active = 1')
+    .bind(id)
+    .first<Technician>();
+}
+
+async function equipmentIdForDvir(unitValue: string) {
+  const unit = unitValue.trim();
+  if (!unit) throw new Error('The DVIR does not have a unit number.');
+
+  const existing = await env.DB.prepare(`
+    SELECT id FROM equipment WHERE lower(trim(unit)) = lower(trim(?)) LIMIT 1
+  `).bind(unit).first<{ id: number }>();
+  if (existing) return existing.id;
+
+  await env.DB.prepare(`
+    INSERT INTO equipment (unit, category, equipment_type, active, updated_at)
+    VALUES (?, 'fleet', 'other', 1, CURRENT_TIMESTAMP)
+    ON CONFLICT(unit) DO UPDATE SET active = 1, updated_at = CURRENT_TIMESTAMP
+  `).bind(unit).run();
+
+  const created = await env.DB.prepare('SELECT id FROM equipment WHERE unit = ?').bind(unit).first<{ id: number }>();
+  if (!created) throw new Error('The DVIR unit could not be added to equipment.');
+  return created.id;
+}
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
-    const [repairs, technicians] = await Promise.all([
+    const [repairs, dvirDefects, technicians] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id,
                CASE
@@ -54,6 +97,7 @@ export async function GET(request: Request) {
                COALESCE(t.name, '') AS technician_name,
                COALESCE(r.labor_hours, 0) AS labor_hours,
                COALESCE(e.equipment_type, 'other') AS equipment_type,
+               r.geotab_defect_id,
                rt.started_at AS timer_started_at,
                COALESCE(tt.name, '') AS timer_technician
         FROM repairs r
@@ -79,19 +123,39 @@ export async function GET(request: Request) {
         technician_name: string;
         labor_hours: number;
         equipment_type: string;
+        geotab_defect_id: string | null;
         timer_started_at: string | null;
         timer_technician: string;
       }>(),
+      env.DB.prepare(`
+        SELECT d.geotab_log_id,
+               d.geotab_defect_id,
+               d.asset_unit,
+               COALESCE(d.driver, '') AS driver,
+               d.defect,
+               COALESCE(d.comments, '') AS comments,
+               COALESCE(d.photos_url, '') AS photos_url,
+               COALESCE(e.location, '') AS location,
+               COALESCE(e.equipment_type, 'other') AS equipment_type
+        FROM dvir_defects d
+        LEFT JOIN equipment e ON lower(trim(e.unit)) = lower(trim(d.asset_unit))
+        WHERE d.repaired = 0
+          AND NOT EXISTS (
+            SELECT 1 FROM repairs r WHERE r.geotab_defect_id = d.geotab_defect_id
+          )
+        ORDER BY d.updated_at DESC
+      `).all<DvirRow>(),
       env.DB.prepare(`
         SELECT id, name
         FROM technicians
         WHERE active = 1
         ORDER BY name
-      `).all<{ id: number; name: string }>(),
+      `).all<Technician>(),
     ]);
 
-    const rows = repairs.results.map((row) => ({
+    const repairRows = repairs.results.map((row) => ({
       id: `repair-${row.id}`,
+      source: row.geotab_defect_id ? 'dvir-repair' as const : 'repair' as const,
       priority: Number(row.priority ?? 2),
       location: row.location,
       unit: row.unit,
@@ -103,11 +167,45 @@ export async function GET(request: Request) {
       assignedTo: row.technician_name,
       laborHours: Number(row.labor_hours ?? 0),
       equipmentType: row.equipment_type,
+      dvirDefectId: row.geotab_defect_id ?? '',
+      dvirLogId: '',
+      dvirComments: '',
+      dvirPhotos: '',
       activeTimer: row.timer_started_at ? {
         startedAt: row.timer_started_at,
         technician: row.timer_technician,
       } : null,
     }));
+
+    const rawDvirRows = dvirDefects.results.map((row) => ({
+      id: `dvir-${row.geotab_defect_id}`,
+      source: 'dvir' as const,
+      priority: 2,
+      location: row.location,
+      unit: row.asset_unit,
+      driver: row.driver,
+      issue: row.defect,
+      parts: '',
+      status: 'DVIR - Needs Repair',
+      technicianId: null,
+      assignedTo: '',
+      laborHours: 0,
+      equipmentType: row.equipment_type,
+      dvirDefectId: row.geotab_defect_id,
+      dvirLogId: row.geotab_log_id,
+      dvirComments: row.comments,
+      dvirPhotos: row.photos_url,
+      activeTimer: null,
+    }));
+
+    const rows = [...repairRows, ...rawDvirRows].sort((left, right) => {
+      if (left.priority !== right.priority) return left.priority - right.priority;
+      if (left.source === 'dvir' && right.source !== 'dvir') return -1;
+      if (right.source === 'dvir' && left.source !== 'dvir') return 1;
+      if (left.technicianId === null && right.technicianId !== null) return -1;
+      if (right.technicianId === null && left.technicianId !== null) return 1;
+      return left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: 'base' });
+    });
 
     return Response.json({
       user: {
@@ -122,6 +220,7 @@ export async function GET(request: Request) {
       repairs: rows,
       summary: {
         total: rows.length,
+        dvirOpen: rows.filter((row) => row.source === 'dvir' || row.source === 'dvir-repair').length,
         highPriority: rows.filter((row) => row.priority === 1).length,
         unassigned: rows.filter((row) => row.technicianId === null).length,
         activeLabor: rows.filter((row) => row.activeTimer !== null).length,
@@ -140,18 +239,96 @@ export async function POST(request: Request) {
     requireManager(user);
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
+
+    if (action === 'createDvirRepair') {
+      const defectId = String(body.defectId ?? '').trim();
+      if (!defectId) throw new Error('DVIR defect was not found.');
+
+      const defect = await env.DB.prepare(`
+        SELECT geotab_defect_id, asset_unit, COALESCE(driver, '') AS driver,
+               defect, COALESCE(comments, '') AS comments
+        FROM dvir_defects
+        WHERE geotab_defect_id = ? AND repaired = 0
+      `).bind(defectId).first<{
+        geotab_defect_id: string;
+        asset_unit: string;
+        driver: string;
+        defect: string;
+        comments: string;
+      }>();
+      if (!defect) throw new Error('That DVIR is no longer open. Refresh the board.');
+
+      const technician = await activeTechnician(body.technicianId);
+      if (Number(body.technicianId ?? 0) > 0 && !technician) throw new Error('Technician was not found or is inactive.');
+
+      const existing = await env.DB.prepare(`
+        SELECT id FROM repairs WHERE geotab_defect_id = ? ORDER BY id DESC LIMIT 1
+      `).bind(defectId).first<{ id: number }>();
+      if (existing) {
+        if (technician) {
+          await env.DB.prepare(`
+            UPDATE repairs SET technician_id = ?, status = CASE WHEN lower(status) = 'new' THEN 'Assigned' ELSE status END,
+                               updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).bind(technician.id, existing.id).run();
+        }
+        return Response.json({ ok: true, repairId: `repair-${existing.id}`, existing: true });
+      }
+
+      const equipmentId = await equipmentIdForDvir(defect.asset_unit);
+      const status = technician ? 'Assigned' : 'New';
+      const result = await env.DB.prepare(`
+        INSERT INTO repairs (
+          equipment_id, title, description, status, priority, source,
+          geotab_defect_id, driver, technician_id, updated_at
+        ) VALUES (?, ?, ?, ?, '2', 'geotab-dvir', ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(
+        equipmentId,
+        defect.defect,
+        defect.comments,
+        status,
+        defect.geotab_defect_id,
+        defect.driver,
+        technician?.id ?? null,
+      ).run();
+
+      const id = Number(result.meta.last_row_id);
+      await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'dvir_added', ?)
+      `).bind(
+        id,
+        user.id,
+        technician?.id ?? null,
+        technician
+          ? `${user.displayName} added the DVIR to the repair list and assigned it to ${technician.name}.`
+          : `${user.displayName} added the DVIR to the repair list.`,
+      ).run();
+
+      return Response.json({ ok: true, repairId: `repair-${id}`, technicianId: technician?.id ?? null });
+    }
+
+    if (action === 'markDvirRepaired') {
+      const defectId = String(body.defectId ?? '').trim();
+      let logId = String(body.logId ?? '').trim();
+      if (!defectId) throw new Error('DVIR defect was not found.');
+      if (!logId) {
+        const row = await env.DB.prepare('SELECT geotab_log_id FROM dvir_defects WHERE geotab_defect_id = ?')
+          .bind(defectId)
+          .first<{ geotab_log_id: string }>();
+        logId = row?.geotab_log_id ?? '';
+      }
+      if (!logId) throw new Error('The Geotab DVIR log could not be found.');
+      const result = await markGeotabDefectRepaired(env, logId, defectId);
+      return Response.json({ ok: true, ...result });
+    }
+
     const id = repairNumber(body.repairId);
     const repair = await openRepairRow(id);
 
     if (action === 'assignTechnician') {
-      const technicianId = Number(body.technicianId ?? 0);
-      let technician: { id: number; name: string } | null = null;
-      if (technicianId > 0) {
-        technician = await env.DB.prepare('SELECT id, name FROM technicians WHERE id = ? AND active = 1')
-          .bind(technicianId)
-          .first<{ id: number; name: string }>();
-        if (!technician) throw new Error('Technician was not found or is inactive.');
-      }
+      const technician = await activeTechnician(body.technicianId);
+      if (Number(body.technicianId ?? 0) > 0 && !technician) throw new Error('Technician was not found or is inactive.');
 
       const activeTimer = await env.DB.prepare(`
         SELECT technician_id FROM repair_labor_timers WHERE repair_id = ?
