@@ -78,12 +78,14 @@ export async function getEquipmentMaster(db: D1Database) {
            (SELECT COUNT(*) FROM unit_expenses x WHERE x.equipment_id = e.id) AS expense_count,
            (SELECT MAX(COALESCE(r.completed_at, r.opened_at)) FROM repairs r WHERE r.equipment_id = e.id) AS last_repair_date
     FROM equipment e
-    ORDER BY CASE WHEN e.archived_at IS NULL THEN 0 ELSE 1 END,
+    ORDER BY CASE WHEN e.active = 1 AND e.archived_at IS NULL THEN 0 ELSE 1 END,
              e.unit COLLATE NOCASE
   `).all<EquipmentMasterRow>();
 
   const equipment = result.results.map((row) => {
     const geotab = Boolean(row.geotab_device_id || row.geotab_trailer_id);
+    const active = Boolean(row.active) && !row.archived_at;
+    const archived = Boolean(row.archived_at) || !Boolean(row.active);
     return {
       id: row.id,
       unit: row.unit,
@@ -93,10 +95,10 @@ export async function getEquipmentMaster(db: D1Database) {
           ? row.category
           : 'Uncategorized',
       equipmentType: row.equipment_type,
-      active: Boolean(row.active) && !row.archived_at,
-      archived: Boolean(row.archived_at),
+      active,
+      archived,
       archivedAt: row.archived_at ?? '',
-      archiveReason: row.archive_reason ?? '',
+      archiveReason: row.archive_reason ?? (!row.active ? 'Inactive in source system' : ''),
       source: geotab ? 'Geotab' : 'Manual',
       geotabDeviceId: row.geotab_device_id ?? '',
       geotabTrailerId: row.geotab_trailer_id ?? '',
@@ -130,7 +132,7 @@ export async function getEquipmentMaster(db: D1Database) {
     equipmentTypes: [...EQUIPMENT_TYPES],
     summary: {
       total: equipment.length,
-      active: equipment.filter((item) => !item.archived).length,
+      active: equipment.filter((item) => item.active).length,
       archived: equipment.filter((item) => item.archived).length,
       geotab: equipment.filter((item) => item.source === 'Geotab').length,
       manual: equipment.filter((item) => item.source === 'Manual').length,
