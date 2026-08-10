@@ -33,6 +33,7 @@ type MaintenanceRepair = {
   status: string;
   driver: string;
   location: string;
+  equipmentType: string;
   relatedGeotabDefectId: string;
   usedParts: never[];
   maintenanceKind: 'pm' | 'annual';
@@ -116,6 +117,7 @@ export async function getMaintenanceBoardItems(db: D1Database) {
           status: overdue ? 'PM Overdue' : 'PM Due Soon',
           driver: row.driver ?? '',
           location: row.location ?? '',
+          equipmentType: row.equipment_type,
           relatedGeotabDefectId: '',
           usedParts: [],
           maintenanceKind: 'pm',
@@ -136,6 +138,7 @@ export async function getMaintenanceBoardItems(db: D1Database) {
           status: annualRemaining <= 0 ? 'Annual Overdue' : 'Annual Due Soon',
           driver: row.driver ?? '',
           location: row.location ?? '',
+          equipmentType: row.equipment_type,
           relatedGeotabDefectId: '',
           usedParts: [],
           maintenanceKind: 'annual',
