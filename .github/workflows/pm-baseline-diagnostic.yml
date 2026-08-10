@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Check authorization
         run: test -n "${CLOUDFLARE_API_TOKEN:-}"
-      - name: Verify tractor PM40 baseline dates
+      - name: Inspect tractor PM repair patterns
         shell: bash
         run: |
           set -euo pipefail
@@ -53,48 +53,31 @@ jobs:
               const result = await api(url, { method: 'POST', body: JSON.stringify({ sql, params }) });
               return result?.[0]?.results || result?.results || [];
             }
-            const matchSummary = await query(`
-              WITH pm40 AS (
-                SELECT equipment_id, ro_date,
-                       ROW_NUMBER() OVER (PARTITION BY equipment_id ORDER BY ro_date DESC, id DESC) AS rn
-                FROM historical_repair_lines
-                WHERE UPPER(vmrs_description) LIKE '%PM 40%'
-                   OR UPPER(vmrs_description) LIKE '%PM40%'
-                   OR UPPER(vmrs_description) LIKE '%40 PM%'
-              ), tractors AS (
-                SELECT e.id, ps.service_date,
-                       (SELECT p.ro_date FROM pm40 p WHERE p.equipment_id = e.id AND p.rn = 1) AS latest_pm40_date
-                FROM equipment e
-                JOIN pm_status ps ON ps.equipment_id = e.id
-                WHERE e.active = 1 AND e.category = 'Tractors'
-              )
-              SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN service_date IS NULL THEN 1 ELSE 0 END) AS baseline_missing,
-                SUM(CASE WHEN latest_pm40_date IS NULL THEN 1 ELSE 0 END) AS no_pm40_history,
-                SUM(CASE WHEN service_date = latest_pm40_date THEN 1 ELSE 0 END) AS exact_match,
-                SUM(CASE WHEN service_date IS NOT NULL AND latest_pm40_date IS NOT NULL AND service_date > latest_pm40_date THEN 1 ELSE 0 END) AS baseline_after_history,
-                SUM(CASE WHEN service_date IS NOT NULL AND latest_pm40_date IS NOT NULL AND service_date < latest_pm40_date THEN 1 ELSE 0 END) AS baseline_before_history
-              FROM tractors
-            `);
-            const exactByNext = await query(`
-              WITH pm40 AS (
-                SELECT equipment_id, ro_date,
-                       ROW_NUMBER() OVER (PARTITION BY equipment_id ORDER BY ro_date DESC, id DESC) AS rn
-                FROM historical_repair_lines
-                WHERE UPPER(vmrs_description) LIKE '%PM 40%'
-                   OR UPPER(vmrs_description) LIKE '%PM40%'
-                   OR UPPER(vmrs_description) LIKE '%40 PM%'
-              )
-              SELECT COALESCE(ps.pm_type, '(blank)') AS current_next, COUNT(*) AS count
-              FROM equipment e
-              JOIN pm_status ps ON ps.equipment_id = e.id
-              JOIN pm40 h ON h.equipment_id = e.id AND h.rn = 1 AND h.ro_date = ps.service_date
+            const descriptions = await query(`
+              SELECT vmrs_description,
+                     COUNT(*) AS lines,
+                     COUNT(DISTINCT ro_number) AS ros,
+                     COUNT(DISTINCT h.equipment_id) AS units
+              FROM historical_repair_lines h
+              JOIN equipment e ON e.id = h.equipment_id
               WHERE e.active = 1 AND e.category = 'Tractors'
-              GROUP BY COALESCE(ps.pm_type, '(blank)')
-              ORDER BY current_next
+                AND UPPER(vmrs_description) LIKE '%PM%'
+              GROUP BY vmrs_description
+              ORDER BY ros DESC, lines DESC
+              LIMIT 30
             `);
-            console.log('TRACTOR_PM40_DATE_MATCH=' + JSON.stringify(matchSummary));
-            console.log('TRACTOR_EXACT_MATCH_CURRENT_NEXT=' + JSON.stringify(exactByNext));
+            const pmRoCounts = await query(`
+              SELECT
+                COUNT(DISTINCT h.ro_number) AS pm_ros,
+                COUNT(DISTINCT h.equipment_id) AS units,
+                MIN(h.ro_date) AS first_date,
+                MAX(h.ro_date) AS last_date
+              FROM historical_repair_lines h
+              JOIN equipment e ON e.id = h.equipment_id
+              WHERE e.active = 1 AND e.category = 'Tractors'
+                AND UPPER(h.vmrs_description) LIKE '%PM%'
+            `);
+            console.log('TRACTOR_PM_DESCRIPTIONS=' + JSON.stringify(descriptions));
+            console.log('TRACTOR_PM_RO_COUNTS=' + JSON.stringify(pmRoCounts));
           })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
           NODE
