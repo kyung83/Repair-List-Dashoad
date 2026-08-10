@@ -54,8 +54,10 @@ export async function POST(request: Request) {
       ));
     }
     if (action === 'syncGeotab') {
-      const dvir = await syncGeotabDvir(env);
+      // Device sync can see tracked trailers as Devices too. Run it first so the
+      // Trailer collection is the final authority for equipment classification.
       const fleet = await syncGeotabFleetMaster(env);
+      const dvir = await syncGeotabDvir(env);
       return Response.json({ ok: true, dvir, fleet }, { headers: { 'cache-control': 'no-store' } });
     }
     return Response.json({ error: 'Unknown repair action' }, { status: 400 });
