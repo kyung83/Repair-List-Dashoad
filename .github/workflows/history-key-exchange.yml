@@ -44,3 +44,5 @@ jobs:
           path: history-private.pem.enc
           if-no-files-found: error
           retention-days: 1
+
+# One-time key refresh for the 2026-08-10 trailer maintenance-date import.
