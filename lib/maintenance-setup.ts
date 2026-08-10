@@ -20,6 +20,7 @@ type EquipmentRow = {
   model: string | null;
   driver: string | null;
   location: string | null;
+  profile_id: number | null;
   profile_name: string | null;
   mileage_interval: number | null;
   time_interval_days: number | null;
@@ -48,6 +49,13 @@ type PresetEquipmentRow = {
   service_date: string | null;
 };
 
+type CorrectionEquipmentRow = {
+  id: number;
+  equipment_type: string;
+  profile_id: number | null;
+  sequence_json: string | null;
+};
+
 const SQL_ID_BATCH_SIZE = 75;
 
 function sequence(value: string) {
@@ -66,10 +74,26 @@ function positiveOptional(value: unknown, label: string) {
   return number;
 }
 
+function nonNegativeOptional(value: unknown, label: string) {
+  if (value == null || String(value).trim() === '') return null;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0) throw new Error(`${label} must be zero or a positive whole number.`);
+  return number;
+}
+
 function positive(value: unknown, label: string) {
   const number = Number(value);
   if (!Number.isInteger(number) || number <= 0) throw new Error(`${label} is required.`);
   return number;
+}
+
+function optionalDate(value: unknown, label: string) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T12:00:00Z`))) {
+    throw new Error(`${label} must be a valid date.`);
+  }
+  return text;
 }
 
 function selectedIds(value: unknown) {
@@ -211,7 +235,7 @@ export async function getMaintenanceSetup(db: D1Database) {
     db.prepare(`
       SELECT e.id, e.unit, e.category, e.equipment_type, e.current_mileage, e.geotab_device_id,
              e.make, e.model, e.driver, e.location,
-             p.name AS profile_name, s.mileage_interval, s.time_interval_days,
+             s.profile_id, p.name AS profile_name, s.mileage_interval, s.time_interval_days,
              ps.pm_type, ps.last_mileage, COALESCE(ps.service_date, e.service_date) AS service_date,
              a.interval_days AS annual_interval_days, a.active AS annual_active,
              COALESCE(ps.annual_date, e.annual_date) AS annual_date
@@ -253,6 +277,7 @@ export async function getMaintenanceSetup(db: D1Database) {
       model: row.model ?? '',
       driver: row.driver ?? '',
       location: row.location ?? '',
+      profileId: row.profile_id,
       profileName: row.profile_name === 'Strict 40 NY PM' ? 'Strict 40 PM' : row.profile_name ?? '',
       mileageInterval: row.mileage_interval == null ? null : Number(row.mileage_interval),
       timeIntervalDays: row.time_interval_days == null ? null : Number(row.time_interval_days),
@@ -366,4 +391,58 @@ export async function assignMaintenanceCategory(db: D1Database, body: Record<str
   }
 
   return { ok: true, category, count: ids.length, inheritedRule: Boolean(preset) };
+}
+
+export async function correctEquipmentMaintenance(db: D1Database, body: Record<string, unknown>) {
+  const equipmentId = positive(body.equipmentId, 'Unit');
+  const equipment = await db.prepare(`
+    SELECT e.id, e.equipment_type, s.profile_id, p.sequence_json
+    FROM equipment e
+    LEFT JOIN equipment_pm_settings s ON s.equipment_id = e.id
+    LEFT JOIN pm_profiles p ON p.id = s.profile_id
+    WHERE e.id = ? AND e.active = 1
+  `).bind(equipmentId).first<CorrectionEquipmentRow>();
+  if (!equipment) throw new Error('Unit was not found.');
+
+  const lastMileage = equipment.equipment_type === 'trailer'
+    ? null
+    : nonNegativeOptional(body.lastMileage, 'Last PM mileage');
+  const lastServiceDate = optionalDate(body.lastServiceDate, 'Last PM/service date');
+  const lastAnnualDate = optionalDate(body.lastAnnualDate, 'Last annual/inspection date');
+  const nextPmType = String(body.nextPmType ?? '').trim() || null;
+
+  const allowedSequence = equipment.sequence_json ? sequence(equipment.sequence_json) : [];
+  if (nextPmType && !equipment.profile_id) throw new Error('Assign a PM rule before setting the next PM type.');
+  if (nextPmType && allowedSequence.length && !allowedSequence.includes(nextPmType)) {
+    throw new Error('Choose a next PM type from the unit\'s assigned PM sequence.');
+  }
+
+  await db.batch([
+    db.prepare(`
+      INSERT INTO pm_status (
+        equipment_id, pm_type, status, last_mileage, service_date, annual_date, updated_at
+      ) VALUES (?, ?, 'Current', ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(equipment_id) DO UPDATE SET
+        pm_type = excluded.pm_type,
+        status = COALESCE(pm_status.status, 'Current'),
+        last_mileage = excluded.last_mileage,
+        service_date = excluded.service_date,
+        annual_date = excluded.annual_date,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(equipmentId, nextPmType, lastMileage, lastServiceDate, lastAnnualDate),
+    db.prepare(`
+      UPDATE equipment
+      SET service_date = ?, annual_date = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(lastServiceDate, lastAnnualDate, equipmentId),
+  ]);
+
+  return {
+    ok: true,
+    equipmentId,
+    lastMileage,
+    lastServiceDate,
+    nextPmType,
+    lastAnnualDate,
+  };
 }

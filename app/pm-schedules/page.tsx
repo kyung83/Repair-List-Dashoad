@@ -22,6 +22,7 @@ type Equipment = {
   model: string;
   driver: string;
   location: string;
+  profileId: number | null;
   profileName: string;
   mileageInterval: number | null;
   timeIntervalDays: number | null;
@@ -43,6 +44,15 @@ type RuleDraft = {
   mileageInterval: string;
   timeIntervalDays: string;
   annualIntervalDays: string;
+};
+type CorrectionDraft = {
+  equipmentId: number;
+  unit: string;
+  equipmentType: "Vehicle" | "Trailer";
+  lastMileage: string;
+  lastServiceDate: string;
+  nextPmType: string;
+  lastAnnualDate: string;
 };
 
 const emptyRule: RuleDraft = {
@@ -80,6 +90,7 @@ export default function PmSchedulesPage() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [correction, setCorrection] = useState<CorrectionDraft | null>(null);
 
   async function load() {
     const response = await fetch("/api/maintenance-setup", { cache: "no-store" });
@@ -109,8 +120,10 @@ export default function PmSchedulesPage() {
       if (!response.ok) throw new Error(result.error || "Maintenance setup could not be saved.");
       await load();
       setMessage(success);
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Maintenance setup could not be saved.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -140,8 +153,35 @@ export default function PmSchedulesPage() {
     if (!assignCategory) return setMessage("Choose a category first.");
     const count = selected.length;
     void post({ action: "assignCategory", equipmentIds: selected, category: assignCategory },
-      `${count} unit${count === 1 ? "" : "s"} assigned to ${assignCategory} and inherited its maintenance rule.`);
+      `${count} unit${count === 1 ? "" : "s"} assigned to ${assignCategory}${assignCategory === "Trailers" ? " / Trailer Service" : ""} and inherited its maintenance rule.`);
     setSelected([]);
+  }
+
+  function openCorrection(item: Equipment) {
+    const profile = (data?.profiles ?? []).find((candidate) => candidate.id === item.profileId);
+    setCorrection({
+      equipmentId: item.id,
+      unit: item.unit,
+      equipmentType: item.equipmentType,
+      lastMileage: item.lastMileage == null ? "" : String(item.lastMileage),
+      lastServiceDate: item.lastServiceDate || "",
+      nextPmType: item.nextPmType || profile?.sequence[0] || "",
+      lastAnnualDate: item.lastAnnualDate || "",
+    });
+  }
+
+  async function saveCorrection() {
+    if (!correction) return;
+    const current = correction;
+    const ok = await post({
+      action: "correctUnitMaintenance",
+      equipmentId: current.equipmentId,
+      lastMileage: current.equipmentType === "Trailer" ? null : current.lastMileage || null,
+      lastServiceDate: current.lastServiceDate || null,
+      nextPmType: current.nextPmType || null,
+      lastAnnualDate: current.lastAnnualDate || null,
+    }, `${current.unit} PM and annual correction saved.`);
+    if (ok) setCorrection(null);
   }
 
   const visible = useMemo(() => {
@@ -161,6 +201,10 @@ export default function PmSchedulesPage() {
     return counts;
   }, [data]);
   const unconfigured = (data?.equipment ?? []).filter((item) => item.category === "Uncategorized").length;
+  const correctionItem = correction ? (data?.equipment ?? []).find((item) => item.id === correction.equipmentId) : undefined;
+  const correctionProfile = correctionItem
+    ? (data?.profiles ?? []).find((profile) => profile.id === correctionItem.profileId)
+    : undefined;
 
   function toggleVisible() {
     const ids = visible.map((item) => item.id);
@@ -178,8 +222,8 @@ export default function PmSchedulesPage() {
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 900, letterSpacing: ".15em" }}>MAINTENANCE RULES</p>
           <h1 style={{ margin: "8px 0 0", fontSize: 34, color: "#0d1b2b" }}>Set it once by category</h1>
-          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 760 }}>
-            Categorize each unit once. After that, the category controls its PM sequence, mileage/time trigger, and separate annual interval. Due work appears on the Repair Board automatically.
+          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 820 }}>
+            Categorize units, set the PM and annual rules, and use Manual correction whenever a unit's last PM mileage/date, next PM type, or annual date needs to be fixed.
           </p>
         </div>
         <div style={{ fontSize: 13, color: "#64748b" }}>{unconfigured} units still uncategorized</div>
@@ -198,6 +242,7 @@ export default function PmSchedulesPage() {
                 <h2 style={{ margin: 0, fontSize: 19 }}>{category}</h2>
                 <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eef2f5", fontSize: 12, fontWeight: 800 }}>{categoryCounts.get(category) ?? 0} units</span>
               </div>
+              {trailer && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Trailer Service is the PM option for this group.</p>}
               <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
                 <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 800 }}>PM option
                   <select value={rule.profileId} onChange={(event) => updateDraft(category, { profileId: event.target.value })} style={{ padding: 9 }}>
@@ -229,12 +274,14 @@ export default function PmSchedulesPage() {
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 20 }}>Assign categories</h2>
-            <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>This is the only unit-by-unit setup. Once categorized, each unit inherits the saved category rule.</p>
+            <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
+              Trucks and trailers can both be checked. For trailers choose Trailers / Trailer Service; they inherit the saved Trailers rule.
+            </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <select value={assignCategory} onChange={(event) => setAssignCategory(event.target.value)} style={{ padding: 9 }}>
               <option value="">Choose category</option>
-              {(data?.categories ?? []).filter((value) => value !== "Trailers").map((value) => <option key={value}>{value}</option>)}
+              {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value === "Trailers" ? "Trailers / Trailer Service" : value}</option>)}
             </select>
             <button type="button" disabled={saving || !selected.length} onClick={assignSelected} style={{ padding: "9px 13px", fontWeight: 800 }}>Assign {selected.length || 0} checked</button>
             <button type="button" disabled={!selected.length} onClick={() => setSelected([])}>Clear</button>
@@ -243,7 +290,11 @@ export default function PmSchedulesPage() {
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, make, model, driver..." style={{ padding: 9, minWidth: 260, flex: 1 }} />
-          <select value={filter} onChange={(event) => setFilter(event.target.value)} style={{ padding: 9 }}>
+          <select value={filter} onChange={(event) => {
+            const next = event.target.value;
+            setFilter(next);
+            if (next === "Trailers") setAssignCategory("Trailers");
+          }} style={{ padding: 9 }}>
             <option>All</option>
             <option>Uncategorized</option>
             {(data?.categories ?? []).map((value) => <option key={value}>{value}</option>)}
@@ -261,20 +312,30 @@ export default function PmSchedulesPage() {
                 <th style={{ padding: 9 }}>PM reminder</th>
                 <th style={{ padding: 9 }}>Annual</th>
                 <th style={{ padding: 9 }}>Location</th>
+                <th style={{ padding: 9 }}>Correction</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((item) => (
                 <tr key={item.id} style={{ borderBottom: "1px solid #edf0f2", background: item.category === "Uncategorized" ? "#fffaf2" : "transparent" }}>
                   <td style={{ padding: 9 }}>
-                    {item.equipmentType === "Trailer" ? <span>—</span> : <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />}
+                    <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />
                   </td>
                   <td style={{ padding: 9, fontWeight: 900 }}>{item.unit}</td>
                   <td style={{ padding: 9 }}>{item.category}</td>
                   <td style={{ padding: 9 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
-                  <td style={{ padding: 9 }}>{scheduleText(item)}</td>
-                  <td style={{ padding: 9 }}>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</td>
+                  <td style={{ padding: 9 }}>
+                    <div>{scheduleText(item)}</div>
+                    {(item.lastServiceDate || item.lastMileage != null) && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>
+                      Last {item.lastServiceDate || "date unknown"}{item.lastMileage != null ? ` · ${item.lastMileage.toLocaleString()} mi` : ""}
+                    </div>}
+                  </td>
+                  <td style={{ padding: 9 }}>
+                    <div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>
+                    {item.lastAnnualDate && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>Last {item.lastAnnualDate}</div>}
+                  </td>
                   <td style={{ padding: 9 }}>{item.location || "—"}</td>
+                  <td style={{ padding: 9 }}><button type="button" onClick={() => openCorrection(item)}>Manual correction</button></td>
                 </tr>
               ))}
             </tbody>
@@ -282,6 +343,51 @@ export default function PmSchedulesPage() {
           {!visible.length && <div style={{ padding: 20, color: "#64748b" }}>No units match this filter.</div>}
         </div>
       </section>
+
+      {correction && <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.46)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }}>
+        <div style={{ width: "min(620px, 100%)", maxHeight: "90vh", overflowY: "auto", background: "white", borderRadius: 14, padding: 20, boxShadow: "0 20px 60px rgba(15,23,42,.25)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+            <div>
+              <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".12em" }}>MANUAL CORRECTION</p>
+              <h2 style={{ margin: "6px 0 0", fontSize: 24 }}>{correction.unit}</h2>
+              <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>Correct stored PM and annual baselines without changing the category rule.</p>
+            </div>
+            <button type="button" onClick={() => setCorrection(null)}>Close</button>
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
+            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Last PM / service date
+              <input type="date" value={correction.lastServiceDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastServiceDate: event.target.value } : current)} style={{ padding: 10 }} />
+            </label>
+
+            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Last PM mileage
+              <input disabled={correction.equipmentType === "Trailer"} type="number" min="0" placeholder={correction.equipmentType === "Trailer" ? "Not used for trailers" : "Enter corrected mileage"} value={correction.lastMileage} onChange={(event) => setCorrection((current) => current ? { ...current, lastMileage: event.target.value } : current)} style={{ padding: 10 }} />
+            </label>
+
+            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Next PM type
+              <select disabled={!correctionProfile?.sequence.length} value={correction.nextPmType} onChange={(event) => setCorrection((current) => current ? { ...current, nextPmType: event.target.value } : current)} style={{ padding: 10 }}>
+                {!correctionProfile?.sequence.length && <option value="">No PM rule assigned</option>}
+                {(correctionProfile?.sequence ?? []).map((pmType) => <option key={pmType} value={pmType}>{pmType}</option>)}
+              </select>
+            </label>
+
+            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Last annual / inspection date
+              <input type="date" value={correction.lastAnnualDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastAnnualDate: event.target.value } : current)} style={{ padding: 10 }} />
+            </label>
+
+            <div style={{ padding: 11, borderRadius: 9, background: "#f8fafc", color: "#64748b", fontSize: 12 }}>
+              Use this only to correct the stored baseline. It does not mark a new PM or annual as completed and it does not change the unit's category rule.
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" disabled={saving} onClick={() => setCorrection(null)}>Cancel</button>
+              <button type="button" disabled={saving} onClick={() => void saveCorrection()} style={{ padding: "10px 14px", border: 0, borderRadius: 8, background: "#f47b20", color: "white", fontWeight: 900 }}>
+                {saving ? "Saving..." : "Save correction"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>}
     </main>
   );
 }
