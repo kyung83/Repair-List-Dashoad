@@ -81,6 +81,14 @@ function scheduleText(item: Equipment) {
   return `${item.nextPmType || item.profileName}${trigger ? ` · ${trigger}` : ""}`;
 }
 
+function baselineWarnings(item: Equipment) {
+  const warnings: string[] = [];
+  if (item.profileName && item.mileageInterval != null && item.lastMileage == null) warnings.push("PM mileage baseline needed");
+  if (item.profileName && item.timeIntervalDays != null && !item.lastServiceDate) warnings.push("PM date baseline needed");
+  if (item.annualIntervalDays != null && !item.lastAnnualDate) warnings.push("Annual date needed");
+  return warnings;
+}
+
 export default function PmSchedulesPage() {
   const [data, setData] = useState<SetupData | null>(null);
   const [drafts, setDrafts] = useState<Record<string, RuleDraft>>({});
@@ -91,6 +99,7 @@ export default function PmSchedulesPage() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [correction, setCorrection] = useState<CorrectionDraft | null>(null);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/maintenance-setup", { cache: "no-store" });
@@ -204,13 +213,19 @@ export default function PmSchedulesPage() {
     });
   }, [data, filter, query]);
 
+  const membersByCategory = useMemo(() => {
+    const groups = new Map<string, Equipment[]>();
+    for (const category of data?.categories ?? []) groups.set(category, []);
+    for (const item of data?.equipment ?? []) {
+      if (!groups.has(item.category)) continue;
+      groups.get(item.category)?.push(item);
+    }
+    for (const members of groups.values()) members.sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true }));
+    return groups;
+  }, [data]);
+
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const allVisibleSelected = visible.length > 0 && visible.every((item) => selectedSet.has(item.id));
-  const categoryCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    (data?.equipment ?? []).forEach((item) => counts.set(item.category, (counts.get(item.category) ?? 0) + 1));
-    return counts;
-  }, [data]);
   const unconfigured = (data?.equipment ?? []).filter((item) => item.category === "Uncategorized").length;
   const correctionItem = correction ? (data?.equipment ?? []).find((item) => item.id === correction.equipmentId) : undefined;
   const correctionProfile = correctionItem
@@ -246,12 +261,20 @@ export default function PmSchedulesPage() {
         {(data?.categories ?? []).map((category) => {
           const rule = drafts[category] ?? emptyRule;
           const trailer = category === "Trailers";
+          const members = membersByCategory.get(category) ?? [];
+          const expanded = openGroup === category;
           const allowedProfiles = (data?.profiles ?? []).filter((profile) => trailer ? profile.name === "Trailer Service" : profile.name !== "Trailer Service");
           return (
             <article key={category} style={{ background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                 <h2 style={{ margin: 0, fontSize: 19 }}>{category}</h2>
-                <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eef2f5", fontSize: 12, fontWeight: 800 }}>{categoryCounts.get(category) ?? 0} assigned</span>
+                <button
+                  type="button"
+                  onClick={() => setOpenGroup(expanded ? null : category)}
+                  style={{ padding: "5px 9px", borderRadius: 999, border: "1px solid #dce2e7", background: expanded ? "#fff4ea" : "#eef2f5", fontSize: 12, fontWeight: 800, cursor: "pointer" }}
+                >
+                  {expanded ? "Hide" : "Open"} · {members.length} assigned
+                </button>
               </div>
               {trailer && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Trailer Service is the PM rule used by the Trailers group.</p>}
               <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
@@ -276,6 +299,36 @@ export default function PmSchedulesPage() {
                   Save {category} rule
                 </button>
               </div>
+
+              {expanded && <div style={{ marginTop: 14, borderTop: "1px solid #edf0f2", paddingTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                  <strong style={{ fontSize: 13 }}>Assigned units</strong>
+                  <button type="button" onClick={() => { setFilter(category); setAssignCategory(category); setQuery(""); }} style={{ fontSize: 12 }}>
+                    Show group in table
+                  </button>
+                </div>
+                <div style={{ marginTop: 8, maxHeight: 280, overflowY: "auto", display: "grid", gap: 7 }}>
+                  {members.map((item) => {
+                    const warnings = baselineWarnings(item);
+                    return (
+                      <div key={item.id} style={{ border: "1px solid #edf0f2", borderRadius: 8, padding: 9, background: warnings.length ? "#fffaf2" : "#fafbfc" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
+                          <div>
+                            <div style={{ fontWeight: 900 }}>{item.unit}</div>
+                            <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>{scheduleText(item)} · {item.equipmentType}</div>
+                            {(item.lastServiceDate || item.lastMileage != null) && <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>
+                              Last PM {item.lastServiceDate || "date unknown"}{item.lastMileage != null ? ` · ${item.lastMileage.toLocaleString()} mi` : ""}
+                            </div>}
+                            {warnings.length > 0 && <div style={{ marginTop: 4, fontSize: 11, fontWeight: 800, color: "#9a5b00" }}>{warnings.join(" · ")}</div>}
+                          </div>
+                          <button type="button" onClick={() => openCorrection(item)} style={{ whiteSpace: "nowrap", fontSize: 11 }}>Correct</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!members.length && <div style={{ padding: 10, color: "#64748b", fontSize: 12 }}>No units are assigned to this group.</div>}
+                </div>
+              </div>}
             </article>
           );
         })}
@@ -286,7 +339,7 @@ export default function PmSchedulesPage() {
           <div>
             <h2 style={{ margin: 0, fontSize: 20 }}>Assign schedule groups</h2>
             <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Equipment type tells you what the unit is. Schedule group tells you which maintenance rule it is assigned to. A Trailer can still be Uncategorized until it is assigned to the Trailers group.
+              Equipment type tells you what the unit is. Schedule group tells you which maintenance rule it is assigned to. Open any group above to audit its assigned units.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -304,7 +357,7 @@ export default function PmSchedulesPage() {
           <select value={filter} onChange={(event) => {
             const next = event.target.value;
             setFilter(next);
-            if (next === "Trailers") setAssignCategory("Trailers");
+            if (next !== "All" && next !== "Uncategorized") setAssignCategory(next);
           }} style={{ padding: 9 }}>
             <option value="All">All schedule groups</option>
             <option value="Uncategorized">Unassigned schedule</option>
@@ -313,7 +366,7 @@ export default function PmSchedulesPage() {
         </div>
 
         <div style={{ marginTop: 9, fontSize: 12, color: "#64748b" }}>
-          All shows every active unit. Type identifies Vehicle vs Trailer; Schedule group shows the saved PM assignment.
+          All shows every active unit. Type identifies Vehicle vs Trailer; Schedule group shows the saved PM assignment. Missing PM/annual baselines are called out instead of being filled with a made-up completion date.
         </div>
 
         <div style={{ overflowX: "auto", marginTop: 12 }}>
@@ -332,31 +385,38 @@ export default function PmSchedulesPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((item) => (
-                <tr key={item.id} style={{ borderBottom: "1px solid #edf0f2", background: item.category === "Uncategorized" ? "#fffaf2" : "transparent" }}>
-                  <td style={{ padding: 9 }}>
-                    <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />
-                  </td>
-                  <td style={{ padding: 9, fontWeight: 900 }}>{item.unit}</td>
-                  <td style={{ padding: 9 }}>
-                    <span style={{ display: "inline-block", padding: "3px 7px", borderRadius: 999, background: "#eef2f5", fontSize: 11, fontWeight: 800 }}>{item.equipmentType}</span>
-                  </td>
-                  <td style={{ padding: 9, fontWeight: item.category === "Uncategorized" ? 800 : 600 }}>{item.category}</td>
-                  <td style={{ padding: 9 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
-                  <td style={{ padding: 9 }}>
-                    <div>{scheduleText(item)}</div>
-                    {(item.lastServiceDate || item.lastMileage != null) && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>
-                      Last {item.lastServiceDate || "date unknown"}{item.lastMileage != null ? ` · ${item.lastMileage.toLocaleString()} mi` : ""}
-                    </div>}
-                  </td>
-                  <td style={{ padding: 9 }}>
-                    <div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>
-                    {item.lastAnnualDate && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>Last {item.lastAnnualDate}</div>}
-                  </td>
-                  <td style={{ padding: 9 }}>{item.location || "—"}</td>
-                  <td style={{ padding: 9 }}><button type="button" onClick={() => openCorrection(item)}>Manual correction</button></td>
-                </tr>
-              ))}
+              {visible.map((item) => {
+                const warnings = baselineWarnings(item);
+                return (
+                  <tr key={item.id} style={{ borderBottom: "1px solid #edf0f2", background: item.category === "Uncategorized" || warnings.length ? "#fffaf2" : "transparent" }}>
+                    <td style={{ padding: 9 }}>
+                      <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />
+                    </td>
+                    <td style={{ padding: 9, fontWeight: 900 }}>{item.unit}</td>
+                    <td style={{ padding: 9 }}>
+                      <span style={{ display: "inline-block", padding: "3px 7px", borderRadius: 999, background: "#eef2f5", fontSize: 11, fontWeight: 800 }}>{item.equipmentType}</span>
+                    </td>
+                    <td style={{ padding: 9, fontWeight: item.category === "Uncategorized" ? 800 : 600 }}>{item.category}</td>
+                    <td style={{ padding: 9 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
+                    <td style={{ padding: 9 }}>
+                      <div>{scheduleText(item)}</div>
+                      {(item.lastServiceDate || item.lastMileage != null) && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>
+                        Last {item.lastServiceDate || "date unknown"}{item.lastMileage != null ? ` · ${item.lastMileage.toLocaleString()} mi` : ""}
+                      </div>}
+                      {warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <div style={{ marginTop: 3, fontSize: 11, color: "#9a5b00", fontWeight: 800 }}>
+                        {warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}
+                      </div>}
+                    </td>
+                    <td style={{ padding: 9 }}>
+                      <div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>
+                      {item.lastAnnualDate && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>Last {item.lastAnnualDate}</div>}
+                      {warnings.includes("Annual date needed") && <div style={{ marginTop: 3, fontSize: 11, color: "#9a5b00", fontWeight: 800 }}>Annual date needed</div>}
+                    </td>
+                    <td style={{ padding: 9 }}>{item.location || "—"}</td>
+                    <td style={{ padding: 9 }}><button type="button" onClick={() => openCorrection(item)}>Manual correction</button></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {!visible.length && <div style={{ padding: 20, color: "#64748b" }}>No units match this filter.</div>}
