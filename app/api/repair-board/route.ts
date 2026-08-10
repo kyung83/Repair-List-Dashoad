@@ -14,6 +14,13 @@ type OosEquipment = {
   out_of_service_reason: string;
   out_of_service_at: string | null;
 };
+type EquipmentOption = {
+  id: number;
+  unit: string;
+  equipment_type: string;
+  driver: string;
+  location: string;
+};
 type DvirRow = {
   geotab_log_id: string;
   geotab_defect_id: string;
@@ -43,6 +50,16 @@ function maintenanceId(value: unknown) {
   return { kind: match[1] as 'pm' | 'annual', equipmentId: Number(match[2]), id: `${match[1]}-${match[2]}` };
 }
 
+function normalizedUnit(value: string) {
+  return value.trim().toLowerCase().replace(/[\s\-()]/g, '');
+}
+
+function safeEquipmentType(value: unknown) {
+  const type = String(value ?? 'other').trim().toLowerCase();
+  if (type === 'truck' || type === 'trailer') return type;
+  return 'other';
+}
+
 async function requireUser(request: Request) {
   const user = await getSessionUser(env.DB, request);
   if (!user) throw new Error('Authentication required.');
@@ -54,8 +71,8 @@ function requireManager(user: AppUser) {
 }
 
 async function openRepairRow(id: number) {
-  const repair = await env.DB.prepare('SELECT id, equipment_id, technician_id, status FROM repairs WHERE id = ?')
-    .bind(id).first<{ id: number; equipment_id: number | null; technician_id: number | null; status: string }>();
+  const repair = await env.DB.prepare('SELECT id, equipment_id, technician_id, status, COALESCE(source,\'manual\') AS source FROM repairs WHERE id = ?')
+    .bind(id).first<{ id: number; equipment_id: number | null; technician_id: number | null; status: string; source: string }>();
   if (!repair) throw new Error('Repair was not found.');
   if (String(repair.status ?? '').toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
   return repair;
@@ -67,17 +84,35 @@ async function activeTechnician(idValue: unknown) {
   return env.DB.prepare('SELECT id, name FROM technicians WHERE id = ? AND active = 1').bind(id).first<Technician>();
 }
 
-async function equipmentIdForUnit(unitValue: string) {
+async function equipmentIdForUnit(unitValue: string, equipmentTypeValue: unknown = 'other', locationValue = '') {
   const unit = unitValue.trim();
   if (!unit) throw new Error('A unit number is required.');
-  const existing = await env.DB.prepare('SELECT id FROM equipment WHERE lower(trim(unit)) = lower(trim(?)) LIMIT 1')
-    .bind(unit).first<{ id: number }>();
-  if (existing) return existing.id;
+  const key = normalizedUnit(unit);
+  const equipmentType = safeEquipmentType(equipmentTypeValue);
+  const location = String(locationValue ?? '').trim();
+  const existing = await env.DB.prepare(`
+    SELECT id
+    FROM equipment
+    WHERE lower(replace(replace(replace(replace(trim(unit), ' ', ''), '-', ''), '(', ''), ')', '')) = ?
+    ORDER BY active DESC, id
+    LIMIT 1
+  `).bind(key).first<{ id: number }>();
+  if (existing) {
+    await env.DB.prepare(`
+      UPDATE equipment
+      SET active = 1,
+          equipment_type = CASE WHEN lower(COALESCE(equipment_type,'other')) = 'other' AND ? <> 'other' THEN ? ELSE equipment_type END,
+          location = CASE WHEN trim(COALESCE(location,'')) = '' AND ? <> '' THEN ? ELSE location END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(equipmentType, equipmentType, location, location, existing.id).run();
+    return existing.id;
+  }
   await env.DB.prepare(`
-    INSERT INTO equipment (unit, category, equipment_type, active, updated_at)
-    VALUES (?, 'fleet', 'other', 1, CURRENT_TIMESTAMP)
+    INSERT INTO equipment (unit, category, equipment_type, location, active, updated_at)
+    VALUES (?, 'fleet', ?, ?, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(unit) DO UPDATE SET active = 1, updated_at = CURRENT_TIMESTAMP
-  `).bind(unit).run();
+  `).bind(unit, equipmentType, location).run();
   const created = await env.DB.prepare('SELECT id FROM equipment WHERE unit = ?').bind(unit).first<{ id: number }>();
   if (!created) throw new Error('The unit could not be added to equipment.');
   return created.id;
@@ -90,13 +125,13 @@ async function resolveEquipmentId(body: Record<string, unknown>) {
     if (!row) throw new Error('Unit was not found or is inactive.');
     return row.id;
   }
-  return equipmentIdForUnit(String(body.unit ?? ''));
+  return equipmentIdForUnit(String(body.unit ?? ''), body.equipmentType, String(body.location ?? ''));
 }
 
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
-    const [repairs, dvirDefects, technicians, maintenanceItems, oosEquipment] = await Promise.all([
+    const [repairs, dvirDefects, technicians, maintenanceItems, oosEquipment, equipmentOptions] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id,
                CASE WHEN lower(trim(COALESCE(r.priority, ''))) IN ('1','high','urgent','critical') THEN 1
@@ -149,6 +184,13 @@ export async function GET(request: Request) {
         WHERE active = 1 AND out_of_service = 1
         ORDER BY unit
       `).all<OosEquipment>(),
+      env.DB.prepare(`
+        SELECT id, unit, COALESCE(equipment_type,'other') AS equipment_type,
+               COALESCE(driver,'') AS driver, COALESCE(location,'') AS location
+        FROM equipment
+        WHERE active = 1 AND trim(COALESCE(unit,'')) <> ''
+        ORDER BY unit COLLATE NOCASE
+      `).all<EquipmentOption>(),
     ]);
 
     const oosByEquipment = new Map(oosEquipment.results.map((item) => [item.id, item]));
@@ -203,6 +245,7 @@ export async function GET(request: Request) {
       user:{ id:user.id, username:user.username, displayName:user.displayName, role:user.role, technicianId:user.technicianId },
       canManage:user.role === 'manager' || user.role === 'admin',
       technicians:technicians.results.map((technician) => ({ id:technician.id, name:technician.name })),
+      equipment:equipmentOptions.results.map((item) => ({ id:item.id, unit:item.unit, equipmentType:item.equipment_type, driver:item.driver, location:item.location })),
       repairs:rows, oosUnits,
       summary:{
         total:rows.length, oos:oosUnits.length,
@@ -227,6 +270,36 @@ export async function POST(request: Request) {
     requireManager(user);
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
+
+    if (action === 'createRepair') {
+      const mode = String(body.mode ?? 'equipment') === 'freeform' ? 'freeform' : 'equipment';
+      const issue = String(body.issue ?? '').trim();
+      const parts = String(body.parts ?? '').trim();
+      const priority = Number(body.priority ?? 2);
+      if (!issue) throw new Error('Enter the repair needed.');
+      if (![1,2,3].includes(priority)) throw new Error('Priority must be 1, 2, or 3.');
+      let equipmentId = 0;
+      if (mode === 'equipment') {
+        equipmentId = await resolveEquipmentId({ equipmentId: body.equipmentId });
+      } else {
+        equipmentId = await equipmentIdForUnit(String(body.unit ?? ''), body.equipmentType, String(body.location ?? ''));
+      }
+      const equipment = await env.DB.prepare(`SELECT id, unit, COALESCE(location,'') AS location FROM equipment WHERE id = ? AND active = 1`)
+        .bind(equipmentId).first<{ id:number; unit:string; location:string }>();
+      if (!equipment) throw new Error('Equipment was not found or is inactive.');
+      const technician = await activeTechnician(body.technicianId);
+      if (Number(body.technicianId ?? 0) > 0 && !technician) throw new Error('Technician was not found or is inactive.');
+      const status = technician ? 'Assigned' : 'New';
+      const location = mode === 'freeform' ? String(body.location ?? '').trim() : '';
+      const result = await env.DB.prepare(`
+        INSERT INTO repairs (equipment_id,title,parts_text,status,priority,source,location,technician_id,updated_at)
+        VALUES (?,?,?,?,?,'manual',?,?,CURRENT_TIMESTAMP)
+      `).bind(equipmentId, issue, parts, status, String(priority), location, technician?.id ?? null).run();
+      const id = Number(result.meta.last_row_id);
+      await env.DB.prepare(`INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail) VALUES (?,?,?,'repair_created',?)`)
+        .bind(id, user.id, technician?.id ?? null, technician ? `${user.displayName} created this repair for Unit ${equipment.unit} and assigned it to ${technician.name}.` : `${user.displayName} created this repair for Unit ${equipment.unit}.`).run();
+      return Response.json({ ok:true, repairId:`repair-${id}`, equipmentId, unit:equipment.unit, technicianId:technician?.id ?? null });
+    }
 
     if (action === 'setUnitOos') {
       const equipmentId = await resolveEquipmentId(body);
@@ -326,6 +399,21 @@ export async function POST(request: Request) {
 
     const id = repairNumber(body.repairId);
     const repair = await openRepairRow(id);
+
+    if (action === 'moveRepairToEquipment') {
+      if (repair.source !== 'manual') throw new Error('Only manual repairs can be moved to a different unit.');
+      const equipmentId = await resolveEquipmentId({ equipmentId: body.equipmentId });
+      if (equipmentId === repair.equipment_id) return Response.json({ ok:true, repairId:`repair-${id}`, equipmentId });
+      const activeTimer = await env.DB.prepare('SELECT user_id FROM repair_labor_timers WHERE repair_id = ?').bind(id).first<{ user_id:number }>();
+      if (activeTimer) throw new Error('Stop active labor before moving this repair to another unit.');
+      const equipment = await env.DB.prepare('SELECT unit FROM equipment WHERE id = ?').bind(equipmentId).first<{ unit:string }>();
+      if (!equipment) throw new Error('Equipment was not found.');
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE repairs SET equipment_id = ?, location = '', updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(equipmentId, id),
+        env.DB.prepare(`INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail) VALUES (?,?,?,'equipment_changed',?)`).bind(id, user.id, repair.technician_id, `${user.displayName} moved the repair to Unit ${equipment.unit}.`),
+      ]);
+      return Response.json({ ok:true, repairId:`repair-${id}`, equipmentId, unit:equipment.unit });
+    }
 
     if (action === 'assignTechnician') {
       const technician = await activeTechnician(body.technicianId);
