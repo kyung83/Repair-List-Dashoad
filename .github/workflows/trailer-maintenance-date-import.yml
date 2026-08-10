@@ -143,8 +143,8 @@ jobs:
             const { accountId, databaseId } = await findDatabase();
             const queryUrl = `/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}/query`;
 
-            async function query(statementOrBatch) {
-              return api(queryUrl, { method: 'POST', body: JSON.stringify(statementOrBatch) });
+            async function query(statement) {
+              return api(queryUrl, { method: 'POST', body: JSON.stringify(statement) });
             }
 
             const equipmentByUnit = new Map();
@@ -174,19 +174,25 @@ jobs:
               matched.push({ ...row, equipmentId: Number(equipment.id) });
             }
 
-            for (const group of chunks(matched, 35)) {
-              const batch = [];
-              for (const row of group) {
-                batch.push({
-                  sql: `UPDATE equipment SET service_date = ?, annual_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND active = 1 AND equipment_type = 'trailer'`,
-                  params: [row.serviceDate, row.annualDate, row.equipmentId],
-                });
-                batch.push({
-                  sql: `INSERT INTO pm_status (equipment_id, pm_type, status, service_date, annual_date, updated_at) VALUES (?, 'Service', 'Current', ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(equipment_id) DO UPDATE SET pm_type = COALESCE(pm_status.pm_type, excluded.pm_type), status = COALESCE(pm_status.status, 'Current'), service_date = excluded.service_date, annual_date = excluded.annual_date, updated_at = CURRENT_TIMESTAMP`,
-                  params: [row.equipmentId, row.serviceDate, row.annualDate],
-                });
-              }
-              await query(batch);
+            for (const group of chunks(matched, 15)) {
+              const serviceCases = group.map(() => 'WHEN ? THEN ?').join(' ');
+              const annualCases = group.map(() => 'WHEN ? THEN ?').join(' ');
+              const idPlaceholders = group.map(() => '?').join(',');
+              const equipmentParams = [
+                ...group.flatMap((row) => [row.equipmentId, row.serviceDate]),
+                ...group.flatMap((row) => [row.equipmentId, row.annualDate]),
+                ...group.map((row) => row.equipmentId),
+              ];
+              await query({
+                sql: `UPDATE equipment SET service_date = CASE id ${serviceCases} ELSE service_date END, annual_date = CASE id ${annualCases} ELSE annual_date END, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idPlaceholders}) AND active = 1 AND equipment_type = 'trailer'`,
+                params: equipmentParams,
+              });
+
+              const pmValues = group.map(() => "(?, 'Service', 'Current', ?, ?, CURRENT_TIMESTAMP)").join(',');
+              await query({
+                sql: `INSERT INTO pm_status (equipment_id, pm_type, status, service_date, annual_date, updated_at) VALUES ${pmValues} ON CONFLICT(equipment_id) DO UPDATE SET pm_type = COALESCE(pm_status.pm_type, excluded.pm_type), status = COALESCE(pm_status.status, 'Current'), service_date = excluded.service_date, annual_date = excluded.annual_date, updated_at = CURRENT_TIMESTAMP`,
+                params: group.flatMap((row) => [row.equipmentId, row.serviceDate, row.annualDate]),
+              });
             }
 
             let verified = 0;
