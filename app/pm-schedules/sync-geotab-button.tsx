@@ -25,19 +25,10 @@ export default function SyncGeotabButton() {
   }
 
   return (
-    <div style={{ position: "fixed", right: 18, bottom: 18, zIndex: 45, display: "grid", justifyItems: "end", gap: 7 }}>
-      {error && (
-        <div style={{ maxWidth: 360, padding: "9px 11px", borderRadius: 8, background: "#fff8e6", border: "1px solid #f2c66d", color: "#7c4a03", fontSize: 12 }}>
-          {error}
-        </div>
-      )}
-      <button
-        type="button"
-        disabled={syncing}
-        onClick={() => void syncNow()}
-        style={{ padding: "10px 14px", border: 0, borderRadius: 9, background: "#0d1b2b", color: "white", fontWeight: 900, boxShadow: "0 6px 18px rgba(15,23,42,.2)", cursor: syncing ? "wait" : "pointer" }}
-      >
-        {syncing ? "Syncing Geotab…" : "Sync Geotab now"}
+    <div className="pm-sync-toolbar">
+      {error && <div className="pm-sync-error">{error}</div>}
+      <button type="button" disabled={syncing} onClick={() => void syncNow()}>
+        {syncing ? "Syncing Geotab…" : "Sync Geotab"}
       </button>
     </div>
   );
