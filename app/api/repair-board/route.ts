@@ -39,7 +39,11 @@ export async function GET(request: Request) {
     const [repairs, technicians] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id,
-               COALESCE(r.priority, 2) AS priority,
+               CASE
+                 WHEN lower(trim(COALESCE(r.priority, ''))) IN ('1', 'high', 'urgent', 'critical') THEN 1
+                 WHEN lower(trim(COALESCE(r.priority, ''))) IN ('3', 'low') THEN 3
+                 ELSE 2
+               END AS priority,
                COALESCE(NULLIF(r.location, ''), NULLIF(e.location, ''), '') AS location,
                COALESCE(e.unit, '') AS unit,
                COALESCE(NULLIF(e.driver, ''), NULLIF(r.driver, ''), '') AS driver,
@@ -58,7 +62,7 @@ export async function GET(request: Request) {
         LEFT JOIN repair_labor_timers rt ON rt.repair_id = r.id
         LEFT JOIN technicians tt ON tt.id = rt.technician_id
         WHERE lower(COALESCE(r.status, '')) NOT LIKE '%complete%'
-        ORDER BY COALESCE(r.priority, 2),
+        ORDER BY priority,
                  CASE WHEN r.technician_id IS NULL THEN 0 ELSE 1 END,
                  r.updated_at DESC,
                  r.id DESC
@@ -183,7 +187,7 @@ export async function POST(request: Request) {
       const priority = Number(body.priority);
       if (![1, 2, 3].includes(priority)) throw new Error('Priority must be 1, 2, or 3.');
       await env.DB.batch([
-        env.DB.prepare('UPDATE repairs SET priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(priority, id),
+        env.DB.prepare('UPDATE repairs SET priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(String(priority), id),
         env.DB.prepare(`
           INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
           VALUES (?, ?, ?, 'priority_changed', ?)
