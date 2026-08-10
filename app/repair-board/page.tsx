@@ -55,6 +55,7 @@ type BoardData = {
   summary: { total: number; oos: number; trucks: number; trailers: number; dvirOpen: number; maintenanceDue: number; unassigned: number; activeLabor: number };
   updatedAt: string;
 };
+type EtaData = { etaByEquipment: Record<string, string> };
 type ChangeResult = { ok?: boolean; error?: string; unit?: string; repairId?: string };
 type UnitGroup = {
   key: string;
@@ -205,6 +206,7 @@ function groupWorkload(rows: RepairRow[]) {
 
 export default function RepairBoardPage() {
   const [data, setData] = useState<BoardData | null>(null);
+  const [etaByEquipment, setEtaByEquipment] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [shopView, setShopView] = useState<ShopView>("all");
   const [message, setMessage] = useState("");
@@ -215,10 +217,16 @@ export default function RepairBoardPage() {
   const [newRepair, setNewRepair] = useState<RepairDraft>(blankRepairDraft);
 
   async function load() {
-    const response = await fetch("/api/repair-board", { cache: "no-store" });
+    const [response, etaResponse] = await Promise.all([
+      fetch("/api/repair-board", { cache: "no-store" }),
+      fetch("/api/repair-board/eta", { cache: "no-store" }),
+    ]);
     const payload = await response.json() as BoardData & { error?: string };
+    const etaPayload = await etaResponse.json() as EtaData & { error?: string };
     if (!response.ok) throw new Error(payload.error || "Repair board could not be loaded.");
+    if (!etaResponse.ok) throw new Error(etaPayload.error || "Unit ETAs could not be loaded.");
     setData(payload);
+    setEtaByEquipment(etaPayload.etaByEquipment ?? {});
   }
 
   useEffect(() => {
@@ -241,6 +249,29 @@ export default function RepairBoardPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Repair-board change failed.");
       return false;
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function editUnitEta(equipmentId: number, unit: string) {
+    const current = etaByEquipment[String(equipmentId)] ?? "";
+    const next = window.prompt(`ETA / driver coming through for Unit ${unit || "—"}\n\nExamples: Today 3:30, Tomorrow AM, Friday`, current);
+    if (next === null) return;
+    setBusyId(`eta-${equipmentId}`);
+    setMessage("");
+    try {
+      const response = await fetch("/api/repair-board/eta", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ equipmentId, eta: next }),
+      });
+      const result = await response.json() as ChangeResult;
+      if (!response.ok || !result.ok) throw new Error(result.error || "Unit ETA could not be saved.");
+      await load();
+      setMessage(next.trim() ? `Unit ${unit} ETA set to ${next.trim()}.` : `Unit ${unit} ETA cleared.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unit ETA could not be saved.");
     } finally {
       setBusyId(null);
     }
@@ -372,8 +403,9 @@ export default function RepairBoardPage() {
       row.assignedTo,
       row.dvirComments,
       sourceLabel(row.source),
+      row.equipmentId ? etaByEquipment[String(row.equipmentId)] ?? "" : "",
     ].join(" ").toLowerCase().includes(needle));
-  }, [data, query]);
+  }, [data, etaByEquipment, query]);
 
   const visible = useMemo(() => {
     const filtered = searchFiltered.filter((row) => shopView === "all" || shopForLocation(row.location) === shopView);
@@ -400,6 +432,7 @@ export default function RepairBoardPage() {
         displayDriver(unit.driver),
         unit.reason,
         unit.equipmentType,
+        etaByEquipment[String(unit.equipmentId)] ?? "",
         ...unit.openWork.flatMap((work) => [work.issue, work.assignedTo, work.status, sourceLabel(work.source)]),
       ].join(" ").toLowerCase().includes(needle);
     }).sort((left, right) => {
@@ -407,7 +440,7 @@ export default function RepairBoardPage() {
       const rank = (location: string) => shopForLocation(location) === "clare" ? 0 : shopForLocation(location) === "cadillac" ? 1 : 2;
       return rank(left.location) - rank(right.location) || left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: "base" });
     });
-  }, [data, query, shopView]);
+  }, [data, etaByEquipment, query, shopView]);
 
   const shopCounts = useMemo(() => {
     const rows = data?.repairs ?? [];
@@ -527,6 +560,7 @@ export default function RepairBoardPage() {
               <div className={styles.detailsGrid}>
                 <div><span>Unit</span><strong>{row.unit || "—"}</strong></div>
                 <div><span>Location</span><strong>{row.location || "—"}</strong></div>
+                {row.equipmentId && etaByEquipment[String(row.equipmentId)] && <div><span>ETA / Coming Through</span><strong>{etaByEquipment[String(row.equipmentId)]}</strong></div>}
                 {driver && <div><span>Driver</span><strong>{driver}</strong></div>}
                 <div><span>Labor</span><strong>{row.laborHours.toFixed(2)} hr</strong></div>
                 <div><span>Assigned</span><strong>{row.assignedTo || "Unassigned"}</strong></div>
@@ -565,9 +599,10 @@ export default function RepairBoardPage() {
     const expanded = expandedUnits.has(group.key);
     const workload = groupWorkload(group.rows);
     const driver = displayDriver(group.driver);
+    const eta = group.equipmentId ? etaByEquipment[String(group.equipmentId)] ?? "" : "";
     return (
       <Fragment key={group.key}>
-        <tr className={`${styles.unitSummaryRow} ${workload.priority === 1 ? styles.unitPriorityOne : ""}`}>
+        <tr className={styles.unitSummaryRow}>
           <td className={styles.unitColumn}>
             <strong>Unit {group.unit || "—"}</strong>
             {driver && <span>{driver}</span>}
@@ -582,6 +617,9 @@ export default function RepairBoardPage() {
           <td className={styles.locationColumn}>
             <span className={`${styles.shopBadge} ${shopForLocation(group.location) === "clare" ? styles.clareBadge : shopForLocation(group.location) === "cadillac" ? styles.cadillacBadge : styles.otherBadge}`}>{shopLabel(group.location)}</span>
             <span>{group.location || "Location not set"}</span>
+            {group.equipmentId && data?.canManage ? (
+              <button className={styles.smallButton} style={{ marginTop: 4, maxWidth: "100%" }} disabled={busyId === `eta-${group.equipmentId}`} onClick={() => void editUnitEta(group.equipmentId!, group.unit)}>{eta ? `ETA: ${eta}` : "Set ETA"}</button>
+            ) : eta ? <span>ETA: {eta}</span> : null}
           </td>
           <td className={styles.workloadColumn}>
             <div className={styles.workloadBadges}>
@@ -628,7 +666,7 @@ export default function RepairBoardPage() {
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.unitTable}>
-            <thead><tr><th>Unit</th><th>Repairs / Summary</th><th>Location</th><th>Workload</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Unit</th><th>Repairs / Summary</th><th>Location / ETA</th><th>Workload</th><th>Actions</th></tr></thead>
             <tbody>
               {groups.map(renderUnitGroup)}
               {groups.length === 0 && <tr><td className={styles.empty} colSpan={5}>No open work in this section.</td></tr>}
@@ -739,7 +777,7 @@ export default function RepairBoardPage() {
       </section>
 
       <div className={styles.searchBar}>
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, location, part, technician…" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, location, ETA, part, technician…" />
         <span>All work sources stay visible unless you choose a shop-only filter.</span>
       </div>
 
@@ -747,17 +785,21 @@ export default function RepairBoardPage() {
         <div className={styles.oosTitle}><div><span>OUT OF SERVICE</span><h2>{currentShopName} OOS</h2></div><strong>{oosVisible.length}</strong></div>
         <div className={styles.oosTableWrap}>
           <table className={styles.oosTable}>
-            <thead><tr><th>Unit</th><th>Location</th><th>OOS Reason</th><th>Open Repairs</th><th>Action</th></tr></thead>
+            <thead><tr><th>Unit</th><th>Location / ETA</th><th>OOS Reason</th><th>Open Repairs</th><th>Action</th></tr></thead>
             <tbody>
               {oosVisible.map((unit) => {
                 const key = `oos-unit-${unit.equipmentId}`;
                 const expanded = expandedUnits.has(key);
+                const eta = etaByEquipment[String(unit.equipmentId)] ?? "";
                 const openRows = unit.openWork.map((work) => data?.repairs.find((row) => row.id === work.id)).filter((row): row is RepairRow => Boolean(row));
                 return (
                   <Fragment key={unit.equipmentId}>
                     <tr className={styles.oosUnitRow}>
                       <td><strong>Unit {unit.unit}</strong><span>{equipmentGroup(unit.equipmentType).toUpperCase()}</span></td>
-                      <td><span className={styles.shopBadge}>{shopLabel(unit.location)}</span><small>{unit.location || "Location not set"}</small></td>
+                      <td>
+                        <span className={styles.shopBadge}>{shopLabel(unit.location)}</span><small>{unit.location || "Location not set"}</small>
+                        {data?.canManage ? <button className={styles.smallButton} style={{ marginTop: 4 }} disabled={busyId === `eta-${unit.equipmentId}`} onClick={() => void editUnitEta(unit.equipmentId, unit.unit)}>{eta ? `ETA: ${eta}` : "Set ETA"}</button> : eta ? <small>ETA: {eta}</small> : null}
+                      </td>
                       <td><strong>{unit.reason || "No OOS reason entered."}</strong>{unit.since && <small>Since {whenText(unit.since)}</small>}</td>
                       <td><button className={styles.oosRepairToggle} type="button" onClick={() => toggleUnit(key)}>{unit.openWork.length} Repair{unit.openWork.length === 1 ? "" : "s"} {expanded ? "▲" : "▼"}</button></td>
                       <td>{data?.canManage && <button className={styles.returnButton} disabled={busyId === `oos-${unit.equipmentId}`} onClick={() => void returnToService(unit)}>Return to Service</button>}</td>
