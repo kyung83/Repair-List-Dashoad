@@ -267,9 +267,7 @@ export async function getMaintenanceSetup(db: D1Database) {
     equipment: equipment.results.map((row) => ({
       id: row.id,
       unit: row.unit,
-      category: row.equipment_type === 'trailer'
-        ? 'Trailers'
-        : row.category && row.category.toLowerCase() !== 'fleet' ? row.category : 'Uncategorized',
+      category: row.category && row.category.toLowerCase() !== 'fleet' ? row.category : 'Uncategorized',
       equipmentType: row.equipment_type === 'trailer' ? 'Trailer' : 'Vehicle',
       currentMileage: row.current_mileage == null ? null : Number(row.current_mileage),
       mileageSource: row.geotab_device_id ? 'Geotab' : 'Manual',
@@ -329,7 +327,7 @@ export async function saveCategoryMaintenanceRule(db: D1Database, body: Record<s
   `).bind(category, profileId, mileageInterval, timeIntervalDays, annualIntervalDays).run();
 
   const matches = isTrailerCategory
-    ? await db.prepare(`SELECT id FROM equipment WHERE active = 1 AND equipment_type = 'trailer'`).all<{ id: number }>()
+    ? await db.prepare(`SELECT id FROM equipment WHERE active = 1 AND equipment_type = 'trailer' AND category = 'Trailers'`).all<{ id: number }>()
     : await db.prepare(`SELECT id FROM equipment WHERE active = 1 AND category = ?`).bind(category).all<{ id: number }>();
   const ids = matches.results.map((row) => row.id);
 
@@ -361,11 +359,9 @@ export async function assignMaintenanceCategory(db: D1Database, body: Record<str
   }
   const ignoredCount = selected.length - ids.length;
 
-  if (category !== 'Trailers') {
-    await runBatches(db, ids.map((id) => db.prepare(`
-      UPDATE equipment SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-    `).bind(category, id)));
-  }
+  await runBatches(db, ids.map((id) => db.prepare(`
+    UPDATE equipment SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).bind(category, id)));
 
   const preset = await db.prepare(`
     SELECT c.category, c.profile_id, p.sequence_json,
