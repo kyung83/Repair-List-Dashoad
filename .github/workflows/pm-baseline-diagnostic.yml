@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Check authorization
         run: test -n "${CLOUDFLARE_API_TOKEN:-}"
-      - name: Inspect tractor PM repair patterns
+      - name: Validate tractor rotating PM sequence
         shell: bash
         run: |
           set -euo pipefail
@@ -53,31 +53,84 @@ jobs:
               const result = await api(url, { method: 'POST', body: JSON.stringify({ sql, params }) });
               return result?.[0]?.results || result?.results || [];
             }
-            const descriptions = await query(`
-              SELECT vmrs_description,
-                     COUNT(*) AS lines,
-                     COUNT(DISTINCT ro_number) AS ros,
-                     COUNT(DISTINCT h.equipment_id) AS units
-              FROM historical_repair_lines h
-              JOIN equipment e ON e.id = h.equipment_id
-              WHERE e.active = 1 AND e.category = 'Tractors'
-                AND UPPER(vmrs_description) LIKE '%PM%'
-              GROUP BY vmrs_description
-              ORDER BY ros DESC, lines DESC
-              LIMIT 30
+            const recoverable = await query(`
+              WITH tractors AS (
+                SELECT e.id AS equipment_id, ps.service_date
+                FROM equipment e
+                JOIN pm_status ps ON ps.equipment_id = e.id
+                JOIN equipment_pm_settings s ON s.equipment_id = e.id
+                JOIN pm_profiles p ON p.id = s.profile_id
+                WHERE e.active = 1 AND e.category = 'Tractors'
+                  AND p.name = 'Rotating 40-20A-20B'
+                  AND ps.service_date IS NOT NULL
+              ), anchors AS (
+                SELECT t.equipment_id, t.service_date,
+                  (
+                    SELECT MAX(h.ro_date)
+                    FROM historical_repair_lines h
+                    WHERE h.equipment_id = t.equipment_id
+                      AND h.ro_date <= t.service_date
+                      AND (UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%')
+                  ) AS last_pm40_date
+                FROM tractors t
+              ), classified AS (
+                SELECT a.equipment_id, a.service_date, a.last_pm40_date,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM historical_repair_lines h
+                    WHERE h.equipment_id = a.equipment_id AND h.ro_date = a.service_date
+                      AND (UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%')
+                  ) THEN 1 ELSE 0 END AS baseline_is_pm40,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM historical_repair_lines h
+                    WHERE h.equipment_id = a.equipment_id AND h.ro_date = a.service_date
+                      AND UPPER(h.vmrs_description) LIKE '%PM20%'
+                  ) THEN 1 ELSE 0 END AS baseline_is_pm20,
+                  (
+                    SELECT COUNT(DISTINCT h.ro_number)
+                    FROM historical_repair_lines h
+                    WHERE h.equipment_id = a.equipment_id
+                      AND a.last_pm40_date IS NOT NULL
+                      AND h.ro_date > a.last_pm40_date
+                      AND h.ro_date <= a.service_date
+                      AND UPPER(h.vmrs_description) LIKE '%PM20%'
+                  ) AS pm20_after_anchor
+                FROM anchors a
+              ), resolved AS (
+                SELECT *, CASE
+                  WHEN baseline_is_pm40 = 1 THEN '20A'
+                  WHEN baseline_is_pm20 = 1 AND pm20_after_anchor = 1 THEN '20B'
+                  WHEN baseline_is_pm20 = 1 AND pm20_after_anchor = 2 THEN '40'
+                  ELSE NULL
+                END AS recovered_next
+                FROM classified
+              )
+              SELECT COALESCE(recovered_next, '(unresolved)') AS recovered_next,
+                     COUNT(*) AS count
+              FROM resolved
+              GROUP BY COALESCE(recovered_next, '(unresolved)')
+              ORDER BY recovered_next
             `);
-            const pmRoCounts = await query(`
-              SELECT
-                COUNT(DISTINCT h.ro_number) AS pm_ros,
-                COUNT(DISTINCT h.equipment_id) AS units,
-                MIN(h.ro_date) AS first_date,
-                MAX(h.ro_date) AS last_date
-              FROM historical_repair_lines h
-              JOIN equipment e ON e.id = h.equipment_id
-              WHERE e.active = 1 AND e.category = 'Tractors'
-                AND UPPER(h.vmrs_description) LIKE '%PM%'
+            const integrity = await query(`
+              WITH tractors AS (
+                SELECT e.id AS equipment_id, ps.service_date
+                FROM equipment e
+                JOIN pm_status ps ON ps.equipment_id = e.id
+                JOIN equipment_pm_settings s ON s.equipment_id = e.id
+                JOIN pm_profiles p ON p.id = s.profile_id
+                WHERE e.active = 1 AND e.category = 'Tractors'
+                  AND p.name = 'Rotating 40-20A-20B'
+                  AND ps.service_date IS NOT NULL
+              ), anchors AS (
+                SELECT t.equipment_id, t.service_date,
+                  (SELECT MAX(h.ro_date) FROM historical_repair_lines h WHERE h.equipment_id=t.equipment_id AND h.ro_date<=t.service_date AND UPPER(h.vmrs_description) LIKE '%PM40%') AS last_pm40_date
+                FROM tractors t
+              )
+              SELECT COUNT(*) AS baselines,
+                     SUM(CASE WHEN last_pm40_date IS NULL THEN 1 ELSE 0 END) AS without_anchor,
+                     SUM(CASE WHEN EXISTS (SELECT 1 FROM historical_repair_lines h WHERE h.equipment_id=a.equipment_id AND h.ro_date=a.service_date AND (UPPER(h.vmrs_description) LIKE '%PM20%' OR UPPER(h.vmrs_description) LIKE '%PM40%')) THEN 1 ELSE 0 END) AS baseline_labeled_pm
+              FROM anchors a
             `);
-            console.log('TRACTOR_PM_DESCRIPTIONS=' + JSON.stringify(descriptions));
-            console.log('TRACTOR_PM_RO_COUNTS=' + JSON.stringify(pmRoCounts));
+            console.log('TRACTOR_RECOVERED_NEXT=' + JSON.stringify(recoverable));
+            console.log('TRACTOR_SEQUENCE_INTEGRITY=' + JSON.stringify(integrity));
           })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
           NODE
