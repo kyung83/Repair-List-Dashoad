@@ -132,6 +132,18 @@ function isRawMaintenance(source: Source) {
   return source === "pm" || source === "annual";
 }
 
+function isPmSource(source: Source) {
+  return source === "pm" || source === "pm-repair";
+}
+
+function isAnnualSource(source: Source) {
+  return source === "annual" || source === "annual-repair";
+}
+
+function isRepairSource(source: Source) {
+  return !isPmSource(source) && !isAnnualSource(source);
+}
+
 function isScheduled(source: Source) {
   return source === "dvir" || isRawMaintenance(source);
 }
@@ -194,15 +206,11 @@ function issueSummary(rows: RepairRow[]) {
   return `${shown.join(" • ")}${issues.length > shown.length ? ` + ${issues.length - shown.length} more` : ""}`;
 }
 
-function groupWorkload(rows: RepairRow[]) {
-  const assigned = rows.filter((row) => row.technicianId !== null).length;
-  const unassigned = rows.length - assigned;
-  const active = rows.filter((row) => row.activeTimer).length;
-  const waiting = rows.filter((row) => row.status.toLowerCase().includes("waiting")).length;
-  const dvir = rows.filter((row) => row.source === "dvir" || row.source === "dvir-repair").length;
-  const pm = rows.filter((row) => row.source === "pm" || row.source === "pm-repair").length;
-  const annual = rows.filter((row) => row.source === "annual" || row.source === "annual-repair").length;
-  return { assigned, unassigned, active, waiting, dvir, pm, annual, priority: Math.min(...rows.map((row) => row.priority || 2)) };
+function groupCountLabel(rows: RepairRow[]) {
+  if (rows.length && rows.every((row) => isPmSource(row.source))) return `${rows.length} PM${rows.length === 1 ? "" : "s"}`;
+  if (rows.length && rows.every((row) => isAnnualSource(row.source))) return `${rows.length} Annual${rows.length === 1 ? "" : "s"}`;
+  const hasMaintenance = rows.some((row) => isPmSource(row.source) || isAnnualSource(row.source));
+  return `${rows.length} ${hasMaintenance ? "Repairs / Services" : `Repair${rows.length === 1 ? "" : "s"}`}`;
 }
 
 export default function RepairBoardPage() {
@@ -235,17 +243,22 @@ export default function RepairBoardPage() {
     void load().catch((error) => setMessage(error instanceof Error ? error.message : "Repair board could not be loaded."));
   }, []);
 
+  async function requestChange(rowId: string, body: Record<string, unknown>) {
+    const response = await fetch("/api/repair-board", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repairId: rowId, ...body }),
+    });
+    const result = await response.json() as ChangeResult;
+    if (!response.ok || !result.ok) throw new Error(result.error || "Repair-board change failed.");
+    return result;
+  }
+
   async function change(rowId: string, body: Record<string, unknown>) {
     setBusyId(rowId);
     setMessage("");
     try {
-      const response = await fetch("/api/repair-board", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repairId: rowId, ...body }),
-      });
-      const result = await response.json() as ChangeResult;
-      if (!response.ok || !result.ok) throw new Error(result.error || "Repair-board change failed.");
+      await requestChange(rowId, body);
       await load();
       return true;
     } catch (error) {
@@ -368,6 +381,33 @@ export default function RepairBoardPage() {
     if (ok) setMessage("Repair completed.");
   }
 
+  async function assignGroupTechnician(group: UnitGroup, technicianId: number) {
+    const pending = group.rows.filter((row) => row.technicianId === null);
+    if (!pending.length || technicianId <= 0) return;
+    const busyKey = `assign-${group.key}`;
+    setBusyId(busyKey);
+    setMessage("");
+    try {
+      for (const row of pending) {
+        if (row.source === "dvir") {
+          await requestChange(row.id, { action: "createDvirRepair", defectId: row.dvirDefectId, technicianId });
+        } else if (isRawMaintenance(row.source)) {
+          await requestChange(row.id, { action: "createMaintenanceRepair", maintenanceId: row.maintenanceId || row.id, technicianId });
+        } else {
+          await requestChange(row.id, { action: "assignTechnician", technicianId });
+        }
+      }
+      await load();
+      const technician = data?.technicians.find((item) => item.id === technicianId)?.name ?? "technician";
+      setMessage(`Assigned ${pending.length} unassigned item${pending.length === 1 ? "" : "s"} for Unit ${group.unit} to ${technician}. Existing assignments were left alone.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The unit work could not be assigned.");
+      await load().catch(() => undefined);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function placeOos(row: RepairRow) {
     const reason = window.prompt(`Why is Unit ${row.unit || "—"} out of service?`, row.issue || "");
     if (reason === null) return;
@@ -437,9 +477,20 @@ export default function RepairBoardPage() {
   }, [searchFiltered, shopView]);
 
   const activeVisible = useMemo(() => visible.filter((row) => !row.outOfService), [visible]);
-  const truckGroups = useMemo(() => buildUnitGroups(activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "truck")), [activeVisible]);
-  const trailerGroups = useMemo(() => buildUnitGroups(activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "trailer")), [activeVisible]);
-  const otherGroups = useMemo(() => buildUnitGroups(activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "other")), [activeVisible]);
+  const boardSections = useMemo(() => {
+    const truckRows = activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "truck");
+    const trailerRows = activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "trailer");
+    const otherRows = activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "other");
+    const truckRepairKeys = new Set(truckRows.filter((row) => isRepairSource(row.source)).map(unitKey));
+
+    return {
+      truckRepairGroups: buildUnitGroups(truckRows.filter((row) => isRepairSource(row.source) || (isAnnualSource(row.source) && truckRepairKeys.has(unitKey(row))))),
+      truckPmGroups: buildUnitGroups(truckRows.filter((row) => isPmSource(row.source))),
+      truckAnnualGroups: buildUnitGroups(truckRows.filter((row) => isAnnualSource(row.source) && !truckRepairKeys.has(unitKey(row)))),
+      trailerGroups: buildUnitGroups(trailerRows),
+      otherGroups: buildUnitGroups(otherRows),
+    };
+  }, [activeVisible]);
 
   const oosVisible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -615,9 +666,31 @@ export default function RepairBoardPage() {
     );
   }
 
+  function groupAssignmentControl(group: UnitGroup) {
+    const unassigned = group.rows.filter((row) => row.technicianId === null);
+    if (!data?.canManage) {
+      const names = [...new Set(group.rows.map((row) => row.assignedTo).filter(Boolean))];
+      return <span className={styles.assignmentText}>{names.length ? names.join(", ") : "Unassigned"}</span>;
+    }
+    const busy = busyId === `assign-${group.key}`;
+    return (
+      <select
+        className={styles.techSelect}
+        value=""
+        disabled={busy || unassigned.length === 0}
+        onChange={(event) => {
+          const technicianId = Number(event.target.value);
+          if (technicianId > 0) void assignGroupTechnician(group, technicianId);
+        }}
+      >
+        <option value="">{busy ? "Assigning…" : unassigned.length ? `Assign ${unassigned.length} unassigned…` : "All work assigned"}</option>
+        {data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+      </select>
+    );
+  }
+
   function renderUnitGroup(group: UnitGroup) {
     const expanded = expandedUnits.has(group.key);
-    const workload = groupWorkload(group.rows);
     const driver = displayDriver(group.driver);
     const eta = group.equipmentId ? etaByEquipment[String(group.equipmentId)] ?? "" : "";
     return (
@@ -629,7 +702,7 @@ export default function RepairBoardPage() {
           </td>
           <td className={styles.summaryColumn}>
             <button className={styles.repairToggle} type="button" onClick={() => toggleUnit(group.key)}>
-              <span className={styles.repairCount}>{group.rows.length} Repair{group.rows.length === 1 ? "" : "s"}</span>
+              <span className={styles.repairCount}>{groupCountLabel(group.rows)}</span>
               <span className={styles.chevron}>{expanded ? "▲" : "▼"}</span>
             </button>
             <span className={styles.issueSummary}>{issueSummary(group.rows)}</span>
@@ -641,18 +714,7 @@ export default function RepairBoardPage() {
               <button className={styles.smallButton} style={{ marginTop: 4, maxWidth: "100%" }} disabled={busyId === `eta-${group.equipmentId}`} onClick={() => void editUnitEta(group.equipmentId!, group.unit)}>{eta ? `ETA: ${eta}` : "Set ETA"}</button>
             ) : eta ? <span>ETA: {eta}</span> : null}
           </td>
-          <td className={styles.workloadColumn}>
-            <div className={styles.workloadBadges}>
-              <span className={workload.priority === 1 ? styles.priorityHot : styles.priorityCool}>P{workload.priority}</span>
-              {workload.dvir > 0 && <span>{workload.dvir} DVIR</span>}
-              {workload.pm > 0 && <span>{workload.pm} PM</span>}
-              {workload.annual > 0 && <span>{workload.annual} Annual</span>}
-              <span>{workload.assigned} assigned</span>
-              {workload.unassigned > 0 && <span className={styles.unassignedBadge}>{workload.unassigned} open</span>}
-              {workload.waiting > 0 && <span>{workload.waiting} parts</span>}
-              {workload.active > 0 && <span className={styles.activeBadge}>{workload.active} working</span>}
-            </div>
-          </td>
+          <td>{groupAssignmentControl(group)}</td>
           <td className={styles.unitActions}>
             <button className={styles.expandButton} type="button" onClick={() => toggleUnit(group.key)}>{expanded ? "Hide" : "Repairs"}</button>
             {data?.canManage && <button className={styles.oosButton} type="button" disabled={busyId === `oos-${group.equipmentId ?? group.unit}`} onClick={() => void placeOos(group.rows[0])}>OOS</button>}
@@ -686,7 +748,7 @@ export default function RepairBoardPage() {
         </div>
         <div className={styles.tableWrap}>
           <table className={styles.unitTable}>
-            <thead><tr><th>Unit</th><th>Repairs / Summary</th><th>Location / ETA</th><th>Workload</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Unit</th><th>Repairs / Summary</th><th>Location / ETA</th><th>Assign Tech</th><th>Actions</th></tr></thead>
             <tbody>
               {groups.map(renderUnitGroup)}
               {groups.length === 0 && <tr><td className={styles.empty} colSpan={5}>No open work in this section.</td></tr>}
@@ -707,7 +769,7 @@ export default function RepairBoardPage() {
         <div>
           <p className={styles.eyebrow}>NORLOW SHOP CONTROL</p>
           <h1>Repair Board</h1>
-          <p className={styles.subtitle}>All open repairs, DVIRs, PMs, and annuals are shown by default. Clare work stays pinned first; use the shop tabs when you want a location-only view.</p>
+          <p className={styles.subtitle}>Truck repairs, truck PMs, truck annuals, and trailer work have their own sections. If a truck has an annual plus another repair, the annual stays grouped with that unit's repairs.</p>
         </div>
         <div className={styles.headerActions}>
           {data?.canManage && <button className={styles.primaryLink} style={{ cursor: "pointer" }} onClick={() => setShowAddRepair((current) => !current)}>{showAddRepair ? "Close Add Repair" : "+ Add Repair"}</button>}
@@ -864,10 +926,14 @@ export default function RepairBoardPage() {
       </section>
 
       <div className={styles.sideBySide}>
-        {repairTable("Truck Repair List", truckGroups, "truck")}
-        {repairTable("Trailer Repair List", trailerGroups, "trailer")}
+        {repairTable("Truck Repair List", boardSections.truckRepairGroups, "truck")}
+        {repairTable("Truck PMs", boardSections.truckPmGroups, "truck")}
       </div>
-      {otherGroups.length > 0 && <div className={styles.otherBoard}>{repairTable("Other Equipment", otherGroups, "other")}</div>}
+      <div className={styles.sideBySide}>
+        {repairTable("Truck Annuals", boardSections.truckAnnualGroups, "truck")}
+        {repairTable("Trailer Repair List", boardSections.trailerGroups, "trailer")}
+      </div>
+      {boardSections.otherGroups.length > 0 && <div className={styles.otherBoard}>{repairTable("Other Equipment", boardSections.otherGroups, "other")}</div>}
 
       <footer className={styles.footer}>{data ? `${visible.length} open work items in ${currentShopName} · updated ${new Date(data.updatedAt).toLocaleString()}` : "Loading repair board…"}</footer>
     </main>
