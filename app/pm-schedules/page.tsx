@@ -55,12 +55,10 @@ type CorrectionDraft = {
   lastAnnualDate: string;
 };
 
-const emptyRule: RuleDraft = {
-  profileId: "",
-  mileageInterval: "",
-  timeIntervalDays: "",
-  annualIntervalDays: "365",
-};
+const emptyRule: RuleDraft = { profileId: "", mileageInterval: "", timeIntervalDays: "", annualIntervalDays: "365" };
+const inputStyle = { width: "100%", minHeight: 34, padding: "6px 8px", border: "1px solid #cbd3d9", borderRadius: 4, background: "white", color: "#172033" } as const;
+const labelStyle = { display: "grid", gap: 4, fontSize: 11, fontWeight: 800, color: "#53616e" } as const;
+const buttonStyle = { minHeight: 32, padding: "0 10px", border: "1px solid #c5cdd3", borderRadius: 4, background: "white", color: "#263746", fontWeight: 800, fontSize: 11 } as const;
 
 function ruleFromPreset(preset?: Preset): RuleDraft {
   if (!preset) return { ...emptyRule };
@@ -106,10 +104,7 @@ export default function PmSchedulesPage() {
     const payload = await response.json() as SetupData & { error?: string };
     if (!response.ok) throw new Error(payload.error || "Maintenance setup could not be loaded.");
     setData(payload);
-    setDrafts(Object.fromEntries(payload.categories.map((category) => [
-      category,
-      ruleFromPreset(payload.presets.find((preset) => preset.category === category)),
-    ])));
+    setDrafts(Object.fromEntries(payload.categories.map((category) => [category, ruleFromPreset(payload.presets.find((preset) => preset.category === category))])));
   }
 
   useEffect(() => {
@@ -139,10 +134,7 @@ export default function PmSchedulesPage() {
   }
 
   function updateDraft(category: string, patch: Partial<RuleDraft>) {
-    setDrafts((current) => ({
-      ...current,
-      [category]: { ...(current[category] ?? emptyRule), ...patch },
-    }));
+    setDrafts((current) => ({ ...current, [category]: { ...(current[category] ?? emptyRule), ...patch } }));
   }
 
   function saveCategoryRule(category: string) {
@@ -200,26 +192,14 @@ export default function PmSchedulesPage() {
     return (data?.equipment ?? []).filter((item) => {
       if (filter !== "All" && item.category !== filter) return false;
       if (!needle) return true;
-      return [
-        item.unit,
-        item.equipmentType,
-        item.category,
-        item.profileName,
-        item.make,
-        item.model,
-        item.driver,
-        item.location,
-      ].join(" ").toLowerCase().includes(needle);
+      return [item.unit, item.equipmentType, item.category, item.profileName, item.make, item.model, item.driver, item.location].join(" ").toLowerCase().includes(needle);
     });
   }, [data, filter, query]);
 
   const membersByCategory = useMemo(() => {
     const groups = new Map<string, Equipment[]>();
     for (const category of data?.categories ?? []) groups.set(category, []);
-    for (const item of data?.equipment ?? []) {
-      if (!groups.has(item.category)) continue;
-      groups.get(item.category)?.push(item);
-    }
+    for (const item of data?.equipment ?? []) if (groups.has(item.category)) groups.get(item.category)?.push(item);
     for (const members of groups.values()) members.sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true }));
     return groups;
   }, [data]);
@@ -228,9 +208,7 @@ export default function PmSchedulesPage() {
   const allVisibleSelected = visible.length > 0 && visible.every((item) => selectedSet.has(item.id));
   const unconfigured = (data?.equipment ?? []).filter((item) => item.category === "Uncategorized").length;
   const correctionItem = correction ? (data?.equipment ?? []).find((item) => item.id === correction.equipmentId) : undefined;
-  const correctionProfile = correctionItem
-    ? (data?.profiles ?? []).find((profile) => profile.id === correctionItem.profileId)
-    : undefined;
+  const correctionProfile = correctionItem ? (data?.profiles ?? []).find((profile) => profile.id === correctionItem.profileId) : undefined;
 
   function toggleVisible() {
     const ids = visible.map((item) => item.id);
@@ -243,227 +221,168 @@ export default function PmSchedulesPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: 34, color: "#172033" }}>
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-end", flexWrap: "wrap" }}>
+    <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "28px 32px 70px", color: "#172033" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div>
-          <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 900, letterSpacing: ".15em" }}>MAINTENANCE RULES</p>
-          <h1 style={{ margin: "8px 0 0", fontSize: 34, color: "#0d1b2b" }}>Set it once by category</h1>
-          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 820 }}>
-            Categorize units, set the PM and annual rules, and use Manual correction whenever a unit's last PM mileage/date, next PM type, or annual date needs to be fixed.
+          <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>PM SCHEDULE SETUP</p>
+          <h1 style={{ margin: "6px 0 0", fontSize: 30, color: "#0d1b2b" }}>Maintenance schedules</h1>
+          <p style={{ margin: "6px 0 0", color: "#64748b", maxWidth: 820, fontSize: 13 }}>
+            Compact schedule groups up top; the unit assignment table stays below for bulk setup and corrections.
           </p>
         </div>
-        <div style={{ fontSize: 13, color: "#64748b" }}>{unconfigured} units still uncategorized</div>
+        <div style={{ fontSize: 12, color: unconfigured ? "#9a5b00" : "#64748b", fontWeight: 800 }}>{unconfigured} units uncategorized</div>
       </header>
 
-      {message && <div style={{ marginTop: 16, padding: 12, borderRadius: 9, background: "#fff8e6", border: "1px solid #f2c66d" }}>{message}</div>}
+      {message && <div style={{ marginTop: 12, padding: 10, borderRadius: 5, background: "#fff8e6", border: "1px solid #f2c66d", fontSize: 12 }}>{message}</div>}
 
-      <section style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
+      <section style={{ marginTop: 16, border: "1px solid #cfd6db", background: "white" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(140px,1.3fr) minmax(180px,2fr) 110px 100px 110px 95px 72px", gap: 0, padding: "7px 10px", borderBottom: "1px solid #cfd6db", background: "#eef1f2", color: "#59656e", fontSize: 9, fontWeight: 900, letterSpacing: ".05em", textTransform: "uppercase" }}>
+          <span>Schedule group</span><span>PM rule</span><span>Mileage</span><span>PM days</span><span>Annual</span><span>Assigned</span><span></span>
+        </div>
         {(data?.categories ?? []).map((category) => {
           const rule = drafts[category] ?? emptyRule;
           const trailer = category === "Trailers";
           const members = membersByCategory.get(category) ?? [];
           const expanded = openGroup === category;
           const allowedProfiles = (data?.profiles ?? []).filter((profile) => trailer ? profile.name === "Trailer Service" : profile.name !== "Trailer Service");
+          const selectedProfile = allowedProfiles.find((profile) => String(profile.id) === rule.profileId);
           return (
-            <article key={category} style={{ background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                <h2 style={{ margin: 0, fontSize: 19 }}>{category}</h2>
-                <button
-                  type="button"
-                  onClick={() => setOpenGroup(expanded ? null : category)}
-                  style={{ padding: "5px 9px", borderRadius: 999, border: "1px solid #dce2e7", background: expanded ? "#fff4ea" : "#eef2f5", fontSize: 12, fontWeight: 800, cursor: "pointer" }}
-                >
-                  {expanded ? "Hide" : "Open"} · {members.length} assigned
-                </button>
-              </div>
-              {trailer && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Trailer Service is the PM rule used by the Trailers group.</p>}
-              <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
-                <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 800 }}>PM option
-                  <select value={rule.profileId} onChange={(event) => updateDraft(category, { profileId: event.target.value })} style={{ padding: 9 }}>
-                    <option value="">No PM reminder</option>
-                    {allowedProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} ({profile.sequence.join(" → ")})</option>)}
-                  </select>
-                </label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 800 }}>Mileage interval
-                    <input disabled={trailer} type="number" min="1" placeholder={trailer ? "Not used" : "20,000"} value={rule.mileageInterval} onChange={(event) => updateDraft(category, { mileageInterval: event.target.value })} style={{ padding: 9 }} />
-                  </label>
-                  <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 800 }}>PM time (days)
-                    <input type="number" min="1" placeholder="90" value={rule.timeIntervalDays} onChange={(event) => updateDraft(category, { timeIntervalDays: event.target.value })} style={{ padding: 9 }} />
-                  </label>
-                </div>
-                <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 800 }}>Annual / inspection interval (days)
-                  <input type="number" min="1" placeholder="365" value={rule.annualIntervalDays} onChange={(event) => updateDraft(category, { annualIntervalDays: event.target.value })} style={{ padding: 9 }} />
-                </label>
-                <button type="button" disabled={saving} onClick={() => saveCategoryRule(category)} style={{ padding: "10px 14px", border: 0, borderRadius: 8, background: "#f47b20", color: "white", fontWeight: 900 }}>
-                  Save {category} rule
-                </button>
+            <div key={category} style={{ borderBottom: "1px solid #e3e7ea" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(140px,1.3fr) minmax(180px,2fr) 110px 100px 110px 95px 72px", alignItems: "center", minHeight: 44, padding: "5px 10px", fontSize: 12 }}>
+                <strong style={{ color: "#172033" }}>{category}</strong>
+                <span>{selectedProfile ? `${selectedProfile.name} · ${selectedProfile.sequence.join(" → ")}` : "No PM reminder"}</span>
+                <span>{trailer ? "—" : rule.mileageInterval ? `${Number(rule.mileageInterval).toLocaleString()} mi` : "—"}</span>
+                <span>{rule.timeIntervalDays ? `${rule.timeIntervalDays} d` : "—"}</span>
+                <span>{rule.annualIntervalDays ? `${rule.annualIntervalDays} d` : "—"}</span>
+                <span>{members.length} units</span>
+                <button type="button" style={buttonStyle} onClick={() => setOpenGroup(expanded ? null : category)}>{expanded ? "Close" : "Edit"}</button>
               </div>
 
-              {expanded && <div style={{ marginTop: 14, borderTop: "1px solid #edf0f2", paddingTop: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                  <strong style={{ fontSize: 13 }}>Assigned units</strong>
-                  <button type="button" onClick={() => { setFilter(category); setAssignCategory(category); setQuery(""); }} style={{ fontSize: 12 }}>
-                    Show group in table
-                  </button>
-                </div>
-                <div style={{ marginTop: 8, maxHeight: 280, overflowY: "auto", display: "grid", gap: 7 }}>
-                  {members.map((item) => {
-                    const warnings = baselineWarnings(item);
-                    return (
-                      <div key={item.id} style={{ border: "1px solid #edf0f2", borderRadius: 8, padding: 9, background: warnings.length ? "#fffaf2" : "#fafbfc" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
-                          <div>
-                            <div style={{ fontWeight: 900 }}>{item.unit}</div>
-                            <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>{scheduleText(item)} · {item.equipmentType}</div>
-                            {(item.lastServiceDate || item.lastMileage != null) && <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>
-                              Last PM {item.lastServiceDate || "date unknown"}{item.lastMileage != null ? ` · ${item.lastMileage.toLocaleString()} mi` : ""}
-                            </div>}
-                            {warnings.length > 0 && <div style={{ marginTop: 4, fontSize: 11, fontWeight: 800, color: "#9a5b00" }}>{warnings.join(" · ")}</div>}
+              {expanded && (
+                <div style={{ padding: 12, borderTop: "1px solid #eef1f3", background: "#fafbfb", display: "grid", gridTemplateColumns: "minmax(320px,1fr) minmax(340px,1.2fr)", gap: 14 }}>
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 8 }}>
+                      <label style={labelStyle}>PM option
+                        <select value={rule.profileId} onChange={(event) => updateDraft(category, { profileId: event.target.value })} style={inputStyle}>
+                          <option value="">No PM reminder</option>
+                          {allowedProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} ({profile.sequence.join(" → ")})</option>)}
+                        </select>
+                      </label>
+                      <label style={labelStyle}>Mileage
+                        <input disabled={trailer} type="number" min="1" value={rule.mileageInterval} onChange={(event) => updateDraft(category, { mileageInterval: event.target.value })} style={inputStyle} placeholder={trailer ? "N/A" : "20000"} />
+                      </label>
+                      <label style={labelStyle}>PM days
+                        <input type="number" min="1" value={rule.timeIntervalDays} onChange={(event) => updateDraft(category, { timeIntervalDays: event.target.value })} style={inputStyle} placeholder="90" />
+                      </label>
+                      <label style={labelStyle}>Annual days
+                        <input type="number" min="1" value={rule.annualIntervalDays} onChange={(event) => updateDraft(category, { annualIntervalDays: event.target.value })} style={inputStyle} placeholder="365" />
+                      </label>
+                    </div>
+                    <div style={{ marginTop: 9, display: "flex", gap: 7, alignItems: "center" }}>
+                      <button type="button" disabled={saving} onClick={() => saveCategoryRule(category)} style={{ ...buttonStyle, borderColor: "#d56e13", background: "#f47b20", color: "white" }}>Save rule</button>
+                      <span style={{ color: "#73808a", fontSize: 11 }}>{trailer ? "Trailer Service uses time-based PM rules." : "Saved changes apply to all units in this group."}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ borderLeft: "1px solid #e0e5e8", paddingLeft: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <strong style={{ fontSize: 12 }}>Assigned units</strong>
+                      <button type="button" style={buttonStyle} onClick={() => { setFilter(category); setAssignCategory(category); setQuery(""); }}>Show in table</button>
+                    </div>
+                    <div style={{ marginTop: 7, maxHeight: 180, overflowY: "auto" }}>
+                      {members.map((item) => {
+                        const warnings = baselineWarnings(item);
+                        return (
+                          <div key={item.id} style={{ display: "grid", gridTemplateColumns: "95px 1fr auto", gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #e7eaec", fontSize: 11 }}>
+                            <strong>{item.unit}</strong>
+                            <span style={{ color: warnings.length ? "#8b5a08" : "#64748b" }}>{scheduleText(item)}{warnings.length ? ` · ${warnings.join(" / ")}` : ""}</span>
+                            <button type="button" style={buttonStyle} onClick={() => openCorrection(item)}>Correct</button>
                           </div>
-                          <button type="button" onClick={() => openCorrection(item)} style={{ whiteSpace: "nowrap", fontSize: 11 }}>Correct</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {!members.length && <div style={{ padding: 10, color: "#64748b", fontSize: 12 }}>No units are assigned to this group.</div>}
+                        );
+                      })}
+                      {!members.length && <div style={{ padding: 8, color: "#64748b", fontSize: 11 }}>No units assigned.</div>}
+                    </div>
+                  </div>
                 </div>
-              </div>}
-            </article>
+              )}
+            </div>
           );
         })}
       </section>
 
-      <section style={{ marginTop: 20, background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <section style={{ marginTop: 16, background: "white", border: "1px solid #cfd6db" }}>
+        <div style={{ padding: 12, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>Assign schedule groups</h2>
-            <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Equipment type tells you what the unit is. Schedule group tells you which maintenance rule it is assigned to. Open any group above to audit its assigned units.
-            </p>
+            <h2 style={{ margin: 0, fontSize: 18 }}>Assign schedule groups</h2>
+            <p style={{ margin: "3px 0 0", color: "#64748b", fontSize: 11 }}>Check units, choose the schedule group, then assign them in bulk.</p>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <select value={assignCategory} onChange={(event) => setAssignCategory(event.target.value)} style={{ padding: 9 }}>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            <select value={assignCategory} onChange={(event) => setAssignCategory(event.target.value)} style={{ ...inputStyle, width: 190 }}>
               <option value="">Choose schedule group</option>
               {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
-            <button type="button" disabled={saving || !selected.length} onClick={assignSelected} style={{ padding: "9px 13px", fontWeight: 800 }}>Assign {selected.length || 0} checked</button>
-            <button type="button" disabled={!selected.length} onClick={() => setSelected([])}>Clear</button>
+            <button type="button" disabled={saving || !selected.length} onClick={assignSelected} style={buttonStyle}>Assign {selected.length || 0}</button>
+            <button type="button" disabled={!selected.length} onClick={() => setSelected([])} style={buttonStyle}>Clear</button>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, type, schedule group, make, model, driver..." style={{ padding: 9, minWidth: 260, flex: 1 }} />
+        <div style={{ display: "flex", gap: 7, padding: 10, borderBottom: "1px solid #e4e8eb", flexWrap: "wrap" }}>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, type, group, make, model, driver..." style={{ ...inputStyle, minWidth: 260, flex: 1 }} />
           <select value={filter} onChange={(event) => {
             const next = event.target.value;
             setFilter(next);
             if (next !== "All" && next !== "Uncategorized") setAssignCategory(next);
-          }} style={{ padding: 9 }}>
+          }} style={{ ...inputStyle, width: 190 }}>
             <option value="All">All schedule groups</option>
             <option value="Uncategorized">Unassigned schedule</option>
             {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </div>
 
-        <div style={{ marginTop: 9, fontSize: 12, color: "#64748b" }}>
-          All shows every active unit. Type identifies Vehicle vs Trailer; Schedule group shows the saved PM assignment. Missing PM/annual baselines are called out instead of being filled with a made-up completion date.
-        </div>
-
-        <div style={{ overflowX: "auto", marginTop: 12 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 1050 }}>
             <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #dce2e7" }}>
-                <th style={{ padding: 9 }}><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={!visible.length} /></th>
-                <th style={{ padding: 9 }}>Unit</th>
-                <th style={{ padding: 9 }}>Type</th>
-                <th style={{ padding: 9 }}>Schedule group</th>
-                <th style={{ padding: 9 }}>Mileage</th>
-                <th style={{ padding: 9 }}>PM reminder</th>
-                <th style={{ padding: 9 }}>Annual</th>
-                <th style={{ padding: 9 }}>Location</th>
-                <th style={{ padding: 9 }}>Correction</th>
+              <tr style={{ textAlign: "left", background: "#eef1f2", color: "#59656e", fontSize: 9, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                <th style={{ padding: 8 }}><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={!visible.length} /></th>
+                <th style={{ padding: 8 }}>Unit</th><th style={{ padding: 8 }}>Type</th><th style={{ padding: 8 }}>Schedule group</th><th style={{ padding: 8 }}>Mileage</th><th style={{ padding: 8 }}>PM reminder</th><th style={{ padding: 8 }}>Annual</th><th style={{ padding: 8 }}>Location</th><th style={{ padding: 8 }}>Correction</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((item) => {
                 const warnings = baselineWarnings(item);
                 return (
-                  <tr key={item.id} style={{ borderBottom: "1px solid #edf0f2", background: item.category === "Uncategorized" || warnings.length ? "#fffaf2" : "transparent" }}>
-                    <td style={{ padding: 9 }}>
-                      <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />
-                    </td>
-                    <td style={{ padding: 9, fontWeight: 900 }}>{item.unit}</td>
-                    <td style={{ padding: 9 }}>
-                      <span style={{ display: "inline-block", padding: "3px 7px", borderRadius: 999, background: "#eef2f5", fontSize: 11, fontWeight: 800 }}>{item.equipmentType}</span>
-                    </td>
-                    <td style={{ padding: 9, fontWeight: item.category === "Uncategorized" ? 800 : 600 }}>{item.category}</td>
-                    <td style={{ padding: 9 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
-                    <td style={{ padding: 9 }}>
-                      <div>{scheduleText(item)}</div>
-                      {(item.lastServiceDate || item.lastMileage != null) && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>
-                        Last {item.lastServiceDate || "date unknown"}{item.lastMileage != null ? ` · ${item.lastMileage.toLocaleString()} mi` : ""}
-                      </div>}
-                      {warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <div style={{ marginTop: 3, fontSize: 11, color: "#9a5b00", fontWeight: 800 }}>
-                        {warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}
-                      </div>}
-                    </td>
-                    <td style={{ padding: 9 }}>
-                      <div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>
-                      {item.lastAnnualDate && <div style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>Last {item.lastAnnualDate}</div>}
-                      {warnings.includes("Annual date needed") && <div style={{ marginTop: 3, fontSize: 11, color: "#9a5b00", fontWeight: 800 }}>Annual date needed</div>}
-                    </td>
-                    <td style={{ padding: 9 }}>{item.location || "—"}</td>
-                    <td style={{ padding: 9 }}><button type="button" onClick={() => openCorrection(item)}>Manual correction</button></td>
+                  <tr key={item.id} style={{ borderTop: "1px solid #edf0f2", background: item.category === "Uncategorized" || warnings.length ? "#fffaf2" : "white" }}>
+                    <td style={{ padding: 8 }}><input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>
+                    <td style={{ padding: 8, fontWeight: 900 }}>{item.unit}</td>
+                    <td style={{ padding: 8 }}>{item.equipmentType}</td>
+                    <td style={{ padding: 8, fontWeight: item.category === "Uncategorized" ? 800 : 500 }}>{item.category}</td>
+                    <td style={{ padding: 8 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
+                    <td style={{ padding: 8 }}><div>{scheduleText(item)}</div>{warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <small style={{ color: "#9a5b00", fontWeight: 800 }}>{warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}</small>}</td>
+                    <td style={{ padding: 8 }}><div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>{item.lastAnnualDate && <small style={{ color: "#64748b" }}>Last {item.lastAnnualDate}</small>}{warnings.includes("Annual date needed") && <small style={{ display: "block", color: "#9a5b00", fontWeight: 800 }}>Annual date needed</small>}</td>
+                    <td style={{ padding: 8 }}>{item.location || "—"}</td>
+                    <td style={{ padding: 8 }}><button type="button" style={buttonStyle} onClick={() => openCorrection(item)}>Correct</button></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {!visible.length && <div style={{ padding: 20, color: "#64748b" }}>No units match this filter.</div>}
+          {!visible.length && <div style={{ padding: 18, color: "#64748b", fontSize: 12 }}>No units match this filter.</div>}
         </div>
       </section>
 
       {correction && <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.46)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }}>
-        <div style={{ width: "min(620px, 100%)", maxHeight: "90vh", overflowY: "auto", background: "white", borderRadius: 14, padding: 20, boxShadow: "0 20px 60px rgba(15,23,42,.25)" }}>
+        <div style={{ width: "min(620px, 100%)", maxHeight: "90vh", overflowY: "auto", background: "white", borderRadius: 10, padding: 18, boxShadow: "0 20px 60px rgba(15,23,42,.25)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-            <div>
-              <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".12em" }}>MANUAL CORRECTION</p>
-              <h2 style={{ margin: "6px 0 0", fontSize: 24 }}>{correction.unit}</h2>
-              <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>Correct stored PM and annual baselines without changing the category rule.</p>
-            </div>
-            <button type="button" onClick={() => setCorrection(null)}>Close</button>
+            <div><p style={{ margin: 0, color: "#f47b20", fontSize: 10, fontWeight: 900, letterSpacing: ".12em" }}>MANUAL CORRECTION</p><h2 style={{ margin: "5px 0 0", fontSize: 22 }}>{correction.unit}</h2><p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 12 }}>Correct stored PM and annual baselines without changing the schedule rule.</p></div>
+            <button type="button" style={buttonStyle} onClick={() => setCorrection(null)}>Close</button>
           </div>
-
-          <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
-            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Last PM / service date
-              <input type="date" value={correction.lastServiceDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastServiceDate: event.target.value } : current)} style={{ padding: 10 }} />
-            </label>
-
-            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Last PM mileage
-              <input disabled={correction.equipmentType === "Trailer"} type="number" min="0" placeholder={correction.equipmentType === "Trailer" ? "Not used for trailers" : "Enter corrected mileage"} value={correction.lastMileage} onChange={(event) => setCorrection((current) => current ? { ...current, lastMileage: event.target.value } : current)} style={{ padding: 10 }} />
-            </label>
-
-            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Next PM type
-              <select disabled={!correctionProfile?.sequence.length} value={correction.nextPmType} onChange={(event) => setCorrection((current) => current ? { ...current, nextPmType: event.target.value } : current)} style={{ padding: 10 }}>
-                {!correctionProfile?.sequence.length && <option value="">No PM rule assigned</option>}
-                {(correctionProfile?.sequence ?? []).map((pmType) => <option key={pmType} value={pmType}>{pmType}</option>)}
-              </select>
-            </label>
-
-            <label style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 800 }}>Last annual / inspection date
-              <input type="date" value={correction.lastAnnualDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastAnnualDate: event.target.value } : current)} style={{ padding: 10 }} />
-            </label>
-
-            <div style={{ padding: 11, borderRadius: 9, background: "#f8fafc", color: "#64748b", fontSize: 12 }}>
-              Use this only to correct the stored baseline. It does not mark a new PM or annual as completed and it does not change the unit's category rule.
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button type="button" disabled={saving} onClick={() => setCorrection(null)}>Cancel</button>
-              <button type="button" disabled={saving} onClick={() => void saveCorrection()} style={{ padding: "10px 14px", border: 0, borderRadius: 8, background: "#f47b20", color: "white", fontWeight: 900 }}>
-                {saving ? "Saving..." : "Save correction"}
-              </button>
-            </div>
+          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+            <label style={labelStyle}>Last PM / service date<input type="date" value={correction.lastServiceDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastServiceDate: event.target.value } : current)} style={inputStyle} /></label>
+            <label style={labelStyle}>Last PM mileage<input disabled={correction.equipmentType === "Trailer"} type="number" min="0" value={correction.lastMileage} onChange={(event) => setCorrection((current) => current ? { ...current, lastMileage: event.target.value } : current)} style={inputStyle} placeholder={correction.equipmentType === "Trailer" ? "Not used for trailers" : "Enter corrected mileage"} /></label>
+            <label style={labelStyle}>Next PM type<select disabled={!correctionProfile?.sequence.length} value={correction.nextPmType} onChange={(event) => setCorrection((current) => current ? { ...current, nextPmType: event.target.value } : current)} style={inputStyle}>{!correctionProfile?.sequence.length && <option value="">No PM rule assigned</option>}{(correctionProfile?.sequence ?? []).map((pmType) => <option key={pmType} value={pmType}>{pmType}</option>)}</select></label>
+            <label style={labelStyle}>Last annual / inspection date<input type="date" value={correction.lastAnnualDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastAnnualDate: event.target.value } : current)} style={inputStyle} /></label>
+            <div style={{ padding: 9, background: "#f8fafc", color: "#64748b", fontSize: 11 }}>This corrects the stored baseline only. It does not mark a new PM or annual complete.</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 7 }}><button type="button" disabled={saving} style={buttonStyle} onClick={() => setCorrection(null)}>Cancel</button><button type="button" disabled={saving} onClick={() => void saveCorrection()} style={{ ...buttonStyle, borderColor: "#d56e13", background: "#f47b20", color: "white" }}>{saving ? "Saving..." : "Save correction"}</button></div>
           </div>
         </div>
       </div>}

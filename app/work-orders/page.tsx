@@ -1,19 +1,198 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-type Technician={id:number;name:string;email:string;phone:string}; type Part={id:number;partNumber:string;description:string;quantityOnHand:number;location:string}; type UsedPart={partId:number;partNumber:string;description:string;quantity:number}; type LaborEntry={id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string}; type Dvir={defectId:string;asset:string;driver:string;defect:string};
-type Repair={id:string;unit:string;issue:string;status:string;partsText:string;assignedTo:string;technicianId:number|null;location:string;relatedGeotabDefectId:string;usedParts:UsedPart[];laborEntries:LaborEntry[];laborHours:number;laborRate:number;laborCost:number;outsideCost:number}; type WorkOrderData={repairs:Repair[];technicians:Technician[];parts:Part[];dvir:Dvir[];defaultLaborRate:number;updatedAt:string}; type RowSelection={partId:string;quantity:number}; type LaborDraft={hours:string;rate:string;notes:string};
-const blankRepair={unit:"",issue:"",status:"New",location:"",geotabDefectId:""}; const blankTechnician={name:"",email:"",phone:""}; const blankPart={partNumber:"",description:"",quantityOnHand:0,reorderLevel:0,location:""};
-export default function WorkOrdersPage(){const[data,setData]=useState<WorkOrderData|null>(null);const[message,setMessage]=useState("");const[query,setQuery]=useState("");const[repair,setRepair]=useState(blankRepair);const[technician,setTechnician]=useState(blankTechnician);const[part,setPart]=useState(blankPart);const[selections,setSelections]=useState<Record<string,RowSelection>>({});const[labor,setLabor]=useState<Record<string,LaborDraft>>({});const[busy,setBusy]=useState(false);
-async function load(){const response=await fetch('/api/work-orders',{cache:'no-store'});const payload=await response.json() as WorkOrderData&{error?:string};if(!response.ok)throw new Error(payload.error||'Unable to load work orders');setData(payload);}useEffect(()=>{void load().catch(e=>setMessage(e instanceof Error?e.message:'Unable to load work orders'));},[]);
-async function post(body:Record<string,unknown>){setBusy(true);try{const response=await fetch('/api/work-orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const result=await response.json() as{ok?:boolean;error?:string};if(!response.ok||!result.ok)throw new Error(result.error||'Work-order action failed');setMessage('');await load();return true;}catch(e){setMessage(e instanceof Error?e.message:'Work-order action failed');return false;}finally{setBusy(false);}}
-async function createRepair(e:FormEvent){e.preventDefault();if(await post({action:'saveRepair',...repair}))setRepair(blankRepair);}async function createTechnician(e:FormEvent){e.preventDefault();if(await post({action:'saveTechnician',...technician}))setTechnician(blankTechnician);}async function createPart(e:FormEvent){e.preventDefault();if(await post({action:'savePart',...part}))setPart(blankPart);}
-function selectionFor(id:string){return selections[id]??{partId:'',quantity:1};}function updateSelection(id:string,patch:Partial<RowSelection>){setSelections(c=>({...c,[id]:{...selectionFor(id),...patch}}));}async function usePart(id:string){const s=selectionFor(id);if(!s.partId)return setMessage('Choose a part first.');if(await post({action:'usePart',repairId:id,partId:Number(s.partId),quantity:s.quantity}))updateSelection(id,{partId:'',quantity:1});}
-function laborFor(id:string){return labor[id]??{hours:'',rate:String(data?.defaultLaborRate??100),notes:''};}function updateLabor(id:string,patch:Partial<LaborDraft>){setLabor(c=>({...c,[id]:{...laborFor(id),...patch}}));}async function addLabor(item:Repair){const d=laborFor(item.id);if(!Number(d.hours))return setMessage('Enter labor hours.');const ok=await post({action:'addLabor',repairId:item.id,technicianId:item.technicianId,hours:Number(d.hours),rate:d.rate===''?undefined:Number(d.rate),notes:d.notes});if(ok)setLabor(c=>({...c,[item.id]:{hours:'',rate:String(data?.defaultLaborRate??100),notes:''}}));}
-const visibleRepairs=useMemo(()=>{const q=query.trim().toLowerCase();return(data?.repairs??[]).filter(item=>{const related=data?.dvir.find(row=>row.defectId===item.relatedGeotabDefectId);return[item.unit,item.issue,item.status,item.assignedTo,item.partsText,item.location,related?.defect??''].join(' ').toLowerCase().includes(q);});},[data,query]);const openCount=(data?.repairs??[]).filter(i=>!i.status.toLowerCase().includes('complete')).length;
-return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'42px 42px 110px',color:'#182331'}}><header style={{display:'flex',justifyContent:'space-between',gap:24,alignItems:'flex-end',flexWrap:'wrap'}}><div><p style={{margin:0,color:'#f47b20',fontSize:12,fontWeight:800,letterSpacing:'.16em'}}>SHOP OPERATIONS</p><h1 style={{margin:'8px 0 0',fontSize:34}}>Work orders</h1><p style={{color:'#6c7886'}}>Repairs, technicians, inventory parts, and labor tracking. Default labor rate: <strong>${data?.defaultLaborRate??100}/hr</strong>.</p></div><div style={{textAlign:'right'}}><strong style={{display:'block',fontSize:28}}>{openCount}</strong>open work orders</div></header>{message&&<div style={{marginTop:18,padding:12,background:'#fff8e6',border:'1px solid #f2c66d',borderRadius:9}}>{message}</div>}
-<section style={{marginTop:24,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:16}}><form onSubmit={createRepair} style={formStyle}><h2 style={formTitleStyle}>Add repair</h2><select value={repair.geotabDefectId} onChange={e=>{const id=e.target.value;const related=data?.dvir.find(r=>r.defectId===id);setRepair({...repair,geotabDefectId:id,unit:related?.asset??repair.unit});}} style={inputStyle}><option value="">Not tied to a DVIR</option>{(data?.dvir??[]).map(r=><option key={r.defectId} value={r.defectId}>{r.asset} — {r.defect}</option>)}</select><input required placeholder="Unit" value={repair.unit} onChange={e=>setRepair({...repair,unit:e.target.value})} style={inputStyle}/><input required placeholder="Repair needed" value={repair.issue} onChange={e=>setRepair({...repair,issue:e.target.value})} style={inputStyle}/><input placeholder="Location" value={repair.location} onChange={e=>setRepair({...repair,location:e.target.value})} style={inputStyle}/><button disabled={busy} style={primaryButtonStyle}>Add repair</button></form><form onSubmit={createTechnician} style={formStyle}><h2 style={formTitleStyle}>Add technician</h2><input required placeholder="Technician name" value={technician.name} onChange={e=>setTechnician({...technician,name:e.target.value})} style={inputStyle}/><input type="email" placeholder="Email" value={technician.email} onChange={e=>setTechnician({...technician,email:e.target.value})} style={inputStyle}/><input placeholder="Phone" value={technician.phone} onChange={e=>setTechnician({...technician,phone:e.target.value})} style={inputStyle}/><button disabled={busy} style={primaryButtonStyle}>Add technician</button></form><form onSubmit={createPart} style={formStyle}><h2 style={formTitleStyle}>Add part</h2><input required placeholder="Part number" value={part.partNumber} onChange={e=>setPart({...part,partNumber:e.target.value})} style={inputStyle}/><input required placeholder="Description" value={part.description} onChange={e=>setPart({...part,description:e.target.value})} style={inputStyle}/><input type="number" min="0" placeholder="On hand" value={part.quantityOnHand} onChange={e=>setPart({...part,quantityOnHand:Number(e.target.value)})} style={inputStyle}/><input placeholder="Bin / location" value={part.location} onChange={e=>setPart({...part,location:e.target.value})} style={inputStyle}/><button disabled={busy} style={primaryButtonStyle}>Add part</button></form></section>
-<section style={{marginTop:24,background:'white',border:'1px solid #dce2e7',borderRadius:12,overflow:'hidden'}}><div style={{padding:18,borderBottom:'1px solid #dce2e7',display:'flex',justifyContent:'space-between',gap:18,flexWrap:'wrap'}}><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search unit, repair, technician, part…" style={{...inputStyle,width:'min(540px,100%)'}}/><span>{visibleRepairs.length} work orders</span></div><div style={{display:'grid',gap:12,padding:16}}>{visibleRepairs.map(item=>{const selection=selectionFor(item.id),complete=item.status.toLowerCase().includes('complete'),related=data?.dvir.find(r=>r.defectId===item.relatedGeotabDefectId),ld=laborFor(item.id);return <article key={item.id} style={{border:'1px solid #e0e5e9',borderRadius:12,padding:18,background:complete?'#f7f9fa':'white'}}><div style={{display:'flex',justifyContent:'space-between',gap:16,flexWrap:'wrap'}}><div><span style={{color:'#f47b20',fontSize:12,fontWeight:800}}>UNIT {item.unit||'—'}</span><h3 style={{margin:'5px 0 4px',fontSize:20}}>{item.issue}</h3><span style={{color:'#6c7886',fontSize:13}}>{item.location||'No location'} · {item.status}</span>{item.relatedGeotabDefectId&&<div style={{marginTop:7,fontSize:12,fontWeight:700}}>Related DVIR: {related?.defect||'linked Geotab defect'}</div>}</div>{!complete&&<button disabled={busy} onClick={()=>void post({action:'completeRepair',id:item.id})} style={secondaryButtonStyle}>Complete</button>}</div>
-<div style={{marginTop:16,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:14}}><label style={labelStyle}>Technician<select value={item.technicianId??''} onChange={e=>void post({action:'assignTechnician',repairId:item.id,technicianId:e.target.value?Number(e.target.value):0})} style={inputStyle} disabled={busy||complete}><option value="">Unassigned</option>{(data?.technicians??[]).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label><div><span style={{...labelStyle,display:'block'}}>Parts used</span><div style={{display:'grid',gridTemplateColumns:'1fr 80px auto',gap:8}}><select value={selection.partId} onChange={e=>updateSelection(item.id,{partId:e.target.value})} style={inputStyle} disabled={busy||complete}><option value="">Choose part</option>{(data?.parts??[]).map(p=><option key={p.id} value={p.id} disabled={p.quantityOnHand<=0}>{p.partNumber} — {p.description} ({p.quantityOnHand})</option>)}</select><input type="number" min="0.01" step="any" value={selection.quantity} onChange={e=>updateSelection(item.id,{quantity:Number(e.target.value)})} style={inputStyle}/><button disabled={busy||complete} onClick={()=>void usePart(item.id)} style={secondaryButtonStyle}>Use part</button></div><div style={{marginTop:8}}>{item.usedParts.map((u,i)=><span key={`${u.partId}-${i}`} style={chip}>{u.partNumber} × {u.quantity}</span>)}</div></div>
-<div><span style={{...labelStyle,display:'block'}}>Labor</span><div style={{display:'grid',gridTemplateColumns:'90px 110px 1fr auto',gap:8}}><input type="number" min="0.01" max="24" step="0.25" placeholder="Hours" value={ld.hours} onChange={e=>updateLabor(item.id,{hours:e.target.value})} style={inputStyle} disabled={busy||complete}/><input type="number" min="0" step="0.01" placeholder="$/hr" value={ld.rate} onChange={e=>updateLabor(item.id,{rate:e.target.value})} style={inputStyle} disabled={busy||complete}/><input placeholder="Labor notes" value={ld.notes} onChange={e=>updateLabor(item.id,{notes:e.target.value})} style={inputStyle} disabled={busy||complete}/><button disabled={busy||complete} onClick={()=>void addLabor(item)} style={secondaryButtonStyle}>Add labor</button></div><div style={{marginTop:8,fontSize:13}}><strong>{item.laborHours.toFixed(2)} hrs · ${item.laborCost.toFixed(2)}</strong>{item.laborEntries.map(l=><div key={l.id} style={{color:'#64748b'}}>{l.laborDate} · {l.technician} · {l.hours} hr @ ${l.rate.toFixed(2)} = ${l.amount.toFixed(2)}{l.notes?` · ${l.notes}`:''}</div>)}</div></div></div></article>})}</div></section></main>}
-const formStyle={background:'white',border:'1px solid #dce2e7',borderRadius:12,padding:18,display:'grid',gap:9} as const;const formTitleStyle={margin:'0 0 3px',fontSize:18} as const;const inputStyle={width:'100%',boxSizing:'border-box',padding:'10px 11px',border:'1px solid #ccd4db',borderRadius:8,background:'white',color:'#182331'} as const;const primaryButtonStyle={border:0,borderRadius:8,padding:'11px 14px',background:'#f47b20',color:'white',fontWeight:800,cursor:'pointer'} as const;const secondaryButtonStyle={border:'1px solid #cbd3da',borderRadius:8,padding:'9px 12px',background:'#f7f9fa',color:'#182331',fontWeight:700,cursor:'pointer'} as const;const labelStyle={color:'#596674',fontSize:12,fontWeight:800} as const;const chip={display:'inline-block',padding:'5px 8px',borderRadius:999,background:'#eef2f5',fontSize:12,margin:'0 5px 5px 0'} as const;
+import { Fragment, useEffect, useMemo, useState } from "react";
+
+type UsedPart = { partId: number; partNumber: string; description: string; quantity: number };
+type LaborEntry = { id: number; technicianId: number | null; technician: string; laborDate: string; hours: number; rate: number; amount: number; notes: string };
+type Dvir = { defectId: string; asset: string; driver: string; defect: string };
+type Repair = {
+  id: string;
+  unit: string;
+  issue: string;
+  status: string;
+  partsText: string;
+  assignedTo: string;
+  technicianId: number | null;
+  location: string;
+  relatedGeotabDefectId: string;
+  usedParts: UsedPart[];
+  laborEntries: LaborEntry[];
+  laborHours: number;
+  laborRate: number;
+  laborCost: number;
+  outsideCost: number;
+};
+type WorkOrderData = { repairs: Repair[]; dvir: Dvir[]; defaultLaborRate: number; updatedAt: string };
+type StatusFilter = "all" | "open" | "completed";
+
+function isComplete(item: Repair) {
+  return item.status.toLowerCase().includes("complete");
+}
+
+function money(value: number) {
+  return value.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
+export default function WorkOrdersPage() {
+  const [data, setData] = useState<WorkOrderData | null>(null);
+  const [message, setMessage] = useState("");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+
+  async function load() {
+    const response = await fetch("/api/work-orders", { cache: "no-store" });
+    const payload = await response.json() as WorkOrderData & { error?: string };
+    if (!response.ok) throw new Error(payload.error || "Unable to load work orders.");
+    setData(payload);
+  }
+
+  useEffect(() => {
+    void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Unable to load work orders."));
+  }, []);
+
+  const visibleRepairs = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return (data?.repairs ?? []).filter((item) => {
+      if (statusFilter === "open" && isComplete(item)) return false;
+      if (statusFilter === "completed" && !isComplete(item)) return false;
+      const related = data?.dvir.find((row) => row.defectId === item.relatedGeotabDefectId);
+      if (!needle) return true;
+      return [item.unit, item.issue, item.status, item.assignedTo, item.partsText, item.location, related?.defect ?? "", ...item.usedParts.flatMap((part) => [part.partNumber, part.description])].join(" ").toLowerCase().includes(needle);
+    });
+  }, [data, query, statusFilter]);
+
+  const totals = useMemo(() => {
+    const repairs = data?.repairs ?? [];
+    const open = repairs.filter((item) => !isComplete(item)).length;
+    const completed = repairs.length - open;
+    const laborHours = repairs.reduce((sum, item) => sum + Number(item.laborHours || 0), 0);
+    const recordedCost = repairs.reduce((sum, item) => sum + Number(item.laborCost || 0) + Number(item.outsideCost || 0), 0);
+    return { total: repairs.length, open, completed, laborHours, recordedCost };
+  }, [data]);
+
+  function toggle(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "30px 34px 80px", color: "#182331" }}>
+      <header style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>WORK ORDER REVIEW</p>
+          <h1 style={{ margin: "6px 0 0", fontSize: 31 }}>Review work orders</h1>
+          <p style={{ margin: "7px 0 0", color: "#64748b", maxWidth: 850, fontSize: 13 }}>
+            Read-only review. Technicians assign parts, record labor, and complete repairs from Shop Jobs as they work. This screen is only for reviewing the resulting work order record.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 7 }}>
+          <a href="/repair-board" style={linkButtonStyle}>Repair Board</a>
+          <button type="button" onClick={() => void load()} style={buttonStyle}>Refresh</button>
+        </div>
+      </header>
+
+      {message && <div style={{ marginTop: 12, padding: 10, background: "#fff8e6", border: "1px solid #f2c66d", fontSize: 12 }}>{message}</div>}
+
+      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(5,minmax(120px,1fr))", border: "1px solid #cfd6db", background: "white" }}>
+        <Metric label="Open" value={String(totals.open)} />
+        <Metric label="Completed" value={String(totals.completed)} />
+        <Metric label="Total records" value={String(totals.total)} />
+        <Metric label="Labor hours" value={totals.laborHours.toFixed(2)} />
+        <Metric label="Labor + outside" value={money(totals.recordedCost)} last />
+      </section>
+
+      <section style={{ marginTop: 12, border: "1px solid #cfd6db", background: "white" }}>
+        <div style={{ padding: 10, borderBottom: "1px solid #dce2e7", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, technician, part, DVIR..." style={{ ...inputStyle, flex: 1, minWidth: 280 }} />
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} style={{ ...inputStyle, width: 155 }}>
+            <option value="all">All work orders</option>
+            <option value="open">Open only</option>
+            <option value="completed">Completed only</option>
+          </select>
+          <span style={{ color: "#6c7886", fontSize: 11, minWidth: 95, textAlign: "right" }}>{visibleRepairs.length} shown</span>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1050 }}>
+            <thead>
+              <tr style={{ background: "#eef1f2", color: "#5b6770", fontSize: 9, letterSpacing: ".05em", textTransform: "uppercase", textAlign: "left" }}>
+                <th style={thStyle}>Unit</th><th style={thStyle}>Repair</th><th style={thStyle}>Status</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Parts</th><th style={thStyle}>Labor</th><th style={thStyle}>Cost</th><th style={thStyle}>Review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRepairs.map((item) => {
+                const complete = isComplete(item);
+                const open = expanded.has(item.id);
+                const related = data?.dvir.find((row) => row.defectId === item.relatedGeotabDefectId);
+                return (
+                  <Fragment key={item.id}>
+                    <tr style={{ borderTop: "1px solid #e7ebee", background: complete ? "#f8faf9" : "white" }}>
+                      <td style={{ ...tdStyle, fontWeight: 900, color: "#0d1b2b" }}>{item.unit || "—"}</td>
+                      <td style={tdStyle}><strong style={{ color: "#263746" }}>{item.issue}</strong>{related && <small style={{ display: "block", marginTop: 2, color: "#8b5d09" }}>DVIR: {related.defect}</small>}</td>
+                      <td style={tdStyle}><span style={{ display: "inline-flex", padding: "3px 7px", border: `1px solid ${complete ? "#9fcab4" : "#c7ced2"}`, background: complete ? "#e9f6ef" : "#f2f4f5", color: complete ? "#176440" : "#53616d", fontSize: 10, fontWeight: 900 }}>{item.status}</span></td>
+                      <td style={tdStyle}>{item.assignedTo || "Unassigned"}</td>
+                      <td style={tdStyle}>{item.location || "—"}</td>
+                      <td style={tdStyle}>{item.usedParts.length ? `${item.usedParts.length} line${item.usedParts.length === 1 ? "" : "s"}` : item.partsText || "—"}</td>
+                      <td style={tdStyle}>{item.laborHours.toFixed(2)} hr</td>
+                      <td style={tdStyle}>{money(Number(item.laborCost || 0) + Number(item.outsideCost || 0))}</td>
+                      <td style={tdStyle}><button type="button" onClick={() => toggle(item.id)} style={buttonStyle}>{open ? "Close" : "Review"}</button></td>
+                    </tr>
+                    {open && (
+                      <tr style={{ borderTop: "1px solid #e7ebee", background: "#fafbfc" }}>
+                        <td colSpan={9} style={{ padding: 12 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(160px,1fr))", gap: 10 }}>
+                            <Detail label="Work order" value={item.id} />
+                            <Detail label="Technician" value={item.assignedTo || "Unassigned"} />
+                            <Detail label="Labor" value={`${item.laborHours.toFixed(2)} hr · ${money(item.laborCost)}`} />
+                            <Detail label="Outside cost" value={money(item.outsideCost)} />
+                            {related && <Detail label="Related DVIR" value={`${related.asset} · ${related.defect}`} />}
+                            <Detail label="Parts summary" value={item.partsText || "No part summary"} />
+                          </div>
+
+                          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "minmax(280px,1fr) minmax(420px,2fr)", gap: 12 }}>
+                            <div style={{ border: "1px solid #e0e5e8", background: "white" }}>
+                              <div style={subheadStyle}>Parts used</div>
+                              {item.usedParts.length ? item.usedParts.map((part, index) => <div key={`${part.partId}-${index}`} style={{ display: "grid", gridTemplateColumns: "100px 1fr auto", gap: 8, padding: "7px 9px", borderTop: "1px solid #edf0f2", fontSize: 11 }}><strong>{part.partNumber}</strong><span>{part.description}</span><span>× {part.quantity}</span></div>) : <div style={emptyStyle}>No parts recorded.</div>}
+                            </div>
+                            <div style={{ border: "1px solid #e0e5e8", background: "white" }}>
+                              <div style={subheadStyle}>Labor entries</div>
+                              {item.laborEntries.length ? item.laborEntries.map((entry) => <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "95px 130px 80px 100px 1fr", gap: 8, padding: "7px 9px", borderTop: "1px solid #edf0f2", fontSize: 11 }}><span>{entry.laborDate}</span><strong>{entry.technician}</strong><span>{entry.hours} hr</span><span>{money(entry.amount)}</span><span style={{ color: "#64748b" }}>{entry.notes || "—"}</span></div>) : <div style={emptyStyle}>No labor entries recorded.</div>}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+          {!visibleRepairs.length && <div style={{ padding: 24, color: "#64748b", textAlign: "center", fontSize: 12 }}>No work orders match this search/filter.</div>}
+        </div>
+      </section>
+
+      <footer style={{ marginTop: 9, color: "#74808a", fontSize: 10, textAlign: "right" }}>{data ? `Read-only snapshot updated ${new Date(data.updatedAt).toLocaleString()}` : "Loading work order review..."}</footer>
+    </main>
+  );
+}
+
+function Metric({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
+  return <article style={{ minHeight: 64, padding: "10px 12px", borderRight: last ? 0 : "1px solid #dce2e7" }}><span style={{ display: "block", color: "#6f7b84", fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".05em" }}>{label}</span><strong style={{ display: "block", marginTop: 4, color: "#0d1b2b", fontSize: 21 }}>{value}</strong></article>;
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return <div><span style={{ display: "block", color: "#74808a", fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</span><strong style={{ display: "block", marginTop: 2, fontSize: 11, color: "#263746" }}>{value}</strong></div>;
+}
+
+const inputStyle = { minHeight: 34, padding: "6px 8px", border: "1px solid #c7ced3", borderRadius: 4, background: "white", color: "#263746" } as const;
+const buttonStyle = { minHeight: 30, padding: "0 9px", border: "1px solid #bcc5cb", borderRadius: 4, background: "white", color: "#263746", fontSize: 10, fontWeight: 900 } as const;
+const linkButtonStyle = { ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" } as const;
+const thStyle = { padding: "7px 8px", borderRight: "1px solid #d7dde1" } as const;
+const tdStyle = { padding: "8px", fontSize: 11, verticalAlign: "middle" } as const;
+const subheadStyle = { padding: "7px 9px", background: "#eef1f2", color: "#59656e", fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" } as const;
+const emptyStyle = { padding: 10, borderTop: "1px solid #edf0f2", color: "#7a858d", fontSize: 11 } as const;
