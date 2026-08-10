@@ -152,8 +152,10 @@ export default function PmSchedulesPage() {
     if (!selected.length) return setMessage("Check the units you want to categorize first.");
     if (!assignCategory) return setMessage("Choose a category first.");
     const count = selected.length;
-    void post({ action: "assignCategory", equipmentIds: selected, category: assignCategory },
-      `${count} unit${count === 1 ? "" : "s"} assigned to ${assignCategory}${assignCategory === "Trailers" ? " / Trailer Service" : ""} and inherited its maintenance rule.`);
+    const success = assignCategory === "Trailers"
+      ? `${count} trailer${count === 1 ? "" : "s"} assigned to Trailers. The saved Trailer Service rule was applied.`
+      : `${count} unit${count === 1 ? "" : "s"} assigned to ${assignCategory} and inherited its maintenance rule.`;
+    void post({ action: "assignCategory", equipmentIds: selected, category: assignCategory }, success);
     setSelected([]);
   }
 
@@ -242,7 +244,7 @@ export default function PmSchedulesPage() {
                 <h2 style={{ margin: 0, fontSize: 19 }}>{category}</h2>
                 <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eef2f5", fontSize: 12, fontWeight: 800 }}>{categoryCounts.get(category) ?? 0} units</span>
               </div>
-              {trailer && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Trailer Service is the PM option for this group.</p>}
+              {trailer && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Trailer Service is the PM rule used by the Trailers group.</p>}
               <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
                 <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 800 }}>PM option
                   <select value={rule.profileId} onChange={(event) => updateDraft(category, { profileId: event.target.value })} style={{ padding: 9 }}>
@@ -275,13 +277,13 @@ export default function PmSchedulesPage() {
           <div>
             <h2 style={{ margin: 0, fontSize: 20 }}>Assign categories</h2>
             <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Trucks and trailers can both be checked. For trailers choose Trailers / Trailer Service; they inherit the saved Trailers rule.
+              Trucks and trailers can both be checked. The group name is Trailers; Trailer Service is the PM rule assigned to that group.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <select value={assignCategory} onChange={(event) => setAssignCategory(event.target.value)} style={{ padding: 9 }}>
               <option value="">Choose category</option>
-              {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value === "Trailers" ? "Trailers / Trailer Service" : value}</option>)}
+              {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
             <button type="button" disabled={saving || !selected.length} onClick={assignSelected} style={{ padding: "9px 13px", fontWeight: 800 }}>Assign {selected.length || 0} checked</button>
             <button type="button" disabled={!selected.length} onClick={() => setSelected([])}>Clear</button>
