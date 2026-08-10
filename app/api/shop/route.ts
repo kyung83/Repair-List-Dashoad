@@ -96,6 +96,73 @@ export async function POST(request: Request) {
     const action = String(body.action ?? '');
     const technician = await requireTechnician(user);
 
+    if (action === 'openRepair') {
+      const id = repairId(body.repairId);
+      const existing = await env.DB.prepare('SELECT repair_id FROM repair_labor_timers WHERE user_id = ?')
+        .bind(user.id)
+        .first<{ repair_id: number }>();
+      if (existing) {
+        if (existing.repair_id === id) return Response.json({ ok: true, repairId: `repair-${id}`, alreadyRunning: true });
+        throw new Error(`You already have labor running on repair #${existing.repair_id}. Stop that timer before opening another job.`);
+      }
+
+      const repair = await env.DB.prepare('SELECT id, technician_id, status FROM repairs WHERE id = ?')
+        .bind(id)
+        .first<{ id: number; technician_id: number | null; status: string }>();
+      if (!repair) throw new Error('Repair was not found.');
+      if (String(repair.status ?? '').toLowerCase().includes('complete')) throw new Error('Completed repairs cannot be opened for labor.');
+      if (repair.technician_id !== null && Number(repair.technician_id) !== technician.id) {
+        throw new Error('That job is assigned to another technician.');
+      }
+
+      const wasUnassigned = repair.technician_id === null;
+      const notes = String(body.notes ?? '').trim().slice(0, 500);
+      const results = await env.DB.batch([
+        env.DB.prepare(`
+          UPDATE repairs
+          SET technician_id = ?, driver = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+            AND (technician_id IS NULL OR technician_id = ?)
+            AND lower(COALESCE(status, '')) NOT LIKE '%complete%'
+        `).bind(technician.id, technician.name, id, technician.id),
+        env.DB.prepare(`
+          INSERT INTO repair_labor_timers (user_id, repair_id, technician_id, notes)
+          SELECT ?, r.id, ?, ?
+          FROM repairs r
+          WHERE r.id = ?
+            AND r.technician_id = ?
+            AND lower(COALESCE(r.status, '')) NOT LIKE '%complete%'
+        `).bind(user.id, technician.id, notes, id, technician.id),
+        env.DB.prepare(`
+          INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+          SELECT ?, ?, ?, 'claimed', ?
+          WHERE ? = 1
+            AND EXISTS (
+              SELECT 1 FROM repair_labor_timers WHERE user_id = ? AND repair_id = ?
+            )
+        `).bind(id, user.id, technician.id, `${technician.name} opened and grabbed the job.`, wasUnassigned ? 1 : 0, user.id, id),
+        env.DB.prepare(`
+          INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+          SELECT ?, ?, ?, 'labor_started', ?
+          WHERE EXISTS (
+            SELECT 1 FROM repair_labor_timers WHERE user_id = ? AND repair_id = ?
+          )
+        `).bind(id, user.id, technician.id, `${technician.name} opened the job and labor started automatically.`, user.id, id),
+      ]);
+
+      if (Number(results[1]?.meta.changes ?? 0) === 0) {
+        const current = await env.DB.prepare('SELECT technician_id, status FROM repairs WHERE id = ?')
+          .bind(id)
+          .first<{ technician_id: number | null; status: string }>();
+        if (!current) throw new Error('Repair was not found.');
+        if (String(current.status ?? '').toLowerCase().includes('complete')) throw new Error('That repair has already been completed.');
+        if (Number(current.technician_id ?? 0) !== technician.id) throw new Error('That job was grabbed or assigned to another technician.');
+        throw new Error('Labor could not be started for that repair.');
+      }
+
+      return Response.json({ ok: true, repairId: `repair-${id}`, claimed: wasUnassigned, laborStarted: true });
+    }
+
     if (action === 'claimRepair') {
       const id = repairId(body.repairId);
       const result = await env.DB.prepare(`
