@@ -6,7 +6,9 @@ import styles from "./repair-board.module.css";
 type Role = "viewer" | "mechanic" | "manager" | "admin";
 type Source = "repair" | "dvir" | "dvir-repair" | "pm" | "annual" | "pm-repair" | "annual-repair";
 type ShopView = "clare" | "cadillac" | "all";
+type RepairMode = "equipment" | "freeform";
 type Technician = { id: number; name: string };
+type EquipmentOption = { id: number; unit: string; equipmentType: string; driver: string; location: string };
 type Timer = { startedAt: string; technician: string };
 type RepairRow = {
   id: string;
@@ -47,12 +49,13 @@ type BoardData = {
   user: { id: number; username: string; displayName: string; role: Role; technicianId: number | null };
   canManage: boolean;
   technicians: Technician[];
+  equipment: EquipmentOption[];
   repairs: RepairRow[];
   oosUnits: OosUnit[];
   summary: { total: number; oos: number; trucks: number; trailers: number; dvirOpen: number; maintenanceDue: number; unassigned: number; activeLabor: number };
   updatedAt: string;
 };
-type ChangeResult = { ok?: boolean; error?: string };
+type ChangeResult = { ok?: boolean; error?: string; unit?: string; repairId?: string };
 type UnitGroup = {
   key: string;
   unit: string;
@@ -62,8 +65,30 @@ type UnitGroup = {
   driver: string;
   rows: RepairRow[];
 };
+type RepairDraft = {
+  mode: RepairMode;
+  equipmentId: string;
+  unit: string;
+  equipmentType: "truck" | "trailer" | "other";
+  location: string;
+  issue: string;
+  parts: string;
+  priority: number;
+  technicianId: string;
+};
 
 const statuses = ["New", "Assigned", "Waiting for Parts", "In Progress", "Completed"];
+const blankRepairDraft: RepairDraft = {
+  mode: "equipment",
+  equipmentId: "",
+  unit: "",
+  equipmentType: "other",
+  location: "",
+  issue: "",
+  parts: "",
+  priority: 2,
+  technicianId: "",
+};
 
 function sourceLabel(source: Source) {
   if (source === "dvir") return "DVIR";
@@ -186,6 +211,8 @@ export default function RepairBoardPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() => new Set());
   const [expandedRepairId, setExpandedRepairId] = useState<string | null>(null);
+  const [showAddRepair, setShowAddRepair] = useState(false);
+  const [newRepair, setNewRepair] = useState<RepairDraft>(blankRepairDraft);
 
   async function load() {
     const response = await fetch("/api/repair-board", { cache: "no-store" });
@@ -214,6 +241,52 @@ export default function RepairBoardPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Repair-board change failed.");
       return false;
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function createBoardRepair() {
+    if (newRepair.mode === "equipment" && !newRepair.equipmentId) {
+      setMessage("Choose the equipment this repair belongs to.");
+      return;
+    }
+    if (newRepair.mode === "freeform" && !newRepair.unit.trim()) {
+      setMessage("Enter a unit or equipment name for the freeform repair.");
+      return;
+    }
+    if (!newRepair.issue.trim()) {
+      setMessage("Enter the repair needed.");
+      return;
+    }
+    setBusyId("create-repair");
+    setMessage("");
+    try {
+      const response = await fetch("/api/repair-board", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "createRepair",
+          mode: newRepair.mode,
+          equipmentId: newRepair.mode === "equipment" ? Number(newRepair.equipmentId) : 0,
+          unit: newRepair.unit,
+          equipmentType: newRepair.equipmentType,
+          location: newRepair.location,
+          issue: newRepair.issue,
+          parts: newRepair.parts,
+          priority: newRepair.priority,
+          technicianId: newRepair.technicianId ? Number(newRepair.technicianId) : 0,
+        }),
+      });
+      const result = await response.json() as ChangeResult;
+      if (!response.ok || !result.ok) throw new Error(result.error || "Repair could not be added.");
+      await load();
+      setShopView("all");
+      setShowAddRepair(false);
+      setNewRepair(blankRepairDraft);
+      setMessage(`Repair added${result.unit ? ` to Unit ${result.unit}` : ""}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Repair could not be added.");
     } finally {
       setBusyId(null);
     }
@@ -457,6 +530,28 @@ export default function RepairBoardPage() {
                 {driver && <div><span>Driver</span><strong>{driver}</strong></div>}
                 <div><span>Labor</span><strong>{row.laborHours.toFixed(2)} hr</strong></div>
                 <div><span>Assigned</span><strong>{row.assignedTo || "Unassigned"}</strong></div>
+                {data?.canManage && row.source === "repair" && (
+                  <div>
+                    <span>Move to Unit</span>
+                    <select
+                      className={styles.techSelect}
+                      value={row.equipmentId ?? ""}
+                      disabled={busy}
+                      onChange={(event) => {
+                        const equipmentId = Number(event.target.value);
+                        const equipment = data.equipment.find((item) => item.id === equipmentId);
+                        if (equipmentId > 0 && equipmentId !== row.equipmentId) {
+                          void change(row.id, { action: "moveRepairToEquipment", equipmentId }).then((ok) => {
+                            if (ok) setMessage(`Repair moved to Unit ${equipment?.unit ?? "selected equipment"}.`);
+                          });
+                        }
+                      }}
+                    >
+                      <option value="">Choose equipment…</option>
+                      {data.equipment.map((item) => <option key={item.id} value={item.id}>{item.unit} — {equipmentGroup(item.equipmentType).toUpperCase()}{item.location ? ` — ${item.location}` : ""}</option>)}
+                    </select>
+                  </div>
+                )}
                 {row.dvirPhotos && <div><span>DVIR Photos</span><a href={row.dvirPhotos} target="_blank" rel="noreferrer">View photos</a></div>}
               </div>
             </td>
@@ -557,12 +652,76 @@ export default function RepairBoardPage() {
           <p className={styles.subtitle}>All open repairs, DVIRs, PMs, and annuals are shown by default. Clare work stays pinned first; use the shop tabs when you want a location-only view.</p>
         </div>
         <div className={styles.headerActions}>
+          {data?.canManage && <button className={styles.primaryLink} style={{ cursor: "pointer" }} onClick={() => setShowAddRepair((current) => !current)}>{showAddRepair ? "Close Add Repair" : "+ Add Repair"}</button>}
           <button className={styles.refresh} onClick={() => void load()}>Refresh</button>
           <a className={styles.primaryLink} href="/work-orders">Full Work Orders</a>
         </div>
       </header>
 
       {message && <div className={styles.notice}>{message}</div>}
+
+      {showAddRepair && data?.canManage && (
+        <section style={{ margin: "4px 0 12px", border: "2px solid #d87816", background: "#fffaf2", padding: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+            <div><strong style={{ fontSize: 14 }}>Add Repair</strong><div style={{ marginTop: 2, color: "#6b7280", fontSize: 10 }}>Choose existing equipment whenever it is already in the fleet. That attaches the repair to the exact unit and keeps every repair grouped together.</div></div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 8 }}>
+            <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>EQUIPMENT SOURCE
+              <select className={styles.techSelect} value={newRepair.mode} onChange={(event) => setNewRepair((current) => ({ ...current, mode: event.target.value as RepairMode, equipmentId: "" }))}>
+                <option value="equipment">Existing Equipment</option>
+                <option value="freeform">Freeform / Other Equipment</option>
+              </select>
+            </label>
+            {newRepair.mode === "equipment" ? (
+              <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>UNIT / EQUIPMENT
+                <select className={styles.techSelect} value={newRepair.equipmentId} onChange={(event) => setNewRepair((current) => ({ ...current, equipmentId: event.target.value }))}>
+                  <option value="">Choose equipment…</option>
+                  {data.equipment.map((item) => <option key={item.id} value={item.id}>{item.unit} — {equipmentGroup(item.equipmentType).toUpperCase()}{item.location ? ` — ${item.location}` : ""}</option>)}
+                </select>
+              </label>
+            ) : (
+              <>
+                <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>UNIT / NAME
+                  <input className={styles.techSelect} value={newRepair.unit} onChange={(event) => setNewRepair((current) => ({ ...current, unit: event.target.value }))} placeholder="454(SC), forklift, plow truck…" />
+                </label>
+                <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>EQUIPMENT TYPE
+                  <select className={styles.techSelect} value={newRepair.equipmentType} onChange={(event) => setNewRepair((current) => ({ ...current, equipmentType: event.target.value as RepairDraft["equipmentType"] }))}>
+                    <option value="other">Other Equipment</option>
+                    <option value="truck">Truck</option>
+                    <option value="trailer">Trailer</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>LOCATION
+                  <input className={styles.techSelect} value={newRepair.location} onChange={(event) => setNewRepair((current) => ({ ...current, location: event.target.value }))} placeholder="Clare, Cadillac, road…" />
+                </label>
+              </>
+            )}
+            <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>REPAIR NEEDED
+              <input className={styles.techSelect} value={newRepair.issue} onChange={(event) => setNewRepair((current) => ({ ...current, issue: event.target.value }))} placeholder="Describe the repair" />
+            </label>
+            <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>PARTS NEEDED
+              <input className={styles.techSelect} value={newRepair.parts} onChange={(event) => setNewRepair((current) => ({ ...current, parts: event.target.value }))} placeholder="Optional" />
+            </label>
+            <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>PRIORITY
+              <select className={styles.techSelect} value={newRepair.priority} onChange={(event) => setNewRepair((current) => ({ ...current, priority: Number(event.target.value) }))}>
+                <option value={1}>P1 — High</option>
+                <option value={2}>P2 — Normal</option>
+                <option value={3}>P3 — Low</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 9, fontWeight: 900, color: "#59646c" }}>ASSIGN TECH
+              <select className={styles.techSelect} value={newRepair.technicianId} onChange={(event) => setNewRepair((current) => ({ ...current, technicianId: event.target.value }))}>
+                <option value="">Unassigned</option>
+                {data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 7, justifyContent: "flex-end" }}>
+            <button className={styles.refresh} disabled={busyId === "create-repair"} onClick={() => { setShowAddRepair(false); setNewRepair(blankRepairDraft); }}>Cancel</button>
+            <button className={styles.primaryLink} style={{ cursor: "pointer" }} disabled={busyId === "create-repair"} onClick={() => void createBoardRepair()}>{busyId === "create-repair" ? "Adding…" : "Add Repair"}</button>
+          </div>
+        </section>
+      )}
 
       <nav className={styles.shopTabs} aria-label="Shop view">
         <button className={shopView === "all" ? styles.activeShopTab : ""} onClick={() => setShopView("all")}><span>All Shops</span><b>{shopCounts.all}</b></button>
