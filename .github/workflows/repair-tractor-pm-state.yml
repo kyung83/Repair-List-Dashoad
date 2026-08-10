@@ -1,0 +1,189 @@
+name: Repair Tractor PM State
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - .github/workflows/repair-tractor-pm-state.yml
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check authorization
+        run: test -n "${CLOUDFLARE_API_TOKEN:-}"
+      - name: Repair and verify tractor PM state
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          function normalizeToken(raw) {
+            return String(raw || '').trim().replace(/^CLOUDFLARE_API_TOKEN=/, '').replace(/^Bearer\s*/i, '').replace(/^"|"$/g, '');
+          }
+          const token = normalizeToken(process.env.CLOUDFLARE_API_TOKEN);
+          async function api(path, options = {}) {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              ...options,
+              headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(options.headers || {}) },
+            });
+            const body = await response.json();
+            if (!response.ok || body.success === false) throw new Error((body.errors || []).map((e) => e.message || e.code).join('; ') || response.statusText);
+            return body.result;
+          }
+          async function findDb() {
+            const accounts = await api('/accounts?per_page=50');
+            for (const account of accounts || []) {
+              const dbs = await api(`/accounts/${encodeURIComponent(account.id)}/d1/database?per_page=100`);
+              const db = (dbs || []).find((candidate) => candidate.name === 'norlow-repair-production');
+              if (db) return { accountId: account.id, databaseId: db.uuid || db.id };
+            }
+            throw new Error('Production D1 database not found.');
+          }
+          (async () => {
+            const { accountId, databaseId } = await findDb();
+            const url = `/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}/query`;
+            async function query(sql, params = []) {
+              const result = await api(url, { method: 'POST', body: JSON.stringify({ sql, params }) });
+              return result?.[0]?.results || result?.results || [];
+            }
+
+            const syntheticBefore = await query(`
+              SELECT COUNT(*) AS count
+              FROM equipment e
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              WHERE e.active = 1
+                AND e.category = 'Tractors'
+                AND ps.status = 'Scheduled'
+                AND ps.service_date = '2026-08-10'
+                AND e.service_date IS NULL
+                AND NOT EXISTS (
+                  SELECT 1 FROM maintenance_events me
+                  WHERE me.equipment_id = e.id AND me.event_type = 'pm'
+                )
+            `);
+
+            await query(`
+              UPDATE pm_status
+              SET service_date = NULL,
+                  last_mileage = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE equipment_id IN (
+                SELECT e.id
+                FROM equipment e
+                WHERE e.active = 1
+                  AND e.category = 'Tractors'
+                  AND e.service_date IS NULL
+                  AND EXISTS (
+                    SELECT 1 FROM pm_status ps2
+                    WHERE ps2.equipment_id = e.id
+                      AND ps2.status = 'Scheduled'
+                      AND ps2.service_date = '2026-08-10'
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM maintenance_events me
+                    WHERE me.equipment_id = e.id AND me.event_type = 'pm'
+                  )
+              )
+            `);
+
+            const eventBacked = await query(`
+              SELECT e.id,
+                     (
+                       SELECT me.pm_type
+                       FROM maintenance_events me
+                       WHERE me.equipment_id = e.id
+                         AND me.event_type = 'pm'
+                         AND me.pm_type IN ('40', '20A', '20B')
+                       ORDER BY me.event_date DESC, me.id DESC
+                       LIMIT 1
+                     ) AS last_pm_type
+              FROM equipment e
+              JOIN equipment_pm_settings s ON s.equipment_id = e.id
+              JOIN pm_profiles p ON p.id = s.profile_id
+              WHERE e.active = 1
+                AND e.category = 'Tractors'
+                AND p.name = 'Rotating 40-20A-20B'
+            `);
+
+            let repairedSequence = 0;
+            for (const row of eventBacked) {
+              const last = String(row.last_pm_type || '');
+              if (!last) continue;
+              const next = last === '40' ? '20A' : last === '20A' ? '20B' : '40';
+              await query(`
+                UPDATE pm_status
+                SET pm_type = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE equipment_id = ?
+              `, [next, Number(row.id)]);
+              repairedSequence += 1;
+            }
+
+            const verify = await query(`
+              SELECT COUNT(*) AS mismatches
+              FROM equipment e
+              JOIN equipment_pm_settings s ON s.equipment_id = e.id
+              JOIN pm_profiles p ON p.id = s.profile_id
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              WHERE e.active = 1
+                AND e.category = 'Tractors'
+                AND p.name = 'Rotating 40-20A-20B'
+                AND EXISTS (
+                  SELECT 1 FROM maintenance_events me
+                  WHERE me.equipment_id = e.id
+                    AND me.event_type = 'pm'
+                    AND me.pm_type IN ('40', '20A', '20B')
+                )
+                AND ps.pm_type <> CASE (
+                  SELECT me.pm_type
+                  FROM maintenance_events me
+                  WHERE me.equipment_id = e.id
+                    AND me.event_type = 'pm'
+                    AND me.pm_type IN ('40', '20A', '20B')
+                  ORDER BY me.event_date DESC, me.id DESC
+                  LIMIT 1
+                )
+                  WHEN '40' THEN '20A'
+                  WHEN '20A' THEN '20B'
+                  WHEN '20B' THEN '40'
+                END
+            `);
+
+            const syntheticAfter = await query(`
+              SELECT COUNT(*) AS count
+              FROM equipment e
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              WHERE e.active = 1
+                AND e.category = 'Tractors'
+                AND ps.service_date = '2026-08-10'
+                AND e.service_date IS NULL
+                AND NOT EXISTS (
+                  SELECT 1 FROM maintenance_events me
+                  WHERE me.equipment_id = e.id AND me.event_type = 'pm'
+                )
+            `);
+
+            const distribution = await query(`
+              SELECT COALESCE(ps.pm_type, '(blank)') AS next_pm, COUNT(*) AS count
+              FROM equipment e
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              WHERE e.active = 1 AND e.category = 'Tractors'
+              GROUP BY COALESCE(ps.pm_type, '(blank)')
+              ORDER BY next_pm
+            `);
+
+            const before = Number(syntheticBefore?.[0]?.count || 0);
+            const after = Number(syntheticAfter?.[0]?.count || 0);
+            const mismatches = Number(verify?.[0]?.mismatches || 0);
+            if (before !== 10) throw new Error(`Expected 10 synthetic tractor baselines, found ${before}.`);
+            if (after !== 0) throw new Error(`Synthetic tractor baselines remain: ${after}.`);
+            if (mismatches !== 0) throw new Error(`Tractor PM sequence verification failed: ${mismatches} mismatch(es).`);
+            console.log(`TRACTOR_PM_REPAIR=syntheticCleared=${before},sequenceRestored=${repairedSequence},mismatches=${mismatches},distribution=${JSON.stringify(distribution)}`);
+          })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
+          NODE
