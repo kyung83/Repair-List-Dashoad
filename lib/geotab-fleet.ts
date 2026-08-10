@@ -1,4 +1,5 @@
 import { geotabProtectedConfig } from './geotab-protected-config';
+import { buildTrailerGroupIds, entityBelongsToTrailerGroup } from './geotab-group-classification';
 import { refreshMissingVinMetadata } from './vin-decoder';
 import type { GeotabEnv } from './geotab';
 
@@ -147,11 +148,23 @@ async function currentOdometers(auth: Auth) {
   return milesByDevice;
 }
 
+async function currentGroups(auth: Auth) {
+  try {
+    return await call<JsonRecord[]>(auth, 'Get', { typeName: 'Group' });
+  } catch (error) {
+    // A group lookup failure should not take the fleet offline or erase a prior
+    // trailer classification. Preserve the stored asset class until a later run.
+    console.error(JSON.stringify({ event: 'geotab_group_sync_failed', error: String(error) }));
+    return null;
+  }
+}
+
 export async function syncGeotabFleetMaster(env: GeotabEnv) {
   const auth = await authenticate(env);
-  const [devices, odometers] = await Promise.all([
+  const [devices, odometers, groups] = await Promise.all([
     call<JsonRecord[]>(auth, 'Get', { typeName: 'Device' }),
     currentOdometers(auth),
+    currentGroups(auth),
   ]);
 
   if (!devices.length) throw new Error('Geotab returned no devices; refusing to change active fleet state.');
@@ -160,6 +173,8 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     return id && id.toLowerCase() !== 'nodeviceid' && isCurrentlyActiveDevice(device);
   });
   if (!activeDevices.length) throw new Error('Geotab returned no currently active devices; refusing to deactivate the fleet.');
+
+  const trailerGroupIds = groups ? buildTrailerGroupIds(groups) : new Set<string>();
 
   // Geotab keeps historical devices in the Device collection. Reset Device-only
   // rows to inactive first, then reactivate only current Devices. A unit with a
@@ -174,6 +189,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
 
   const statements: D1PreparedStatement[] = [];
   let vehicles = 0;
+  let trailerDevices = 0;
   let mileageUpdates = 0;
 
   for (const device of activeDevices) {
@@ -181,22 +197,31 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     const unit = text(get(device, 'name', 'Name')).trim();
     if (!id || !unit) continue;
 
+    const groupAssetClass = groups
+      ? (entityBelongsToTrailerGroup(device, trailerGroupIds) ? 'trailer' : 'vehicle')
+      : null;
+    const incomingType = groupAssetClass === 'trailer' ? 'trailer' : 'truck';
+    if (groupAssetClass === 'trailer') trailerDevices += 1;
+    else vehicles += 1;
+
     const vin = text(get(device, 'vehicleIdentificationNumber', 'VehicleIdentificationNumber')).trim().toUpperCase() || null;
     const plate = text(get(device, 'licensePlate', 'LicensePlate')).trim() || null;
     const plateState = text(get(device, 'licenseState', 'LicenseState')).trim() || null;
     const mileage = odometers.get(id) ?? null;
     if (mileage != null) mileageUpdates += 1;
-    vehicles += 1;
 
     statements.push(env.DB.prepare(`
       INSERT INTO equipment (
-        unit, category, equipment_type, geotab_device_id, vin, license_plate, license_state,
-        current_mileage, mileage_updated_at, active, updated_at
-      ) VALUES (?, 'fleet', 'truck', ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, 1, CURRENT_TIMESTAMP)
+        unit, category, equipment_type, geotab_device_id, geotab_asset_class,
+        vin, license_plate, license_state, current_mileage, mileage_updated_at, active, updated_at
+      ) VALUES (?, 'fleet', ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, 1, CURRENT_TIMESTAMP)
       ON CONFLICT(unit) DO UPDATE SET
+        geotab_asset_class = COALESCE(excluded.geotab_asset_class, equipment.geotab_asset_class),
         equipment_type = CASE
           WHEN equipment.geotab_trailer_id IS NOT NULL AND TRIM(equipment.geotab_trailer_id) <> '' THEN 'trailer'
-          ELSE 'truck'
+          WHEN COALESCE(excluded.geotab_asset_class, equipment.geotab_asset_class) = 'trailer' THEN 'trailer'
+          WHEN COALESCE(excluded.geotab_asset_class, equipment.geotab_asset_class) = 'vehicle' THEN 'truck'
+          ELSE equipment.equipment_type
         END,
         geotab_device_id = excluded.geotab_device_id,
         model_year = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.model_year END,
@@ -212,7 +237,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
         mileage_updated_at = CASE WHEN excluded.current_mileage IS NULL THEN equipment.mileage_updated_at ELSE CURRENT_TIMESTAMP END,
         active = 1,
         updated_at = CURRENT_TIMESTAMP
-    `).bind(unit, id, vin, plate, plateState, mileage, mileage));
+    `).bind(unit, incomingType, id, groupAssetClass, vin, plate, plateState, mileage, mileage));
   }
 
   for (let index = 0; index < statements.length; index += 75) {
@@ -230,6 +255,9 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     ok: true,
     receivedDevices: devices.length,
     activeVehicles: vehicles,
+    activeTrailerDevices: trailerDevices,
+    trailerGroupCount: trailerGroupIds.size,
+    groupCatalogAvailable: Boolean(groups),
     historicalDevicesIgnored: Math.max(0, devices.length - activeDevices.length),
     mileageUpdates,
     vinDecode,
