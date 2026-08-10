@@ -161,13 +161,15 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
   });
   if (!activeDevices.length) throw new Error('Geotab returned no currently active devices; refusing to deactivate the fleet.');
 
-  // Geotab keeps historical devices in the Device collection. Reset the Geotab
-  // device rows to inactive first, then reactivate only devices whose ActiveFrom/
-  // ActiveTo window contains the current time.
+  // Geotab keeps historical devices in the Device collection. Reset Device-only
+  // rows to inactive first, then reactivate only current Devices. A unit with a
+  // Geotab Trailer identity is owned by the trailer feed and must not be
+  // deactivated or reclassified by this Device sync.
   await env.DB.prepare(`
     UPDATE equipment
     SET active = 0, updated_at = CURRENT_TIMESTAMP
     WHERE geotab_device_id IS NOT NULL
+      AND (geotab_trailer_id IS NULL OR TRIM(geotab_trailer_id) = '')
   `).run();
 
   const statements: D1PreparedStatement[] = [];
@@ -192,7 +194,10 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
         current_mileage, mileage_updated_at, active, updated_at
       ) VALUES (?, 'fleet', 'truck', ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, 1, CURRENT_TIMESTAMP)
       ON CONFLICT(unit) DO UPDATE SET
-        equipment_type = 'truck',
+        equipment_type = CASE
+          WHEN equipment.geotab_trailer_id IS NOT NULL AND TRIM(equipment.geotab_trailer_id) <> '' THEN 'trailer'
+          ELSE 'truck'
+        END,
         geotab_device_id = excluded.geotab_device_id,
         model_year = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.model_year END,
         make = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.make END,
