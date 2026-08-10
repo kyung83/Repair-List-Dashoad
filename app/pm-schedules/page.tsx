@@ -191,7 +191,16 @@ export default function PmSchedulesPage() {
     return (data?.equipment ?? []).filter((item) => {
       if (filter !== "All" && item.category !== filter) return false;
       if (!needle) return true;
-      return [item.unit, item.category, item.make, item.model, item.driver, item.location].join(" ").toLowerCase().includes(needle);
+      return [
+        item.unit,
+        item.equipmentType,
+        item.category,
+        item.profileName,
+        item.make,
+        item.model,
+        item.driver,
+        item.location,
+      ].join(" ").toLowerCase().includes(needle);
     });
   }, [data, filter, query]);
 
@@ -242,7 +251,7 @@ export default function PmSchedulesPage() {
             <article key={category} style={{ background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                 <h2 style={{ margin: 0, fontSize: 19 }}>{category}</h2>
-                <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eef2f5", fontSize: 12, fontWeight: 800 }}>{categoryCounts.get(category) ?? 0} units</span>
+                <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eef2f5", fontSize: 12, fontWeight: 800 }}>{categoryCounts.get(category) ?? 0} assigned</span>
               </div>
               {trailer && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Trailer Service is the PM rule used by the Trailers group.</p>}
               <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
@@ -275,14 +284,14 @@ export default function PmSchedulesPage() {
       <section style={{ marginTop: 20, background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>Assign categories</h2>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Assign schedule groups</h2>
             <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Trucks and trailers can both be checked. The group name is Trailers; Trailer Service is the PM rule assigned to that group.
+              Equipment type tells you what the unit is. Schedule group tells you which maintenance rule it is assigned to. A Trailer can still be Uncategorized until it is assigned to the Trailers group.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <select value={assignCategory} onChange={(event) => setAssignCategory(event.target.value)} style={{ padding: 9 }}>
-              <option value="">Choose category</option>
+              <option value="">Choose schedule group</option>
               {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
             <button type="button" disabled={saving || !selected.length} onClick={assignSelected} style={{ padding: "9px 13px", fontWeight: 800 }}>Assign {selected.length || 0} checked</button>
@@ -291,16 +300,20 @@ export default function PmSchedulesPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, make, model, driver..." style={{ padding: 9, minWidth: 260, flex: 1 }} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, type, schedule group, make, model, driver..." style={{ padding: 9, minWidth: 260, flex: 1 }} />
           <select value={filter} onChange={(event) => {
             const next = event.target.value;
             setFilter(next);
             if (next === "Trailers") setAssignCategory("Trailers");
           }} style={{ padding: 9 }}>
-            <option>All</option>
-            <option>Uncategorized</option>
-            {(data?.categories ?? []).map((value) => <option key={value}>{value}</option>)}
+            <option value="All">All schedule groups</option>
+            <option value="Uncategorized">Unassigned schedule</option>
+            {(data?.categories ?? []).map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
+        </div>
+
+        <div style={{ marginTop: 9, fontSize: 12, color: "#64748b" }}>
+          All shows every active unit. Type identifies Vehicle vs Trailer; Schedule group shows the saved PM assignment.
         </div>
 
         <div style={{ overflowX: "auto", marginTop: 12 }}>
@@ -309,7 +322,8 @@ export default function PmSchedulesPage() {
               <tr style={{ textAlign: "left", borderBottom: "1px solid #dce2e7" }}>
                 <th style={{ padding: 9 }}><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={!visible.length} /></th>
                 <th style={{ padding: 9 }}>Unit</th>
-                <th style={{ padding: 9 }}>Category</th>
+                <th style={{ padding: 9 }}>Type</th>
+                <th style={{ padding: 9 }}>Schedule group</th>
                 <th style={{ padding: 9 }}>Mileage</th>
                 <th style={{ padding: 9 }}>PM reminder</th>
                 <th style={{ padding: 9 }}>Annual</th>
@@ -324,7 +338,10 @@ export default function PmSchedulesPage() {
                     <input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} />
                   </td>
                   <td style={{ padding: 9, fontWeight: 900 }}>{item.unit}</td>
-                  <td style={{ padding: 9 }}>{item.category}</td>
+                  <td style={{ padding: 9 }}>
+                    <span style={{ display: "inline-block", padding: "3px 7px", borderRadius: 999, background: "#eef2f5", fontSize: 11, fontWeight: 800 }}>{item.equipmentType}</span>
+                  </td>
+                  <td style={{ padding: 9, fontWeight: item.category === "Uncategorized" ? 800 : 600 }}>{item.category}</td>
                   <td style={{ padding: 9 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
                   <td style={{ padding: 9 }}>
                     <div>{scheduleText(item)}</div>
