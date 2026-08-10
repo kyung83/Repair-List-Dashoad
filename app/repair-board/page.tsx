@@ -5,25 +5,63 @@ import styles from "./repair-board.module.css";
 
 type Role = "viewer" | "mechanic" | "manager" | "admin";
 type Source = "repair" | "dvir" | "dvir-repair" | "pm" | "annual" | "pm-repair" | "annual-repair";
+type ShopView = "clare" | "cadillac" | "all";
 type Technician = { id: number; name: string };
 type Timer = { startedAt: string; technician: string };
 type RepairRow = {
-  id: string; source: Source; priority: number; location: string; unit: string; driver: string; issue: string; parts: string;
-  status: string; technicianId: number | null; assignedTo: string; laborHours: number; equipmentType: string; equipmentId: number | null;
-  outOfService: boolean; oosReason: string; oosAt: string | null; activeTimer: Timer | null;
-  dvirDefectId: string; dvirLogId: string; dvirComments: string; dvirPhotos: string; maintenanceId: string;
+  id: string;
+  source: Source;
+  priority: number;
+  location: string;
+  unit: string;
+  driver: string;
+  issue: string;
+  parts: string;
+  status: string;
+  technicianId: number | null;
+  assignedTo: string;
+  laborHours: number;
+  equipmentType: string;
+  equipmentId: number | null;
+  outOfService: boolean;
+  oosReason: string;
+  oosAt: string | null;
+  activeTimer: Timer | null;
+  dvirDefectId: string;
+  dvirLogId: string;
+  dvirComments: string;
+  dvirPhotos: string;
+  maintenanceId: string;
 };
 type OosUnit = {
-  equipmentId: number; unit: string; equipmentType: string; driver: string; location: string; reason: string; since: string | null;
+  equipmentId: number;
+  unit: string;
+  equipmentType: string;
+  driver: string;
+  location: string;
+  reason: string;
+  since: string | null;
   openWork: { id: string; source: Source; issue: string; assignedTo: string; status: string }[];
 };
 type BoardData = {
   user: { id: number; username: string; displayName: string; role: Role; technicianId: number | null };
-  canManage: boolean; technicians: Technician[]; repairs: RepairRow[]; oosUnits: OosUnit[];
+  canManage: boolean;
+  technicians: Technician[];
+  repairs: RepairRow[];
+  oosUnits: OosUnit[];
   summary: { total: number; oos: number; trucks: number; trailers: number; dvirOpen: number; maintenanceDue: number; unassigned: number; activeLabor: number };
   updatedAt: string;
 };
 type ChangeResult = { ok?: boolean; error?: string };
+type UnitGroup = {
+  key: string;
+  unit: string;
+  equipmentId: number | null;
+  equipmentType: string;
+  location: string;
+  driver: string;
+  rows: RepairRow[];
+};
 
 const statuses = ["New", "Assigned", "Waiting for Parts", "In Progress", "Completed"];
 
@@ -44,8 +82,32 @@ function equipmentGroup(value: string) {
   return "other";
 }
 
-function isRawMaintenance(source: Source) { return source === "pm" || source === "annual"; }
-function isScheduled(source: Source) { return source === "dvir" || isRawMaintenance(source); }
+function shopForLocation(value: string): "clare" | "cadillac" | "other" {
+  const location = value.trim().toLowerCase();
+  if (location.includes("clare")) return "clare";
+  if (location.includes("cadillac")) return "cadillac";
+  return "other";
+}
+
+function shopLabel(value: string) {
+  const shop = shopForLocation(value);
+  if (shop === "clare") return "Clare";
+  if (shop === "cadillac") return "Cadillac";
+  return "Other";
+}
+
+function displayDriver(value: string) {
+  const driver = value.trim();
+  return driver.includes("@") ? "" : driver;
+}
+
+function isRawMaintenance(source: Source) {
+  return source === "pm" || source === "annual";
+}
+
+function isScheduled(source: Source) {
+  return source === "dvir" || isRawMaintenance(source);
+}
 
 function runningDuration(startedAt: string) {
   const normalized = startedAt.includes("T") ? startedAt : startedAt.replace(" ", "T") + "Z";
@@ -64,12 +126,63 @@ function whenText(value: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function unitKey(row: RepairRow) {
+  if (row.equipmentId) return `equipment-${row.equipmentId}`;
+  return `unit-${row.unit.trim().toLowerCase() || row.id}`;
+}
+
+function buildUnitGroups(rows: RepairRow[]) {
+  const groups = new Map<string, UnitGroup>();
+  for (const row of rows) {
+    const key = unitKey(row);
+    const current = groups.get(key);
+    if (current) {
+      current.rows.push(row);
+      if (!current.location && row.location) current.location = row.location;
+      if (!current.driver && displayDriver(row.driver)) current.driver = displayDriver(row.driver);
+      continue;
+    }
+    groups.set(key, {
+      key,
+      unit: row.unit,
+      equipmentId: row.equipmentId,
+      equipmentType: row.equipmentType,
+      location: row.location,
+      driver: displayDriver(row.driver),
+      rows: [row],
+    });
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      rows: [...group.rows].sort((left, right) => left.priority - right.priority || left.issue.localeCompare(right.issue)),
+    }))
+    .sort((left, right) => left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function issueSummary(rows: RepairRow[]) {
+  const issues = rows.map((row) => row.issue.trim()).filter(Boolean);
+  const shown = issues.slice(0, 3).map((issue) => issue.length > 42 ? `${issue.slice(0, 39)}…` : issue);
+  return `${shown.join(" • ")}${issues.length > shown.length ? ` + ${issues.length - shown.length} more` : ""}`;
+}
+
+function groupWorkload(rows: RepairRow[]) {
+  const assigned = rows.filter((row) => row.technicianId !== null).length;
+  const unassigned = rows.length - assigned;
+  const active = rows.filter((row) => row.activeTimer).length;
+  const waiting = rows.filter((row) => row.status.toLowerCase().includes("waiting")).length;
+  return { assigned, unassigned, active, waiting, priority: Math.min(...rows.map((row) => row.priority || 2)) };
+}
+
 export default function RepairBoardPage() {
   const [data, setData] = useState<BoardData | null>(null);
   const [query, setQuery] = useState("");
+  const [shopView, setShopView] = useState<ShopView>("clare");
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() => new Set());
+  const [expandedRepairId, setExpandedRepairId] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/repair-board", { cache: "no-store" });
@@ -78,13 +191,18 @@ export default function RepairBoardPage() {
     setData(payload);
   }
 
-  useEffect(() => { void load().catch((error) => setMessage(error instanceof Error ? error.message : "Repair board could not be loaded.")); }, []);
+  useEffect(() => {
+    void load().catch((error) => setMessage(error instanceof Error ? error.message : "Repair board could not be loaded."));
+  }, []);
 
   async function change(rowId: string, body: Record<string, unknown>) {
-    setBusyId(rowId); setMessage("");
+    setBusyId(rowId);
+    setMessage("");
     try {
       const response = await fetch("/api/repair-board", {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repairId: rowId, ...body }),
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repairId: rowId, ...body }),
       });
       const result = await response.json() as ChangeResult;
       if (!response.ok || !result.ok) throw new Error(result.error || "Repair-board change failed.");
@@ -93,7 +211,18 @@ export default function RepairBoardPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Repair-board change failed.");
       return false;
-    } finally { setBusyId(null); }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  function toggleUnit(key: string) {
+    setExpandedUnits((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   async function addDvirRepair(row: RepairRow, technicianId = 0) {
@@ -119,89 +248,173 @@ export default function RepairBoardPage() {
     if (ok) setMessage(`${row.source === "pm" ? "PM" : "Annual"} completed and schedule updated.`);
   }
 
+  async function completeRepair(row: RepairRow) {
+    if (!window.confirm(`Complete this repair for Unit ${row.unit || "—"}?\n\n${row.issue}`)) return;
+    const ok = await change(row.id, { action: "setStatus", status: "Completed" });
+    if (ok) setMessage("Repair completed.");
+  }
+
   async function placeOos(row: RepairRow) {
     const reason = window.prompt(`Why is Unit ${row.unit || "—"} out of service?`, row.issue || "");
     if (reason === null) return;
     const trimmed = reason.trim();
-    if (!trimmed) { setMessage("Enter an out-of-service reason."); return; }
+    if (!trimmed) {
+      setMessage("Enter an out-of-service reason.");
+      return;
+    }
     const ok = await change(`oos-${row.equipmentId ?? row.unit}`, {
-      action: "setUnitOos", equipmentId: row.equipmentId, unit: row.unit, outOfService: true, reason: trimmed,
+      action: "setUnitOos",
+      equipmentId: row.equipmentId,
+      unit: row.unit,
+      outOfService: true,
+      reason: trimmed,
     });
     if (ok) setMessage(`Unit ${row.unit} is now out of service.`);
   }
 
   async function returnToService(unit: OosUnit) {
     if (!window.confirm(`Return Unit ${unit.unit} to service?`)) return;
-    const ok = await change(`oos-${unit.equipmentId}`, { action: "setUnitOos", equipmentId: unit.equipmentId, outOfService: false, reason: "Returned to service" });
+    const ok = await change(`oos-${unit.equipmentId}`, {
+      action: "setUnitOos",
+      equipmentId: unit.equipmentId,
+      outOfService: false,
+      reason: "Returned to service",
+    });
     if (ok) setMessage(`Unit ${unit.unit} returned to service.`);
   }
 
-  const visible = useMemo(() => {
+  const searchFiltered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return data?.repairs ?? [];
-    return (data?.repairs ?? []).filter((row) => [row.unit,row.location,row.driver,row.issue,row.parts,row.status,row.assignedTo,row.dvirComments,sourceLabel(row.source)].join(" ").toLowerCase().includes(needle));
+    return (data?.repairs ?? []).filter((row) => [
+      row.unit,
+      row.location,
+      displayDriver(row.driver),
+      row.issue,
+      row.parts,
+      row.status,
+      row.assignedTo,
+      row.dvirComments,
+      sourceLabel(row.source),
+    ].join(" ").toLowerCase().includes(needle));
   }, [data, query]);
 
-  const grouped = useMemo(() => {
-    const active = visible.filter((row) => !row.outOfService);
-    return {
-      trucks: active.filter((row) => equipmentGroup(row.equipmentType) === "truck"),
-      trailers: active.filter((row) => equipmentGroup(row.equipmentType) === "trailer"),
-      other: active.filter((row) => equipmentGroup(row.equipmentType) === "other"),
-    };
-  }, [visible]);
+  const visible = useMemo(() => {
+    const filtered = searchFiltered.filter((row) => shopView === "all" || shopForLocation(row.location) === shopView);
+    if (shopView !== "all") return filtered;
+    return [...filtered].sort((left, right) => {
+      const rank = (location: string) => shopForLocation(location) === "clare" ? 0 : shopForLocation(location) === "cadillac" ? 1 : 2;
+      return rank(left.location) - rank(right.location) || left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [searchFiltered, shopView]);
+
+  const activeVisible = useMemo(() => visible.filter((row) => !row.outOfService), [visible]);
+  const truckGroups = useMemo(() => buildUnitGroups(activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "truck")), [activeVisible]);
+  const trailerGroups = useMemo(() => buildUnitGroups(activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "trailer")), [activeVisible]);
+  const otherGroups = useMemo(() => buildUnitGroups(activeVisible.filter((row) => equipmentGroup(row.equipmentType) === "other")), [activeVisible]);
 
   const oosVisible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return data?.oosUnits ?? [];
-    return (data?.oosUnits ?? []).filter((unit) => [unit.unit,unit.driver,unit.location,unit.reason,unit.equipmentType,...unit.openWork.flatMap((work) => [work.issue,work.assignedTo,work.status,sourceLabel(work.source)])].join(" ").toLowerCase().includes(needle));
-  }, [data, query]);
+    return (data?.oosUnits ?? []).filter((unit) => {
+      if (shopView !== "all" && shopForLocation(unit.location) !== shopView) return false;
+      if (!needle) return true;
+      return [
+        unit.unit,
+        unit.location,
+        displayDriver(unit.driver),
+        unit.reason,
+        unit.equipmentType,
+        ...unit.openWork.flatMap((work) => [work.issue, work.assignedTo, work.status, sourceLabel(work.source)]),
+      ].join(" ").toLowerCase().includes(needle);
+    }).sort((left, right) => {
+      if (shopView !== "all") return left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: "base" });
+      const rank = (location: string) => shopForLocation(location) === "clare" ? 0 : shopForLocation(location) === "cadillac" ? 1 : 2;
+      return rank(left.location) - rank(right.location) || left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [data, query, shopView]);
+
+  const shopCounts = useMemo(() => {
+    const rows = data?.repairs ?? [];
+    return {
+      clare: rows.filter((row) => shopForLocation(row.location) === "clare").length,
+      cadillac: rows.filter((row) => shopForLocation(row.location) === "cadillac").length,
+      all: rows.length,
+    };
+  }, [data]);
 
   function assignmentControl(row: RepairRow) {
     if (!data?.canManage) return <span className={styles.assignmentText}>{row.assignedTo || "Unassigned"}</span>;
-    if (row.source === "dvir") return (
-      <select className={styles.techSelect} value="" disabled={busyId === row.id} onChange={(event) => { const id = Number(event.target.value); if (id > 0) void addDvirRepair(row, id); }}>
-        <option value="">Assign tech…</option>{data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
-      </select>
-    );
-    if (isRawMaintenance(row.source)) return (
-      <select className={styles.techSelect} value="" disabled={busyId === row.id} onChange={(event) => { const id = Number(event.target.value); if (id > 0) void addMaintenanceRepair(row, id); }}>
-        <option value="">Assign tech…</option>{data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
-      </select>
-    );
+    if (row.source === "dvir") {
+      return (
+        <select
+          className={styles.techSelect}
+          value=""
+          disabled={busyId === row.id}
+          onChange={(event) => {
+            const id = Number(event.target.value);
+            if (id > 0) void addDvirRepair(row, id);
+          }}
+        >
+          <option value="">Assign & create…</option>
+          {data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+        </select>
+      );
+    }
+    if (isRawMaintenance(row.source)) {
+      return (
+        <select
+          className={styles.techSelect}
+          value=""
+          disabled={busyId === row.id}
+          onChange={(event) => {
+            const id = Number(event.target.value);
+            if (id > 0) void addMaintenanceRepair(row, id);
+          }}
+        >
+          <option value="">Assign & create…</option>
+          {data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+        </select>
+      );
+    }
     return (
-      <select className={styles.techSelect} value={row.technicianId ?? ""} disabled={busyId === row.id} onChange={(event) => void change(row.id, { action: "assignTechnician", technicianId: event.target.value ? Number(event.target.value) : 0 })}>
-        <option value="">Unassigned</option>{data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+      <select
+        className={styles.techSelect}
+        value={row.technicianId ?? ""}
+        disabled={busyId === row.id}
+        onChange={(event) => void change(row.id, { action: "assignTechnician", technicianId: event.target.value ? Number(event.target.value) : 0 })}
+      >
+        <option value="">Unassigned</option>
+        {data.technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
       </select>
     );
   }
 
-  function renderRepairRow(row: RepairRow) {
+  function renderRepairChild(row: RepairRow) {
     const rawDvir = row.source === "dvir";
     const rawMaintenance = isRawMaintenance(row.source);
     const busy = busyId === row.id;
+    const driver = displayDriver(row.driver);
     return (
       <Fragment key={row.id}>
-        <tr className={`${row.priority === 1 ? styles.priorityOne : ""} ${rawDvir ? styles.dvirRow : ""} ${rawMaintenance ? styles.maintenanceRow : ""}`.trim()}>
-          <td className={styles.unitColumn}>
-            <strong>{row.unit || "—"}</strong>
-            <span>{row.location || "No location"}</span>
-            {row.driver && <span>{row.driver}</span>}
-          </td>
-          <td className={styles.issueColumn}>
-            <div className={styles.badges}>
+        <tr className={`${row.priority === 1 ? styles.childPriorityOne : ""} ${rawDvir ? styles.childDvir : ""} ${rawMaintenance ? styles.childMaintenance : ""}`.trim()}>
+          <td>
+            <div className={styles.childTypeLine}>
               <span className={`${styles.sourceBadge} ${rawDvir ? styles.dvirBadge : rawMaintenance ? styles.maintenanceBadge : styles.repairBadge}`}>{sourceLabel(row.source)}</span>
               {data?.canManage && !isScheduled(row.source) ? (
-                <select className={styles.prioritySelect} value={row.priority} disabled={busy} onChange={(event) => void change(row.id, { action: "setPriority", priority: Number(event.target.value) })} aria-label={`Priority for ${row.unit}`}>
-                  <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>
+                <select className={styles.prioritySelect} value={row.priority} disabled={busy} onChange={(event) => void change(row.id, { action: "setPriority", priority: Number(event.target.value) })}>
+                  <option value={1}>P1</option>
+                  <option value={2}>P2</option>
+                  <option value={3}>P3</option>
                 </select>
               ) : <span className={styles.priorityBadge}>P{row.priority}</span>}
             </div>
-            <strong className={styles.issueText}>{row.issue}</strong>
-            {row.parts && <span className={styles.partsText}>Parts: {row.parts}</span>}
-            {rawDvir && row.dvirComments && <span className={styles.commentText}>{row.dvirComments}</span>}
           </td>
-          <td className={styles.statusColumn}>
+          <td className={styles.childIssue}>
+            <strong>{row.issue}</strong>
+            {rawDvir && row.dvirComments && <span>{row.dvirComments}</span>}
+          </td>
+          <td className={styles.childParts}>{row.parts || <span className={styles.muted}>—</span>}</td>
+          <td>
             {data?.canManage && !isScheduled(row.source) ? (
               <select className={styles.statusSelect} value={row.status} disabled={busy} onChange={(event) => void change(row.id, { action: "setStatus", status: event.target.value })}>
                 {statuses.map((status) => <option key={status}>{status}</option>)}
@@ -209,84 +422,211 @@ export default function RepairBoardPage() {
             ) : <span className={styles.statusBadge}>{row.status}</span>}
             {row.activeTimer && <span className={styles.timerBadge}>{row.activeTimer.technician || row.assignedTo || "Tech"} · {runningDuration(row.activeTimer.startedAt)}</span>}
           </td>
-          <td className={styles.techColumn}>{assignmentControl(row)}</td>
-          <td className={styles.actionsColumn}>
-            <button className={styles.smallButton} type="button" onClick={() => setExpandedId((current) => current === row.id ? null : row.id)}>{expandedId === row.id ? "Close" : "Details"}</button>
-            {data?.canManage && <button className={styles.oosButton} type="button" disabled={busy} onClick={() => void placeOos(row)}>OOS</button>}
-            {rawDvir ? data?.canManage && <><button className={styles.actionButton} disabled={busy} onClick={() => void addDvirRepair(row)}>Add Repair</button><button className={styles.completeButton} disabled={busy} onClick={() => void markDvirRepaired(row)}>Repaired</button></> : rawMaintenance ? data?.canManage && <><button className={styles.actionButton} disabled={busy} onClick={() => void addMaintenanceRepair(row)}>Work Order</button><button className={styles.completeButton} disabled={busy} onClick={() => void completeMaintenance(row)}>Complete</button></> : <a className={styles.actionLink} href="/work-orders">Work Order</a>}
+          <td>{assignmentControl(row)}</td>
+          <td className={styles.childActions}>
+            <button className={styles.smallButton} type="button" onClick={() => setExpandedRepairId((current) => current === row.id ? null : row.id)}>
+              {expandedRepairId === row.id ? "Close" : "Details"}
+            </button>
+            {rawDvir ? data?.canManage && (
+              <>
+                <button className={styles.actionButton} disabled={busy} onClick={() => void addDvirRepair(row)}>Add Repair</button>
+                <button className={styles.completeButton} disabled={busy} onClick={() => void markDvirRepaired(row)}>Repaired</button>
+              </>
+            ) : rawMaintenance ? data?.canManage && (
+              <>
+                <button className={styles.actionButton} disabled={busy} onClick={() => void addMaintenanceRepair(row)}>Work Order</button>
+                <button className={styles.completeButton} disabled={busy} onClick={() => void completeMaintenance(row)}>Complete</button>
+              </>
+            ) : (
+              <>
+                <a className={styles.actionLink} href="/work-orders">Work Order</a>
+                {data?.canManage && <button className={styles.completeButton} disabled={busy} onClick={() => void completeRepair(row)}>Complete</button>}
+              </>
+            )}
           </td>
         </tr>
-        {expandedId === row.id && (
-          <tr className={styles.expanded}><td colSpan={5}>
-            <div className={styles.detailsGrid}>
-              <div><span>Source</span><strong>{sourceLabel(row.source)}</strong></div>
-              <div><span>Driver</span><strong>{row.driver || "—"}</strong></div>
-              <div><span>Location</span><strong>{row.location || "—"}</strong></div>
-              <div><span>Labor</span><strong>{row.laborHours.toFixed(2)} hr</strong></div>
-              <div><span>Assigned</span><strong>{row.assignedTo || "Unassigned"}</strong></div>
-              {row.dvirPhotos && <div><span>DVIR photos</span><a href={row.dvirPhotos} target="_blank" rel="noreferrer">View photos</a></div>}
-            </div>
-          </td></tr>
+        {expandedRepairId === row.id && (
+          <tr className={styles.repairDetailsRow}>
+            <td colSpan={6}>
+              <div className={styles.detailsGrid}>
+                <div><span>Unit</span><strong>{row.unit || "—"}</strong></div>
+                <div><span>Location</span><strong>{row.location || "—"}</strong></div>
+                {driver && <div><span>Driver</span><strong>{driver}</strong></div>}
+                <div><span>Labor</span><strong>{row.laborHours.toFixed(2)} hr</strong></div>
+                <div><span>Assigned</span><strong>{row.assignedTo || "Unassigned"}</strong></div>
+                {row.dvirPhotos && <div><span>DVIR Photos</span><a href={row.dvirPhotos} target="_blank" rel="noreferrer">View photos</a></div>}
+              </div>
+            </td>
+          </tr>
         )}
       </Fragment>
     );
   }
 
-  function repairTable(title: string, rows: RepairRow[], kind: "truck" | "trailer" | "other") {
+  function renderUnitGroup(group: UnitGroup) {
+    const expanded = expandedUnits.has(group.key);
+    const workload = groupWorkload(group.rows);
+    const driver = displayDriver(group.driver);
+    return (
+      <Fragment key={group.key}>
+        <tr className={`${styles.unitSummaryRow} ${workload.priority === 1 ? styles.unitPriorityOne : ""}`}>
+          <td className={styles.unitColumn}>
+            <strong>Unit {group.unit || "—"}</strong>
+            {driver && <span>{driver}</span>}
+          </td>
+          <td className={styles.summaryColumn}>
+            <button className={styles.repairToggle} type="button" onClick={() => toggleUnit(group.key)}>
+              <span className={styles.repairCount}>{group.rows.length} Repair{group.rows.length === 1 ? "" : "s"}</span>
+              <span className={styles.chevron}>{expanded ? "▲" : "▼"}</span>
+            </button>
+            <span className={styles.issueSummary}>{issueSummary(group.rows)}</span>
+          </td>
+          <td className={styles.locationColumn}>
+            <span className={`${styles.shopBadge} ${shopForLocation(group.location) === "clare" ? styles.clareBadge : shopForLocation(group.location) === "cadillac" ? styles.cadillacBadge : styles.otherBadge}`}>{shopLabel(group.location)}</span>
+            <span>{group.location || "Location not set"}</span>
+          </td>
+          <td className={styles.workloadColumn}>
+            <div className={styles.workloadBadges}>
+              <span className={workload.priority === 1 ? styles.priorityHot : styles.priorityCool}>P{workload.priority}</span>
+              <span>{workload.assigned} assigned</span>
+              {workload.unassigned > 0 && <span className={styles.unassignedBadge}>{workload.unassigned} open</span>}
+              {workload.waiting > 0 && <span>{workload.waiting} parts</span>}
+              {workload.active > 0 && <span className={styles.activeBadge}>{workload.active} working</span>}
+            </div>
+          </td>
+          <td className={styles.unitActions}>
+            <button className={styles.expandButton} type="button" onClick={() => toggleUnit(group.key)}>{expanded ? "Hide" : "Repairs"}</button>
+            {data?.canManage && <button className={styles.oosButton} type="button" disabled={busyId === `oos-${group.equipmentId ?? group.unit}`} onClick={() => void placeOos(group.rows[0])}>OOS</button>}
+          </td>
+        </tr>
+        {expanded && (
+          <tr className={styles.unitExpandedRow}>
+            <td colSpan={5}>
+              <div className={styles.childTableWrap}>
+                <table className={styles.childTable}>
+                  <thead>
+                    <tr><th>Type</th><th>Repair / Service</th><th>Parts</th><th>Status</th><th>Technician</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>{group.rows.map(renderRepairChild)}</tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  }
+
+  function repairTable(title: string, groups: UnitGroup[], kind: "truck" | "trailer" | "other") {
+    const jobCount = groups.reduce((sum, group) => sum + group.rows.length, 0);
     return (
       <section className={`${styles.sheetSection} ${kind === "truck" ? styles.truckSection : kind === "trailer" ? styles.trailerSection : styles.otherSection}`}>
-        <div className={styles.sectionTitle}><div><span>{kind === "truck" ? "TRUCKS" : kind === "trailer" ? "TRAILERS" : "OTHER"}</span><h2>{title}</h2></div><strong>{rows.length}</strong></div>
-        <div className={styles.tableWrap}><table className={styles.compactTable}><thead><tr><th>Unit</th><th>Repair / Service Needed</th><th>Status</th><th>Tech</th><th>Actions</th></tr></thead><tbody>
-          {rows.map(renderRepairRow)}
-          {rows.length === 0 && <tr><td className={styles.empty} colSpan={5}>No open work in this section.</td></tr>}
-        </tbody></table></div>
+        <div className={styles.sectionTitle}>
+          <div><span>{kind === "truck" ? "TRUCKS" : kind === "trailer" ? "TRAILERS" : "OTHER EQUIPMENT"}</span><h2>{title}</h2></div>
+          <strong>{groups.length} units · {jobCount} jobs</strong>
+        </div>
+        <div className={styles.tableWrap}>
+          <table className={styles.unitTable}>
+            <thead><tr><th>Unit</th><th>Repairs / Summary</th><th>Location</th><th>Workload</th><th>Actions</th></tr></thead>
+            <tbody>
+              {groups.map(renderUnitGroup)}
+              {groups.length === 0 && <tr><td className={styles.empty} colSpan={5}>No open work in this section.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </section>
     );
   }
 
+  const currentShopName = shopView === "clare" ? "Clare Shop" : shopView === "cadillac" ? "Cadillac Shop" : "All Shops";
+
   return (
     <main className={styles.page}>
+      <div className={styles.sheetBanner}><strong>REPAIR LIST</strong><span>{currentShopName}</span></div>
+
       <header className={styles.header}>
-        <div><p className={styles.eyebrow}>NORLOW SHOP CONTROL</p><h1>Repair Board</h1><p className={styles.subtitle}>Out-of-service equipment first, then truck and trailer repair lists side by side—closer to the shop sheet.</p></div>
-        <div className={styles.headerActions}><button className={styles.refresh} onClick={() => void load()}>Refresh</button><a className={styles.primaryLink} href="/work-orders">Full Work Orders</a></div>
+        <div>
+          <p className={styles.eyebrow}>NORLOW SHOP CONTROL</p>
+          <h1>Repair Board</h1>
+          <p className={styles.subtitle}>One line per unit. Open the Repairs dropdown to assign, work, and complete each repair separately.</p>
+        </div>
+        <div className={styles.headerActions}>
+          <button className={styles.refresh} onClick={() => void load()}>Refresh</button>
+          <a className={styles.primaryLink} href="/work-orders">Full Work Orders</a>
+        </div>
       </header>
 
       {message && <div className={styles.notice}>{message}</div>}
 
+      <nav className={styles.shopTabs} aria-label="Shop view">
+        <button className={shopView === "clare" ? styles.activeShopTab : ""} onClick={() => setShopView("clare")}><span>Clare Shop</span><b>{shopCounts.clare}</b></button>
+        <button className={shopView === "cadillac" ? styles.activeShopTab : ""} onClick={() => setShopView("cadillac")}><span>Cadillac Shop</span><b>{shopCounts.cadillac}</b></button>
+        <button className={shopView === "all" ? styles.activeShopTab : ""} onClick={() => setShopView("all")}><span>All Shops</span><b>{shopCounts.all}</b></button>
+      </nav>
+
       <section className={styles.metrics}>
-        <article><span>OOS Units</span><strong>{data?.summary.oos ?? 0}</strong></article>
-        <article><span>Truck Work</span><strong>{data?.summary.trucks ?? 0}</strong></article>
-        <article><span>Trailer Work</span><strong>{data?.summary.trailers ?? 0}</strong></article>
-        <article><span>DVIR</span><strong>{data?.summary.dvirOpen ?? 0}</strong></article>
-        <article><span>PM / Annual</span><strong>{data?.summary.maintenanceDue ?? 0}</strong></article>
-        <article><span>Active Labor</span><strong>{data?.summary.activeLabor ?? 0}</strong></article>
+        <article><span>OOS Units</span><strong>{oosVisible.length}</strong></article>
+        <article><span>Open Work</span><strong>{visible.length}</strong></article>
+        <article><span>Truck Units</span><strong>{truckGroups.length}</strong></article>
+        <article><span>Trailer Units</span><strong>{trailerGroups.length}</strong></article>
+        <article><span>Unassigned</span><strong>{visible.filter((row) => row.technicianId === null).length}</strong></article>
+        <article><span>Active Labor</span><strong>{visible.filter((row) => row.activeTimer).length}</strong></article>
       </section>
 
-      <div className={styles.searchBar}><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, driver, location, part, technician…" /><span>Rows stay grouped by unit—no priority sorting.</span></div>
+      <div className={styles.searchBar}>
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, location, part, technician…" />
+        <span>Units stay together; individual repairs remain independent.</span>
+      </div>
 
       <section className={styles.oosSection}>
-        <div className={styles.oosTitle}><div><span>OUT OF SERVICE</span><h2>Units held from service</h2></div><strong>{oosVisible.length}</strong></div>
-        {oosVisible.length === 0 ? <div className={styles.oosEmpty}>No units are currently out of service.</div> : <div className={styles.oosGrid}>
-          {oosVisible.map((unit) => (
-            <article key={unit.equipmentId} className={styles.oosCard}>
-              <div className={styles.oosCardHeader}><div><span className={styles.oosType}>{equipmentGroup(unit.equipmentType).toUpperCase()}</span><h3>Unit {unit.unit}</h3></div>{data?.canManage && <button className={styles.returnButton} disabled={busyId === `oos-${unit.equipmentId}`} onClick={() => void returnToService(unit)}>Return to Service</button>}</div>
-              <div className={styles.oosMeta}><span>{unit.location || "No location"}</span>{unit.driver && <span>{unit.driver}</span>}{unit.since && <span>OOS since {whenText(unit.since)}</span>}</div>
-              <p className={styles.oosReason}>{unit.reason || "No OOS reason entered."}</p>
-              <div className={styles.oosWork}><strong>Open work</strong>
-                {unit.openWork.length === 0 ? <span className={styles.noWork}>No open repair rows.</span> : unit.openWork.map((work) => {
-                  const row = data?.repairs.find((item) => item.id === work.id);
-                  return <div key={work.id} className={styles.oosWorkRow}><div><span className={styles.oosWorkSource}>{sourceLabel(work.source)}</span><b>{work.issue}</b><small>{work.status}</small></div>{row && <div className={styles.oosAssign}>{assignmentControl(row)}</div>}</div>;
-                })}
-              </div>
-            </article>
-          ))}
-        </div>}
+        <div className={styles.oosTitle}><div><span>OUT OF SERVICE</span><h2>{currentShopName} OOS</h2></div><strong>{oosVisible.length}</strong></div>
+        <div className={styles.oosTableWrap}>
+          <table className={styles.oosTable}>
+            <thead><tr><th>Unit</th><th>Location</th><th>OOS Reason</th><th>Open Repairs</th><th>Action</th></tr></thead>
+            <tbody>
+              {oosVisible.map((unit) => {
+                const key = `oos-unit-${unit.equipmentId}`;
+                const expanded = expandedUnits.has(key);
+                const openRows = unit.openWork.map((work) => data?.repairs.find((row) => row.id === work.id)).filter((row): row is RepairRow => Boolean(row));
+                return (
+                  <Fragment key={unit.equipmentId}>
+                    <tr className={styles.oosUnitRow}>
+                      <td><strong>Unit {unit.unit}</strong><span>{equipmentGroup(unit.equipmentType).toUpperCase()}</span></td>
+                      <td><span className={styles.shopBadge}>{shopLabel(unit.location)}</span><small>{unit.location || "Location not set"}</small></td>
+                      <td><strong>{unit.reason || "No OOS reason entered."}</strong>{unit.since && <small>Since {whenText(unit.since)}</small>}</td>
+                      <td><button className={styles.oosRepairToggle} type="button" onClick={() => toggleUnit(key)}>{unit.openWork.length} Repair{unit.openWork.length === 1 ? "" : "s"} {expanded ? "▲" : "▼"}</button></td>
+                      <td>{data?.canManage && <button className={styles.returnButton} disabled={busyId === `oos-${unit.equipmentId}`} onClick={() => void returnToService(unit)}>Return to Service</button>}</td>
+                    </tr>
+                    {expanded && (
+                      <tr className={styles.oosExpandedRow}>
+                        <td colSpan={5}>
+                          {openRows.length ? (
+                            <div className={styles.childTableWrap}>
+                              <table className={styles.childTable}>
+                                <thead><tr><th>Type</th><th>Repair / Service</th><th>Parts</th><th>Status</th><th>Technician</th><th>Actions</th></tr></thead>
+                                <tbody>{openRows.map(renderRepairChild)}</tbody>
+                              </table>
+                            </div>
+                          ) : <div className={styles.oosNoRepairs}>No open repair rows are attached to this OOS unit.</div>}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {oosVisible.length === 0 && <tr><td className={styles.empty} colSpan={5}>No units are currently out of service in this view.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </section>
 
-      <div className={styles.sideBySide}>{repairTable("Truck Repairs", grouped.trucks, "truck")}{repairTable("Trailer Repairs", grouped.trailers, "trailer")}</div>
-      {grouped.other.length > 0 && <div className={styles.otherBoard}>{repairTable("Other Equipment Repairs", grouped.other, "other")}</div>}
+      <div className={styles.sideBySide}>
+        {repairTable("Truck Repair List", truckGroups, "truck")}
+        {repairTable("Trailer Repair List", trailerGroups, "trailer")}
+      </div>
+      {otherGroups.length > 0 && <div className={styles.otherBoard}>{repairTable("Other Equipment", otherGroups, "other")}</div>}
 
-      <footer className={styles.footer}>{data ? `${data.repairs.length} open work items · ${data.summary.unassigned} unassigned · updated ${new Date(data.updatedAt).toLocaleString()}` : "Loading repair board…"}</footer>
+      <footer className={styles.footer}>{data ? `${visible.length} open work items in ${currentShopName} · updated ${new Date(data.updatedAt).toLocaleString()}` : "Loading repair board…"}</footer>
     </main>
   );
 }
