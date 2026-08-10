@@ -139,6 +139,10 @@ jobs:
             return output;
           }
 
+          function escapeRegExp(value) {
+            return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          }
+
           (async () => {
             const { accountId, databaseId } = await findDatabase();
             const queryUrl = `/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}/query`;
@@ -147,31 +151,53 @@ jobs:
               return api(queryUrl, { method: 'POST', body: JSON.stringify(statement) });
             }
 
-            const equipmentByUnit = new Map();
-            for (const group of chunks(rows, 60)) {
-              const placeholders = group.map(() => '?').join(',');
-              const result = await query({
-                sql: `SELECT id, UPPER(TRIM(unit)) AS unit, equipment_type, active FROM equipment WHERE UPPER(TRIM(unit)) IN (${placeholders})`,
-                params: group.map((row) => row.unit),
-              });
-              const records = result?.[0]?.results || result?.results || [];
-              for (const record of records) equipmentByUnit.set(String(record.unit).toUpperCase(), record);
+            const equipmentResult = await query({
+              sql: `SELECT id, UPPER(TRIM(unit)) AS unit FROM equipment WHERE active = 1`,
+              params: [],
+            });
+            const equipmentRows = equipmentResult?.[0]?.results || equipmentResult?.results || [];
+            const exactByUnit = new Map();
+            for (const equipment of equipmentRows) {
+              const unit = String(equipment.unit || '').trim().toUpperCase();
+              const list = exactByUnit.get(unit) || [];
+              list.push(equipment);
+              exactByUnit.set(unit, list);
             }
 
             const matched = [];
+            let exactMatches = 0;
+            let prefixMatches = 0;
             let missing = 0;
-            let notActiveTrailer = 0;
+            let ambiguous = 0;
+
             for (const row of rows) {
-              const equipment = equipmentByUnit.get(row.unit);
-              if (!equipment) {
+              const exact = exactByUnit.get(row.unit) || [];
+              if (exact.length === 1) {
+                matched.push({ ...row, equipmentId: Number(exact[0].id) });
+                exactMatches += 1;
+                continue;
+              }
+              if (exact.length > 1) {
+                ambiguous += 1;
+                continue;
+              }
+
+              const prefix = new RegExp(`^${escapeRegExp(row.unit)}(?:$|[^0-9A-Z])`);
+              const candidates = equipmentRows.filter((equipment) => prefix.test(String(equipment.unit || '').trim().toUpperCase()));
+              if (candidates.length === 1) {
+                matched.push({ ...row, equipmentId: Number(candidates[0].id) });
+                prefixMatches += 1;
+              } else if (candidates.length > 1) {
+                ambiguous += 1;
+              } else {
                 missing += 1;
-                continue;
               }
-              if (Number(equipment.active) !== 1 || String(equipment.equipment_type).toLowerCase() !== 'trailer') {
-                notActiveTrailer += 1;
-                continue;
-              }
-              matched.push({ ...row, equipmentId: Number(equipment.id) });
+            }
+
+            const matchedIds = new Set();
+            for (const row of matched) {
+              if (matchedIds.has(row.equipmentId)) throw new Error('Two source rows resolved to the same active equipment record.');
+              matchedIds.add(row.equipmentId);
             }
 
             for (const group of chunks(matched, 15)) {
@@ -184,7 +210,7 @@ jobs:
                 ...group.map((row) => row.equipmentId),
               ];
               await query({
-                sql: `UPDATE equipment SET service_date = CASE id ${serviceCases} ELSE service_date END, annual_date = CASE id ${annualCases} ELSE annual_date END, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idPlaceholders}) AND active = 1 AND equipment_type = 'trailer'`,
+                sql: `UPDATE equipment SET service_date = CASE id ${serviceCases} ELSE service_date END, annual_date = CASE id ${annualCases} ELSE annual_date END, updated_at = CURRENT_TIMESTAMP WHERE id IN (${idPlaceholders}) AND active = 1`,
                 params: equipmentParams,
               });
 
@@ -199,7 +225,7 @@ jobs:
             for (const group of chunks(matched, 60)) {
               const placeholders = group.map(() => '?').join(',');
               const result = await query({
-                sql: `SELECT e.id, UPPER(TRIM(e.unit)) AS unit, e.service_date, e.annual_date, p.service_date AS pm_service_date, p.annual_date AS pm_annual_date FROM equipment e JOIN pm_status p ON p.equipment_id = e.id WHERE e.id IN (${placeholders})`,
+                sql: `SELECT e.id, e.service_date, e.annual_date, p.service_date AS pm_service_date, p.annual_date AS pm_annual_date FROM equipment e JOIN pm_status p ON p.equipment_id = e.id WHERE e.id IN (${placeholders})`,
                 params: group.map((row) => row.equipmentId),
               });
               const records = result?.[0]?.results || result?.results || [];
@@ -213,7 +239,7 @@ jobs:
               }
             }
 
-            console.log(`Trailer maintenance date import complete: input=${rows.length}, matched=${matched.length}, verified=${verified}, missing=${missing}, notActiveTrailer=${notActiveTrailer}.`);
+            console.log(`Trailer maintenance date import complete: input=${rows.length}, exact=${exactMatches}, annotated=${prefixMatches}, matched=${matched.length}, verified=${verified}, missing=${missing}, ambiguous=${ambiguous}.`);
           })().catch((error) => {
             console.error(error instanceof Error ? error.message : String(error));
             process.exit(1);
