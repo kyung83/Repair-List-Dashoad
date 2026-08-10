@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Check authorization
         run: test -n "${CLOUDFLARE_API_TOKEN:-}"
-      - name: Repair and verify tractor PM state
+      - name: Restore and verify tractor PM sequence
         shell: bash
         run: |
           set -euo pipefail
@@ -54,119 +54,108 @@ jobs:
               return result?.[0]?.results || result?.results || [];
             }
 
-            const syntheticBefore = await query(`
-              SELECT COUNT(*) AS count
-              FROM equipment e
-              JOIN pm_status ps ON ps.equipment_id = e.id
-              WHERE e.active = 1
-                AND e.category = 'Tractors'
-                AND ps.status = 'Scheduled'
-                AND ps.service_date = '2026-08-10'
-                AND e.service_date IS NULL
-                AND NOT EXISTS (
-                  SELECT 1 FROM maintenance_events me
-                  WHERE me.equipment_id = e.id AND me.event_type = 'pm'
-                )
-            `);
-
-            await query(`
-              UPDATE pm_status
-              SET service_date = NULL,
-                  last_mileage = NULL,
-                  updated_at = CURRENT_TIMESTAMP
-              WHERE equipment_id IN (
-                SELECT e.id
+            const resolved = await query(`
+              WITH tractors AS (
+                SELECT e.id AS equipment_id, ps.service_date
                 FROM equipment e
-                WHERE e.active = 1
-                  AND e.category = 'Tractors'
-                  AND e.service_date IS NULL
-                  AND EXISTS (
-                    SELECT 1 FROM pm_status ps2
-                    WHERE ps2.equipment_id = e.id
-                      AND ps2.status = 'Scheduled'
-                      AND ps2.service_date = '2026-08-10'
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM maintenance_events me
-                    WHERE me.equipment_id = e.id AND me.event_type = 'pm'
-                  )
+                JOIN pm_status ps ON ps.equipment_id = e.id
+                JOIN equipment_pm_settings s ON s.equipment_id = e.id
+                JOIN pm_profiles p ON p.id = s.profile_id
+                WHERE e.active = 1 AND e.category = 'Tractors'
+                  AND p.name = 'Rotating 40-20A-20B'
+                  AND ps.service_date IS NOT NULL
+              ), anchors AS (
+                SELECT t.equipment_id, t.service_date,
+                  (
+                    SELECT MAX(h.ro_date)
+                    FROM historical_repair_lines h
+                    WHERE h.equipment_id = t.equipment_id
+                      AND h.ro_date <= t.service_date
+                      AND (UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%')
+                  ) AS last_pm40_date
+                FROM tractors t
+              ), classified AS (
+                SELECT a.equipment_id, a.service_date, a.last_pm40_date,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM historical_repair_lines h
+                    WHERE h.equipment_id = a.equipment_id AND h.ro_date = a.service_date
+                      AND (UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%')
+                  ) THEN 1 ELSE 0 END AS baseline_is_pm40,
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM historical_repair_lines h
+                    WHERE h.equipment_id = a.equipment_id AND h.ro_date = a.service_date
+                      AND UPPER(h.vmrs_description) LIKE '%PM20%'
+                  ) THEN 1 ELSE 0 END AS baseline_is_pm20,
+                  (
+                    SELECT COUNT(DISTINCT h.ro_number)
+                    FROM historical_repair_lines h
+                    WHERE h.equipment_id = a.equipment_id
+                      AND a.last_pm40_date IS NOT NULL
+                      AND h.ro_date > a.last_pm40_date
+                      AND h.ro_date <= a.service_date
+                      AND UPPER(h.vmrs_description) LIKE '%PM20%'
+                  ) AS pm20_after_anchor
+                FROM anchors a
               )
+              SELECT equipment_id,
+                     CASE
+                       WHEN baseline_is_pm40 = 1 THEN '20A'
+                       WHEN baseline_is_pm20 = 1 AND pm20_after_anchor = 1 THEN '20B'
+                       WHEN baseline_is_pm20 = 1 AND pm20_after_anchor = 2 THEN '40'
+                       ELSE NULL
+                     END AS recovered_next
+              FROM classified
+              WHERE baseline_is_pm40 = 1
+                 OR (baseline_is_pm20 = 1 AND pm20_after_anchor IN (1, 2))
             `);
 
-            const eventBacked = await query(`
-              SELECT e.id,
-                     (
-                       SELECT me.pm_type
-                       FROM maintenance_events me
-                       WHERE me.equipment_id = e.id
-                         AND me.event_type = 'pm'
-                         AND me.pm_type IN ('40', '20A', '20B')
-                       ORDER BY me.event_date DESC, me.id DESC
-                       LIMIT 1
-                     ) AS last_pm_type
-              FROM equipment e
-              JOIN equipment_pm_settings s ON s.equipment_id = e.id
-              JOIN pm_profiles p ON p.id = s.profile_id
-              WHERE e.active = 1
-                AND e.category = 'Tractors'
-                AND p.name = 'Rotating 40-20A-20B'
-            `);
+            const expected = { '20A': 43, '20B': 29, '40': 20 };
+            const counts = { '20A': 0, '20B': 0, '40': 0 };
+            for (const row of resolved) {
+              const next = String(row.recovered_next || '');
+              if (!Object.prototype.hasOwnProperty.call(counts, next)) throw new Error('Unexpected recovered Tractor PM type.');
+              counts[next] += 1;
+            }
+            for (const key of Object.keys(expected)) {
+              if (counts[key] !== expected[key]) throw new Error(`Expected ${expected[key]} recovered ${key} rows, found ${counts[key]}.`);
+            }
+            if (resolved.length !== 92) throw new Error(`Expected 92 recoverable Tractor schedules, found ${resolved.length}.`);
 
-            let repairedSequence = 0;
-            for (const row of eventBacked) {
-              const last = String(row.last_pm_type || '');
-              if (!last) continue;
-              const next = last === '40' ? '20A' : last === '20A' ? '20B' : '40';
+            for (const row of resolved) {
               await query(`
                 UPDATE pm_status
                 SET pm_type = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE equipment_id = ?
-              `, [next, Number(row.id)]);
-              repairedSequence += 1;
+              `, [String(row.recovered_next), Number(row.equipment_id)]);
             }
 
-            const verify = await query(`
-              SELECT COUNT(*) AS mismatches
-              FROM equipment e
-              JOIN equipment_pm_settings s ON s.equipment_id = e.id
-              JOIN pm_profiles p ON p.id = s.profile_id
-              JOIN pm_status ps ON ps.equipment_id = e.id
-              WHERE e.active = 1
-                AND e.category = 'Tractors'
-                AND p.name = 'Rotating 40-20A-20B'
-                AND EXISTS (
-                  SELECT 1 FROM maintenance_events me
-                  WHERE me.equipment_id = e.id
-                    AND me.event_type = 'pm'
-                    AND me.pm_type IN ('40', '20A', '20B')
-                )
-                AND ps.pm_type <> CASE (
-                  SELECT me.pm_type
-                  FROM maintenance_events me
-                  WHERE me.equipment_id = e.id
-                    AND me.event_type = 'pm'
-                    AND me.pm_type IN ('40', '20A', '20B')
-                  ORDER BY me.event_date DESC, me.id DESC
-                  LIMIT 1
-                )
-                  WHEN '40' THEN '20A'
-                  WHEN '20A' THEN '20B'
-                  WHEN '20B' THEN '40'
-                END
-            `);
-
-            const syntheticAfter = await query(`
-              SELECT COUNT(*) AS count
-              FROM equipment e
-              JOIN pm_status ps ON ps.equipment_id = e.id
-              WHERE e.active = 1
-                AND e.category = 'Tractors'
-                AND ps.service_date = '2026-08-10'
-                AND e.service_date IS NULL
-                AND NOT EXISTS (
-                  SELECT 1 FROM maintenance_events me
-                  WHERE me.equipment_id = e.id AND me.event_type = 'pm'
-                )
+            const mismatches = await query(`
+              WITH tractors AS (
+                SELECT e.id AS equipment_id, ps.service_date, ps.pm_type
+                FROM equipment e
+                JOIN pm_status ps ON ps.equipment_id = e.id
+                JOIN equipment_pm_settings s ON s.equipment_id = e.id
+                JOIN pm_profiles p ON p.id = s.profile_id
+                WHERE e.active = 1 AND e.category = 'Tractors'
+                  AND p.name = 'Rotating 40-20A-20B'
+                  AND ps.service_date IS NOT NULL
+              ), anchors AS (
+                SELECT t.*,
+                  (SELECT MAX(h.ro_date) FROM historical_repair_lines h WHERE h.equipment_id=t.equipment_id AND h.ro_date<=t.service_date AND (UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%')) AS last_pm40_date
+                FROM tractors t
+              ), classified AS (
+                SELECT a.*,
+                  CASE WHEN EXISTS (SELECT 1 FROM historical_repair_lines h WHERE h.equipment_id=a.equipment_id AND h.ro_date=a.service_date AND (UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%')) THEN 1 ELSE 0 END AS is40,
+                  CASE WHEN EXISTS (SELECT 1 FROM historical_repair_lines h WHERE h.equipment_id=a.equipment_id AND h.ro_date=a.service_date AND UPPER(h.vmrs_description) LIKE '%PM20%') THEN 1 ELSE 0 END AS is20,
+                  (SELECT COUNT(DISTINCT h.ro_number) FROM historical_repair_lines h WHERE h.equipment_id=a.equipment_id AND a.last_pm40_date IS NOT NULL AND h.ro_date>a.last_pm40_date AND h.ro_date<=a.service_date AND UPPER(h.vmrs_description) LIKE '%PM20%') AS pm20_count
+                FROM anchors a
+              ), expected_rows AS (
+                SELECT equipment_id, pm_type,
+                  CASE WHEN is40=1 THEN '20A' WHEN is20=1 AND pm20_count=1 THEN '20B' WHEN is20=1 AND pm20_count=2 THEN '40' ELSE NULL END AS expected_next
+                FROM classified
+              )
+              SELECT COUNT(*) AS count FROM expected_rows
+              WHERE expected_next IS NOT NULL AND pm_type <> expected_next
             `);
 
             const distribution = await query(`
@@ -177,13 +166,16 @@ jobs:
               GROUP BY COALESCE(ps.pm_type, '(blank)')
               ORDER BY next_pm
             `);
+            const baselineState = await query(`
+              SELECT SUM(CASE WHEN ps.service_date IS NULL THEN 1 ELSE 0 END) AS missing_service,
+                     SUM(CASE WHEN ps.last_mileage IS NULL THEN 1 ELSE 0 END) AS missing_mileage
+              FROM equipment e
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              WHERE e.active = 1 AND e.category = 'Tractors'
+            `);
 
-            const before = Number(syntheticBefore?.[0]?.count || 0);
-            const after = Number(syntheticAfter?.[0]?.count || 0);
-            const mismatches = Number(verify?.[0]?.mismatches || 0);
-            if (before !== 10) throw new Error(`Expected 10 synthetic tractor baselines, found ${before}.`);
-            if (after !== 0) throw new Error(`Synthetic tractor baselines remain: ${after}.`);
-            if (mismatches !== 0) throw new Error(`Tractor PM sequence verification failed: ${mismatches} mismatch(es).`);
-            console.log(`TRACTOR_PM_REPAIR=syntheticCleared=${before},sequenceRestored=${repairedSequence},mismatches=${mismatches},distribution=${JSON.stringify(distribution)}`);
+            const mismatchCount = Number(mismatches?.[0]?.count || 0);
+            if (mismatchCount !== 0) throw new Error(`Recovered Tractor sequence verification failed: ${mismatchCount} mismatch(es).`);
+            console.log(`TRACTOR_SEQUENCE_RESTORE=restored=${resolved.length},to20A=${counts['20A']},to20B=${counts['20B']},to40=${counts['40']},mismatches=${mismatchCount},distribution=${JSON.stringify(distribution)},baselineState=${JSON.stringify(baselineState)}`);
           })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
           NODE
