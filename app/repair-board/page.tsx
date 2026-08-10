@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import styles from "./repair-board.module.css";
 
 type Role = "viewer" | "mechanic" | "manager" | "admin";
@@ -193,8 +193,8 @@ export default function RepairBoardPage() {
             {visible.map((repair) => {
               const busy = busyId === repair.id;
               return (
-                <>
-                  <tr key={repair.id} className={repair.priority === 1 ? styles.priorityOne : repair.priority === 2 ? styles.priorityTwo : undefined}>
+                <Fragment key={repair.id}>
+                  <tr className={repair.priority === 1 ? styles.priorityOne : repair.priority === 2 ? styles.priorityTwo : undefined}>
                     <td className={styles.priorityCell}>
                       {data?.canManage ? (
                         <select
@@ -261,7 +261,7 @@ export default function RepairBoardPage() {
                     </td>
                   </tr>
                   {expandedId === repair.id && (
-                    <tr key={`${repair.id}-details`} className={styles.expanded}>
+                    <tr className={styles.expanded}>
                       <td colSpan={9}>
                         <div className={styles.details}>
                           <div className={styles.detailBlock}><span>Unit</span><strong>{repair.unit || "—"}</strong></div>
@@ -272,7 +272,7 @@ export default function RepairBoardPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
             {data && visible.length === 0 && (
