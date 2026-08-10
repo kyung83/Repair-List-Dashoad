@@ -62,12 +62,21 @@ jobs:
                      SUM(CASE WHEN ps.status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
                      SUM(CASE WHEN ps.status = 'Scheduled' AND ps.service_date = DATE(ps.updated_at) THEN 1 ELSE 0 END) AS scheduled_same_day,
                      SUM(CASE WHEN ps.status = 'Scheduled'
-                                   AND ps.service_date = DATE(ps.updated_at)
+                                   AND ps.service_date IS NOT NULL
+                                   AND e.service_date IS NULL
                                    AND NOT EXISTS (
                                      SELECT 1 FROM maintenance_events me
                                      WHERE me.equipment_id = e.id AND me.event_type = 'pm'
                                    )
-                              THEN 1 ELSE 0 END) AS suspicious_no_event
+                              THEN 1 ELSE 0 END) AS pm_status_only_no_event,
+                     SUM(CASE WHEN ps.status = 'Scheduled'
+                                   AND ps.service_date = DATE(ps.updated_at)
+                                   AND e.service_date IS NULL
+                                   AND NOT EXISTS (
+                                     SELECT 1 FROM maintenance_events me
+                                     WHERE me.equipment_id = e.id AND me.event_type = 'pm'
+                                   )
+                              THEN 1 ELSE 0 END) AS strong_synthetic
               FROM equipment e
               LEFT JOIN equipment_pm_settings s ON s.equipment_id = e.id
               LEFT JOIN pm_status ps ON ps.equipment_id = e.id
@@ -86,7 +95,20 @@ jobs:
               GROUP BY e.category, COALESCE(p.name, 'No profile'), COALESCE(ps.pm_type, '(blank)')
               ORDER BY e.category, profile, next_pm
             `);
+            const dateShape = await query(`
+              SELECT e.category, ps.service_date, COUNT(*) AS count,
+                     SUM(CASE WHEN e.service_date IS NULL THEN 1 ELSE 0 END) AS equipment_date_blank,
+                     SUM(CASE WHEN EXISTS (
+                       SELECT 1 FROM maintenance_events me WHERE me.equipment_id = e.id AND me.event_type = 'pm'
+                     ) THEN 1 ELSE 0 END) AS with_pm_event
+              FROM equipment e
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              WHERE e.active = 1 AND e.category IN ('Shuttle Trucks', 'Tractors')
+              GROUP BY e.category, ps.service_date
+              ORDER BY e.category, ps.service_date
+            `);
             console.log('PM_BASELINE_SUMMARY=' + JSON.stringify(summary));
             console.log('PM_SEQUENCE_SUMMARY=' + JSON.stringify(sequence));
+            console.log('PM_DATE_SHAPE=' + JSON.stringify(dateShape));
           })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
           NODE
