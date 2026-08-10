@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
+import { completeMaintenanceBoardItem, getMaintenanceBoardItems } from '@/lib/maintenance-board';
 
 const STATUSES = new Set(['New', 'Assigned', 'Waiting for Parts', 'In Progress', 'Completed']);
 
@@ -23,6 +24,12 @@ function repairNumber(value: unknown) {
   const id = match ? Number(match[1]) : 0;
   if (!Number.isInteger(id) || id <= 0) throw new Error('Repair was not found.');
   return id;
+}
+
+function maintenanceId(value: unknown) {
+  const match = String(value ?? '').match(/^(pm|annual)-(\d+)$/);
+  if (!match) throw new Error('Scheduled maintenance item was not found.');
+  return { kind: match[1] as 'pm' | 'annual', equipmentId: Number(match[2]), id: `${match[1]}-${match[2]}` };
 }
 
 async function requireUser(request: Request) {
@@ -79,7 +86,7 @@ async function equipmentIdForDvir(unitValue: string) {
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
-    const [repairs, dvirDefects, technicians] = await Promise.all([
+    const [repairs, dvirDefects, technicians, maintenanceItems] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id,
                CASE
@@ -93,10 +100,12 @@ export async function GET(request: Request) {
                r.title,
                COALESCE(r.parts_text, '') AS parts_text,
                COALESCE(r.status, 'New') AS status,
+               COALESCE(r.source, 'manual') AS source,
                r.technician_id,
                COALESCE(t.name, '') AS technician_name,
                COALESCE(r.labor_hours, 0) AS labor_hours,
                COALESCE(e.equipment_type, 'other') AS equipment_type,
+               r.equipment_id,
                r.geotab_defect_id,
                rt.started_at AS timer_started_at,
                COALESCE(tt.name, '') AS timer_technician
@@ -119,10 +128,12 @@ export async function GET(request: Request) {
         title: string;
         parts_text: string;
         status: string;
+        source: string;
         technician_id: number | null;
         technician_name: string;
         labor_hours: number;
         equipment_type: string;
+        equipment_id: number | null;
         geotab_defect_id: string | null;
         timer_started_at: string | null;
         timer_technician: string;
@@ -151,31 +162,51 @@ export async function GET(request: Request) {
         WHERE active = 1
         ORDER BY name
       `).all<Technician>(),
+      getMaintenanceBoardItems(env.DB),
     ]);
 
-    const repairRows = repairs.results.map((row) => ({
-      id: `repair-${row.id}`,
-      source: row.geotab_defect_id ? 'dvir-repair' as const : 'repair' as const,
-      priority: Number(row.priority ?? 2),
-      location: row.location,
-      unit: row.unit,
-      driver: row.driver,
-      issue: row.title,
-      parts: row.parts_text,
-      status: row.status,
-      technicianId: row.technician_id === null ? null : Number(row.technician_id),
-      assignedTo: row.technician_name,
-      laborHours: Number(row.labor_hours ?? 0),
-      equipmentType: row.equipment_type,
-      dvirDefectId: row.geotab_defect_id ?? '',
-      dvirLogId: '',
-      dvirComments: '',
-      dvirPhotos: '',
-      activeTimer: row.timer_started_at ? {
-        startedAt: row.timer_started_at,
-        technician: row.timer_technician,
-      } : null,
-    }));
+    const activeMaintenance = new Set<string>();
+    const repairRows = repairs.results.map((row) => {
+      let source: 'repair' | 'dvir-repair' | 'pm-repair' | 'annual-repair' = 'repair';
+      if (row.source === 'scheduled-pm') {
+        source = 'pm-repair';
+        if (row.equipment_id) activeMaintenance.add(`pm-${row.equipment_id}`);
+      } else if (row.source === 'scheduled-annual') {
+        source = 'annual-repair';
+        if (row.equipment_id) activeMaintenance.add(`annual-${row.equipment_id}`);
+      } else if (row.geotab_defect_id) {
+        source = 'dvir-repair';
+      }
+
+      return {
+        id: `repair-${row.id}`,
+        source,
+        priority: Number(row.priority ?? 2),
+        location: row.location,
+        unit: row.unit,
+        driver: row.driver,
+        issue: row.title,
+        parts: row.parts_text,
+        status: row.status,
+        technicianId: row.technician_id === null ? null : Number(row.technician_id),
+        assignedTo: row.technician_name,
+        laborHours: Number(row.labor_hours ?? 0),
+        equipmentType: row.equipment_type,
+        dvirDefectId: row.geotab_defect_id ?? '',
+        dvirLogId: '',
+        dvirComments: '',
+        dvirPhotos: '',
+        maintenanceId: source === 'pm-repair' && row.equipment_id
+          ? `pm-${row.equipment_id}`
+          : source === 'annual-repair' && row.equipment_id
+            ? `annual-${row.equipment_id}`
+            : '',
+        activeTimer: row.timer_started_at ? {
+          startedAt: row.timer_started_at,
+          technician: row.timer_technician,
+        } : null,
+      };
+    });
 
     const rawDvirRows = dvirDefects.results.map((row) => ({
       id: `dvir-${row.geotab_defect_id}`,
@@ -195,13 +226,39 @@ export async function GET(request: Request) {
       dvirLogId: row.geotab_log_id,
       dvirComments: row.comments,
       dvirPhotos: row.photos_url,
+      maintenanceId: '',
       activeTimer: null,
     }));
 
-    const rows = [...repairRows, ...rawDvirRows].sort((left, right) => {
+    const maintenanceRows = maintenanceItems
+      .filter((item) => !activeMaintenance.has(item.id))
+      .map((item) => ({
+        id: item.id,
+        source: item.maintenanceKind,
+        priority: item.status.toLowerCase().includes('overdue') ? 1 : 2,
+        location: item.location,
+        unit: item.unit,
+        driver: item.driver,
+        issue: item.issue,
+        parts: '',
+        status: item.status,
+        technicianId: null,
+        assignedTo: '',
+        laborHours: 0,
+        equipmentType: item.equipmentType,
+        dvirDefectId: '',
+        dvirLogId: '',
+        dvirComments: '',
+        dvirPhotos: '',
+        maintenanceId: item.id,
+        activeTimer: null,
+      }));
+
+    const rows = [...repairRows, ...rawDvirRows, ...maintenanceRows].sort((left, right) => {
       if (left.priority !== right.priority) return left.priority - right.priority;
-      if (left.source === 'dvir' && right.source !== 'dvir') return -1;
-      if (right.source === 'dvir' && left.source !== 'dvir') return 1;
+      const leftScheduled = ['dvir', 'pm', 'annual'].includes(left.source) ? 0 : 1;
+      const rightScheduled = ['dvir', 'pm', 'annual'].includes(right.source) ? 0 : 1;
+      if (leftScheduled !== rightScheduled) return leftScheduled - rightScheduled;
       if (left.technicianId === null && right.technicianId !== null) return -1;
       if (right.technicianId === null && left.technicianId !== null) return 1;
       return left.unit.localeCompare(right.unit, undefined, { numeric: true, sensitivity: 'base' });
@@ -221,6 +278,7 @@ export async function GET(request: Request) {
       summary: {
         total: rows.length,
         dvirOpen: rows.filter((row) => row.source === 'dvir' || row.source === 'dvir-repair').length,
+        maintenanceDue: rows.filter((row) => ['pm', 'annual', 'pm-repair', 'annual-repair'].includes(row.source)).length,
         highPriority: rows.filter((row) => row.priority === 1).length,
         unassigned: rows.filter((row) => row.technicianId === null).length,
         activeLabor: rows.filter((row) => row.activeTimer !== null).length,
@@ -320,6 +378,87 @@ export async function POST(request: Request) {
       }
       if (!logId) throw new Error('The Geotab DVIR log could not be found.');
       const result = await markGeotabDefectRepaired(env, logId, defectId);
+      return Response.json({ ok: true, ...result });
+    }
+
+    if (action === 'createMaintenanceRepair') {
+      const maintenance = maintenanceId(body.maintenanceId ?? body.repairId);
+      const dueItems = await getMaintenanceBoardItems(env.DB);
+      const dueItem = dueItems.find((item) => item.id === maintenance.id);
+      if (!dueItem) throw new Error('That PM or annual is no longer due. Refresh the board.');
+
+      const technician = await activeTechnician(body.technicianId);
+      if (Number(body.technicianId ?? 0) > 0 && !technician) throw new Error('Technician was not found or is inactive.');
+      const source = maintenance.kind === 'pm' ? 'scheduled-pm' : 'scheduled-annual';
+
+      const existing = await env.DB.prepare(`
+        SELECT id FROM repairs
+        WHERE equipment_id = ? AND source = ?
+          AND lower(COALESCE(status, '')) NOT LIKE '%complete%'
+        ORDER BY id DESC LIMIT 1
+      `).bind(maintenance.equipmentId, source).first<{ id: number }>();
+
+      if (existing) {
+        if (technician) {
+          await env.DB.prepare(`
+            UPDATE repairs
+            SET technician_id = ?, status = CASE WHEN lower(status) = 'new' THEN 'Assigned' ELSE status END,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `).bind(technician.id, existing.id).run();
+        }
+        return Response.json({ ok: true, repairId: `repair-${existing.id}`, existing: true });
+      }
+
+      const priority = dueItem.status.toLowerCase().includes('overdue') ? '1' : '2';
+      const status = technician ? 'Assigned' : 'New';
+      const result = await env.DB.prepare(`
+        INSERT INTO repairs (
+          equipment_id, title, description, status, priority, source,
+          driver, location, technician_id, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).bind(
+        maintenance.equipmentId,
+        dueItem.issue,
+        `Scheduled ${maintenance.kind === 'pm' ? 'PM' : 'annual inspection'} generated from the Repair Board.`,
+        status,
+        priority,
+        source,
+        dueItem.driver,
+        dueItem.location,
+        technician?.id ?? null,
+      ).run();
+
+      const id = Number(result.meta.last_row_id);
+      await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'scheduled_maintenance_added', ?)
+      `).bind(
+        id,
+        user.id,
+        technician?.id ?? null,
+        technician
+          ? `${user.displayName} assigned the scheduled ${maintenance.kind.toUpperCase()} to ${technician.name}.`
+          : `${user.displayName} added the scheduled ${maintenance.kind.toUpperCase()} to the repair list.`,
+      ).run();
+
+      return Response.json({ ok: true, repairId: `repair-${id}`, technicianId: technician?.id ?? null });
+    }
+
+    if (action === 'completeMaintenance') {
+      const maintenance = maintenanceId(body.maintenanceId ?? body.repairId);
+      const activeRepair = await env.DB.prepare(`
+        SELECT id FROM repairs
+        WHERE equipment_id = ? AND source = ?
+          AND lower(COALESCE(status, '')) NOT LIKE '%complete%'
+        LIMIT 1
+      `).bind(
+        maintenance.equipmentId,
+        maintenance.kind === 'pm' ? 'scheduled-pm' : 'scheduled-annual',
+      ).first<{ id: number }>();
+      if (activeRepair) throw new Error('This scheduled maintenance has an open work order. Complete that work order first.');
+      const result = await completeMaintenanceBoardItem(env.DB, maintenance.id);
+      if (!result) throw new Error('Scheduled maintenance item was not found.');
       return Response.json({ ok: true, ...result });
     }
 
