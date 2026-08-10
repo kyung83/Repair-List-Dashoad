@@ -60,7 +60,7 @@ export function validUsername(value: string) { return /^[a-z0-9][a-z0-9._-]{2,31
 export function isAppRole(value: unknown): value is AppRole { return value === 'viewer' || value === 'mechanic' || value === 'manager' || value === 'admin'; }
 
 export async function hashPassword(password: string) {
-  if (password.length < 12) throw new Error('Password must be at least 12 characters.');
+  if (password.length < 6) throw new Error('Password must be at least 6 characters.');
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const hash = deriveScrypt(password, salt);
   return { hash: bytesToBase64Url(hash), salt: bytesToBase64Url(salt), iterations: 0, algorithm: 'scrypt-v1' as const };
