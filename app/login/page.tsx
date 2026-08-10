@@ -2,6 +2,8 @@
 
 import { FormEvent, useState } from "react";
 
+type LoginUser = { role?: "viewer" | "mechanic" | "manager" | "admin" };
+
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -12,11 +14,13 @@ export default function LoginPage() {
     event.preventDefault(); setBusy(true); setMessage("");
     try {
       const response = await fetch("/api/auth/login", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ username, password }) });
-      const result = await response.json() as { error?:string; setupRequired?:boolean };
+      const result = await response.json() as { error?:string; setupRequired?:boolean; user?:LoginUser };
       if (result.setupRequired) { window.location.assign("/setup"); return; }
       if (!response.ok) { setMessage(result.error || "Sign in failed."); return; }
-      const params = new URLSearchParams(window.location.search); const requested = params.get("returnTo") || "/shop";
-      const returnTo = requested.startsWith("/") && !requested.startsWith("//") ? requested : "/shop";
+      const params = new URLSearchParams(window.location.search);
+      const defaultPath = result.user?.role === "mechanic" ? "/shop" : "/repair-board";
+      const requested = params.get("returnTo") || defaultPath;
+      const returnTo = requested.startsWith("/") && !requested.startsWith("//") ? requested : defaultPath;
       window.location.assign(returnTo);
     } catch { setMessage("The dashboard could not be reached."); } finally { setBusy(false); }
   }
