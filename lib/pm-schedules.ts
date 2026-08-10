@@ -56,6 +56,8 @@ type PmBaselineRow = {
   annual_date: string | null;
 };
 
+const PM_ID_BATCH_SIZE = 75;
+
 function finiteInteger(value: unknown, label: string, options: { allowZero?: boolean } = {}) {
   const number = Number(value);
   if (!Number.isFinite(number) || !Number.isInteger(number) || number < (options.allowZero ? 0 : 1)) {
@@ -101,9 +103,27 @@ function equipmentIds(value: unknown) {
 }
 
 async function runBatches(db: D1Database, statements: D1PreparedStatement[]) {
-  for (let index = 0; index < statements.length; index += 75) {
-    await db.batch(statements.slice(index, index + 75));
+  for (let index = 0; index < statements.length; index += PM_ID_BATCH_SIZE) {
+    await db.batch(statements.slice(index, index + PM_ID_BATCH_SIZE));
   }
+}
+
+async function loadPmBaselines(db: D1Database, ids: number[]) {
+  const rows: PmBaselineRow[] = [];
+  for (let index = 0; index < ids.length; index += PM_ID_BATCH_SIZE) {
+    const chunk = ids.slice(index, index + PM_ID_BATCH_SIZE);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const result = await db.prepare(`
+      SELECT e.id, e.equipment_type, e.current_mileage, ps.last_mileage,
+             COALESCE(ps.service_date, e.service_date) AS service_date,
+             COALESCE(ps.annual_date, e.annual_date) AS annual_date
+      FROM equipment e
+      LEFT JOIN pm_status ps ON ps.equipment_id = e.id
+      WHERE e.active = 1 AND e.id IN (${placeholders})
+    `).bind(...chunk).all<PmBaselineRow>();
+    rows.push(...result.results);
+  }
+  return rows;
 }
 
 export async function getPmScheduleData(db: D1Database) {
@@ -201,26 +221,18 @@ export async function applyPmSchedule(db: D1Database, body: Record<string, unkno
     throw new Error('Choose a mileage interval, time interval, or annual reminder.');
   }
 
-  const placeholders = ids.map(() => '?').join(', ');
-  const baselines = await db.prepare(`
-    SELECT e.id, e.equipment_type, e.current_mileage, ps.last_mileage,
-           COALESCE(ps.service_date, e.service_date) AS service_date,
-           COALESCE(ps.annual_date, e.annual_date) AS annual_date
-    FROM equipment e
-    LEFT JOIN pm_status ps ON ps.equipment_id = e.id
-    WHERE e.active = 1 AND e.id IN (${placeholders})
-  `).bind(...ids).all<PmBaselineRow>();
-  if (baselines.results.length !== ids.length) throw new Error('One or more selected units are no longer active.');
+  const baselines = await loadPmBaselines(db, ids);
+  if (baselines.length !== ids.length) throw new Error('One or more selected units are no longer active.');
 
-  const trailerRows = baselines.results.filter((row) => row.equipment_type === 'trailer');
-  const vehicleRows = baselines.results.filter((row) => row.equipment_type !== 'trailer');
+  const trailerRows = baselines.filter((row) => row.equipment_type === 'trailer');
+  const vehicleRows = baselines.filter((row) => row.equipment_type !== 'trailer');
   const isTrailerProfile = profile.name === 'Trailer Service';
   if (isTrailerProfile && vehicleRows.length) throw new Error('Trailer Service can only be assigned to trailers.');
   if (!isTrailerProfile && trailerRows.length) throw new Error('Trailers must use the Trailer Service profile.');
   if (trailerRows.length && mileageInterval != null) throw new Error('Trailer service schedules use time and annual reminders, not mileage.');
 
   const statements: D1PreparedStatement[] = [];
-  for (const row of baselines.results) {
+  for (const row of baselines) {
     const baselineMileage = overrideLastMileage ?? row.last_mileage ?? row.current_mileage;
     const baselineServiceDate = overrideServiceDate ?? row.service_date ?? todayDate();
     const baselineAnnualDate = overrideAnnualDate ?? row.annual_date;
