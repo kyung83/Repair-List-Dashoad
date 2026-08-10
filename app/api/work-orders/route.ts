@@ -1,6 +1,32 @@
 import { env } from 'cloudflare:workers';
+import { getSessionUser } from '@/lib/auth';
 import { removePartFromRepair, usePartOnRepair } from '@/lib/inventory-db';
 import { getWorkOrderData, handleWorkOrderAction } from '@/lib/work-orders';
+
+function repairNumber(value: unknown) {
+  const match = String(value ?? '').match(/^repair-(\d+)$/);
+  if (!match) throw new Error('Repair row not found');
+  return Number(match[1]);
+}
+
+async function enforceTechnicianScope(request: Request, body: Record<string, unknown>) {
+  const user = await getSessionUser(env.DB, request);
+  if (!user) throw new Error('Authentication required.');
+  if (user.role !== 'mechanic') return;
+  if (!user.technicianId) throw new Error('This technician login is not linked to a technician record.');
+
+  const action = String(body.action ?? '');
+  if (!['usePart', 'completeRepair', 'addLabor'].includes(action)) {
+    throw new Error('Technicians can only change their assigned repairs from the shop workspace.');
+  }
+  const repairId = repairNumber(action === 'completeRepair' ? (body.id ?? body.repairId) : body.repairId);
+  const repair = await env.DB.prepare('SELECT technician_id, status FROM repairs WHERE id = ?')
+    .bind(repairId)
+    .first<{ technician_id: number | null; status: string }>();
+  if (!repair) throw new Error('Repair was not found.');
+  if (Number(repair.technician_id ?? 0) !== user.technicianId) throw new Error('This repair is not assigned to you.');
+  if (String(repair.status ?? '').toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
+}
 
 // Repair-part mutations stay centralized here so attach/remove always refresh the repair summary.
 async function refreshRepairPartsText(repairId: number) {
@@ -31,6 +57,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
+    await enforceTechnicianScope(request, body);
     if (String(body.action ?? '') === 'usePart') {
       const result = await usePartOnRepair(env.DB, body);
       const match = String(body.repairId ?? '').match(/^repair-(\d+)$/);
