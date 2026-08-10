@@ -172,13 +172,16 @@ function groupWorkload(rows: RepairRow[]) {
   const unassigned = rows.length - assigned;
   const active = rows.filter((row) => row.activeTimer).length;
   const waiting = rows.filter((row) => row.status.toLowerCase().includes("waiting")).length;
-  return { assigned, unassigned, active, waiting, priority: Math.min(...rows.map((row) => row.priority || 2)) };
+  const dvir = rows.filter((row) => row.source === "dvir" || row.source === "dvir-repair").length;
+  const pm = rows.filter((row) => row.source === "pm" || row.source === "pm-repair").length;
+  const annual = rows.filter((row) => row.source === "annual" || row.source === "annual-repair").length;
+  return { assigned, unassigned, active, waiting, dvir, pm, annual, priority: Math.min(...rows.map((row) => row.priority || 2)) };
 }
 
 export default function RepairBoardPage() {
   const [data, setData] = useState<BoardData | null>(null);
   const [query, setQuery] = useState("");
-  const [shopView, setShopView] = useState<ShopView>("clare");
+  const [shopView, setShopView] = useState<ShopView>("all");
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedUnits, setExpandedUnits] = useState<Set<string>>(() => new Set());
@@ -488,6 +491,9 @@ export default function RepairBoardPage() {
           <td className={styles.workloadColumn}>
             <div className={styles.workloadBadges}>
               <span className={workload.priority === 1 ? styles.priorityHot : styles.priorityCool}>P{workload.priority}</span>
+              {workload.dvir > 0 && <span>{workload.dvir} DVIR</span>}
+              {workload.pm > 0 && <span>{workload.pm} PM</span>}
+              {workload.annual > 0 && <span>{workload.annual} Annual</span>}
               <span>{workload.assigned} assigned</span>
               {workload.unassigned > 0 && <span className={styles.unassignedBadge}>{workload.unassigned} open</span>}
               {workload.waiting > 0 && <span>{workload.waiting} parts</span>}
@@ -548,7 +554,7 @@ export default function RepairBoardPage() {
         <div>
           <p className={styles.eyebrow}>NORLOW SHOP CONTROL</p>
           <h1>Repair Board</h1>
-          <p className={styles.subtitle}>One line per unit. Open the Repairs dropdown to assign, work, and complete each repair separately.</p>
+          <p className={styles.subtitle}>All open repairs, DVIRs, PMs, and annuals are shown by default. Clare work stays pinned first; use the shop tabs when you want a location-only view.</p>
         </div>
         <div className={styles.headerActions}>
           <button className={styles.refresh} onClick={() => void load()}>Refresh</button>
@@ -559,23 +565,23 @@ export default function RepairBoardPage() {
       {message && <div className={styles.notice}>{message}</div>}
 
       <nav className={styles.shopTabs} aria-label="Shop view">
+        <button className={shopView === "all" ? styles.activeShopTab : ""} onClick={() => setShopView("all")}><span>All Shops</span><b>{shopCounts.all}</b></button>
         <button className={shopView === "clare" ? styles.activeShopTab : ""} onClick={() => setShopView("clare")}><span>Clare Shop</span><b>{shopCounts.clare}</b></button>
         <button className={shopView === "cadillac" ? styles.activeShopTab : ""} onClick={() => setShopView("cadillac")}><span>Cadillac Shop</span><b>{shopCounts.cadillac}</b></button>
-        <button className={shopView === "all" ? styles.activeShopTab : ""} onClick={() => setShopView("all")}><span>All Shops</span><b>{shopCounts.all}</b></button>
       </nav>
 
       <section className={styles.metrics}>
         <article><span>OOS Units</span><strong>{oosVisible.length}</strong></article>
         <article><span>Open Work</span><strong>{visible.length}</strong></article>
-        <article><span>Truck Units</span><strong>{truckGroups.length}</strong></article>
-        <article><span>Trailer Units</span><strong>{trailerGroups.length}</strong></article>
+        <article><span>DVIR</span><strong>{visible.filter((row) => row.source === "dvir" || row.source === "dvir-repair").length}</strong></article>
+        <article><span>PM / Annual</span><strong>{visible.filter((row) => ["pm", "annual", "pm-repair", "annual-repair"].includes(row.source)).length}</strong></article>
         <article><span>Unassigned</span><strong>{visible.filter((row) => row.technicianId === null).length}</strong></article>
         <article><span>Active Labor</span><strong>{visible.filter((row) => row.activeTimer).length}</strong></article>
       </section>
 
       <div className={styles.searchBar}>
         <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, location, part, technician…" />
-        <span>Units stay together; individual repairs remain independent.</span>
+        <span>All work sources stay visible unless you choose a shop-only filter.</span>
       </div>
 
       <section className={styles.oosSection}>
