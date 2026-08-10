@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Check authorization
         run: test -n "${CLOUDFLARE_API_TOKEN:-}"
-      - name: Inspect tractor PM subtype evidence
+      - name: Verify tractor PM40 baseline dates
         shell: bash
         run: |
           set -euo pipefail
@@ -53,66 +53,48 @@ jobs:
               const result = await api(url, { method: 'POST', body: JSON.stringify({ sql, params }) });
               return result?.[0]?.results || result?.results || [];
             }
-            const eventTypes = await query(`
-              SELECT COALESCE(me.source, '(null)') AS source,
-                     COALESCE(me.pm_type, '(null)') AS pm_type,
-                     COUNT(*) AS count
-              FROM maintenance_events me
-              JOIN equipment e ON e.id = me.equipment_id
-              WHERE e.active = 1 AND e.category = 'Tractors' AND me.event_type = 'pm'
-              GROUP BY COALESCE(me.source, '(null)'), COALESCE(me.pm_type, '(null)')
-              ORDER BY source, pm_type
-            `);
-            const historySignals = await query(`
-              SELECT
-                SUM(CASE WHEN UPPER(vmrs_description) LIKE '%20A%' THEN 1 ELSE 0 END) AS lines_20a,
-                SUM(CASE WHEN UPPER(vmrs_description) LIKE '%20B%' THEN 1 ELSE 0 END) AS lines_20b,
-                SUM(CASE WHEN UPPER(vmrs_description) LIKE '%PM 40%' OR UPPER(vmrs_description) LIKE '%PM40%' OR UPPER(vmrs_description) LIKE '%40 PM%' THEN 1 ELSE 0 END) AS lines_40,
-                COUNT(DISTINCT CASE WHEN UPPER(vmrs_description) LIKE '%20A%' THEN equipment_id END) AS units_20a,
-                COUNT(DISTINCT CASE WHEN UPPER(vmrs_description) LIKE '%20B%' THEN equipment_id END) AS units_20b,
-                COUNT(DISTINCT CASE WHEN UPPER(vmrs_description) LIKE '%PM 40%' OR UPPER(vmrs_description) LIKE '%PM40%' OR UPPER(vmrs_description) LIKE '%40 PM%' THEN equipment_id END) AS units_40
-              FROM historical_repair_lines h
-              WHERE EXISTS (
-                SELECT 1 FROM equipment e
-                WHERE e.id = h.equipment_id AND e.active = 1 AND e.category = 'Tractors'
-              )
-            `);
-            const recentSignals = await query(`
-              SELECT
-                SUM(CASE WHEN UPPER(COALESCE(title,'') || ' ' || COALESCE(description,'')) LIKE '%20A%' THEN 1 ELSE 0 END) AS repairs_20a,
-                SUM(CASE WHEN UPPER(COALESCE(title,'') || ' ' || COALESCE(description,'')) LIKE '%20B%' THEN 1 ELSE 0 END) AS repairs_20b,
-                SUM(CASE WHEN UPPER(COALESCE(title,'') || ' ' || COALESCE(description,'')) LIKE '%PM 40%' OR UPPER(COALESCE(title,'') || ' ' || COALESCE(description,'')) LIKE '%PM40%' OR UPPER(COALESCE(title,'') || ' ' || COALESCE(description,'')) LIKE '%40 PM%' THEN 1 ELSE 0 END) AS repairs_40
-              FROM repairs r
-              WHERE EXISTS (
-                SELECT 1 FROM equipment e
-                WHERE e.id = r.equipment_id AND e.active = 1 AND e.category = 'Tractors'
-              )
-            `);
-            const latestHistory = await query(`
-              WITH labeled AS (
-                SELECT h.equipment_id, h.ro_date,
-                  CASE
-                    WHEN UPPER(h.vmrs_description) LIKE '%20A%' THEN '20A'
-                    WHEN UPPER(h.vmrs_description) LIKE '%20B%' THEN '20B'
-                    WHEN UPPER(h.vmrs_description) LIKE '%PM 40%' OR UPPER(h.vmrs_description) LIKE '%PM40%' OR UPPER(h.vmrs_description) LIKE '%40 PM%' THEN '40'
-                    ELSE NULL
-                  END AS completed_pm
-                FROM historical_repair_lines h
-                JOIN equipment e ON e.id = h.equipment_id
+            const matchSummary = await query(`
+              WITH pm40 AS (
+                SELECT equipment_id, ro_date,
+                       ROW_NUMBER() OVER (PARTITION BY equipment_id ORDER BY ro_date DESC, id DESC) AS rn
+                FROM historical_repair_lines
+                WHERE UPPER(vmrs_description) LIKE '%PM 40%'
+                   OR UPPER(vmrs_description) LIKE '%PM40%'
+                   OR UPPER(vmrs_description) LIKE '%40 PM%'
+              ), tractors AS (
+                SELECT e.id, ps.service_date,
+                       (SELECT p.ro_date FROM pm40 p WHERE p.equipment_id = e.id AND p.rn = 1) AS latest_pm40_date
+                FROM equipment e
+                JOIN pm_status ps ON ps.equipment_id = e.id
                 WHERE e.active = 1 AND e.category = 'Tractors'
-              ), ranked AS (
-                SELECT equipment_id, completed_pm, ro_date,
-                       ROW_NUMBER() OVER (PARTITION BY equipment_id ORDER BY ro_date DESC) AS rn
-                FROM labeled
-                WHERE completed_pm IS NOT NULL
               )
-              SELECT completed_pm, COUNT(*) AS units
-              FROM ranked WHERE rn = 1
-              GROUP BY completed_pm ORDER BY completed_pm
+              SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN service_date IS NULL THEN 1 ELSE 0 END) AS baseline_missing,
+                SUM(CASE WHEN latest_pm40_date IS NULL THEN 1 ELSE 0 END) AS no_pm40_history,
+                SUM(CASE WHEN service_date = latest_pm40_date THEN 1 ELSE 0 END) AS exact_match,
+                SUM(CASE WHEN service_date IS NOT NULL AND latest_pm40_date IS NOT NULL AND service_date > latest_pm40_date THEN 1 ELSE 0 END) AS baseline_after_history,
+                SUM(CASE WHEN service_date IS NOT NULL AND latest_pm40_date IS NOT NULL AND service_date < latest_pm40_date THEN 1 ELSE 0 END) AS baseline_before_history
+              FROM tractors
             `);
-            console.log('TRACTOR_EVENT_PM_TYPES=' + JSON.stringify(eventTypes));
-            console.log('TRACTOR_HISTORY_SIGNALS=' + JSON.stringify(historySignals));
-            console.log('TRACTOR_RECENT_SIGNALS=' + JSON.stringify(recentSignals));
-            console.log('TRACTOR_LATEST_HISTORY_LABELS=' + JSON.stringify(latestHistory));
+            const exactByNext = await query(`
+              WITH pm40 AS (
+                SELECT equipment_id, ro_date,
+                       ROW_NUMBER() OVER (PARTITION BY equipment_id ORDER BY ro_date DESC, id DESC) AS rn
+                FROM historical_repair_lines
+                WHERE UPPER(vmrs_description) LIKE '%PM 40%'
+                   OR UPPER(vmrs_description) LIKE '%PM40%'
+                   OR UPPER(vmrs_description) LIKE '%40 PM%'
+              )
+              SELECT COALESCE(ps.pm_type, '(blank)') AS current_next, COUNT(*) AS count
+              FROM equipment e
+              JOIN pm_status ps ON ps.equipment_id = e.id
+              JOIN pm40 h ON h.equipment_id = e.id AND h.rn = 1 AND h.ro_date = ps.service_date
+              WHERE e.active = 1 AND e.category = 'Tractors'
+              GROUP BY COALESCE(ps.pm_type, '(blank)')
+              ORDER BY current_next
+            `);
+            console.log('TRACTOR_PM40_DATE_MATCH=' + JSON.stringify(matchSummary));
+            console.log('TRACTOR_EXACT_MATCH_CURRENT_NEXT=' + JSON.stringify(exactByNext));
           })().catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
           NODE
