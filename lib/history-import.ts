@@ -1,417 +1,73 @@
 const IMPORT_KEY = 'ro-history-9309499-v1';
-const SOURCE_NAME = 'RO History Account Export 9309499.xls';
-const SOURCE_SHA256 = '0020194047e29985107ed7e820ec6ed26683df1d002ed5716fb238e5aea0a328';
-const SOURCE_LINE_COUNT = 80600;
-const SOURCE_RO_COUNT = 59879;
+const LEGACY_SOURCE_NAME = 'RO History Account Export 9309499.xls';
 const TERMINAL_STATUSES = new Set(['CLOSED', 'INVOICED', 'COMPLETTED']);
 
 type EquipmentMatchRow = { id: number; unit: string };
-type ParentIdRow = { id: number; ro_number: string };
 type CountRow = { count: number };
 type SumRow = { count: number; line_count: number; total_cost: number };
+type ImportRegistration = { import_key: string; source_name: string; source_sha256: string | null; source_line_count: number; source_ro_count: number; status: string };
+type ImportLine = { systemCode?: unknown; assemblyCode?: unknown; description?: unknown; laborHours?: unknown; laborCost?: unknown; partsCost?: unknown; subletCost?: unknown; totalCost?: unknown };
+type ImportRo = { unit?: unknown; roNumber?: unknown; roDate?: unknown; location?: unknown; status?: unknown; lines?: unknown };
+type ParsedRo = { unit: string; roNumber: string; roDate: string; location: string; status: string; lines: ImportLine[] };
 
-type ImportLine = {
-  systemCode?: unknown;
-  assemblyCode?: unknown;
-  description?: unknown;
-  laborHours?: unknown;
-  laborCost?: unknown;
-  partsCost?: unknown;
-  subletCost?: unknown;
-  totalCost?: unknown;
-};
-
-type ImportRo = {
-  unit?: unknown;
-  roNumber?: unknown;
-  roDate?: unknown;
-  location?: unknown;
-  status?: unknown;
-  lines?: unknown;
-};
-
-type ParsedRo = {
-  unit: string;
-  roNumber: string;
-  roDate: string;
-  location: string;
-  status: string;
-  lines: ImportLine[];
-};
-
-function clean(value: unknown, max = 300) {
-  return String(value ?? '').trim().slice(0, max);
-}
-
-function numberValue(value: unknown) {
-  const number = Number(value ?? 0);
-  return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0;
-}
-
-function positiveNumber(value: unknown) {
-  return Math.max(0, numberValue(value));
-}
-
-function normalizeUnit(value: unknown) {
-  return clean(value, 100).toUpperCase().replace(/\s+/g, ' ');
-}
-
-function historicalNumericUnit(value: unknown) {
-  const unit = normalizeUnit(value);
-  if (!/^\d+$/.test(unit)) return null;
-  const number = Number(unit);
-  return Number.isInteger(number) && number >= 300 ? String(number) : null;
-}
-
-function validDate(value: unknown) {
-  const text = clean(value, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) {
-    throw new Error(`Invalid repair date: ${text || '(blank)'}`);
-  }
-  return text;
-}
-
-function majorCategory(systemValue: unknown) {
-  const system = clean(systemValue, 20).toUpperCase();
-  if (system === 'PM') return 'Preventive Maintenance & Inspections';
-  const groups: Array<[string[], string]> = [
-    [['013'], 'Brakes'],
-    [['017', '018'], 'Tires, Wheels & Bearings'],
-    [['070', '071', '072', '077', '176'], 'Trailer & Body'],
-    [['034'], 'Lighting'],
-    [['030'], 'Electrical Wiring'],
-    [['031', '032'], 'Starting, Charging & Batteries'],
-    [['033', '037'], 'Diagnostics & Electronic Modules'],
-    [['040', '041', '042', '043', '044', '045'], 'Engine, Cooling, Exhaust & Fuel'],
-    [['001'], 'HVAC'],
-    [['002', '010', '014'], 'Cab, Body & Frame'],
-    [['016', '113'], 'Suspension & Alignment'],
-    [['011', '012', '020', '021', '022'], 'Axles, Hubs & Seals'],
-    [['023', '024', '026', '027', '028'], 'Drivetrain & Transmission'],
-    [['015'], 'Steering'],
-    [['059'], 'Coupling & Fifth Wheel'],
-    [['036', '051'], 'Telematics, Cameras & GPS'],
-    [['003'], 'Instruments, Switches & Gauges'],
-    [['050', '052', '053', '054'], 'Accessories & Safety Equipment'],
-    [['019'], 'Lubrication Systems'],
-    [['047'], 'Filters / Multi-System'],
-    [['049', '065', '112'], 'Hydraulics'],
-    [['055'], 'Liftgate & Material Handling'],
-    [['006'], 'Aerodynamics'],
-    [['094'], 'Bulk Product Transfer'],
-    [['100'], 'Outside Service / Road Calls'],
-    [['103'], 'Indirect Shop Labor'],
-    [['104'], 'Shop Supplies'],
-    [['105'], 'Transfer / Internal Movement'],
-    [['151', '153'], 'APU & Generator'],
-    [['152', '174'], 'Specialty Body Systems'],
-  ];
-  for (const [systems, name] of groups) if (systems.includes(system)) return name;
-  return system ? `Other / System ${system}` : 'Other / Unclassified';
-}
-
-function assertImportIdentity(body: Record<string, unknown>) {
-  if (clean(body.importKey, 100) !== IMPORT_KEY) throw new Error('Import package key is not recognized.');
-  if (clean(body.sourceSha256, 100).toLowerCase() !== SOURCE_SHA256) throw new Error('Import source checksum does not match the approved repair-history export.');
-}
-
-async function runBatches(db: D1Database, statements: D1PreparedStatement[], size = 60) {
-  for (let index = 0; index < statements.length; index += size) {
-    await db.batch(statements.slice(index, index + size));
-  }
-}
-
-async function importExists(db: D1Database) {
-  return db.prepare(`SELECT import_key, source_sha256, status FROM data_imports WHERE import_key = ?`)
-    .bind(IMPORT_KEY).first<{ import_key: string; source_sha256: string | null; status: string }>();
-}
+function clean(value: unknown, max = 300) { return String(value ?? '').trim().slice(0, max); }
+function numberValue(value: unknown) { const number = Number(value ?? 0); return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0; }
+function positiveNumber(value: unknown) { return Math.max(0, numberValue(value)); }
+function normalizeUnit(value: unknown) { return clean(value, 100).toUpperCase().replace(/\s+/g, ' '); }
+function historicalNumericUnit(value: unknown) { const unit = normalizeUnit(value); if (!/^\d+$/.test(unit)) return null; const number = Number(unit); return Number.isInteger(number) && number >= 300 ? String(number) : null; }
+function validDate(value: unknown) { const text = clean(value, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) throw new Error(`Invalid repair date: ${text || '(blank)'}`); return text; }
+function validSha(value: unknown) { const sha = clean(value, 64).toLowerCase(); if (!/^[0-9a-f]{64}$/.test(sha)) throw new Error('Repair-history source checksum is invalid.'); return sha; }
+function validSourceName(value: unknown) { const name = clean(value, 240); if (!name || !/\.(xls|json)$/i.test(name)) throw new Error('Repair-history source must be a Norlow .xls export or prepared .json package.'); return name; }
+function positiveInteger(value: unknown, label: string, max: number) { const number = Number(value); if (!Number.isInteger(number) || number <= 0 || number > max) throw new Error(`${label} is invalid.`); return number; }
+function majorCategory(systemValue: unknown) { const system = clean(systemValue, 20).toUpperCase(); if (system === 'PM') return 'Preventive Maintenance & Inspections'; const groups: Array<[string[], string]> = [[['013'],'Brakes'],[['017','018'],'Tires, Wheels & Bearings'],[['070','071','072','077','176'],'Trailer & Body'],[['034'],'Lighting'],[['030'],'Electrical Wiring'],[['031','032'],'Starting, Charging & Batteries'],[['033','037'],'Diagnostics & Electronic Modules'],[['040','041','042','043','044','045'],'Engine, Cooling, Exhaust & Fuel'],[['001'],'HVAC'],[['002','010','014'],'Cab, Body & Frame'],[['016','113'],'Suspension & Alignment'],[['011','012','020','021','022'],'Axles, Hubs & Seals'],[['023','024','026','027','028'],'Drivetrain & Transmission'],[['015'],'Steering'],[['059'],'Coupling & Fifth Wheel'],[['036','051'],'Telematics, Cameras & GPS'],[['003'],'Instruments, Switches & Gauges'],[['050','052','053','054'],'Accessories & Safety Equipment'],[['019'],'Lubrication Systems'],[['047'],'Filters / Multi-System'],[['049','065','112'],'Hydraulics'],[['055'],'Liftgate & Material Handling'],[['006'],'Aerodynamics'],[['094'],'Bulk Product Transfer'],[['100'],'Outside Service / Road Calls'],[['103'],'Indirect Shop Labor'],[['104'],'Shop Supplies'],[['105'],'Transfer / Internal Movement'],[['151','153'],'APU & Generator'],[['152','174'],'Specialty Body Systems']]; for (const [systems, name] of groups) if (systems.includes(system)) return name; return system ? `Other / System ${system}` : 'Other / Unclassified'; }
+function assertImportKey(body: Record<string, unknown>) { if (clean(body.importKey, 100) !== IMPORT_KEY) throw new Error('Import package key is not recognized.'); }
+async function runBatches(db: D1Database, statements: D1PreparedStatement[], size = 60) { for (let index = 0; index < statements.length; index += size) await db.batch(statements.slice(index, index + size)); }
+async function runStatementGroups(db: D1Database, groups: D1PreparedStatement[][], maxStatements = 60) { let batch: D1PreparedStatement[] = []; for (const group of groups) { if (group.length > maxStatements) { if (batch.length) { await db.batch(batch); batch = []; } await db.batch(group); continue; } if (batch.length && batch.length + group.length > maxStatements) { await db.batch(batch); batch = []; } batch.push(...group); } if (batch.length) await db.batch(batch); }
+async function importExists(db: D1Database) { return db.prepare(`SELECT import_key, source_name, source_sha256, source_line_count, source_ro_count, status FROM data_imports WHERE import_key = ?`).bind(IMPORT_KEY).first<ImportRegistration>(); }
+function assertRegisteredSource(body: Record<string, unknown>, registered: ImportRegistration) { const sha = validSha(body.sourceSha256); if (sha !== clean(registered.source_sha256, 64).toLowerCase()) throw new Error('This batch does not belong to the repair-history source that was started.'); }
 
 export async function getHistoryImportStatus(db: D1Database) {
   const [status, unmatched] = await Promise.all([
-    db.prepare(`
-      SELECT import_key, source_name, source_sha256, status, source_line_count, source_ro_count,
-             imported_line_count, imported_ro_count, matched_unit_count, unmatched_line_count,
-             unmatched_ro_count, unmatched_unit_count, skipped_nonfinal_ro_count,
-             started_at, completed_at, notes
-      FROM data_imports WHERE import_key = ?
-    `).bind(IMPORT_KEY).first<any>(),
-    db.prepare(`
-      SELECT unit, ro_count, line_count, total_cost
-      FROM data_import_unmatched_units
-      WHERE import_key = ?
-      ORDER BY ro_count DESC, unit
-      LIMIT 500
-    `).bind(IMPORT_KEY).all<any>(),
+    db.prepare(`SELECT import_key, source_name, source_sha256, status, source_line_count, source_ro_count, imported_line_count, imported_ro_count, matched_unit_count, unmatched_line_count, unmatched_ro_count, unmatched_unit_count, skipped_nonfinal_ro_count, started_at, completed_at, notes FROM data_imports WHERE import_key = ?`).bind(IMPORT_KEY).first<any>(),
+    db.prepare(`SELECT unit, ro_count, line_count, total_cost FROM data_import_unmatched_units WHERE import_key = ? ORDER BY ro_count DESC, unit LIMIT 500`).bind(IMPORT_KEY).all<any>(),
   ]);
-  return {
-    importKey: IMPORT_KEY,
-    expectedSourceName: SOURCE_NAME,
-    expectedSourceSha256: SOURCE_SHA256,
-    expectedSourceRows: SOURCE_LINE_COUNT,
-    expectedSourceRos: SOURCE_RO_COUNT,
-    status: status ? {
-      importKey: status.import_key,
-      sourceName: status.source_name,
-      sourceSha256: status.source_sha256 ?? '',
-      status: status.status,
-      sourceLineCount: Number(status.source_line_count ?? 0),
-      sourceRoCount: Number(status.source_ro_count ?? 0),
-      importedLineCount: Number(status.imported_line_count ?? 0),
-      importedRoCount: Number(status.imported_ro_count ?? 0),
-      matchedUnitCount: Number(status.matched_unit_count ?? 0),
-      unmatchedLineCount: Number(status.unmatched_line_count ?? 0),
-      unmatchedRoCount: Number(status.unmatched_ro_count ?? 0),
-      unmatchedUnitCount: Number(status.unmatched_unit_count ?? 0),
-      skippedNonfinalRoCount: Number(status.skipped_nonfinal_ro_count ?? 0),
-      startedAt: status.started_at ?? '',
-      completedAt: status.completed_at ?? '',
-      notes: status.notes ?? '',
-    } : null,
-    unmatchedUnits: unmatched.results.map((row: any) => ({
-      unit: row.unit,
-      roCount: Number(row.ro_count ?? 0),
-      lineCount: Number(row.line_count ?? 0),
-      totalCost: Number(row.total_cost ?? 0),
-    })),
-  };
+  return { importKey: IMPORT_KEY, sourceFormat: 'Norlow RO History Account Export (.xls)', legacySourceName: LEGACY_SOURCE_NAME,
+    status: status ? { importKey: status.import_key, sourceName: status.source_name, sourceSha256: status.source_sha256 ?? '', status: status.status, sourceLineCount: Number(status.source_line_count ?? 0), sourceRoCount: Number(status.source_ro_count ?? 0), importedLineCount: Number(status.imported_line_count ?? 0), importedRoCount: Number(status.imported_ro_count ?? 0), matchedUnitCount: Number(status.matched_unit_count ?? 0), unmatchedLineCount: Number(status.unmatched_line_count ?? 0), unmatchedRoCount: Number(status.unmatched_ro_count ?? 0), unmatchedUnitCount: Number(status.unmatched_unit_count ?? 0), skippedNonfinalRoCount: Number(status.skipped_nonfinal_ro_count ?? 0), startedAt: status.started_at ?? '', completedAt: status.completed_at ?? '', notes: status.notes ?? '' } : null,
+    unmatchedUnits: unmatched.results.map((row: any) => ({ unit: row.unit, roCount: Number(row.ro_count ?? 0), lineCount: Number(row.line_count ?? 0), totalCost: Number(row.total_cost ?? 0) })) };
 }
 
 export async function startHistoryImport(db: D1Database, body: Record<string, unknown>) {
-  assertImportIdentity(body);
-  const sourceLineCount = Number(body.sourceLineCount);
-  const sourceRoCount = Number(body.sourceRoCount);
-  if (sourceLineCount !== SOURCE_LINE_COUNT || sourceRoCount !== SOURCE_RO_COUNT) {
-    throw new Error('Import package row counts do not match the approved export.');
-  }
-  const existing = await importExists(db);
-  if (existing && existing.source_sha256 && existing.source_sha256 !== SOURCE_SHA256) {
-    throw new Error('A different source is already registered under this import key.');
-  }
-  const reprocess = body.reprocess === true;
-  if (existing?.status === 'completed' && !reprocess) return { ok: true, alreadyCompleted: true, importKey: IMPORT_KEY };
-
-  await db.prepare(`
-    INSERT INTO data_imports (
-      import_key, source_name, source_sha256, status, source_line_count, source_ro_count,
-      started_at, notes
-    ) VALUES (?, ?, ?, 'running', ?, ?, CURRENT_TIMESTAMP, ?)
-    ON CONFLICT(import_key) DO UPDATE SET
-      source_name = excluded.source_name,
-      source_sha256 = excluded.source_sha256,
-      status = 'running',
-      source_line_count = excluded.source_line_count,
-      source_ro_count = excluded.source_ro_count,
-      notes = excluded.notes,
-      completed_at = NULL
-  `).bind(
-    IMPORT_KEY,
-    SOURCE_NAME,
-    SOURCE_SHA256,
-    SOURCE_LINE_COUNT,
-    SOURCE_RO_COUNT,
-    reprocess
-      ? 'Admin browser reprocess; existing equipment only; refreshed matching rules; no equipment creation.'
-      : 'Admin browser import; existing equipment only; no equipment creation.',
-  ).run();
+  assertImportKey(body); const sourceName = validSourceName(body.sourceName); const sourceSha256 = validSha(body.sourceSha256); const sourceLineCount = positiveInteger(body.sourceLineCount, 'Source detail-row count', 1_000_000); const sourceRoCount = positiveInteger(body.sourceRoCount, 'Source repair-order count', 500_000); const existing = await importExists(db);
+  if (existing && sourceRoCount < Number(existing.source_ro_count ?? 0)) throw new Error(`This cumulative export has fewer ROs (${sourceRoCount.toLocaleString()}) than the last accepted snapshot (${Number(existing.source_ro_count).toLocaleString()}). Export the full RO history again.`);
+  const reprocess = body.reprocess === true; if (existing?.status === 'completed' && existing.source_sha256 === sourceSha256 && !reprocess) return { ok: true, alreadyCompleted: true, importKey: IMPORT_KEY };
+  await db.prepare(`INSERT INTO data_imports (import_key, source_name, source_sha256, status, source_line_count, source_ro_count, started_at, notes) VALUES (?, ?, ?, 'running', ?, ?, CURRENT_TIMESTAMP, ?) ON CONFLICT(import_key) DO UPDATE SET source_name = excluded.source_name, source_sha256 = excluded.source_sha256, status = 'running', source_line_count = excluded.source_line_count, source_ro_count = excluded.source_ro_count, started_at = CURRENT_TIMESTAMP, completed_at = NULL, notes = excluded.notes`).bind(IMPORT_KEY, sourceName, sourceSha256, sourceLineCount, sourceRoCount, reprocess ? 'Admin cumulative Excel/JSON reprocess; existing equipment only; existing RO rows refreshed; no equipment creation.' : 'Admin cumulative Excel/JSON import; existing equipment only; existing RO rows refreshed; no equipment creation.').run();
   return { ok: true, alreadyCompleted: false, importKey: IMPORT_KEY };
 }
 
-function parseRo(value: unknown): ParsedRo {
-  if (!value || typeof value !== 'object') throw new Error('Repair order row is invalid.');
-  const row = value as ImportRo;
-  const lines = Array.isArray(row.lines) ? row.lines as ImportLine[] : [];
-  const roNumber = clean(row.roNumber, 80);
-  const unit = clean(row.unit, 100);
-  if (!roNumber || !unit) throw new Error('Repair order is missing unit or RO number.');
-  if (!lines.length || lines.length > 30) throw new Error(`Repair order ${roNumber} has an invalid detail-line count.`);
-  return {
-    unit,
-    roNumber,
-    roDate: validDate(row.roDate),
-    location: clean(row.location, 160),
-    status: clean(row.status, 40).toUpperCase(),
-    lines,
-  };
-}
+function parseRo(value: unknown): ParsedRo { if (!value || typeof value !== 'object') throw new Error('Repair order row is invalid.'); const row = value as ImportRo; const lines = Array.isArray(row.lines) ? row.lines as ImportLine[] : []; const roNumber = clean(row.roNumber, 80).toUpperCase(); const unit = clean(row.unit, 100); if (!roNumber || !unit) throw new Error('Repair order is missing unit or RO number.'); if (!roNumber.startsWith('WO')) throw new Error(`Repair order ${roNumber} is outside the standard WO history scope.`); if (!lines.length || lines.length > 30) throw new Error(`Repair order ${roNumber} has an invalid detail-line count.`); return { unit, roNumber, roDate: validDate(row.roDate), location: clean(row.location, 160), status: clean(row.status, 40).toUpperCase(), lines }; }
+async function existingHistoricalRos(db: D1Database, roNumbers: string[]) { const result = new Set<string>(); for (let index = 0; index < roNumbers.length; index += 70) { const slice = roNumbers.slice(index, index + 70); const placeholders = slice.map(() => '?').join(','); const rows = await db.prepare(`SELECT ro_number FROM historical_repairs WHERE import_key = ? AND ro_number IN (${placeholders})`).bind(IMPORT_KEY, ...slice).all<{ ro_number: string }>(); rows.results.forEach((row) => result.add(row.ro_number)); } return result; }
 
 export async function importHistoryBatch(db: D1Database, body: Record<string, unknown>) {
-  assertImportIdentity(body);
-  const registered = await importExists(db);
-  if (!registered) throw new Error('Start the history import before uploading batches.');
-  if (registered.status === 'completed') return { ok: true, alreadyCompleted: true, received: 0 };
-  const incoming = Array.isArray(body.ros) ? body.ros : [];
-  if (!incoming.length || incoming.length > 600) throw new Error('Each import batch must contain 1 to 600 repair orders.');
-  const ros = incoming.map(parseRo);
-
-  const equipmentRows = await db.prepare(`SELECT id, unit FROM equipment WHERE active = 1`).all<EquipmentMatchRow>();
-  const equipmentByUnit = new Map(equipmentRows.results.map((row) => [normalizeUnit(row.unit), Number(row.id)]));
-  const equipmentByHistoricalNumber = new Map<string, number | null>();
-  for (const row of equipmentRows.results) {
-    const match = normalizeUnit(row.unit).match(/^(\d+)\s*\(\s*(DC|BT|SC)\s*\)$/);
-    if (!match) continue;
-    const key = String(Number(match[1]));
-    const id = Number(row.id);
-    equipmentByHistoricalNumber.set(key, equipmentByHistoricalNumber.has(key) ? null : id);
-  }
-
-  const matched: Array<{ ro: ReturnType<typeof parseRo>; equipmentId: number }> = [];
-  const unmatchedStatements: D1PreparedStatement[] = [];
-  const skippedStatements: D1PreparedStatement[] = [];
-  const matchedAuditCleanupStatements: D1PreparedStatement[] = [];
-  for (const ro of ros) {
-    if (!TERMINAL_STATUSES.has(ro.status)) {
-      skippedStatements.push(db.prepare(`
-        INSERT OR IGNORE INTO data_import_skipped_ros (import_key, ro_number, source_status)
-        VALUES (?, ?, ?)
-      `).bind(IMPORT_KEY, ro.roNumber, ro.status || 'UNKNOWN'));
-      continue;
-    }
-    const historicalNumber = historicalNumericUnit(ro.unit);
-    const equipmentId = equipmentByUnit.get(normalizeUnit(ro.unit))
-      ?? (historicalNumber ? equipmentByHistoricalNumber.get(historicalNumber) ?? undefined : undefined);
-    if (!equipmentId) {
-      const totalCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.totalCost), 0);
-      unmatchedStatements.push(db.prepare(`
-        INSERT OR IGNORE INTO data_import_unmatched_ros (import_key, ro_number, unit, line_count, total_cost)
-        VALUES (?, ?, ?, ?, ?)
-      `).bind(IMPORT_KEY, ro.roNumber, ro.unit, ro.lines.length, Math.round(totalCost * 100) / 100));
-      continue;
-    }
-    matched.push({ ro, equipmentId });
-    matchedAuditCleanupStatements.push(db.prepare(`
-      DELETE FROM data_import_unmatched_ros WHERE import_key = ? AND ro_number = ?
-    `).bind(IMPORT_KEY, ro.roNumber));
-  }
-  await runBatches(db, [...skippedStatements, ...unmatchedStatements]);
-
-  const parentStatements = matched.map(({ ro, equipmentId }) => {
-    const laborHours = ro.lines.reduce((sum, line) => sum + positiveNumber(line.laborHours), 0);
-    const laborCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.laborCost), 0);
-    const partsCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.partsCost), 0);
-    const subletCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.subletCost), 0);
-    const totalCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.totalCost), 0);
-    return db.prepare(`
-      INSERT OR IGNORE INTO historical_repairs (
-        import_key, equipment_id, ro_number, ro_date, location, source_status,
-        labor_hours, labor_cost, parts_cost, sublet_cost, total_cost, line_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      IMPORT_KEY, equipmentId, ro.roNumber, ro.roDate, ro.location, ro.status,
-      Math.round(laborHours * 100) / 100,
-      Math.round(laborCost * 100) / 100,
-      Math.round(partsCost * 100) / 100,
-      Math.round(subletCost * 100) / 100,
-      Math.round(totalCost * 100) / 100,
-      ro.lines.length,
-    );
-  });
-  await runBatches(db, parentStatements);
-
-  const parentByRo = new Map<string, number>();
-  const roNumbers = matched.map(({ ro }) => ro.roNumber);
-  for (let index = 0; index < roNumbers.length; index += 70) {
-    const slice = roNumbers.slice(index, index + 70);
-    const placeholders = slice.map(() => '?').join(',');
-    const rows = await db.prepare(`
-      SELECT id, ro_number FROM historical_repairs
-      WHERE import_key = ? AND ro_number IN (${placeholders})
-    `).bind(IMPORT_KEY, ...slice).all<ParentIdRow>();
-    rows.results.forEach((row) => parentByRo.set(row.ro_number, Number(row.id)));
-  }
-
-  const lineStatements: D1PreparedStatement[] = [];
-  for (const { ro, equipmentId } of matched) {
-    const historicalRepairId = parentByRo.get(ro.roNumber);
-    if (!historicalRepairId) throw new Error(`Historical repair parent was not created for ${ro.roNumber}.`);
-    for (const line of ro.lines) {
-      const systemCode = clean(line.systemCode, 20).toUpperCase();
-      const assemblyCode = clean(line.assemblyCode, 30).toUpperCase();
-      const description = clean(line.description, 500) || 'Unspecified repair';
-      lineStatements.push(db.prepare(`
-        INSERT OR IGNORE INTO historical_repair_lines (
-          import_key, historical_repair_id, equipment_id, ro_number, ro_date,
-          major_category, system_code, assembly_code, vmrs_description,
-          labor_hours, labor_cost, parts_cost, sublet_cost, total_cost
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        IMPORT_KEY, historicalRepairId, equipmentId, ro.roNumber, ro.roDate,
-        majorCategory(systemCode), systemCode, assemblyCode, description,
-        positiveNumber(line.laborHours), positiveNumber(line.laborCost),
-        positiveNumber(line.partsCost), positiveNumber(line.subletCost), positiveNumber(line.totalCost),
-      ));
-    }
-  }
-  await runBatches(db, lineStatements);
-  await runBatches(db, matchedAuditCleanupStatements);
-
-  return {
-    ok: true,
-    received: ros.length,
-    matched: matched.length,
-    unmatched: unmatchedStatements.length,
-    skipped: skippedStatements.length,
-    importedLines: lineStatements.length,
-  };
+  assertImportKey(body); const registered = await importExists(db); if (!registered) throw new Error('Start the history import before uploading batches.'); assertRegisteredSource(body, registered); if (registered.status === 'completed') return { ok: true, alreadyCompleted: true, received: 0 }; const incoming = Array.isArray(body.ros) ? body.ros : []; if (!incoming.length || incoming.length > 600) throw new Error('Each import batch must contain 1 to 600 repair orders.'); const ros = incoming.map(parseRo); if (new Set(ros.map((ro) => ro.roNumber)).size !== ros.length) throw new Error('Import batch contains duplicate repair-order numbers.');
+  const [equipmentRows, existingRos] = await Promise.all([db.prepare(`SELECT id, unit FROM equipment WHERE active = 1`).all<EquipmentMatchRow>(), existingHistoricalRos(db, ros.map((ro) => ro.roNumber))]);
+  const equipmentByUnit = new Map(equipmentRows.results.map((row) => [normalizeUnit(row.unit), Number(row.id)])); const equipmentByHistoricalNumber = new Map<string, number | null>(); for (const row of equipmentRows.results) { const match = normalizeUnit(row.unit).match(/^(\d+)\s*\(\s*(DC|BT|SC)\s*\)$/); if (!match) continue; const key = String(Number(match[1])); const id = Number(row.id); equipmentByHistoricalNumber.set(key, equipmentByHistoricalNumber.has(key) ? null : id); }
+  const matched: Array<{ ro: ParsedRo; equipmentId: number }> = []; const auditGroups: D1PreparedStatement[][] = []; let unmatchedCount = 0, skippedCount = 0;
+  for (const ro of ros) { const alreadyHistorical = existingRos.has(ro.roNumber); if (!TERMINAL_STATUSES.has(ro.status)) { if (alreadyHistorical) auditGroups.push([db.prepare(`DELETE FROM data_import_unmatched_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber), db.prepare(`DELETE FROM data_import_skipped_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)]); else { skippedCount++; auditGroups.push([db.prepare(`INSERT INTO data_import_skipped_ros (import_key, ro_number, source_status) VALUES (?, ?, ?) ON CONFLICT(import_key, ro_number) DO UPDATE SET source_status = excluded.source_status`).bind(IMPORT_KEY, ro.roNumber, ro.status || 'UNKNOWN'), db.prepare(`DELETE FROM data_import_unmatched_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)]); } continue; }
+    const historicalNumber = historicalNumericUnit(ro.unit); const equipmentId = equipmentByUnit.get(normalizeUnit(ro.unit)) ?? (historicalNumber ? equipmentByHistoricalNumber.get(historicalNumber) ?? undefined : undefined); if (!equipmentId) { if (alreadyHistorical) auditGroups.push([db.prepare(`DELETE FROM data_import_unmatched_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber), db.prepare(`DELETE FROM data_import_skipped_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)]); else { unmatchedCount++; const totalCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.totalCost), 0); auditGroups.push([db.prepare(`INSERT INTO data_import_unmatched_ros (import_key, ro_number, unit, line_count, total_cost) VALUES (?, ?, ?, ?, ?) ON CONFLICT(import_key, ro_number) DO UPDATE SET unit = excluded.unit, line_count = excluded.line_count, total_cost = excluded.total_cost`).bind(IMPORT_KEY, ro.roNumber, ro.unit, ro.lines.length, Math.round(totalCost * 100) / 100), db.prepare(`DELETE FROM data_import_skipped_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)]); } continue; } matched.push({ ro, equipmentId }); }
+  await runStatementGroups(db, auditGroups);
+  const matchedGroups: D1PreparedStatement[][] = []; let importedLines = 0;
+  for (const { ro, equipmentId } of matched) { const laborHours = ro.lines.reduce((sum, line) => sum + positiveNumber(line.laborHours), 0); const laborCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.laborCost), 0); const partsCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.partsCost), 0); const subletCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.subletCost), 0); const totalCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.totalCost), 0); const group: D1PreparedStatement[] = [db.prepare(`INSERT INTO historical_repairs (import_key, equipment_id, ro_number, ro_date, location, source_status, labor_hours, labor_cost, parts_cost, sublet_cost, total_cost, line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(import_key, ro_number) DO UPDATE SET equipment_id = excluded.equipment_id, ro_date = excluded.ro_date, location = excluded.location, source_status = excluded.source_status, labor_hours = excluded.labor_hours, labor_cost = excluded.labor_cost, parts_cost = excluded.parts_cost, sublet_cost = excluded.sublet_cost, total_cost = excluded.total_cost, line_count = excluded.line_count`).bind(IMPORT_KEY, equipmentId, ro.roNumber, ro.roDate, ro.location, ro.status, Math.round(laborHours * 100) / 100, Math.round(laborCost * 100) / 100, Math.round(partsCost * 100) / 100, Math.round(subletCost * 100) / 100, Math.round(totalCost * 100) / 100, ro.lines.length), db.prepare(`DELETE FROM historical_repair_lines WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)];
+    for (const line of ro.lines) { const systemCode = clean(line.systemCode, 20).toUpperCase(); const assemblyCode = clean(line.assemblyCode, 30).toUpperCase(); const description = clean(line.description, 500) || 'Unspecified repair'; group.push(db.prepare(`INSERT INTO historical_repair_lines (import_key, historical_repair_id, equipment_id, ro_number, ro_date, major_category, system_code, assembly_code, vmrs_description, labor_hours, labor_cost, parts_cost, sublet_cost, total_cost) VALUES (?, (SELECT id FROM historical_repairs WHERE import_key = ? AND ro_number = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(IMPORT_KEY, IMPORT_KEY, ro.roNumber, equipmentId, ro.roNumber, ro.roDate, majorCategory(systemCode), systemCode, assemblyCode, description, positiveNumber(line.laborHours), positiveNumber(line.laborCost), positiveNumber(line.partsCost), positiveNumber(line.subletCost), positiveNumber(line.totalCost))); importedLines++; }
+    group.push(db.prepare(`DELETE FROM data_import_unmatched_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber), db.prepare(`DELETE FROM data_import_skipped_ros WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)); matchedGroups.push(group); }
+  await runStatementGroups(db, matchedGroups); return { ok: true, received: ros.length, matched: matched.length, unmatched: unmatchedCount, skipped: skippedCount, importedLines };
 }
 
 export async function finishHistoryImport(db: D1Database, body: Record<string, unknown>) {
-  assertImportIdentity(body);
-  await db.batch([
-    db.prepare(`DELETE FROM data_import_unmatched_units WHERE import_key = ?`).bind(IMPORT_KEY),
-    db.prepare(`
-      INSERT INTO data_import_unmatched_units (import_key, unit, ro_count, line_count, total_cost)
-      SELECT import_key, unit, COUNT(*), COALESCE(SUM(line_count),0), COALESCE(SUM(total_cost),0)
-      FROM data_import_unmatched_ros
-      WHERE import_key = ?
-      GROUP BY import_key, unit
-    `).bind(IMPORT_KEY),
-  ]);
-
-  const [importedRos, importedLines, matchedUnits, unmatched, unmatchedUnits, skipped] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS count FROM historical_repairs WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(),
-    db.prepare(`SELECT COUNT(*) AS count FROM historical_repair_lines WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(),
-    db.prepare(`SELECT COUNT(DISTINCT equipment_id) AS count FROM historical_repairs WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(line_count),0) AS line_count, COALESCE(SUM(total_cost),0) AS total_cost FROM data_import_unmatched_ros WHERE import_key = ?`).bind(IMPORT_KEY).first<SumRow>(),
-    db.prepare(`SELECT COUNT(DISTINCT unit) AS count FROM data_import_unmatched_ros WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(),
-    db.prepare(`SELECT COUNT(*) AS count FROM data_import_skipped_ros WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(),
-  ]);
-
-  const importedRoCount = Number(importedRos?.count ?? 0);
-  const unmatchedRoCount = Number(unmatched?.count ?? 0);
-  const skippedCount = Number(skipped?.count ?? 0);
-  const processed = importedRoCount + unmatchedRoCount + skippedCount;
-  if (processed !== SOURCE_RO_COUNT) {
-    await db.prepare(`
-      UPDATE data_imports SET status = 'incomplete', notes = ? WHERE import_key = ?
-    `).bind(`Processed ${processed} of ${SOURCE_RO_COUNT} source ROs. Re-open the import page and upload the same package again to resume.`, IMPORT_KEY).run();
-    throw new Error(`Import is incomplete: ${processed.toLocaleString()} of ${SOURCE_RO_COUNT.toLocaleString()} repair orders have been processed.`);
-  }
-
-  await db.prepare(`
-    UPDATE data_imports SET
-      status = 'completed',
-      imported_line_count = ?, imported_ro_count = ?, matched_unit_count = ?,
-      unmatched_line_count = ?, unmatched_ro_count = ?, unmatched_unit_count = ?,
-      skipped_nonfinal_ro_count = ?, completed_at = CURRENT_TIMESTAMP,
-      notes = 'Historical RO export attached to existing active equipment only; unmatched units were not created.'
-    WHERE import_key = ?
-  `).bind(
-    Number(importedLines?.count ?? 0), importedRoCount, Number(matchedUnits?.count ?? 0),
-    Number(unmatched?.line_count ?? 0), unmatchedRoCount, Number(unmatchedUnits?.count ?? 0),
-    skippedCount, IMPORT_KEY,
-  ).run();
-  return { ok: true, ...(await getHistoryImportStatus(db)) };
+  assertImportKey(body); const registered = await importExists(db); if (!registered) throw new Error('History import was not started.'); assertRegisteredSource(body, registered); await db.batch([db.prepare(`DELETE FROM data_import_unmatched_units WHERE import_key = ?`).bind(IMPORT_KEY), db.prepare(`INSERT INTO data_import_unmatched_units (import_key, unit, ro_count, line_count, total_cost) SELECT import_key, unit, COUNT(*), COALESCE(SUM(line_count),0), COALESCE(SUM(total_cost),0) FROM data_import_unmatched_ros WHERE import_key = ? GROUP BY import_key, unit`).bind(IMPORT_KEY)]);
+  const [importedRos, importedLines, matchedUnits, unmatched, unmatchedUnits, skipped] = await Promise.all([db.prepare(`SELECT COUNT(*) AS count FROM historical_repairs WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(), db.prepare(`SELECT COUNT(*) AS count FROM historical_repair_lines WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(), db.prepare(`SELECT COUNT(DISTINCT equipment_id) AS count FROM historical_repairs WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(), db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(line_count),0) AS line_count, COALESCE(SUM(total_cost),0) AS total_cost FROM data_import_unmatched_ros WHERE import_key = ?`).bind(IMPORT_KEY).first<SumRow>(), db.prepare(`SELECT COUNT(DISTINCT unit) AS count FROM data_import_unmatched_ros WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>(), db.prepare(`SELECT COUNT(*) AS count FROM data_import_skipped_ros WHERE import_key = ?`).bind(IMPORT_KEY).first<CountRow>()]);
+  const importedRoCount = Number(importedRos?.count ?? 0), unmatchedRoCount = Number(unmatched?.count ?? 0), skippedCount = Number(skipped?.count ?? 0), processed = importedRoCount + unmatchedRoCount + skippedCount, sourceRoCount = Number(registered.source_ro_count ?? 0);
+  if (processed !== sourceRoCount) { await db.prepare(`UPDATE data_imports SET status = 'incomplete', notes = ? WHERE import_key = ?`).bind(`Processed ${processed} of ${sourceRoCount} source ROs. The upload must be a cumulative full-history export; re-open the import page and upload the same file to resume.`, IMPORT_KEY).run(); throw new Error(`Import is incomplete: ${processed.toLocaleString()} of ${sourceRoCount.toLocaleString()} repair orders are accounted for.`); }
+  await db.prepare(`UPDATE data_imports SET status = 'completed', imported_line_count = ?, imported_ro_count = ?, matched_unit_count = ?, unmatched_line_count = ?, unmatched_ro_count = ?, unmatched_unit_count = ?, skipped_nonfinal_ro_count = ?, completed_at = CURRENT_TIMESTAMP, notes = 'Latest cumulative RO-history snapshot applied to existing equipment only; existing ROs refreshed; unmatched units were not created.' WHERE import_key = ?`).bind(Number(importedLines?.count ?? 0), importedRoCount, Number(matchedUnits?.count ?? 0), Number(unmatched?.line_count ?? 0), unmatchedRoCount, Number(unmatchedUnits?.count ?? 0), skippedCount, IMPORT_KEY).run(); return { ok: true, ...(await getHistoryImportStatus(db)) };
 }
 
-export async function resetHistoryImport(db: D1Database, body: Record<string, unknown>) {
-  assertImportIdentity(body);
-  await db.batch([
-    db.prepare(`DELETE FROM historical_repair_lines WHERE import_key = ?`).bind(IMPORT_KEY),
-    db.prepare(`DELETE FROM historical_repairs WHERE import_key = ?`).bind(IMPORT_KEY),
-    db.prepare(`DELETE FROM data_import_unmatched_units WHERE import_key = ?`).bind(IMPORT_KEY),
-    db.prepare(`DELETE FROM data_import_unmatched_ros WHERE import_key = ?`).bind(IMPORT_KEY),
-    db.prepare(`DELETE FROM data_import_skipped_ros WHERE import_key = ?`).bind(IMPORT_KEY),
-    db.prepare(`DELETE FROM data_imports WHERE import_key = ?`).bind(IMPORT_KEY),
-  ]);
-  return { ok: true };
-}
+export async function resetHistoryImport(db: D1Database, body: Record<string, unknown>) { assertImportKey(body); const registered = await importExists(db); if (registered) assertRegisteredSource(body, registered); await runBatches(db, [db.prepare(`DELETE FROM historical_repair_lines WHERE import_key = ?`).bind(IMPORT_KEY), db.prepare(`DELETE FROM historical_repairs WHERE import_key = ?`).bind(IMPORT_KEY), db.prepare(`DELETE FROM data_import_unmatched_units WHERE import_key = ?`).bind(IMPORT_KEY), db.prepare(`DELETE FROM data_import_unmatched_ros WHERE import_key = ?`).bind(IMPORT_KEY), db.prepare(`DELETE FROM data_import_skipped_ros WHERE import_key = ?`).bind(IMPORT_KEY), db.prepare(`DELETE FROM data_imports WHERE import_key = ?`).bind(IMPORT_KEY)]); return { ok: true }; }
