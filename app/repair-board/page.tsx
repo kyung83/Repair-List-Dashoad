@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import styles from "./repair-board.module.css";
 
 type Role = "viewer" | "mechanic" | "manager" | "admin";
-type Source = "repair" | "dvir" | "dvir-repair";
+type Source = "repair" | "dvir" | "dvir-repair" | "pm" | "annual" | "pm-repair" | "annual-repair";
 type Technician = { id: number; name: string };
 type Timer = { startedAt: string; technician: string };
 type RepairRow = {
@@ -26,13 +26,14 @@ type RepairRow = {
   dvirLogId: string;
   dvirComments: string;
   dvirPhotos: string;
+  maintenanceId: string;
 };
 type BoardData = {
   user: { id: number; username: string; displayName: string; role: Role; technicianId: number | null };
   canManage: boolean;
   technicians: Technician[];
   repairs: RepairRow[];
-  summary: { total: number; dvirOpen: number; highPriority: number; unassigned: number; activeLabor: number };
+  summary: { total: number; dvirOpen: number; maintenanceDue: number; highPriority: number; unassigned: number; activeLabor: number };
   updatedAt: string;
 };
 type ChangeResult = { ok?: boolean; error?: string };
@@ -60,7 +61,15 @@ function runningDuration(startedAt: string) {
 function sourceLabel(source: Source) {
   if (source === "dvir") return "DVIR";
   if (source === "dvir-repair") return "DVIR Repair";
+  if (source === "pm") return "PM Due";
+  if (source === "annual") return "Annual Due";
+  if (source === "pm-repair") return "PM Work Order";
+  if (source === "annual-repair") return "Annual Work Order";
   return "Repair";
+}
+
+function isRawMaintenance(source: Source) {
+  return source === "pm" || source === "annual";
 }
 
 export default function RepairBoardPage() {
@@ -124,6 +133,22 @@ export default function RepairBoardPage() {
     if (ok) setMessage("DVIR marked repaired.");
   }
 
+  async function addMaintenanceRepair(row: RepairRow, technicianId = 0) {
+    const ok = await change(row.id, {
+      action: "createMaintenanceRepair",
+      maintenanceId: row.maintenanceId || row.id,
+      technicianId,
+    });
+    if (ok) setMessage(technicianId ? "Scheduled maintenance work order created and assigned." : "Scheduled maintenance work order created.");
+  }
+
+  async function completeMaintenance(row: RepairRow) {
+    const label = row.source === "pm" ? "PM service" : "annual inspection";
+    if (!window.confirm(`Mark the ${label} for Unit ${row.unit || "—"} completed?`)) return;
+    const ok = await change(row.id, { action: "completeMaintenance", maintenanceId: row.maintenanceId || row.id });
+    if (ok) setMessage(`${row.source === "pm" ? "PM" : "Annual"} completed and schedule updated.`);
+  }
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (data?.repairs ?? []).filter((repair) => {
@@ -145,6 +170,7 @@ export default function RepairBoardPage() {
       if (assignmentFilter === "assigned" && repair.technicianId === null) return false;
       if (assignmentFilter === "active" && !repair.activeTimer) return false;
       if (assignmentFilter === "dvir" && repair.source !== "dvir" && repair.source !== "dvir-repair") return false;
+      if (assignmentFilter === "maintenance" && !["pm", "annual", "pm-repair", "annual-repair"].includes(repair.source)) return false;
       return true;
     });
   }, [assignmentFilter, data, equipmentFilter, priorityFilter, query]);
@@ -155,7 +181,7 @@ export default function RepairBoardPage() {
         <div>
           <p className={styles.eyebrow}>MANAGER REPAIR CONTROL</p>
           <h1>Repair Board</h1>
-          <p className={styles.subtitle}>Repair-list work and open DVIR defects together in one spreadsheet-style queue.</p>
+          <p className={styles.subtitle}>Repairs, DVIR defects, due PMs, and annual inspections together in one spreadsheet-style queue.</p>
         </div>
         <div className={styles.headerActions}>
           <button className={styles.refresh} type="button" onClick={() => void load()}>Refresh</button>
@@ -168,6 +194,7 @@ export default function RepairBoardPage() {
       <section className={styles.metrics} aria-label="Repair board summary">
         <article className={styles.metric}><span>Open work</span><strong>{data?.summary.total ?? 0}</strong></article>
         <article className={styles.metric}><span>DVIR work</span><strong>{data?.summary.dvirOpen ?? 0}</strong></article>
+        <article className={styles.metric}><span>PM / Annual</span><strong>{data?.summary.maintenanceDue ?? 0}</strong></article>
         <article className={styles.metric}><span>Priority 1</span><strong>{data?.summary.highPriority ?? 0}</strong></article>
         <article className={styles.metric}><span>Unassigned</span><strong>{data?.summary.unassigned ?? 0}</strong></article>
         <article className={styles.metric}><span>Active labor</span><strong>{data?.summary.activeLabor ?? 0}</strong></article>
@@ -177,7 +204,7 @@ export default function RepairBoardPage() {
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search location, unit, driver, repair, DVIR, part, tech…"
+          placeholder="Search location, unit, driver, repair, DVIR, PM, annual, part, tech…"
           aria-label="Search repairs"
         />
         <select value={equipmentFilter} onChange={(event) => setEquipmentFilter(event.target.value)} aria-label="Equipment filter">
@@ -189,6 +216,7 @@ export default function RepairBoardPage() {
         <select value={assignmentFilter} onChange={(event) => setAssignmentFilter(event.target.value)} aria-label="Assignment filter">
           <option value="all">All work</option>
           <option value="dvir">DVIR work</option>
+          <option value="maintenance">PM / Annual</option>
           <option value="unassigned">Unassigned</option>
           <option value="assigned">Assigned</option>
           <option value="active">Active labor</option>
@@ -208,11 +236,11 @@ export default function RepairBoardPage() {
             <col style={{ width: 145 }} />
             <col style={{ width: 95 }} />
             <col style={{ width: 180 }} />
-            <col style={{ width: 380 }} />
+            <col style={{ width: 390 }} />
             <col style={{ width: 250 }} />
-            <col style={{ width: 165 }} />
+            <col style={{ width: 170 }} />
             <col style={{ width: 220 }} />
-            <col style={{ width: 190 }} />
+            <col style={{ width: 205 }} />
           </colgroup>
           <thead>
             <tr>
@@ -220,7 +248,7 @@ export default function RepairBoardPage() {
               <th>Location</th>
               <th>Unit</th>
               <th>Driver</th>
-              <th>Repair Needed</th>
+              <th>Repair / Service Needed</th>
               <th>Parts Needed / Used</th>
               <th>Status</th>
               <th>Assigned Tech</th>
@@ -231,11 +259,13 @@ export default function RepairBoardPage() {
             {visible.map((repair) => {
               const busy = busyId === repair.id;
               const rawDvir = repair.source === "dvir";
+              const rawMaintenance = isRawMaintenance(repair.source);
+              const readOnlyScheduled = rawDvir || rawMaintenance;
               return (
                 <Fragment key={repair.id}>
-                  <tr className={`${rawDvir ? styles.dvirRow : ""} ${repair.priority === 1 ? styles.priorityOne : repair.priority === 2 ? styles.priorityTwo : ""}`.trim()}>
+                  <tr className={`${rawDvir ? styles.dvirRow : ""} ${rawMaintenance ? styles.maintenanceRow : ""} ${repair.priority === 1 ? styles.priorityOne : repair.priority === 2 ? styles.priorityTwo : ""}`.trim()}>
                     <td className={styles.priorityCell}>
-                      {data?.canManage && !rawDvir ? (
+                      {data?.canManage && !readOnlyScheduled ? (
                         <select
                           className={styles.inlineSelect}
                           value={repair.priority}
@@ -255,7 +285,7 @@ export default function RepairBoardPage() {
                     <td>{repair.driver || <span className={styles.muted}>—</span>}</td>
                     <td className={styles.issueCell}>
                       <div className={styles.issueTopline}>
-                        <span className={`${styles.sourceBadge} ${rawDvir ? styles.dvirSource : repair.source === "dvir-repair" ? styles.dvirRepairSource : styles.repairSource}`}>
+                        <span className={`${styles.sourceBadge} ${rawDvir ? styles.dvirSource : rawMaintenance ? styles.maintenanceSource : repair.source === "dvir-repair" ? styles.dvirRepairSource : ["pm-repair", "annual-repair"].includes(repair.source) ? styles.maintenanceRepairSource : styles.repairSource}`}>
                           {sourceLabel(repair.source)}
                         </span>
                       </div>
@@ -264,7 +294,7 @@ export default function RepairBoardPage() {
                     </td>
                     <td className={styles.partsCell}>{repair.parts || <span className={styles.muted}>—</span>}</td>
                     <td>
-                      {data?.canManage && !rawDvir ? (
+                      {data?.canManage && !readOnlyScheduled ? (
                         <select
                           className={styles.inlineSelect}
                           value={repair.status}
@@ -274,7 +304,7 @@ export default function RepairBoardPage() {
                           {statuses.map((status) => <option key={status}>{status}</option>)}
                         </select>
                       ) : (
-                        <span className={`${styles.statusBadge} ${rawDvir ? styles.dvirStatus : ""}`}>{repair.status}</span>
+                        <span className={`${styles.statusBadge} ${rawDvir ? styles.dvirStatus : rawMaintenance ? styles.maintenanceStatus : ""}`}>{repair.status}</span>
                       )}
                     </td>
                     <td className={styles.techCell}>
@@ -289,6 +319,19 @@ export default function RepairBoardPage() {
                           }}
                         >
                           <option value="">Assign & create repair…</option>
+                          {(data.technicians ?? []).map((technician) => <option key={technician.id} value={technician.id}>{technician.name}</option>)}
+                        </select>
+                      ) : data?.canManage && rawMaintenance ? (
+                        <select
+                          className={styles.inlineSelect}
+                          value=""
+                          disabled={busy}
+                          onChange={(event) => {
+                            const technicianId = Number(event.target.value);
+                            if (technicianId > 0) void addMaintenanceRepair(repair, technicianId);
+                          }}
+                        >
+                          <option value="">Assign & create work order…</option>
                           {(data.technicians ?? []).map((technician) => <option key={technician.id} value={technician.id}>{technician.name}</option>)}
                         </select>
                       ) : data?.canManage ? (
@@ -323,6 +366,13 @@ export default function RepairBoardPage() {
                               <button className={styles.completeButton} disabled={busy} type="button" onClick={() => void markDvirRepaired(repair)}>Mark Repaired</button>
                             </>
                           )
+                        ) : rawMaintenance ? (
+                          data?.canManage && (
+                            <>
+                              <button className={styles.rowLink} disabled={busy} type="button" onClick={() => void addMaintenanceRepair(repair)}>Add Work Order</button>
+                              <button className={styles.completeButton} disabled={busy} type="button" onClick={() => void completeMaintenance(repair)}>{repair.source === "pm" ? "Complete PM" : "Complete Annual"}</button>
+                            </>
+                          )
                         ) : (
                           <a className={styles.rowLink} href="/work-orders">Work Order</a>
                         )}
@@ -340,6 +390,14 @@ export default function RepairBoardPage() {
                             <div className={styles.detailBlock}><span>Comments</span><strong>{repair.dvirComments || "No driver comments"}</strong></div>
                             {repair.dvirPhotos && <div className={styles.detailBlock}><span>Photos</span><a className={styles.photoLink} href={repair.dvirPhotos} target="_blank" rel="noreferrer">View DVIR photos</a></div>}
                           </div>
+                        ) : rawMaintenance ? (
+                          <div className={styles.details}>
+                            <div className={styles.detailBlock}><span>Source</span><strong>{repair.source === "pm" ? "PM schedule" : "Annual inspection schedule"}</strong></div>
+                            <div className={styles.detailBlock}><span>Unit</span><strong>{repair.unit || "—"}</strong></div>
+                            <div className={styles.detailBlock}><span>Driver</span><strong>{repair.driver || "—"}</strong></div>
+                            <div className={styles.detailBlock}><span>Schedule status</span><strong>{repair.status}</strong></div>
+                            <div className={styles.detailBlock}><span>Next step</span><strong>Assign a tech to create the work order, or complete here if service is already done.</strong></div>
+                          </div>
                         ) : (
                           <div className={styles.details}>
                             <div className={styles.detailBlock}><span>Source</span><strong>{sourceLabel(repair.source)}</strong></div>
@@ -355,7 +413,7 @@ export default function RepairBoardPage() {
               );
             })}
             {data && visible.length === 0 && (
-              <tr><td className={styles.empty} colSpan={9}>No open repair or DVIR work matches these filters.</td></tr>
+              <tr><td className={styles.empty} colSpan={9}>No open repair, DVIR, PM, or annual work matches these filters.</td></tr>
             )}
           </tbody>
         </table>
