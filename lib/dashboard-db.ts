@@ -68,6 +68,7 @@ export async function getDashboardData(db: D1Database, geotabConfigured: boolean
              r.geotab_defect_id
       FROM repairs r
       LEFT JOIN equipment e ON e.id = r.equipment_id
+      WHERE e.active = 1 OR e.id IS NULL
       ORDER BY CASE WHEN lower(r.status) LIKE '%complete%' THEN 1 ELSE 0 END, r.updated_at DESC
     `).all<RepairRow>(),
     db.prepare(`
