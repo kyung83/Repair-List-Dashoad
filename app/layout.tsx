@@ -21,6 +21,20 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AppNav />
         <script dangerouslySetInnerHTML={{ __html: `(function(){
+          var APP_TIME_ZONE='America/Detroit';
+          if(!window.__northernEasternTimePatched){
+            window.__northernEasternTimePatched=true;
+            ['toLocaleString','toLocaleDateString','toLocaleTimeString'].forEach(function(methodName){
+              var original=Date.prototype[methodName];
+              if(typeof original!=='function')return;
+              Date.prototype[methodName]=function(locales,options){
+                var resolvedLocales=locales===undefined?'en-US':locales;
+                var resolvedOptions=Object.assign({},options||{});
+                if(!resolvedOptions.timeZone)resolvedOptions.timeZone=APP_TIME_ZONE;
+                return original.call(this,resolvedLocales,resolvedOptions);
+              };
+            });
+          }
           function verifyPhotoLinks(root){
             var links=[];
             if(root instanceof HTMLAnchorElement && root.matches('a[href^="/photos?defectId="]')) links.push(root);
