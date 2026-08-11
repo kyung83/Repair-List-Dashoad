@@ -3,13 +3,14 @@ import { Geist, Geist_Mono } from "next/font/google";
 import AppNav from "./app-nav";
 import "./globals.css";
 import "./professional-shell.css";
+import "./northern-brand.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Norlow Fleet Operations",
-  description: "Fleet repair, Geotab DVIR, PM, work orders, inventory, reporting, labor and invoicing for Norloworld.",
+  title: "Northern Logistics Fleet Operations",
+  description: "Northern Logistics fleet repair, DVIR, PM, work orders, inventory, reporting, labor, and equipment operations.",
   other: { "codex-preview": "development" },
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
