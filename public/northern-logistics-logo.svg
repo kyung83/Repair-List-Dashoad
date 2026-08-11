@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 130" role="img" aria-labelledby="title desc">
+  <title id="title">Northern Logistics</title>
+  <desc id="desc">Northern Logistics wordmark with compass mark and red road swoosh.</desc>
+  <rect width="500" height="130" fill="white"/>
+  <g transform="translate(12 12)">
+    <g transform="translate(34 42)">
+      <circle r="29" fill="none" stroke="#1d1f21" stroke-width="3"/>
+      <path d="M0-34 7-10 0-14-7-10Z" fill="#1d1f21"/>
+      <path d="M34 0 10 7 14 0 10-7Z" fill="#1d1f21"/>
+      <path d="M0 34 -7 10 0 14 7 10Z" fill="#b31e2b"/>
+      <path d="M-34 0 -10-7 -14 0 -10 7Z" fill="#1d1f21"/>
+      <path d="M0-24 6 0 0 24 -6 0Z" fill="#1d1f21" opacity=".92"/>
+      <path d="M-24 0 0-6 24 0 0 6Z" fill="#1d1f21" opacity=".92"/>
+      <circle r="17" fill="white" stroke="#1d1f21" stroke-width="2"/>
+      <text x="0" y="8" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="29" font-style="italic" font-weight="900" fill="#1d1f21">N</text>
+    </g>
+    <g transform="translate(78 3)">
+      <text x="0" y="48" font-family="Arial Black, Arial, sans-serif" font-size="55" font-style="italic" font-weight="900" letter-spacing="-4" fill="#1d1f21">NORTHERN</text>
+      <text x="154" y="79" font-family="Arial, sans-serif" font-size="23" font-weight="700" letter-spacing="7" fill="#b31e2b">LOGISTICS</text>
+      <path d="M22 98 C102 73 203 82 281 96 C335 105 384 101 423 83" fill="none" stroke="#b31e2b" stroke-width="7" stroke-linecap="round"/>
+      <path d="M95 104 C184 92 272 101 337 109 C375 114 409 109 441 95" fill="none" stroke="#b31e2b" stroke-width="3" stroke-linecap="round"/>
+      <path d="M293 80 C326 77 355 78 383 83" fill="none" stroke="#1d1f21" stroke-width="3" stroke-linecap="round" opacity=".65"/>
+    </g>
+  </g>
+</svg>
