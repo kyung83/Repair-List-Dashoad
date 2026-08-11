@@ -20,7 +20,51 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AppNav />
-        <script dangerouslySetInnerHTML={{ __html: `document.addEventListener('click',function(event){var target=event.target;if(!(target instanceof Element))return;var link=target.closest('a[href^="geotab-media:"]');if(!link)return;event.preventDefault();var raw=link.getAttribute('href')||'';var ids=raw.slice('geotab-media:'.length);if(ids){window.open('/photos?ids='+encodeURIComponent(ids),'_blank','noopener,noreferrer');}});` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){
+          function verifyPhotoLinks(root){
+            var links=[];
+            if(root instanceof HTMLAnchorElement && root.matches('a[href^="/photos?defectId="]')) links.push(root);
+            if(root && root.querySelectorAll) links=links.concat(Array.from(root.querySelectorAll('a[href^="/photos?defectId="]')));
+            links.forEach(function(link){
+              if(!(link instanceof HTMLAnchorElement) || link.dataset.photoVerified) return;
+              link.dataset.photoVerified='checking';
+              link.hidden=true;
+              var defectId='';
+              try{ defectId=new URL(link.href,window.location.origin).searchParams.get('defectId')||''; }catch(_error){}
+              if(!defectId){ link.remove(); return; }
+              fetch('/api/geotab-photo-ids?defectId='+encodeURIComponent(defectId),{cache:'no-store'})
+                .then(function(response){ return response.ok?response.json():{ids:[]}; })
+                .then(function(payload){
+                  var ids=Array.isArray(payload.ids)?payload.ids.map(String).map(function(id){return id.trim();}).filter(Boolean):[];
+                  if(!ids.length){ link.remove(); return; }
+                  link.href='geotab-media:'+Array.from(new Set(ids)).join(',');
+                  link.dataset.photoVerified='yes';
+                  link.hidden=false;
+                })
+                .catch(function(){ link.remove(); });
+            });
+          }
+          function startPhotoVerifier(){
+            verifyPhotoLinks(document);
+            if(!document.body) return;
+            new MutationObserver(function(records){
+              records.forEach(function(record){
+                record.addedNodes.forEach(function(node){ if(node instanceof Element) verifyPhotoLinks(node); });
+              });
+            }).observe(document.body,{childList:true,subtree:true});
+          }
+          if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',startPhotoVerifier,{once:true}); else startPhotoVerifier();
+          document.addEventListener('click',function(event){
+            var target=event.target;
+            if(!(target instanceof Element))return;
+            var link=target.closest('a[href^="geotab-media:"]');
+            if(!link)return;
+            event.preventDefault();
+            var raw=link.getAttribute('href')||'';
+            var ids=raw.slice('geotab-media:'.length);
+            if(ids){window.open('/photos?ids='+encodeURIComponent(ids),'_blank','noopener,noreferrer');}
+          });
+        })();` }} />
         {children}
       </body>
     </html>
