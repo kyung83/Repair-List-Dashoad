@@ -34,7 +34,7 @@ function buildGroups(rows: Row[]) { const map = new Map<string, Group>(); for (c
 function issueSummary(rows: Row[]) { const issues = rows.map((row) => row.issue.trim()).filter(Boolean); const shown = issues.slice(0, 3).map((issue) => issue.length > 90 ? `${issue.slice(0, 87)}…` : issue); return `${shown.join(" • ")}${issues.length > shown.length ? ` + ${issues.length - shown.length} more` : ""}`; }
 function partSummary(rows: Row[]) { const parts = [...new Set(rows.map((row) => row.parts.trim()).filter(Boolean))]; return parts.length ? `${parts.slice(0, 2).join(" • ")}${parts.length > 2 ? ` +${parts.length - 2}` : ""}` : "—"; }
 function countLabel(rows: Row[]) { if (rows.every((row) => isPm(row.source))) return `${rows.length} PM${rows.length === 1 ? "" : "s"}`; if (rows.every((row) => isAnnual(row.source))) return `${rows.length} Annual${rows.length === 1 ? "" : "s"}`; return `${rows.length} ${rows.some((row) => isPm(row.source) || isAnnual(row.source)) ? "items" : `repair${rows.length === 1 ? "" : "s"}`}`; }
-function combinedPhotoIds(rows: Row[]) { return [...new Set(rows.flatMap((row) => String(row.dvirPhotos || "").split(",").map((id) => id.trim()).filter(Boolean)))].join(","); }
+function combinedPhotoIds(rows: Row[]) { return [...new Set(rows.flatMap((row) => String(row.dvirPhotos || "").replace(/^geotab-media:/i, "").split(",").map((id) => id.trim()).filter(Boolean)))].join(","); }
 
 export default function RepairBoardPage() {
   const [data, setData] = useState<Data | null>(null);
