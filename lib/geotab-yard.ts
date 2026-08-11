@@ -9,10 +9,11 @@ type ProtectedConfig = { database: string; serviceUsername: string; servicePassw
 type Payload<T> = { result?: T; error?: { message?: string; name?: string } };
 type YardKey = '' | 'clare' | 'cadillac';
 type Position = { deviceId: string; latitude: number; longitude: number; dateTime: string };
+type Point = { x: number; y: number };
+type YardZone = { name: string; points: Point[] };
 
 const CLARE_ZONE = 'z';
 const CADILLAC_ZONE = 'new cadillac yard';
-const ADDRESS_BATCH_SIZE = 80;
 let loginPromise: Promise<Login> | undefined;
 
 function record(value: unknown): JsonRecord {
@@ -36,13 +37,16 @@ function objectId(value: unknown) {
   return text(get(record(value), 'id', 'Id')).trim();
 }
 
-function objectName(value: unknown) {
-  return text(get(record(value), 'name', 'Name')).trim();
-}
-
 function number(value: unknown) {
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
+}
+
+function dateValue(value: unknown) {
+  const raw = text(value).trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function decodeBase64(value: string) {
@@ -122,24 +126,43 @@ async function call<T>(auth: Auth, method: string, params: JsonRecord) {
   return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
 }
 
-function yardFromAddress(address: JsonRecord) {
-  let currentYard: YardKey = '';
-  let zoneName = '';
-  for (const zone of array(get(address, 'zones', 'Zones'))) {
-    const name = objectName(zone);
-    const normalized = name.toLowerCase();
-    if (normalized === CLARE_ZONE) {
-      currentYard = 'clare';
-      zoneName = name || 'Z';
-      break;
-    }
-    if (normalized === CADILLAC_ZONE) {
-      currentYard = 'cadillac';
-      zoneName = name || 'New cadillac yard';
-      break;
-    }
+function currentZone(zone: JsonRecord, now = Date.now()) {
+  const activeFrom = dateValue(get(zone, 'activeFrom', 'ActiveFrom'));
+  const activeTo = dateValue(get(zone, 'activeTo', 'ActiveTo'));
+  return (activeFrom == null || activeFrom <= now) && (activeTo == null || activeTo > now);
+}
+
+function zonePoints(zone: JsonRecord): Point[] {
+  const points: Point[] = [];
+  for (const raw of array(get(zone, 'points', 'Points'))) {
+    const x = number(get(raw, 'x', 'X'));
+    const y = number(get(raw, 'y', 'Y'));
+    if (x != null && y != null) points.push({ x, y });
   }
-  return { currentYard, zoneName };
+  return points;
+}
+
+function findYardZone(zones: JsonRecord[], expectedName: string): YardZone | null {
+  const normalized = expectedName.toLowerCase();
+  const match = zones.find((zone) => currentZone(zone) && text(get(zone, 'name', 'Name')).trim().toLowerCase() === normalized);
+  if (!match) return null;
+  const points = zonePoints(match);
+  if (points.length < 3) return null;
+  return { name: text(get(match, 'name', 'Name')).trim() || expectedName, points };
+}
+
+function pointInPolygon(longitude: number, latitude: number, polygon: Point[]) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const crosses = (yi > latitude) !== (yj > latitude)
+      && longitude < ((xj - xi) * (latitude - yi)) / ((yj - yi) || Number.EPSILON) + xi;
+    if (crosses) inside = !inside;
+  }
+  return inside;
 }
 
 async function currentPositions(auth: Auth): Promise<Position[]> {
@@ -161,28 +184,71 @@ async function currentPositions(auth: Auth): Promise<Position[]> {
   return positions;
 }
 
+async function writeSyncState(env: GeotabEnv, state: {
+  status: string;
+  message: string;
+  positions: number;
+  clare: number;
+  cadillac: number;
+  outside: number;
+  clareZoneFound: boolean;
+  cadillacZoneFound: boolean;
+}) {
+  await env.DB.prepare(`
+    INSERT INTO geotab_yard_sync_state (
+      id,status,message,positions,clare,cadillac,outside,clare_zone_found,cadillac_zone_found,updated_at
+    ) VALUES (1,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      status=excluded.status,
+      message=excluded.message,
+      positions=excluded.positions,
+      clare=excluded.clare,
+      cadillac=excluded.cadillac,
+      outside=excluded.outside,
+      clare_zone_found=excluded.clare_zone_found,
+      cadillac_zone_found=excluded.cadillac_zone_found,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(
+    state.status,
+    state.message,
+    state.positions,
+    state.clare,
+    state.cadillac,
+    state.outside,
+    state.clareZoneFound ? 1 : 0,
+    state.cadillacZoneFound ? 1 : 0,
+  ).run();
+}
+
 export async function syncGeotabYardPresence(env: GeotabEnv) {
-  const auth = await authenticate(env);
-  const positions = await currentPositions(auth);
-  const statements: D1PreparedStatement[] = [];
-  let clare = 0;
-  let cadillac = 0;
-  let outside = 0;
+  try {
+    const auth = await authenticate(env);
+    const [positions, zones] = await Promise.all([
+      currentPositions(auth),
+      call<JsonRecord[]>(auth, 'Get', { typeName: 'Zone' }),
+    ]);
 
-  for (let offset = 0; offset < positions.length; offset += ADDRESS_BATCH_SIZE) {
-    const batch = positions.slice(offset, offset + ADDRESS_BATCH_SIZE);
-    const addresses = await call<JsonRecord[]>(auth, 'GetAddresses', {
-      coordinates: batch.map((position) => ({ x: position.longitude, y: position.latitude })),
-      movingAddresses: false,
-    });
+    const clareZone = findYardZone(zones, 'Z');
+    const cadillacZone = findYardZone(zones, 'New cadillac yard');
+    const statements: D1PreparedStatement[] = [];
+    let clare = 0;
+    let cadillac = 0;
+    let outside = 0;
 
-    for (let index = 0; index < batch.length; index += 1) {
-      const position = batch[index];
-      const address = addresses[index] ?? {};
-      const { currentYard, zoneName } = yardFromAddress(address);
-      if (currentYard === 'clare') clare += 1;
-      else if (currentYard === 'cadillac') cadillac += 1;
-      else outside += 1;
+    for (const position of positions) {
+      let currentYard: YardKey = '';
+      let zoneName = '';
+      if (clareZone && pointInPolygon(position.longitude, position.latitude, clareZone.points)) {
+        currentYard = 'clare';
+        zoneName = clareZone.name;
+        clare += 1;
+      } else if (cadillacZone && pointInPolygon(position.longitude, position.latitude, cadillacZone.points)) {
+        currentYard = 'cadillac';
+        zoneName = cadillacZone.name;
+        cadillac += 1;
+      } else {
+        outside += 1;
+      }
 
       statements.push(env.DB.prepare(`
         UPDATE equipment
@@ -196,24 +262,67 @@ export async function syncGeotabYardPresence(env: GeotabEnv) {
         WHERE active = 1 AND geotab_device_id = ?
       `).bind(position.latitude, position.longitude, position.dateTime, currentYard, zoneName, position.deviceId));
     }
+
+    await env.DB.prepare(`
+      UPDATE equipment
+      SET current_yard = '', current_yard_zone = '', yard_updated_at = CURRENT_TIMESTAMP
+      WHERE active = 1 AND geotab_device_id IS NOT NULL AND TRIM(geotab_device_id) <> ''
+    `).run();
+
+    for (let index = 0; index < statements.length; index += 75) {
+      await env.DB.batch(statements.slice(index, index + 75));
+    }
+
+    const missing = [
+      !clareZone ? 'Z' : '',
+      !cadillacZone ? 'New cadillac yard' : '',
+    ].filter(Boolean);
+    const status = missing.length ? 'warning' : 'ok';
+    const message = missing.length
+      ? `Geotab connected, but these yard zones were not found exactly: ${missing.join(', ')}.`
+      : `Geotab yard check completed using zones ${clareZone!.name} and ${cadillacZone!.name}.`;
+
+    await writeSyncState(env, {
+      status,
+      message,
+      positions: positions.length,
+      clare,
+      cadillac,
+      outside,
+      clareZoneFound: Boolean(clareZone),
+      cadillacZoneFound: Boolean(cadillacZone),
+    });
+
+    return {
+      ok: status === 'ok',
+      status,
+      message,
+      positions: positions.length,
+      clare,
+      cadillac,
+      outside,
+      clareZoneFound: Boolean(clareZone),
+      cadillacZoneFound: Boolean(cadillacZone),
+      clareZoneName: clareZone?.name ?? '',
+      cadillacZoneName: cadillacZone?.name ?? '',
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await writeSyncState(env, {
+        status: 'error',
+        message,
+        positions: 0,
+        clare: 0,
+        cadillac: 0,
+        outside: 0,
+        clareZoneFound: false,
+        cadillacZoneFound: false,
+      });
+    } catch (stateError) {
+      console.error(JSON.stringify({ event: 'geotab_yard_sync_state_failed', error: String(stateError) }));
+    }
+    throw error;
   }
-
-  await env.DB.prepare(`
-    UPDATE equipment
-    SET current_yard = '', current_yard_zone = '', yard_updated_at = CURRENT_TIMESTAMP
-    WHERE active = 1 AND geotab_device_id IS NOT NULL AND TRIM(geotab_device_id) <> ''
-  `).run();
-
-  for (let index = 0; index < statements.length; index += 75) {
-    await env.DB.batch(statements.slice(index, index + 75));
-  }
-
-  return {
-    ok: true,
-    positions: positions.length,
-    clare,
-    cadillac,
-    outside,
-    updatedAt: new Date().toISOString(),
-  };
 }
