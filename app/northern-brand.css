@@ -1,12 +1,12 @@
 :root{--orange:#5b666b;--navy:#22292d;--navy2:#30383c;--paper:#f4f5f5;--ink:#1f292d;--muted:#68747a;--line:#d8dddf}
-.app-topnav{min-height:116px;padding:5px 20px;background:#fff;color:#1f2528;border-bottom:1px solid #d4d9db;box-shadow:0 3px 14px #1f29330f;overflow:visible}
-.app-brand{min-width:226px;color:#1f2528;gap:0;align-self:stretch;display:flex;align-items:center;overflow:visible;flex:0 0 auto}
-.app-brand-logo{display:block;width:218px;height:99px;max-width:none;max-height:none;object-fit:contain;object-position:left center;flex:0 0 auto;overflow:visible}
+.app-topnav{min-height:80px;padding:5px 16px;background:#fff;color:#1f2528;border-bottom:1px solid #d4d9db;box-shadow:0 3px 14px #1f29330f;overflow:visible;align-items:center}
+.app-brand{width:156px;min-width:156px;height:auto;color:#1f2528;gap:0;display:flex;align-items:center;justify-content:flex-start;overflow:visible;flex:0 0 156px}
+.app-brand-logo{display:block;width:150px;height:auto;max-width:150px;max-height:none;object-fit:contain;object-position:left center;flex:0 0 auto}
 .app-primary-links a{color:#58646a;border-radius:5px}
 .app-primary-links a:hover{color:#1d2427;background:#f0f2f2}
 .app-primary-links a.active{color:#161c1f;background:#e9ecec;box-shadow:inset 0 -2px #4d5a5f}
 .app-user-name{color:#1f2528}.app-user-name small{color:#788388}.app-user-area button{border-color:#c9d0d2;background:#fff;color:#4c5960}.app-user-area button:hover{background:#f0f2f2;color:#1f2528}
 .module-eyebrow{color:#626d72}.module-button.primary{background:#2b3337}.module-button.danger{background:#8e4141;border-color:#8e4141}
 a[href^="/photos?defectId="]{visibility:hidden}
-@media(max-width:900px){.app-topnav{min-height:94px;padding:5px 10px;gap:10px;overflow:visible}.app-brand{min-width:178px;overflow:visible}.app-brand-logo{width:174px;height:79px;max-width:none;max-height:none}.app-primary-links a{padding:8px 8px;font-size:11px}.app-user-name{display:none}}
-@media(max-width:560px){.app-topnav{min-height:84px}.app-brand{min-width:150px}.app-brand-logo{width:148px;height:67px}.app-primary-links a{font-size:10px}}
+@media(max-width:900px){.app-topnav{min-height:72px;padding:4px 10px;gap:9px;overflow:visible}.app-brand{width:136px;min-width:136px;flex-basis:136px}.app-brand-logo{width:130px;max-width:130px;height:auto;max-height:none}.app-primary-links a{padding:8px 8px;font-size:11px}.app-user-name{display:none}}
+@media(max-width:560px){.app-topnav{min-height:66px}.app-brand{width:122px;min-width:122px;flex-basis:122px}.app-brand-logo{width:116px;max-width:116px;height:auto}.app-primary-links a{font-size:10px}}
