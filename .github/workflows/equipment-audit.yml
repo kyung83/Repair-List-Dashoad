@@ -17,7 +17,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      SOURCE_CSV_URL: https://docs.google.com/spreadsheets/d/1_YhZodgIiBSQDClR4kP3VGzCoj71rR6w0qYCXiivd2s/export?format=csv&gid=882640692
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -25,7 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Compare source truck numbers to production units
+      - name: Inspect unmatched equipment records
         shell: bash
         run: |
           set -euo pipefail
@@ -41,42 +40,10 @@ jobs:
           db_id="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(0,"utf8"));const r=d.find(x=>x.name==="norlow-repair-production");if(r)process.stdout.write(r.uuid||r.id||r.database_id||"");' <<<"$list_json")"
           test -n "$db_id"
           sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.audit.jsonc
-          curl -fsSL --retry 3 --retry-delay 2 "$SOURCE_CSV_URL" -o /tmp/master.csv
-          npx wrangler d1 execute DB --remote --config wrangler.audit.jsonc --command "SELECT id,unit,model FROM equipment WHERE active=1 AND equipment_type='truck' ORDER BY id;" --json > /tmp/prod.json
-          python - <<'PY'
-          import csv,json,re
-          def clean(v): return (v or '').strip()
-          def key(v):
-              m=re.match(r'\s*(\d+)',clean(v))
-              return m.group(1) if m else ''
-          with open('/tmp/master.csv',newline='',encoding='utf-8-sig') as f:
-              rows=list(csv.reader(f))
-          src={}
-          raw={}
-          for r in rows[1:]:
-              r=r+['']*(14-len(r))
-              k=key(r[6]); model=clean(r[9])
-              if k and model:
-                  src[k]=model; raw[k]=clean(r[6])
-          data=json.load(open('/tmp/prod.json'))
-          prod=[]
-          for block in data:
-              prod.extend(block.get('results') or [])
-          bykey={}
-          for r in prod:
-              k=key(r.get('unit'))
-              if k: bykey.setdefault(k,[]).append(r)
-          unmatched=[]
-          for k,model in sorted(src.items(),key=lambda x:int(x[0])):
-              if k not in bykey:
-                  unmatched.append((k,raw[k],model))
-          print(f'SOURCE_UNIQUE_TRUCK_MODELS={len(src)}')
-          print(f'PRODUCTION_NUMERIC_TRUCK_KEYS={len(bykey)}')
-          print(f'UNMATCHED_SOURCE_COUNT={len(unmatched)}')
-          for k,rawunit,model in unmatched:
-              print(f'UNMATCHED_SOURCE unit={rawunit} key={k} model={model}')
-          duplicates=[(k,v) for k,v in bykey.items() if len(v)>1]
-          print(f'DUPLICATE_PRODUCTION_KEYS={len(duplicates)}')
-          for k,rows in duplicates[:20]:
-              print('DUPLICATE_PRODUCTION key='+k+' units='+','.join(str(r.get('unit')) for r in rows))
-          PY
+          npx wrangler d1 execute DB --remote --config wrangler.audit.jsonc --command "SELECT id,unit,equipment_type,active,archived_at,model FROM equipment WHERE trim(unit) GLOB '247*' OR trim(unit) GLOB '370*' OR trim(unit) GLOB '673*' OR trim(unit) GLOB '674*' OR trim(unit) GLOB '675*' OR trim(unit) GLOB '676*' OR trim(unit) GLOB '677*' OR trim(unit) GLOB '678*' ORDER BY unit;" --json > /tmp/check.json
+          node <<'NODE'
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('/tmp/check.json','utf8'));
+          const rows=d.flatMap(x=>x.results||[]);
+          console.log('FOUND_RECORDS='+rows.length);
+          for(const row of rows) console.log(JSON.stringify(row));
+          NODE
