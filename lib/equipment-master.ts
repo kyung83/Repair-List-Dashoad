@@ -5,6 +5,7 @@ type EquipmentMasterRow = {
   unit: string;
   category: string;
   equipment_type: string;
+  trailer_type: string | null;
   active: number;
   current_mileage: number | null;
   service_date: string | null;
@@ -35,6 +36,7 @@ type EquipmentMasterRow = {
 };
 
 const EQUIPMENT_TYPES = ['truck', 'trailer', 'vehicle', 'forklift', 'glider', 'switcher', 'other'] as const;
+const TRAILER_TYPES = ['Flat Bed', 'Step Deck', 'Conestoga', 'Dry Van'] as const;
 const MAX_TEXT = 500;
 
 function text(value: unknown, max = MAX_TEXT) {
@@ -76,6 +78,13 @@ function equipmentType(value: unknown) {
   return candidate;
 }
 
+function trailerTypeFor(type: string, value: unknown) {
+  if (type !== 'trailer') return null;
+  const candidate = text(value, 40);
+  if (!(TRAILER_TYPES as readonly string[]).includes(candidate)) throw new Error('Choose a valid trailer body type.');
+  return candidate;
+}
+
 function categoryFor(type: string, value: unknown) {
   if (type === 'trailer') return 'Trailers';
   const candidate = text(value, 80);
@@ -87,7 +96,7 @@ function categoryFor(type: string, value: unknown) {
 
 export async function getEquipmentMaster(db: D1Database) {
   const result = await db.prepare(`
-    SELECT e.id, e.unit, e.category, e.equipment_type, e.active, e.current_mileage,
+    SELECT e.id, e.unit, e.category, e.equipment_type, e.trailer_type, e.active, e.current_mileage,
            e.service_date, e.annual_date, e.notes, e.geotab_device_id, e.geotab_trailer_id,
            e.driver, e.location, e.vin, e.license_plate, e.license_state, e.model_year,
            e.make, e.model, e.engine, e.purchase_date, e.purchase_price, e.purchased_from,
@@ -115,6 +124,7 @@ export async function getEquipmentMaster(db: D1Database) {
           ? row.category
           : 'Uncategorized',
       equipmentType: row.equipment_type,
+      trailerType: row.trailer_type ?? '',
       active,
       archived,
       archivedAt: row.archived_at ?? '',
@@ -153,6 +163,7 @@ export async function getEquipmentMaster(db: D1Database) {
     equipment,
     categories: [...PM_CATEGORIES],
     equipmentTypes: [...EQUIPMENT_TYPES],
+    trailerTypes: [...TRAILER_TYPES],
     summary: {
       total: equipment.length,
       active: equipment.filter((item) => item.active).length,
@@ -170,6 +181,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
   if (!unitInput) throw new Error('Unit number / asset name is required.');
   const type = equipmentType(body.equipmentType);
   const category = categoryFor(type, body.category);
+  const trailerType = trailerTypeFor(type, body.trailerType);
   const modelYear = optionalWholeNumber(body.modelYear, 'Model year', 1900, 2100);
   const currentMileage = optionalWholeNumber(body.currentMileage, 'Mileage', 0);
   const vin = text(body.vin, 40).toUpperCase();
@@ -188,16 +200,17 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
   if (id == null) {
     const result = await db.prepare(`
       INSERT INTO equipment (
-        unit, category, equipment_type, active, current_mileage, mileage_updated_at,
+        unit, category, equipment_type, trailer_type, active, current_mileage, mileage_updated_at,
         vin, license_plate, license_state, model_year, make, model, engine,
         purchase_date, purchase_price, purchased_from,
         driver, location, notes, updated_at
-      ) VALUES (?, ?, ?, 1, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+      ) VALUES (?, ?, ?, ?, 1, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).bind(
       unitInput,
       category,
       type,
+      trailerType,
       currentMileage,
       currentMileage,
       vin || null,
@@ -229,7 +242,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
 
   await db.prepare(`
     UPDATE equipment
-    SET unit = ?, category = ?, equipment_type = ?, current_mileage = ?,
+    SET unit = ?, category = ?, equipment_type = ?, trailer_type = ?, current_mileage = ?,
         mileage_updated_at = CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
         vin = ?, license_plate = ?, license_state = ?, model_year = ?,
         make = ?, model = ?, engine = ?, purchase_date = ?, purchase_price = ?, purchased_from = ?,
@@ -239,6 +252,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
     unit,
     category,
     type,
+    trailerType,
     currentMileage,
     currentMileage,
     vin || null,
