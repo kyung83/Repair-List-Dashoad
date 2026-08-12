@@ -32,110 +32,75 @@ jobs:
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 2 "$SOURCE_CSV_URL" -o /tmp/master-equipment.csv
           python - <<'PY'
-          import csv, sys
+          import csv
           with open('/tmp/master-equipment.csv', newline='', encoding='utf-8-sig') as f:
               rows=list(csv.reader(f))
           if not rows or len(rows[0]) < 14:
               raise SystemExit('Master Equipment Info CSV is missing expected columns')
           h=rows[0]
-          expected={0:'Trailer #',1:'Year Make',2:'VIN',4:'tire size',6:'Truck #',7:'YEAR',8:'ENGINE',9:'MODEL',10:'VIN',13:'esn'}
+          expected={6:'Truck #',7:'YEAR',8:'ENGINE',9:'MODEL',10:'VIN',13:'esn'}
           for idx,name in expected.items():
               if h[idx].strip().lower()!=name.lower():
                   raise SystemExit(f'Unexpected source header at column {idx+1}: {h[idx]!r}')
-          trailer=sum(1 for r in rows[1:] if len(r)>0 and r[0].strip())
-          truck=sum(1 for r in rows[1:] if len(r)>6 and r[6].strip())
-          if trailer < 590 or truck < 290:
-              raise SystemExit(f'Source row counts look incomplete: trailer={trailer}, truck={truck}')
-          print(f'SOURCE_TRAILER_ROWS={trailer}')
-          print(f'SOURCE_TRUCK_ROWS={truck}')
+          truck=sum(1 for r in rows[1:] if len(r)>9 and r[6].strip() and r[9].strip())
+          if truck < 280:
+              raise SystemExit(f'Source truck model rows look incomplete: {truck}')
+          print(f'SOURCE_TRUCK_MODEL_ROWS={truck}')
           PY
 
-      - name: Build blank-only D1 import
+      - name: Build normalized truck-model import
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import csv,re
 
-          def clean(v):
-              return (v or '').strip()
-          def sqlq(v):
-              if not v:
-                  return 'NULL'
-              return "'" + v.replace("'", "''") + "'"
+          def clean(v): return (v or '').strip()
+          def sqlq(v): return 'NULL' if not v else "'" + v.replace("'", "''") + "'"
           def year(v):
               s=clean(v)
               return int(s) if s.isdigit() and 1900 <= int(s) <= 2100 else None
-          def trailer_year(v):
-              s=clean(v)
-              m=re.match(r'^(19|20)\d{2}\b',s)
-              return int(m.group(0)) if m else None
+          def unit_key(v):
+              m=re.match(r'\s*(\d+)', clean(v))
+              return m.group(1) if m else ''
 
-          stage=[]
+          trucks={}
           with open('/tmp/master-equipment.csv', newline='', encoding='utf-8-sig') as f:
               rows=list(csv.reader(f))
           for row in rows[1:]:
               row=row+['']*(14-len(row))
-              if clean(row[0]):
-                  stage.append(('trailer',clean(row[0]),trailer_year(row[1]),'', '',clean(row[2]),'',clean(row[4])))
-              if clean(row[6]):
-                  stage.append(('truck',clean(row[6]),year(row[7]),clean(row[8]),clean(row[9]),clean(row[10]),clean(row[13]),''))
+              key=unit_key(row[6])
+              model=clean(row[9])
+              if not key or not model:
+                  continue
+              trucks[key]=(year(row[7]),clean(row[8]),model,clean(row[10]),clean(row[13]))
 
-          out=[]
-          out.append('PRAGMA foreign_keys = ON;')
-          out.append('DROP TABLE IF EXISTS _equipment_import_stage_20260812;')
-          out.append("CREATE TABLE _equipment_import_stage_20260812 (equipment_type TEXT NOT NULL, unit TEXT NOT NULL COLLATE NOCASE, model_year INTEGER, engine TEXT, model TEXT, vin TEXT, esn TEXT, tire_size TEXT, PRIMARY KEY (equipment_type, unit));")
-          cols='equipment_type,unit,model_year,engine,model,vin,esn,tire_size'
-          for start in range(0,len(stage),100):
-              vals=[]
-              for typ,unit,yr,engine,model,vin,esn,tire in stage[start:start+100]:
-                  vals.append('(' + ','.join([sqlq(typ),sqlq(unit),str(yr) if yr is not None else 'NULL',sqlq(engine),sqlq(model),sqlq(vin),sqlq(esn),sqlq(tire)]) + ')')
-              out.append(f'INSERT INTO _equipment_import_stage_20260812 ({cols}) VALUES\n  '+',\n  '.join(vals)+';')
+          out=['PRAGMA foreign_keys = ON;','DROP TABLE IF EXISTS _truck_model_stage_20260812;',
+               'CREATE TABLE _truck_model_stage_20260812 (unit_key TEXT PRIMARY KEY, model_year INTEGER, engine TEXT, model TEXT NOT NULL, vin TEXT, esn TEXT);']
+          vals=[]
+          for key,(yr,engine,model,vin,esn) in sorted(trucks.items(), key=lambda x:int(x[0])):
+              vals.append('(' + ','.join([sqlq(key),str(yr) if yr is not None else 'NULL',sqlq(engine),sqlq(model),sqlq(vin),sqlq(esn)]) + ')')
+          for start in range(0,len(vals),100):
+              out.append('INSERT INTO _truck_model_stage_20260812 (unit_key,model_year,engine,model,vin,esn) VALUES\n  '+',\n  '.join(vals[start:start+100])+';')
 
-          out.append("""
+          match="s.unit_key = substr(trim(e.unit),1,instr(trim(e.unit),'(')-1)"
+          out.append(f"""
           UPDATE equipment AS e
           SET
-            model_year = CASE WHEN e.model_year IS NULL THEN (SELECT s.model_year FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='truck' AND s.unit=trim(e.unit)) ELSE e.model_year END,
-            engine = CASE WHEN e.engine IS NULL OR trim(e.engine)='' THEN (SELECT s.engine FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='truck' AND s.unit=trim(e.unit)) ELSE e.engine END,
-            model = CASE WHEN e.model IS NULL OR trim(e.model)='' THEN (SELECT s.model FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='truck' AND s.unit=trim(e.unit)) ELSE e.model END,
-            vin = CASE WHEN e.vin IS NULL OR trim(e.vin)='' THEN (SELECT s.vin FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='truck' AND s.unit=trim(e.unit)) ELSE e.vin END,
-            esn = CASE WHEN e.esn IS NULL OR trim(e.esn)='' THEN (SELECT s.esn FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='truck' AND s.unit=trim(e.unit)) ELSE e.esn END,
+            model = (SELECT s.model FROM _truck_model_stage_20260812 s WHERE {match}),
+            model_year = CASE WHEN e.model_year IS NULL THEN (SELECT s.model_year FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.model_year END,
+            engine = CASE WHEN e.engine IS NULL OR trim(e.engine)='' THEN (SELECT s.engine FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.engine END,
+            vin = CASE WHEN e.vin IS NULL OR trim(e.vin)='' THEN (SELECT s.vin FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.vin END,
+            esn = CASE WHEN e.esn IS NULL OR trim(e.esn)='' THEN (SELECT s.esn FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.esn END,
             updated_at = CURRENT_TIMESTAMP
-          WHERE e.active=1 AND e.equipment_type='truck'
-            AND EXISTS (
-              SELECT 1 FROM _equipment_import_stage_20260812 s
-              WHERE s.equipment_type='truck' AND s.unit=trim(e.unit)
-                AND ((e.model_year IS NULL AND s.model_year IS NOT NULL)
-                  OR ((e.engine IS NULL OR trim(e.engine)='') AND s.engine IS NOT NULL)
-                  OR ((e.model IS NULL OR trim(e.model)='') AND s.model IS NOT NULL)
-                  OR ((e.vin IS NULL OR trim(e.vin)='') AND s.vin IS NOT NULL)
-                  OR ((e.esn IS NULL OR trim(e.esn)='') AND s.esn IS NOT NULL))
-            );
+          WHERE e.active=1 AND e.equipment_type='truck' AND instr(trim(e.unit),'(')>1
+            AND EXISTS (SELECT 1 FROM _truck_model_stage_20260812 s WHERE {match});
           """.strip())
-
-          out.append("""
-          UPDATE equipment AS e
-          SET
-            model_year = CASE WHEN e.model_year IS NULL THEN (SELECT s.model_year FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='trailer' AND s.unit=trim(e.unit)) ELSE e.model_year END,
-            vin = CASE WHEN e.vin IS NULL OR trim(e.vin)='' THEN (SELECT s.vin FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='trailer' AND s.unit=trim(e.unit)) ELSE e.vin END,
-            tire_size = CASE WHEN e.tire_size IS NULL OR trim(e.tire_size)='' THEN (SELECT s.tire_size FROM _equipment_import_stage_20260812 s WHERE s.equipment_type='trailer' AND s.unit=trim(e.unit)) ELSE e.tire_size END,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE e.active=1 AND e.equipment_type='trailer'
-            AND EXISTS (
-              SELECT 1 FROM _equipment_import_stage_20260812 s
-              WHERE s.equipment_type='trailer' AND s.unit=trim(e.unit)
-                AND ((e.model_year IS NULL AND s.model_year IS NOT NULL)
-                  OR ((e.vin IS NULL OR trim(e.vin)='') AND s.vin IS NOT NULL)
-                  OR ((e.tire_size IS NULL OR trim(e.tire_size)='') AND s.tire_size IS NOT NULL))
-            );
-          """.strip())
-
-          with open('/tmp/equipment-import.sql','w',encoding='utf-8') as f:
-              f.write('\n\n'.join(out)+'\n')
-          print(f'STAGE_ROWS={len(stage)}')
+          with open('/tmp/truck-model-import.sql','w',encoding='utf-8') as f: f.write('\n\n'.join(out)+'\n')
+          print(f'STAGED_TRUCK_MODELS={len(trucks)}')
           PY
 
-      - name: Apply to production D1
+      - name: Apply model values to production D1
         shell: bash
         run: |
           set -euo pipefail
@@ -145,39 +110,27 @@ jobs:
           token="${token#\"}"
           token="${token%\"}"
           export CLOUDFLARE_API_TOKEN="$token"
-          test -n "$CLOUDFLARE_API_TOKEN"
-
           account_args=()
-          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
-            account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID")
-          fi
+          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID"); fi
           list_json="$(npx wrangler d1 list --json "${account_args[@]}")"
           db_id="$(node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync(0,"utf8")); const r=d.find(x=>x.name==="norlow-repair-production"); if(r) process.stdout.write(r.uuid||r.id||r.database_id||"");' <<<"$list_json")"
           test -n "$db_id"
-          sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.equipment-import.jsonc
-          npx wrangler d1 execute DB --remote --config wrangler.equipment-import.jsonc --file /tmp/equipment-import.sql --yes
+          sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.truck-model.jsonc
+          npx wrangler d1 execute DB --remote --config wrangler.truck-model.jsonc --file /tmp/truck-model-import.sql --yes
 
-      - name: Verify imported blanks are complete
+      - name: Verify sheet model is now authoritative
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler d1 execute DB --remote --config wrangler.equipment-import.jsonc --command "SELECT SUM(CASE WHEN s.equipment_type='truck' AND e.id IS NOT NULL AND s.model_year IS NOT NULL AND e.model_year IS NULL THEN 1 ELSE 0 END) AS truck_year_remaining, SUM(CASE WHEN s.equipment_type='truck' AND e.id IS NOT NULL AND s.engine IS NOT NULL AND (e.engine IS NULL OR trim(e.engine)='') THEN 1 ELSE 0 END) AS truck_engine_remaining, SUM(CASE WHEN s.equipment_type='truck' AND e.id IS NOT NULL AND s.model IS NOT NULL AND (e.model IS NULL OR trim(e.model)='') THEN 1 ELSE 0 END) AS truck_model_remaining, SUM(CASE WHEN s.equipment_type='truck' AND e.id IS NOT NULL AND s.vin IS NOT NULL AND (e.vin IS NULL OR trim(e.vin)='') THEN 1 ELSE 0 END) AS truck_vin_remaining, SUM(CASE WHEN s.equipment_type='truck' AND e.id IS NOT NULL AND s.esn IS NOT NULL AND (e.esn IS NULL OR trim(e.esn)='') THEN 1 ELSE 0 END) AS truck_esn_remaining, SUM(CASE WHEN s.equipment_type='trailer' AND e.id IS NOT NULL AND s.tire_size IS NOT NULL AND (e.tire_size IS NULL OR trim(e.tire_size)='') THEN 1 ELSE 0 END) AS trailer_tire_remaining, SUM(CASE WHEN s.equipment_type='trailer' AND e.id IS NOT NULL AND s.vin IS NOT NULL AND (e.vin IS NULL OR trim(e.vin)='') THEN 1 ELSE 0 END) AS trailer_vin_remaining, SUM(CASE WHEN s.equipment_type='trailer' AND e.id IS NOT NULL AND s.model_year IS NOT NULL AND e.model_year IS NULL THEN 1 ELSE 0 END) AS trailer_year_remaining, SUM(CASE WHEN s.equipment_type='truck' AND e.id IS NOT NULL THEN 1 ELSE 0 END) AS matched_trucks, SUM(CASE WHEN s.equipment_type='trailer' AND e.id IS NOT NULL THEN 1 ELSE 0 END) AS matched_trailers FROM _equipment_import_stage_20260812 s LEFT JOIN equipment e ON e.active=1 AND e.equipment_type=s.equipment_type AND lower(trim(e.unit))=lower(s.unit);" --json > /tmp/verify.json
+          npx wrangler d1 execute DB --remote --config wrangler.truck-model.jsonc --command "SELECT COUNT(*) AS matched_trucks, SUM(CASE WHEN lower(trim(e.model))<>lower(trim(s.model)) THEN 1 ELSE 0 END) AS model_mismatches, SUM(CASE WHEN lower(s.model) LIKE '%day%' THEN 1 ELSE 0 END) AS day_cab_models, SUM(CASE WHEN lower(s.model) LIKE '%sleep%' THEN 1 ELSE 0 END) AS sleeper_models FROM equipment e JOIN _truck_model_stage_20260812 s ON instr(trim(e.unit),'(')>1 AND s.unit_key=substr(trim(e.unit),1,instr(trim(e.unit),'(')-1) WHERE e.active=1 AND e.equipment_type='truck';" --json > /tmp/verify.json
           node <<'NODE'
-          const fs=require('fs');
-          const data=JSON.parse(fs.readFileSync('/tmp/verify.json','utf8'));
-          const row=data.flatMap(x=>Array.isArray(x?.results)?x.results:[])[0]||{};
-          const fields=['truck_year_remaining','truck_engine_remaining','truck_model_remaining','truck_vin_remaining','truck_esn_remaining','trailer_tire_remaining','trailer_vin_remaining','trailer_year_remaining'];
-          for (const f of fields) console.log(`${f.toUpperCase()}=${row[f] ?? 'unknown'}`);
-          console.log(`MATCHED_TRUCKS=${row.matched_trucks ?? 'unknown'}`);
-          console.log(`MATCHED_TRAILERS=${row.matched_trailers ?? 'unknown'}`);
-          const bad=fields.filter(f=>Number(row[f]||0)!==0);
-          if (bad.length) { console.error('Import verification failed: '+bad.join(',')); process.exit(1); }
-          NODE
-
-          npx wrangler d1 execute DB --remote --config wrangler.equipment-import.jsonc --command "SELECT COUNT(*) AS active_trucks, SUM(CASE WHEN model_year IS NULL THEN 1 ELSE 0 END) AS missing_year, SUM(CASE WHEN engine IS NULL OR trim(engine)='' THEN 1 ELSE 0 END) AS missing_engine, SUM(CASE WHEN model IS NULL OR trim(model)='' THEN 1 ELSE 0 END) AS missing_model, SUM(CASE WHEN vin IS NULL OR trim(vin)='' THEN 1 ELSE 0 END) AS missing_vin, SUM(CASE WHEN esn IS NULL OR trim(esn)='' THEN 1 ELSE 0 END) AS missing_esn FROM equipment WHERE active=1 AND equipment_type='truck'; SELECT COUNT(*) AS active_trailers, SUM(CASE WHEN tire_size IS NULL OR trim(tire_size)='' THEN 1 ELSE 0 END) AS missing_tire_size FROM equipment WHERE active=1 AND equipment_type='trailer';" --json > /tmp/final-counts.json
-          node <<'NODE'
-          const fs=require('fs'); const data=JSON.parse(fs.readFileSync('/tmp/final-counts.json','utf8'));
-          for (const block of data) for (const row of (block.results||[])) console.log('FINAL_COUNTS='+JSON.stringify(row));
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('/tmp/verify.json','utf8'));
+          const r=d.flatMap(x=>x.results||[])[0]||{};
+          console.log(`MATCHED_TRUCKS=${r.matched_trucks ?? 'unknown'}`);
+          console.log(`MODEL_MISMATCHES=${r.model_mismatches ?? 'unknown'}`);
+          console.log(`DAY_CAB_MODELS=${r.day_cab_models ?? 'unknown'}`);
+          console.log(`SLEEPER_MODELS=${r.sleeper_models ?? 'unknown'}`);
+          if (Number(r.matched_trucks||0) < 280 || Number(r.model_mismatches||0)!==0) process.exit(1);
           NODE
 
       - name: Remove temporary staging table
@@ -185,6 +138,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          if [ -f wrangler.equipment-import.jsonc ]; then
-            npx wrangler d1 execute DB --remote --config wrangler.equipment-import.jsonc --command "DROP TABLE IF EXISTS _equipment_import_stage_20260812;" --json >/dev/null 2>&1
+          if [ -f wrangler.truck-model.jsonc ]; then
+            npx wrangler d1 execute DB --remote --config wrangler.truck-model.jsonc --command "DROP TABLE IF EXISTS _truck_model_stage_20260812;" --json >/dev/null 2>&1
           fi
