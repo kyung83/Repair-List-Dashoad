@@ -31,11 +31,13 @@ type Timer = { repairId: string; startedAt: string; title: string; unit: string 
 type ShopData = { user: User; activeTimer: Timer | null; repairs: Repair[]; parts: Part[]; updatedAt: string };
 type View = "mine" | "available" | "all";
 type ActionResult = { ok?: boolean; error?: string; repairId?: string; hours?: number; laborStarted?: boolean; completed?: boolean; removed?: boolean };
+type UnitGroup = { key: string; unit: string; equipmentId: number | null; repairs: Repair[] };
 
 function timerStartMs(value: string) {
   const normalized = value.includes("T") ? value : value.replace(" ", "T") + "Z";
   return Date.parse(normalized);
 }
+
 function duration(startedAt: string, now: number) {
   const ms = Math.max(0, now - timerStartMs(startedAt));
   const total = Math.floor(ms / 1000);
@@ -44,10 +46,35 @@ function duration(startedAt: string, now: number) {
   const s = total % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
-function sameUnit(left: Repair, right: Repair) {
-  if (left.equipmentId && right.equipmentId) return left.equipmentId === right.equipmentId;
-  return left.unit.trim().toLowerCase() === right.unit.trim().toLowerCase();
+
+function unitKey(repair: Repair) {
+  if (repair.equipmentId != null) return `equipment-${repair.equipmentId}`;
+  return `unit-${repair.unit.trim().toLowerCase() || repair.id}`;
 }
+
+function sameUnit(left: Repair, right: Repair) {
+  return unitKey(left) === unitKey(right);
+}
+
+function groupByUnit(repairs: Repair[]) {
+  const groups = new Map<string, UnitGroup>();
+  for (const repair of repairs) {
+    const key = unitKey(repair);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.repairs.push(repair);
+    } else {
+      groups.set(key, {
+        key,
+        unit: repair.unit,
+        equipmentId: repair.equipmentId,
+        repairs: [repair],
+      });
+    }
+  }
+  return [...groups.values()];
+}
+
 function numberText(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
@@ -79,6 +106,7 @@ export default function ShopPage() {
   useEffect(() => {
     void load().catch((error) => setMessage(error instanceof Error ? error.message : "Shop jobs could not be loaded."));
   }, []);
+
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
@@ -130,12 +158,7 @@ export default function ShopPage() {
       setMessage("Enter a positive part quantity.");
       return;
     }
-    const result = await action({
-      action: "usePart",
-      repairId: repair.id,
-      partId: Number(partId),
-      quantity: partQuantity,
-    });
+    const result = await action({ action: "usePart", repairId: repair.id, partId: Number(partId), quantity: partQuantity });
     if (result) {
       setPartId("");
       setPartQuantity(1);
@@ -167,23 +190,34 @@ export default function ShopPage() {
     await action({ action: "completeRepair", repairId: repair.id });
   }
 
+  const mine = useMemo(() => {
+    if (!data?.user.technicianId) return [];
+    return data.repairs.filter((repair) => repair.technicianId === data.user.technicianId);
+  }, [data]);
+
+  const available = useMemo(() => data?.repairs.filter((repair) => repair.technicianId === null) ?? [], [data]);
+
   const visible = useMemo(() => {
     if (!data) return [];
-    if (view === "mine") return data.repairs.filter((repair) => repair.technicianId === data.user.technicianId);
-    if (view === "available") return data.repairs.filter((repair) => repair.technicianId === null);
+    if (view === "mine") return mine;
+    if (view === "available") return available;
     return data.repairs;
-  }, [data, view]);
+  }, [data, view, mine, available]);
+
+  const visibleGroups = useMemo(() => groupByUnit(visible), [visible]);
+  const mineGroups = useMemo(() => groupByUnit(mine), [mine]);
+  const availableGroups = useMemo(() => groupByUnit(available), [available]);
+  const allGroups = useMemo(() => groupByUnit(data?.repairs ?? []), [data]);
 
   const selected = useMemo(
     () => data?.repairs.find((repair) => repair.id === selectedId) ?? null,
     [data, selectedId],
   );
-  const relatedRepairs = useMemo(
-    () => selected && data ? data.repairs.filter((repair) => repair.id !== selected.id && sameUnit(repair, selected)) : [],
+
+  const selectedUnitRepairs = useMemo(
+    () => selected && data ? data.repairs.filter((repair) => sameUnit(repair, selected)) : [],
     [data, selected],
   );
-  const myCount = data?.repairs.filter((repair) => repair.technicianId === data.user.technicianId).length ?? 0;
-  const availableCount = data?.repairs.filter((repair) => repair.technicianId === null).length ?? 0;
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "34px 34px 100px", color: "#182331" }}>
@@ -191,7 +225,7 @@ export default function ShopPage() {
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontWeight: 900, fontSize: 12, letterSpacing: ".16em" }}>TECHNICIAN SHOP QUEUE</p>
           <h1 style={{ margin: "7px 0 5px", fontSize: 34, color: "#0d1b2b" }}>Shop Jobs</h1>
-          <p style={{ margin: 0, color: "#667482" }}>Open a repair to claim it if needed, start labor automatically, add parts, and finish the repair.</p>
+          <p style={{ margin: 0, color: "#667482" }}>Jobs are grouped by unit. Open the individual repair you are working on for labor, parts, and completion.</p>
         </div>
         <div style={{ textAlign: "right" }}>
           <strong style={{ display: "block" }}>{data?.user.displayName ?? "Loading…"}</strong>
@@ -227,176 +261,197 @@ export default function ShopPage() {
       )}
 
       <section style={{ marginTop: 22, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button onClick={() => setView("mine")} style={view === "mine" ? activeTab : tabButton}>My Jobs ({myCount})</button>
-        <button onClick={() => setView("available")} style={view === "available" ? activeTab : tabButton}>Available Jobs ({availableCount})</button>
-        <button onClick={() => setView("all")} style={view === "all" ? activeTab : tabButton}>All Open ({data?.repairs.length ?? 0})</button>
+        <button onClick={() => setView("mine")} style={view === "mine" ? activeTab : tabButton}>My Units ({mineGroups.length})</button>
+        <button onClick={() => setView("available")} style={view === "available" ? activeTab : tabButton}>Available Units ({availableGroups.length})</button>
+        <button onClick={() => setView("all")} style={view === "all" ? activeTab : tabButton}>All Open Units ({allGroups.length})</button>
       </section>
 
       {selected && data && (() => {
-        const mine = selected.technicianId === data.user.technicianId;
-        const available = selected.technicianId === null;
+        const repairMine = selected.technicianId === data.user.technicianId && data.user.technicianId !== null;
+        const repairAvailable = selected.technicianId === null;
         const running = data.activeTimer?.repairId === selected.id;
-        const canOpen = Boolean(data.user.technicianId) && (mine || available);
+        const canOpen = Boolean(data.user.technicianId) && (repairMine || repairAvailable);
         const blockedByOtherTimer = Boolean(data.activeTimer && !running);
         return (
           <section style={workspaceStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
               <div>
-                <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>REPAIR WORKSPACE</p>
-                <h2 style={{ margin: "7px 0 4px", fontSize: 27, color: "#0d1b2b" }}>Unit {selected.unit || "—"} — {selected.issue}</h2>
-                <div style={{ color: "#667482" }}>{selected.location || "No location"} · {selected.status} · {available ? "Unassigned" : `Assigned to ${selected.assignedTo || "technician"}`}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-                {canOpen && !data.activeTimer && <button disabled={busy} onClick={() => void openJob(selected.id)} style={primaryButton}>Open Job & Start Labor</button>}
-                {running && <button disabled={busy} onClick={() => void action({ action: "stopLabor", repairId: selected.id })} style={dangerButton}>Stop Labor</button>}
-                {mine && !blockedByOtherTimer && <button disabled={busy} onClick={() => void completeJob(selected)} style={completeButton}>Complete Repair</button>}
+                <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>UNIT WORKSPACE</p>
+                <h2 style={{ margin: "7px 0 4px", fontSize: 27, color: "#0d1b2b" }}>Unit {selected.unit || "—"}</h2>
+                <div style={{ color: "#667482" }}>{selectedUnitRepairs.length} open job{selectedUnitRepairs.length === 1 ? "" : "s"} on this unit</div>
               </div>
             </div>
 
-            {!mine && available && <div style={smallNotice}>Open this job first. Opening it assigns it to you and starts the labor timer.</div>}
-            {!mine && !available && <div style={lockedNotice}>This repair is assigned to {selected.assignedTo || "another technician"}. You can see it, but only that technician or a manager can work it.</div>}
-            {mine && blockedByOtherTimer && <div style={smallNotice}>You have labor running on another repair. Stop that timer before opening or completing this one.</div>}
-
-            <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))", gap: 16 }}>
-              <div style={workspaceCard}>
-                <h3 style={workspaceHeading}>Parts</h3>
-
-                {selected.plannedParts.length > 0 && (
-                  <div style={plannedBox}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                      <strong style={{ color: "#76420a" }}>PM Kit · Planned Parts</strong>
-                      <span style={{ color: "#8c6233", fontSize: 11 }}>{selected.plannedParts[0]?.kitName || "PM Kit"}</span>
+            <div style={{ marginTop: 15, display: "grid", gap: 8 }}>
+              {selectedUnitRepairs.map((repair) => {
+                const rowMine = repair.technicianId === data.user.technicianId && data.user.technicianId !== null;
+                const rowAvailable = repair.technicianId === null;
+                const rowRunning = data.activeTimer?.repairId === repair.id;
+                const rowCanOpen = Boolean(data.user.technicianId) && (rowMine || rowAvailable) && !data.activeTimer;
+                return (
+                  <div key={repair.id} style={{ ...unitJobRow, borderColor: repair.id === selected.id ? "#f47b20" : "#dfe5ea" }}>
+                    <button onClick={() => setSelectedId(repair.id)} style={unitJobTitle}>{repair.issue}</button>
+                    <div style={{ minWidth: 160, color: "#667482", fontSize: 12 }}>
+                      {repair.status || "Open"} · {rowAvailable ? "Unassigned" : `Assigned to ${repair.assignedTo || "technician"}`}
                     </div>
-                    <p style={{ margin: "4px 0 10px", color: "#7c684e", fontSize: 11 }}>These are expected parts only. Inventory is not reduced until you press Use. If a part does not need changing on this PM, mark it Not Needed.</p>
-                    <div style={{ display: "grid", gap: 7 }}>
-                      {selected.plannedParts.map((planned) => {
-                        const remaining = Math.max(0, planned.quantity - planned.usedQuantity);
-                        const inventoryPart = data.parts.find((part) => part.id === planned.partId);
-                        const stock = inventoryPart?.quantityOnHand ?? 0;
-                        const useQty = Math.min(remaining, Math.max(0, stock));
-                        return (
-                          <div key={planned.id} style={plannedRow}>
-                            <div style={{ minWidth: 0 }}>
-                              <strong style={{ display: "block", color: "#253542" }}>{planned.partNumber} · {numberText(planned.quantity)} planned</strong>
-                              <span style={{ display: "block", marginTop: 2, color: "#697782", fontSize: 11 }}>{planned.description}</span>
-                              <span style={{ display: "block", marginTop: 2, color: planned.usedQuantity >= planned.quantity ? "#176440" : "#7c684e", fontSize: 10, fontWeight: 800 }}>
-                                {numberText(planned.usedQuantity)} used · {numberText(remaining)} remaining · {numberText(stock)} on hand
-                              </span>
-                            </div>
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              {remaining <= 0 ? <span style={usedBadge}>Used</span> : (
-                                <>
-                                  {mine && <button disabled={busy || useQty <= 0} onClick={() => void usePlannedPart(selected, planned)} style={plannedUseButton}>{useQty > 0 ? `Use ${numberText(useQty)}` : "No Stock"}</button>}
-                                  {mine && planned.usedQuantity <= 0 && <button disabled={busy} onClick={() => void removePlannedPart(selected, planned)} style={notNeededButton}>Not Needed</button>}
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div style={{ display: "flex", gap: 7, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      {rowCanOpen && <button disabled={busy} onClick={() => void openJob(repair.id)} style={smallPrimaryButton}>Open & Start</button>}
+                      {rowRunning && <span style={runningBadge}>Labor Running</span>}
+                      <button onClick={() => setSelectedId(repair.id)} style={smallSecondaryButton}>Work on Job</button>
                     </div>
                   </div>
-                )}
-
-                <div style={{ minHeight: 32, marginTop: selected.plannedParts.length ? 13 : 0 }}>
-                  <strong style={{ display: "block", marginBottom: 6, color: "#52616c", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>Parts Actually Used</strong>
-                  {selected.usedParts.length ? selected.usedParts.map((part) => (
-                    <span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>
-                  )) : <span style={mutedText}>No parts used yet.</span>}
-                </div>
-                {mine && (
-                  <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 90px auto", gap: 8 }}>
-                    <select value={partId} onChange={(event) => setPartId(event.target.value)} style={inputStyle} disabled={busy}>
-                      <option value="">Choose inventory part</option>
-                      {data.parts.map((part) => (
-                        <option key={part.id} value={part.id} disabled={part.quantityOnHand <= 0}>
-                          {part.partNumber} — {part.description} ({part.quantityOnHand})
-                        </option>
-                      ))}
-                    </select>
-                    <input type="number" min="0.01" step="any" value={partQuantity} onChange={(event) => setPartQuantity(Number(event.target.value))} style={inputStyle} disabled={busy} />
-                    <button disabled={busy} onClick={() => void addPartToRepair(selected)} style={secondaryButton}>Add Part</button>
-                  </div>
-                )}
-                {mine && <p style={helperText}>Only parts you actually use are deducted from inventory and attached to this repair.</p>}
-              </div>
-
-              <div style={workspaceCard}>
-                <h3 style={workspaceHeading}>Labor</h3>
-                <strong style={{ display: "block", fontSize: 25, color: "#0d1b2b" }}>{selected.laborHours.toFixed(2)} hours logged</strong>
-                {running && data.activeTimer && <div style={{ marginTop: 8, color: "#b45309", fontWeight: 800 }}>Current timer: {duration(data.activeTimer.startedAt, now)}</div>}
-                <div style={{ marginTop: 10, display: "grid", gap: 5 }}>
-                  {selected.laborEntries.slice(0, 6).map((entry) => (
-                    <div key={entry.id} style={{ fontSize: 12, color: "#657383" }}>
-                      {entry.laborDate} · {entry.technician} · {entry.hours.toFixed(2)} hr{entry.notes ? ` · ${entry.notes}` : ""}
-                    </div>
-                  ))}
-                  {!selected.laborEntries.length && <span style={mutedText}>Completed timer sessions will appear here.</span>}
-                </div>
-                {mine && <p style={helperText}>Completing this repair automatically stops and saves its running labor first.</p>}
-              </div>
+                );
+              })}
             </div>
 
-            <div style={{ marginTop: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-                <h3 style={{ margin: 0, color: "#0d1b2b" }}>Other open repairs for Unit {selected.unit || "—"}</h3>
-                <span style={{ color: "#667482", fontSize: 13 }}>{relatedRepairs.length} other repair{relatedRepairs.length === 1 ? "" : "s"}</span>
+            <div style={{ marginTop: 20, paddingTop: 18, borderTop: "1px solid #e1e6ea" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
+                <div>
+                  <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>SELECTED REPAIR</p>
+                  <h3 style={{ margin: "6px 0 4px", fontSize: 23, color: "#0d1b2b" }}>{selected.issue}</h3>
+                  <div style={{ color: "#667482" }}>{selected.location || "No location"} · {selected.status} · {repairAvailable ? "Unassigned" : `Assigned to ${selected.assignedTo || "technician"}`}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                  {canOpen && !data.activeTimer && <button disabled={busy} onClick={() => void openJob(selected.id)} style={primaryButton}>Open Job & Start Labor</button>}
+                  {running && <button disabled={busy} onClick={() => void action({ action: "stopLabor", repairId: selected.id })} style={dangerButton}>Stop Labor</button>}
+                  {repairMine && !blockedByOtherTimer && <button disabled={busy} onClick={() => void completeJob(selected)} style={completeButton}>Complete Repair</button>}
+                </div>
               </div>
-              {relatedRepairs.length ? (
-                <div style={{ marginTop: 10, display: "grid", gap: 9 }}>
-                  {relatedRepairs.map((repair) => {
-                    const relatedMine = repair.technicianId === data.user.technicianId;
-                    const relatedAvailable = repair.technicianId === null;
-                    const relatedCanOpen = Boolean(data.user.technicianId) && (relatedMine || relatedAvailable) && !data.activeTimer;
-                    return (
-                      <div key={repair.id} style={relatedRepairStyle}>
-                        <button onClick={() => setSelectedId(repair.id)} style={relatedTitleButton}>{repair.issue}</button>
-                        <span style={{ color: "#667482", fontSize: 12 }}>{repair.status} · {relatedAvailable ? "Unassigned" : `Assigned to ${repair.assignedTo || "technician"}`}</span>
-                        {relatedCanOpen && <button disabled={busy} onClick={() => void openJob(repair.id)} style={secondaryButton}>Open & Start</button>}
-                        {!relatedCanOpen && relatedAvailable && data.activeTimer && <span style={relatedHint}>Stop current timer first</span>}
-                        {!relatedAvailable && !relatedMine && <span style={relatedHint}>Assigned to another tech</span>}
+
+              {!repairMine && repairAvailable && <div style={smallNotice}>Open this job first. Opening it assigns it to you and starts the labor timer.</div>}
+              {!repairMine && !repairAvailable && <div style={lockedNotice}>This repair is assigned to {selected.assignedTo || "another technician"}. You can see it, but only that technician or a manager can work it.</div>}
+              {repairMine && blockedByOtherTimer && <div style={smallNotice}>You have labor running on another repair. Stop that timer before opening or completing this one.</div>}
+
+              <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))", gap: 16 }}>
+                <div style={workspaceCard}>
+                  <h3 style={workspaceHeading}>Parts</h3>
+                  {selected.plannedParts.length > 0 && (
+                    <div style={plannedBox}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <strong style={{ color: "#76420a" }}>PM Kit · Planned Parts</strong>
+                        <span style={{ color: "#8c6233", fontSize: 11 }}>{selected.plannedParts[0]?.kitName || "PM Kit"}</span>
                       </div>
-                    );
-                  })}
+                      <div style={{ marginTop: 9, display: "grid", gap: 7 }}>
+                        {selected.plannedParts.map((planned) => {
+                          const remaining = Math.max(0, planned.quantity - planned.usedQuantity);
+                          const inventoryPart = data.parts.find((part) => part.id === planned.partId);
+                          const stock = inventoryPart?.quantityOnHand ?? 0;
+                          const useQty = Math.min(remaining, Math.max(0, stock));
+                          return (
+                            <div key={planned.id} style={plannedRow}>
+                              <div style={{ minWidth: 0 }}>
+                                <strong style={{ display: "block", color: "#253542" }}>{planned.partNumber} · {numberText(planned.quantity)} planned</strong>
+                                <span style={{ display: "block", marginTop: 2, color: "#697782", fontSize: 11 }}>{planned.description}</span>
+                                <span style={{ display: "block", marginTop: 2, color: planned.usedQuantity >= planned.quantity ? "#176440" : "#7c684e", fontSize: 10, fontWeight: 800 }}>
+                                  {numberText(planned.usedQuantity)} used · {numberText(remaining)} remaining · {numberText(stock)} on hand
+                                </span>
+                              </div>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                {remaining <= 0 ? <span style={usedBadge}>Used</span> : (
+                                  <>
+                                    {repairMine && <button disabled={busy || useQty <= 0} onClick={() => void usePlannedPart(selected, planned)} style={plannedUseButton}>{useQty > 0 ? `Use ${numberText(useQty)}` : "No Stock"}</button>}
+                                    {repairMine && planned.usedQuantity <= 0 && <button disabled={busy} onClick={() => void removePlannedPart(selected, planned)} style={notNeededButton}>Not Needed</button>}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ minHeight: 32, marginTop: selected.plannedParts.length ? 13 : 0 }}>
+                    <strong style={{ display: "block", marginBottom: 6, color: "#52616c", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>Parts Actually Used</strong>
+                    {selected.usedParts.length ? selected.usedParts.map((part) => (
+                      <span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>
+                    )) : <span style={mutedText}>No parts used yet.</span>}
+                  </div>
+
+                  {repairMine && (
+                    <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 90px auto", gap: 8 }}>
+                      <select value={partId} onChange={(event) => setPartId(event.target.value)} style={inputStyle} disabled={busy}>
+                        <option value="">Choose inventory part</option>
+                        {data.parts.map((part) => (
+                          <option key={part.id} value={part.id} disabled={part.quantityOnHand <= 0}>
+                            {part.partNumber} — {part.description} ({part.quantityOnHand})
+                          </option>
+                        ))}
+                      </select>
+                      <input type="number" min="0.01" step="any" value={partQuantity} onChange={(event) => setPartQuantity(Number(event.target.value))} style={inputStyle} disabled={busy} />
+                      <button disabled={busy} onClick={() => void addPartToRepair(selected)} style={secondaryButton}>Add Part</button>
+                    </div>
+                  )}
                 </div>
-              ) : <div style={{ marginTop: 10, ...mutedText }}>No other open repairs are listed for this unit.</div>}
+
+                <div style={workspaceCard}>
+                  <h3 style={workspaceHeading}>Labor</h3>
+                  <strong style={{ display: "block", fontSize: 25, color: "#0d1b2b" }}>{selected.laborHours.toFixed(2)} hours logged</strong>
+                  {running && data.activeTimer && <div style={{ marginTop: 8, color: "#b45309", fontWeight: 800 }}>Current timer: {duration(data.activeTimer.startedAt, now)}</div>}
+                  <div style={{ marginTop: 10, display: "grid", gap: 5 }}>
+                    {selected.laborEntries.slice(0, 6).map((entry) => (
+                      <div key={entry.id} style={{ fontSize: 12, color: "#657383" }}>
+                        {entry.laborDate} · {entry.technician} · {entry.hours.toFixed(2)} hr{entry.notes ? ` · ${entry.notes}` : ""}
+                      </div>
+                    ))}
+                    {!selected.laborEntries.length && <span style={mutedText}>Completed timer sessions will appear here.</span>}
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
         );
       })()}
 
-      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 14 }}>
-        {visible.map((item) => {
-          const mine = item.technicianId === data?.user.technicianId;
-          const available = item.technicianId === null;
-          const running = data?.activeTimer?.repairId === item.id;
-          const canOpen = Boolean(data?.user.technicianId) && (mine || available);
+      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 14 }}>
+        {visibleGroups.map((group) => {
+          const runningRepair = group.repairs.find((repair) => data?.activeTimer?.repairId === repair.id) ?? null;
+          const selectedInGroup = group.repairs.some((repair) => repair.id === selectedId);
+          const totalHours = group.repairs.reduce((sum, repair) => sum + repair.laborHours, 0);
+          const locations = [...new Set(group.repairs.map((repair) => repair.location).filter(Boolean))];
           return (
-            <article key={item.id} style={{ background: "white", border: running ? "2px solid #f47b20" : selectedId === item.id ? "2px solid #0d1b2b" : "1px solid #dce2e7", borderRadius: 13, padding: 18, boxShadow: "0 4px 18px #12202f0d" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <span style={{ fontSize: 12, color: "#f47b20", fontWeight: 900 }}>UNIT {item.unit || "—"}</span>
-                <span style={{ fontSize: 12, fontWeight: 800, color: "#5d6975" }}>{item.status || "Open"}</span>
+            <article key={group.key} style={{ background: "white", border: runningRepair ? "2px solid #f47b20" : selectedInGroup ? "2px solid #0d1b2b" : "1px solid #dce2e7", borderRadius: 13, padding: 18, boxShadow: "0 4px 18px #12202f0d" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                <span style={{ fontSize: 15, color: "#f47b20", fontWeight: 900 }}>UNIT {group.unit || "—"}</span>
+                <span style={{ fontSize: 12, fontWeight: 900, color: "#5d6975" }}>{group.repairs.length} OPEN JOB{group.repairs.length === 1 ? "" : "S"}</span>
               </div>
-              <button onClick={() => setSelectedId(item.id)} style={repairTitleButton}>{item.issue}</button>
-              <div style={{ fontSize: 13, color: "#667482", lineHeight: 1.6 }}>
-                <div>{item.location || "No location"}</div>
-                <div>{available ? "Unassigned" : `Assigned to ${item.assignedTo || "technician"}`}</div>
-                <div>{item.laborHours.toFixed(2)} labor hours · {item.usedParts.length} used part line{item.usedParts.length === 1 ? "" : "s"}{item.plannedParts.length ? ` · ${item.plannedParts.length} PM kit part${item.plannedParts.length === 1 ? "" : "s"}` : ""}</div>
+              <div style={{ marginTop: 7, color: "#667482", fontSize: 12 }}>
+                {locations.length ? locations.join(" · ") : "No location"} · {totalHours.toFixed(2)} total labor hours
               </div>
-              <div style={{ marginTop: 16, display: "flex", gap: 9, flexWrap: "wrap" }}>
-                {canOpen && !running && !data?.activeTimer && <button disabled={busy} onClick={() => void openJob(item.id)} style={primaryButton}>Open Job</button>}
-                {running && <button disabled={busy} onClick={() => void action({ action: "stopLabor", repairId: item.id })} style={dangerButton}>Stop Labor</button>}
-                <button onClick={() => setSelectedId(item.id)} style={secondaryButton}>View Repair + Unit Jobs</button>
-                {canOpen && data?.activeTimer && !running && <span style={relatedHint}>Stop current timer before opening</span>}
+
+              <div style={{ marginTop: 13, display: "grid", gap: 8 }}>
+                {group.repairs.map((repair) => {
+                  const repairMine = repair.technicianId === data?.user.technicianId && data?.user.technicianId !== null;
+                  const repairAvailable = repair.technicianId === null;
+                  const repairRunning = data?.activeTimer?.repairId === repair.id;
+                  const canOpen = Boolean(data?.user.technicianId) && (repairMine || repairAvailable) && !data?.activeTimer;
+                  return (
+                    <div key={repair.id} style={queueJobRow}>
+                      <button onClick={() => setSelectedId(repair.id)} style={queueJobTitle}>{repair.issue}</button>
+                      <div style={{ marginTop: 3, color: "#667482", fontSize: 11 }}>
+                        {repair.status || "Open"} · {repairAvailable ? "Unassigned" : `Assigned to ${repair.assignedTo || "technician"}`} · {repair.laborHours.toFixed(2)} hr
+                      </div>
+                      <div style={{ marginTop: 8, display: "flex", gap: 7, flexWrap: "wrap" }}>
+                        {canOpen && <button disabled={busy} onClick={() => void openJob(repair.id)} style={smallPrimaryButton}>Open Job</button>}
+                        {repairRunning && <span style={runningBadge}>Labor Running</span>}
+                        <button onClick={() => setSelectedId(repair.id)} style={smallSecondaryButton}>View</button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              {canOpen && !data?.activeTimer && <div style={{ marginTop: 9, fontSize: 11, color: "#7a8793" }}>Opening this job starts the labor timer automatically.</div>}
+
+              <button onClick={() => setSelectedId(runningRepair?.id ?? group.repairs[0]?.id ?? null)} style={unitButton}>
+                View All {group.repairs.length} Job{group.repairs.length === 1 ? "" : "s"} for Unit {group.unit || "—"}
+              </button>
             </article>
           );
         })}
-        {data && !visible.length && (
+
+        {data && !visibleGroups.length && (
           <div style={{ gridColumn: "1 / -1", background: "white", border: "1px dashed #cbd4dc", borderRadius: 13, padding: 34, textAlign: "center", color: "#667482" }}>
-            <strong style={{ display: "block", color: "#24313d", marginBottom: 5 }}>No jobs in this view</strong>
-            {view === "available" ? "There are no unassigned open repairs right now." : "Assigned and open repairs will appear here."}
+            <strong style={{ display: "block", color: "#24313d", marginBottom: 5 }}>No units in this view</strong>
+            {view === "available" ? "There are no units with unassigned open repairs right now." : "Assigned and open unit jobs will appear here."}
           </div>
         )}
       </section>
@@ -408,7 +463,9 @@ const noticeStyle = { marginTop: 18, padding: 12, borderRadius: 10, background: 
 const tabButton = { border: "1px solid #cdd5dc", borderRadius: 999, padding: "9px 14px", background: "white", color: "#283645", fontWeight: 800, cursor: "pointer" } as const;
 const activeTab = { ...tabButton, background: "#0d1b2b", borderColor: "#0d1b2b", color: "white" } as const;
 const primaryButton = { border: 0, borderRadius: 9, padding: "10px 14px", background: "#f47b20", color: "white", fontWeight: 900, cursor: "pointer" } as const;
+const smallPrimaryButton = { border: 0, borderRadius: 7, padding: "7px 9px", background: "#f47b20", color: "white", fontWeight: 900, fontSize: 11, cursor: "pointer" } as const;
 const secondaryButton = { border: "1px solid #cbd3da", borderRadius: 9, padding: "9px 12px", background: "#f7f9fa", color: "#182331", fontWeight: 800, cursor: "pointer" } as const;
+const smallSecondaryButton = { border: "1px solid #cbd3da", borderRadius: 7, padding: "6px 9px", background: "#f7f9fa", color: "#182331", fontWeight: 800, fontSize: 11, cursor: "pointer" } as const;
 const dangerButton = { border: 0, borderRadius: 9, padding: "10px 14px", background: "#c83e32", color: "white", fontWeight: 900, cursor: "pointer" } as const;
 const completeButton = { border: 0, borderRadius: 9, padding: "10px 14px", background: "#16784c", color: "white", fontWeight: 900, cursor: "pointer" } as const;
 const inputStyle = { width: "100%", boxSizing: "border-box" as const, padding: "10px 11px", border: "1px solid #ccd4db", borderRadius: 8, background: "white", color: "#182331" } as const;
@@ -422,11 +479,12 @@ const plannedUseButton = { border: "1px solid #81ad8f", borderRadius: 7, padding
 const notNeededButton = { border: "1px solid #c8b9a1", borderRadius: 7, padding: "7px 9px", background: "#f7f3ed", color: "#6d5a40", fontWeight: 900, fontSize: 11, cursor: "pointer" } as const;
 const usedBadge = { display: "inline-flex", alignItems: "center", minHeight: 29, padding: "0 9px", borderRadius: 999, background: "#e5f6eb", color: "#176440", fontWeight: 900, fontSize: 11 } as const;
 const mutedText = { color: "#7b8792", fontSize: 13 } as const;
-const helperText = { margin: "9px 0 0", color: "#7b8792", fontSize: 11 } as const;
 const smallNotice = { marginTop: 12, padding: "9px 11px", borderRadius: 8, background: "#fff8e6", color: "#7a5316", fontSize: 12 } as const;
 const lockedNotice = { marginTop: 12, padding: "9px 11px", borderRadius: 8, background: "#f3f5f7", color: "#657383", fontSize: 12 } as const;
-const relatedRepairStyle = { display: "grid", gridTemplateColumns: "minmax(180px,1fr) minmax(180px,auto) auto", gap: 10, alignItems: "center", padding: "10px 12px", border: "1px solid #e1e6ea", borderRadius: 9, background: "#fbfcfd" } as const;
-const relatedTitleButton = { border: 0, padding: 0, background: "transparent", color: "#0d1b2b", fontWeight: 800, textAlign: "left" as const, cursor: "pointer" } as const;
-const relatedHint = { fontSize: 11, color: "#7b8792", alignSelf: "center" } as const;
-const repairTitleButton = { display: "block", border: 0, padding: 0, margin: "8px 0 7px", background: "transparent", color: "#182331", textAlign: "left" as const, fontSize: 20, fontWeight: 800, cursor: "pointer" } as const;
 const activeJobButton = { display: "block", border: 0, padding: 0, background: "transparent", color: "white", textAlign: "left" as const, fontSize: 22, fontWeight: 900, cursor: "pointer" } as const;
+const queueJobRow = { padding: 11, border: "1px solid #e1e6ea", borderRadius: 9, background: "#fbfcfd" } as const;
+const queueJobTitle = { display: "block", width: "100%", border: 0, padding: 0, background: "transparent", color: "#182331", textAlign: "left" as const, fontSize: 15, fontWeight: 900, cursor: "pointer" } as const;
+const unitJobRow = { display: "grid", gridTemplateColumns: "minmax(220px,1fr) minmax(160px,auto) auto", gap: 12, alignItems: "center", padding: "10px 12px", border: "1px solid #dfe5ea", borderRadius: 9, background: "#fbfcfd" } as const;
+const unitJobTitle = { border: 0, padding: 0, background: "transparent", color: "#0d1b2b", fontWeight: 900, textAlign: "left" as const, cursor: "pointer" } as const;
+const runningBadge = { display: "inline-flex", alignItems: "center", padding: "6px 9px", borderRadius: 999, background: "#fff0e4", color: "#a94a08", fontWeight: 900, fontSize: 11 } as const;
+const unitButton = { width: "100%", marginTop: 12, border: "1px solid #cbd3da", borderRadius: 9, padding: "9px 12px", background: "white", color: "#182331", fontWeight: 900, cursor: "pointer" } as const;
