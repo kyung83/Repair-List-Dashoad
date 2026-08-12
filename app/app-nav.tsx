@@ -10,6 +10,7 @@ const links=[
   {href:"/work-orders",label:"WO Review",reviewOnly:true},
   {href:"/equipment",label:"Equipment"},
   {href:"/pm-schedules",label:"PM Schedules"},
+  {href:"/annual-inspections",label:"Annual Forms"},
   {href:"/inventory",label:"Inventory"},
   {href:"/invoices",label:"Invoices"},
   {href:"/reports",label:"Reports",exact:true},
@@ -17,7 +18,7 @@ const links=[
 ] as const;
 
 export default function AppNav(){
- const pathname=usePathname();const[user,setUser]=useState<User|null>(null);const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/photos");
+ const pathname=usePathname();const[user,setUser]=useState<User|null>(null);const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print");
  useEffect(()=>{if(hidden)return;void fetch('/api/auth/me',{cache:'no-store'}).then(async response=>response.ok?(await response.json() as{user:User}).user:null).then(setUser).catch(()=>setUser(null));},[hidden]);
  async function signOut(){await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);window.location.assign('/login');}
  if(hidden)return null;
