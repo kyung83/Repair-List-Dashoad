@@ -32,33 +32,42 @@ jobs:
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 2 "$SOURCE_CSV_URL" -o /tmp/master.csv
           python - <<'PY'
-          import csv,sys
+          import csv
           def clean(v): return (v or '').strip()
-          allowed={'':'Dry Van','FB':'Flat Bed','SD':'Step Deck','CON':'Conestoga'}
+          def classify(raw):
+              code=clean(raw).upper()
+              if code=='': return ('Dry Van',None,None,'Dry Van')
+              if code=='FB': return ('Flat Bed',None,None,'Flat Bed')
+              if code=='SD': return ('Step Deck',None,None,'Step Deck')
+              if code=='CON': return ('Conestoga',None,None,'Conestoga')
+              if code in {'CON SD','SD CON'}: return ('Conestoga','Step Deck',None,'Conestoga Step Deck')
+              if code=='LOW BOY': return (None,None,'Low Boy','Low Boy model')
+              if code=='EAGLE EXPRESS' or code.startswith('LEASE'):
+                  return ('Dry Van',None,None,'Dry Van')
+              return None
           with open('/tmp/master.csv',newline='',encoding='utf-8-sig') as f:
               rows=list(csv.reader(f))
           if not rows or len(rows[0]) < 5:
               raise SystemExit('Source CSV is missing expected trailer columns')
           if clean(rows[0][0]).lower()!='trailer #':
               raise SystemExit(f'Unexpected trailer unit header: {rows[0][0]!r}')
-          trailers=[]; unknown=set(); seen=set(); counts={v:0 for v in allowed.values()}
+          trailers=[]; unknown=set(); seen=set(); counts={}
           for r in rows[1:]:
               r=r+['']*(5-len(r))
               unit=clean(r[0])
               if not unit: continue
-              code=clean(r[3]).upper()
-              if code not in allowed:
-                  unknown.add(code or '<blank>')
+              result=classify(r[3])
+              if result is None:
+                  unknown.add(clean(r[3]).upper() or '<blank>')
                   continue
               if unit in seen: raise SystemExit(f'Duplicate trailer unit in source: {unit}')
               seen.add(unit)
-              body=allowed[code]
-              trailers.append((unit,body))
-              counts[body]+=1
-          if unknown: raise SystemExit('Unknown trailer type codes: '+', '.join(sorted(unknown)))
+              trailers.append((unit,*result[:3]))
+              counts[result[3]]=counts.get(result[3],0)+1
+          if unknown: raise SystemExit('Unknown trailer source values: '+', '.join(sorted(unknown)))
           if len(trailers) < 590: raise SystemExit(f'Trailer source looks incomplete: {len(trailers)} rows')
           print('SOURCE_TRAILERS='+str(len(trailers)))
-          for k,v in counts.items(): print('SOURCE_'+k.upper().replace(' ','_')+'='+str(v))
+          for k,v in sorted(counts.items()): print('SOURCE_'+k.upper().replace(' ','_')+'='+str(v))
           PY
 
       - name: Build one-time trailer type SQL
@@ -68,8 +77,18 @@ jobs:
           python - <<'PY'
           import csv
           def clean(v): return (v or '').strip()
-          def q(v): return "'"+v.replace("'","''")+"'"
-          mapping={'':'Dry Van','FB':'Flat Bed','SD':'Step Deck','CON':'Conestoga'}
+          def q(v): return 'NULL' if v is None else "'"+v.replace("'","''")+"'"
+          def classify(raw):
+              code=clean(raw).upper()
+              if code=='': return ('Dry Van',None,None)
+              if code=='FB': return ('Flat Bed',None,None)
+              if code=='SD': return ('Step Deck',None,None)
+              if code=='CON': return ('Conestoga',None,None)
+              if code in {'CON SD','SD CON'}: return ('Conestoga','Step Deck',None)
+              if code=='LOW BOY': return (None,None,'Low Boy')
+              if code=='EAGLE EXPRESS' or code.startswith('LEASE'):
+                  return ('Dry Van',None,None)
+              raise SystemExit('Unexpected source value while building SQL: '+code)
           rows=[]
           with open('/tmp/master.csv',newline='',encoding='utf-8-sig') as f:
               for i,r in enumerate(csv.reader(f)):
@@ -77,23 +96,33 @@ jobs:
                   r=r+['']*(5-len(r))
                   unit=clean(r[0])
                   if not unit: continue
-                  code=clean(r[3]).upper()
-                  rows.append((unit,mapping[code]))
+                  trailer_type,trailer_subtype,model_override=classify(r[3])
+                  rows.append((unit,trailer_type,trailer_subtype,model_override))
           sql=[
             'DROP TABLE IF EXISTS _trailer_type_stage_20260812;',
-            'CREATE TABLE _trailer_type_stage_20260812 (unit TEXT PRIMARY KEY COLLATE NOCASE, trailer_type TEXT NOT NULL);'
+            'CREATE TABLE _trailer_type_stage_20260812 (unit TEXT PRIMARY KEY COLLATE NOCASE, trailer_type TEXT, trailer_subtype TEXT, model_override TEXT);'
           ]
-          values=[f'({q(unit)},{q(body)})' for unit,body in rows]
+          values=[f'({q(unit)},{q(body)},{q(subtype)},{q(model)})' for unit,body,subtype,model in rows]
           for i in range(0,len(values),100):
-              sql.append('INSERT INTO _trailer_type_stage_20260812 (unit,trailer_type) VALUES\n  '+',\n  '.join(values[i:i+100])+';')
+              sql.append('INSERT INTO _trailer_type_stage_20260812 (unit,trailer_type,trailer_subtype,model_override) VALUES\n  '+',\n  '.join(values[i:i+100])+';')
           sql.append("""
           UPDATE equipment AS e
-          SET trailer_type = (
-            SELECT s.trailer_type FROM _trailer_type_stage_20260812 s
-            WHERE lower(trim(s.unit)) = lower(trim(e.unit))
-            LIMIT 1
-          ),
-          updated_at = CURRENT_TIMESTAMP
+          SET trailer_type = CASE
+                WHEN (SELECT s.trailer_type FROM _trailer_type_stage_20260812 s WHERE lower(trim(s.unit))=lower(trim(e.unit)) LIMIT 1) IS NULL
+                  THEN e.trailer_type
+                ELSE (SELECT s.trailer_type FROM _trailer_type_stage_20260812 s WHERE lower(trim(s.unit))=lower(trim(e.unit)) LIMIT 1)
+              END,
+              trailer_subtype = CASE
+                WHEN (SELECT s.trailer_type FROM _trailer_type_stage_20260812 s WHERE lower(trim(s.unit))=lower(trim(e.unit)) LIMIT 1) IS NULL
+                  THEN e.trailer_subtype
+                ELSE (SELECT s.trailer_subtype FROM _trailer_type_stage_20260812 s WHERE lower(trim(s.unit))=lower(trim(e.unit)) LIMIT 1)
+              END,
+              model = CASE
+                WHEN (SELECT s.model_override FROM _trailer_type_stage_20260812 s WHERE lower(trim(s.unit))=lower(trim(e.unit)) LIMIT 1) IS NULL
+                  THEN e.model
+                ELSE (SELECT s.model_override FROM _trailer_type_stage_20260812 s WHERE lower(trim(s.unit))=lower(trim(e.unit)) LIMIT 1)
+              END,
+              updated_at = CURRENT_TIMESTAMP
           WHERE e.active = 1
             AND e.equipment_type = 'trailer'
             AND EXISTS (
@@ -126,12 +155,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler d1 execute DB --remote --config wrangler.trailer-types.jsonc --command "SELECT COUNT(*) AS matched, SUM(CASE WHEN e.trailer_type IS NULL OR trim(e.trailer_type)='' THEN 1 ELSE 0 END) AS blanks, SUM(CASE WHEN e.trailer_type<>s.trailer_type THEN 1 ELSE 0 END) AS mismatches, SUM(CASE WHEN e.trailer_type='Flat Bed' THEN 1 ELSE 0 END) AS flat_bed, SUM(CASE WHEN e.trailer_type='Step Deck' THEN 1 ELSE 0 END) AS step_deck, SUM(CASE WHEN e.trailer_type='Conestoga' THEN 1 ELSE 0 END) AS conestoga, SUM(CASE WHEN e.trailer_type='Dry Van' THEN 1 ELSE 0 END) AS dry_van FROM equipment e JOIN _trailer_type_stage_20260812 s ON lower(trim(s.unit))=lower(trim(e.unit)) WHERE e.active=1 AND e.equipment_type='trailer';" --json > /tmp/verify.json
+          npx wrangler d1 execute DB --remote --config wrangler.trailer-types.jsonc --command "SELECT COUNT(*) AS matched, SUM(CASE WHEN s.trailer_type IS NOT NULL THEN 1 ELSE 0 END) AS classified, SUM(CASE WHEN s.trailer_type IS NOT NULL AND (e.trailer_type<>s.trailer_type OR COALESCE(e.trailer_subtype,'')<>COALESCE(s.trailer_subtype,'')) THEN 1 ELSE 0 END) AS type_mismatches, SUM(CASE WHEN s.model_override IS NOT NULL AND COALESCE(e.model,'')<>s.model_override THEN 1 ELSE 0 END) AS model_mismatches, SUM(CASE WHEN e.trailer_type='Flat Bed' THEN 1 ELSE 0 END) AS flat_bed, SUM(CASE WHEN e.trailer_type='Step Deck' AND e.trailer_subtype IS NULL THEN 1 ELSE 0 END) AS step_deck, SUM(CASE WHEN e.trailer_type='Conestoga' AND e.trailer_subtype IS NULL THEN 1 ELSE 0 END) AS conestoga, SUM(CASE WHEN e.trailer_type='Conestoga' AND e.trailer_subtype='Step Deck' THEN 1 ELSE 0 END) AS conestoga_step_deck, SUM(CASE WHEN e.trailer_type='Dry Van' THEN 1 ELSE 0 END) AS dry_van, SUM(CASE WHEN s.model_override='Low Boy' AND e.model='Low Boy' THEN 1 ELSE 0 END) AS low_boy_model FROM equipment e JOIN _trailer_type_stage_20260812 s ON lower(trim(s.unit))=lower(trim(e.unit)) WHERE e.active=1 AND e.equipment_type='trailer';" --json > /tmp/verify.json
           node <<'NODE'
           const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/verify.json','utf8'));
           const row=d.flatMap(x=>x.results||[])[0]||{};
           for(const [k,v] of Object.entries(row)) console.log(`${k.toUpperCase()}=${v}`);
-          if(Number(row.matched||0)<550 || Number(row.blanks||0)!==0 || Number(row.mismatches||0)!==0) process.exit(1);
+          if(Number(row.matched||0)<550 || Number(row.classified||0)<549 || Number(row.type_mismatches||0)!==0 || Number(row.model_mismatches||0)!==0 || Number(row.conestoga_step_deck||0)<1 || Number(row.low_boy_model||0)<1) process.exit(1);
           NODE
 
       - name: Remove temporary staging table
