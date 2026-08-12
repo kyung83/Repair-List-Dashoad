@@ -39,8 +39,8 @@ jobs:
               rows=list(csv.reader(f))
           if not rows or len(rows[0]) < 5:
               raise SystemExit('Source CSV is missing expected trailer columns')
-          if clean(rows[0][0]).lower()!='trailer #' or clean(rows[0][3]).lower()!='trailer body/type code':
-              raise SystemExit(f'Unexpected trailer headers: {rows[0][0]!r}, {rows[0][3]!r}')
+          if clean(rows[0][0]).lower()!='trailer #':
+              raise SystemExit(f'Unexpected trailer unit header: {rows[0][0]!r}')
           trailers=[]; unknown=set(); seen=set(); counts={v:0 for v in allowed.values()}
           for r in rows[1:]:
               r=r+['']*(5-len(r))
