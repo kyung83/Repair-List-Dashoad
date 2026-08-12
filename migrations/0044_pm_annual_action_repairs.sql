@@ -28,7 +28,7 @@ SELECT
   n.equipment_id,
   '[MAINT-ACTION-' || n.id || '] ' || substr(n.description, 1, 440),
   n.description,
-  CASE WHEN n.status = 'attached' THEN 'New' ELSE 'Deferred to Next PM' END,
+  CASE WHEN n.status = 'attached' THEN 'New' ELSE 'Deferred to Next PM' END ,
   'maintenance-action',
   CASE
     WHEN n.status = 'attached' THEN COALESCE(
@@ -36,7 +36,7 @@ SELECT
       n.tagged_by_technician_id
     )
     ELSE NULL
-  END,
+  END ,
   COALESCE(n.tagged_at, CURRENT_TIMESTAMP),
   CURRENT_TIMESTAMP
 FROM pm_next_repairs n
