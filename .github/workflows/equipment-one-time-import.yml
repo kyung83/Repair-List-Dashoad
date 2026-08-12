@@ -38,17 +38,21 @@ jobs:
           if not rows or len(rows[0]) < 14:
               raise SystemExit('Master Equipment Info CSV is missing expected columns')
           h=rows[0]
-          expected={6:'Truck #',7:'YEAR',8:'ENGINE',9:'MODEL',10:'VIN',13:'esn'}
+          expected={0:'Trailer #',1:'Year Make',2:'VIN',4:'tire size',6:'Truck #',7:'YEAR',8:'ENGINE',9:'MODEL',10:'VIN',13:'esn'}
           for idx,name in expected.items():
               if h[idx].strip().lower()!=name.lower():
                   raise SystemExit(f'Unexpected source header at column {idx+1}: {h[idx]!r}')
-          truck=sum(1 for r in rows[1:] if len(r)>9 and r[6].strip() and r[9].strip())
-          if truck < 280:
-              raise SystemExit(f'Source truck model rows look incomplete: {truck}')
-          print(f'SOURCE_TRUCK_MODEL_ROWS={truck}')
+          trailer=sum(1 for r in rows[1:] if len(r)>0 and r[0].strip())
+          truck=sum(1 for r in rows[1:] if len(r)>6 and r[6].strip())
+          numeric_truck=sum(1 for r in rows[1:] if len(r)>9 and r[6].strip().isdigit() and r[9].strip())
+          if trailer < 590 or truck < 290 or numeric_truck < 275:
+              raise SystemExit(f'Source row counts look incomplete: trailer={trailer}, truck={truck}, numeric_model={numeric_truck}')
+          print(f'SOURCE_TRAILER_ROWS={trailer}')
+          print(f'SOURCE_TRUCK_ROWS={truck}')
+          print(f'SOURCE_NUMERIC_TRUCK_MODEL_ROWS={numeric_truck}')
           PY
 
-      - name: Build normalized truck-model import
+      - name: Build final safe import
         shell: bash
         run: |
           set -euo pipefail
@@ -56,51 +60,81 @@ jobs:
           import csv,re
 
           def clean(v): return (v or '').strip()
-          def sqlq(v): return 'NULL' if not v else "'" + v.replace("'", "''") + "'"
+          def sqlq(v): return 'NULL' if v is None or v=='' else "'" + str(v).replace("'", "''") + "'"
           def year(v):
               s=clean(v)
               return int(s) if s.isdigit() and 1900 <= int(s) <= 2100 else None
-          def unit_key(v):
-              m=re.match(r'\s*(\d+)', clean(v))
-              return m.group(1) if m else ''
+          def trailer_year(v):
+              m=re.match(r'^(19|20)\d{2}\b', clean(v))
+              return int(m.group(0)) if m else None
 
-          trucks={}
+          stage=[]
           with open('/tmp/master-equipment.csv', newline='', encoding='utf-8-sig') as f:
               rows=list(csv.reader(f))
           for row in rows[1:]:
               row=row+['']*(14-len(row))
-              key=unit_key(row[6])
-              model=clean(row[9])
-              if not key or not model:
-                  continue
-              trucks[key]=(year(row[7]),clean(row[8]),model,clean(row[10]),clean(row[13]))
+              tunit=clean(row[0])
+              if tunit:
+                  stage.append(('trailer',tunit,None,trailer_year(row[1]),None,None,clean(row[2]),None,clean(row[4])))
+              unit=clean(row[6])
+              if unit:
+                  # Only pure numeric source unit names are normalized to production suffixes.
+                  # Decorated/ambiguous source labels remain exact-match only.
+                  key=unit if unit.isdigit() else None
+                  stage.append(('truck',unit,key,year(row[7]),clean(row[8]),clean(row[9]),clean(row[10]),clean(row[13]),None))
 
-          out=['PRAGMA foreign_keys = ON;','DROP TABLE IF EXISTS _truck_model_stage_20260812;',
-               'CREATE TABLE _truck_model_stage_20260812 (unit_key TEXT PRIMARY KEY, model_year INTEGER, engine TEXT, model TEXT NOT NULL, vin TEXT, esn TEXT);']
+          out=['PRAGMA foreign_keys = ON;',
+               'DROP TABLE IF EXISTS _equipment_final_stage_20260812;',
+               'CREATE TABLE _equipment_final_stage_20260812 (source_type TEXT NOT NULL, source_unit TEXT NOT NULL COLLATE NOCASE, unit_key TEXT COLLATE NOCASE, model_year INTEGER, engine TEXT, model TEXT, vin TEXT, esn TEXT, tire_size TEXT);']
           vals=[]
-          for key,(yr,engine,model,vin,esn) in sorted(trucks.items(), key=lambda x:int(x[0])):
-              vals.append('(' + ','.join([sqlq(key),str(yr) if yr is not None else 'NULL',sqlq(engine),sqlq(model),sqlq(vin),sqlq(esn)]) + ')')
+          for typ,unit,key,yr,engine,model,vin,esn,tire in stage:
+              vals.append('(' + ','.join([sqlq(typ),sqlq(unit),sqlq(key),str(yr) if yr is not None else 'NULL',sqlq(engine),sqlq(model),sqlq(vin),sqlq(esn),sqlq(tire)]) + ')')
           for start in range(0,len(vals),100):
-              out.append('INSERT INTO _truck_model_stage_20260812 (unit_key,model_year,engine,model,vin,esn) VALUES\n  '+',\n  '.join(vals[start:start+100])+';')
+              out.append('INSERT INTO _equipment_final_stage_20260812 (source_type,source_unit,unit_key,model_year,engine,model,vin,esn,tire_size) VALUES\n  '+',\n  '.join(vals[start:start+100])+';')
 
-          match="s.unit_key = substr(trim(e.unit),1,instr(trim(e.unit),'(')-1)"
+          prod_key="CASE WHEN instr(trim(e.unit),'(')>1 THEN trim(substr(trim(e.unit),1,instr(trim(e.unit),'(')-1)) ELSE trim(e.unit) END"
+          truck_match=f"s.source_type='truck' AND ((s.unit_key IS NOT NULL AND s.unit_key={prod_key}) OR (s.unit_key IS NULL AND lower(trim(s.source_unit))=lower(trim(e.unit))))"
           out.append(f"""
           UPDATE equipment AS e
           SET
-            model = (SELECT s.model FROM _truck_model_stage_20260812 s WHERE {match}),
-            model_year = CASE WHEN e.model_year IS NULL THEN (SELECT s.model_year FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.model_year END,
-            engine = CASE WHEN e.engine IS NULL OR trim(e.engine)='' THEN (SELECT s.engine FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.engine END,
-            vin = CASE WHEN e.vin IS NULL OR trim(e.vin)='' THEN (SELECT s.vin FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.vin END,
-            esn = CASE WHEN e.esn IS NULL OR trim(e.esn)='' THEN (SELECT s.esn FROM _truck_model_stage_20260812 s WHERE {match}) ELSE e.esn END,
+            model = CASE WHEN EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match} AND s.model IS NOT NULL AND trim(s.model)<>'') THEN (SELECT s.model FROM _equipment_final_stage_20260812 s WHERE {truck_match} LIMIT 1) ELSE e.model END,
+            model_year = CASE WHEN e.model_year IS NULL THEN (SELECT s.model_year FROM _equipment_final_stage_20260812 s WHERE {truck_match} LIMIT 1) ELSE e.model_year END,
+            engine = CASE WHEN e.engine IS NULL OR trim(e.engine)='' THEN (SELECT s.engine FROM _equipment_final_stage_20260812 s WHERE {truck_match} LIMIT 1) ELSE e.engine END,
+            vin = CASE WHEN e.vin IS NULL OR trim(e.vin)='' THEN (SELECT s.vin FROM _equipment_final_stage_20260812 s WHERE {truck_match} LIMIT 1) ELSE e.vin END,
+            esn = CASE WHEN e.esn IS NULL OR trim(e.esn)='' THEN (SELECT s.esn FROM _equipment_final_stage_20260812 s WHERE {truck_match} LIMIT 1) ELSE e.esn END,
             updated_at = CURRENT_TIMESTAMP
-          WHERE e.active=1 AND e.equipment_type='truck' AND instr(trim(e.unit),'(')>1
-            AND EXISTS (SELECT 1 FROM _truck_model_stage_20260812 s WHERE {match});
+          WHERE e.active=1 AND e.equipment_type='truck'
+            AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match})
+            AND (
+              EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match} AND s.model IS NOT NULL AND trim(s.model)<>'' AND COALESCE(e.model,'')<>s.model)
+              OR (e.model_year IS NULL AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match} AND s.model_year IS NOT NULL))
+              OR ((e.engine IS NULL OR trim(e.engine)='') AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match} AND s.engine IS NOT NULL AND trim(s.engine)<>''))
+              OR ((e.vin IS NULL OR trim(e.vin)='') AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match} AND s.vin IS NOT NULL AND trim(s.vin)<>''))
+              OR ((e.esn IS NULL OR trim(e.esn)='') AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE {truck_match} AND s.esn IS NOT NULL AND trim(s.esn)<>''))
+            );
           """.strip())
-          with open('/tmp/truck-model-import.sql','w',encoding='utf-8') as f: f.write('\n\n'.join(out)+'\n')
-          print(f'STAGED_TRUCK_MODELS={len(trucks)}')
+
+          out.append("""
+          UPDATE equipment AS e
+          SET
+            model_year = CASE WHEN e.model_year IS NULL THEN (SELECT s.model_year FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) LIMIT 1) ELSE e.model_year END,
+            vin = CASE WHEN e.vin IS NULL OR trim(e.vin)='' THEN (SELECT s.vin FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) LIMIT 1) ELSE e.vin END,
+            tire_size = CASE WHEN e.tire_size IS NULL OR trim(e.tire_size)='' THEN (SELECT s.tire_size FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) LIMIT 1) ELSE e.tire_size END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE e.active=1 AND e.equipment_type='trailer'
+            AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)))
+            AND (
+              (e.model_year IS NULL AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) AND s.model_year IS NOT NULL))
+              OR ((e.vin IS NULL OR trim(e.vin)='') AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) AND s.vin IS NOT NULL AND trim(s.vin)<>''))
+              OR ((e.tire_size IS NULL OR trim(e.tire_size)='') AND EXISTS (SELECT 1 FROM _equipment_final_stage_20260812 s WHERE s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) AND s.tire_size IS NOT NULL AND trim(s.tire_size)<>''))
+            );
+          """.strip())
+
+          with open('/tmp/equipment-final.sql','w',encoding='utf-8') as f: f.write('\n\n'.join(out)+'\n')
+          print(f'STAGED_ROWS={len(stage)}')
           PY
 
-      - name: Apply model values to production D1
+      - name: Apply final values to production D1
         shell: bash
         run: |
           set -euo pipefail
@@ -115,22 +149,30 @@ jobs:
           list_json="$(npx wrangler d1 list --json "${account_args[@]}")"
           db_id="$(node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync(0,"utf8")); const r=d.find(x=>x.name==="norlow-repair-production"); if(r) process.stdout.write(r.uuid||r.id||r.database_id||"");' <<<"$list_json")"
           test -n "$db_id"
-          sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.truck-model.jsonc
-          npx wrangler d1 execute DB --remote --config wrangler.truck-model.jsonc --file /tmp/truck-model-import.sql --yes
+          sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.equipment-final.jsonc
+          npx wrangler d1 execute DB --remote --config wrangler.equipment-final.jsonc --file /tmp/equipment-final.sql --yes
 
-      - name: Verify sheet model is now authoritative
+      - name: Verify final production import
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler d1 execute DB --remote --config wrangler.truck-model.jsonc --command "SELECT COUNT(*) AS matched_trucks, SUM(CASE WHEN lower(trim(e.model))<>lower(trim(s.model)) THEN 1 ELSE 0 END) AS model_mismatches, SUM(CASE WHEN lower(s.model) LIKE '%day%' THEN 1 ELSE 0 END) AS day_cab_models, SUM(CASE WHEN lower(s.model) LIKE '%sleep%' THEN 1 ELSE 0 END) AS sleeper_models FROM equipment e JOIN _truck_model_stage_20260812 s ON instr(trim(e.unit),'(')>1 AND s.unit_key=substr(trim(e.unit),1,instr(trim(e.unit),'(')-1) WHERE e.active=1 AND e.equipment_type='truck';" --json > /tmp/verify.json
+          npx wrangler d1 execute DB --remote --config wrangler.equipment-final.jsonc --command "WITH truck_matches AS (SELECT e.id AS equipment_id,e.model AS e_model,e.model_year AS e_year,e.engine AS e_engine,e.vin AS e_vin,e.esn AS e_esn,s.model AS s_model,s.model_year AS s_year,s.engine AS s_engine,s.vin AS s_vin,s.esn AS s_esn FROM equipment e JOIN _equipment_final_stage_20260812 s ON s.source_type='truck' AND ((s.unit_key IS NOT NULL AND s.unit_key=CASE WHEN instr(trim(e.unit),'(')>1 THEN trim(substr(trim(e.unit),1,instr(trim(e.unit),'(')-1)) ELSE trim(e.unit) END) OR (s.unit_key IS NULL AND lower(trim(s.source_unit))=lower(trim(e.unit)))) WHERE e.active=1 AND e.equipment_type='truck'), trailer_matches AS (SELECT e.id AS equipment_id,e.model_year AS e_year,e.vin AS e_vin,e.tire_size AS e_tire,s.model_year AS s_year,s.vin AS s_vin,s.tire_size AS s_tire FROM equipment e JOIN _equipment_final_stage_20260812 s ON s.source_type='trailer' AND lower(trim(s.source_unit))=lower(trim(e.unit)) WHERE e.active=1 AND e.equipment_type='trailer') SELECT COUNT(*) AS matched_trucks, SUM(CASE WHEN s_model IS NOT NULL AND trim(s_model)<>'' AND COALESCE(e_model,'')<>s_model THEN 1 ELSE 0 END) AS model_mismatches, SUM(CASE WHEN s_year IS NOT NULL AND e_year IS NULL THEN 1 ELSE 0 END) AS truck_year_remaining, SUM(CASE WHEN s_engine IS NOT NULL AND trim(s_engine)<>'' AND (e_engine IS NULL OR trim(e_engine)='') THEN 1 ELSE 0 END) AS truck_engine_remaining, SUM(CASE WHEN s_vin IS NOT NULL AND trim(s_vin)<>'' AND (e_vin IS NULL OR trim(e_vin)='') THEN 1 ELSE 0 END) AS truck_vin_remaining, SUM(CASE WHEN s_esn IS NOT NULL AND trim(s_esn)<>'' AND (e_esn IS NULL OR trim(e_esn)='') THEN 1 ELSE 0 END) AS truck_esn_remaining, SUM(CASE WHEN lower(s_model) LIKE '%day%' THEN 1 ELSE 0 END) AS day_models, SUM(CASE WHEN lower(s_model) LIKE '%sleep%' THEN 1 ELSE 0 END) AS sleeper_models FROM truck_matches; SELECT COUNT(*) AS matched_trailers, SUM(CASE WHEN s_year IS NOT NULL AND e_year IS NULL THEN 1 ELSE 0 END) AS trailer_year_remaining, SUM(CASE WHEN s_vin IS NOT NULL AND trim(s_vin)<>'' AND (e_vin IS NULL OR trim(e_vin)='') THEN 1 ELSE 0 END) AS trailer_vin_remaining, SUM(CASE WHEN s_tire IS NOT NULL AND trim(s_tire)<>'' AND (e_tire IS NULL OR trim(e_tire)='') THEN 1 ELSE 0 END) AS trailer_tire_remaining FROM trailer_matches;" --json > /tmp/verify.json
           node <<'NODE'
           const fs=require('fs'); const d=JSON.parse(fs.readFileSync('/tmp/verify.json','utf8'));
-          const r=d.flatMap(x=>x.results||[])[0]||{};
-          console.log(`MATCHED_TRUCKS=${r.matched_trucks ?? 'unknown'}`);
-          console.log(`MODEL_MISMATCHES=${r.model_mismatches ?? 'unknown'}`);
-          console.log(`DAY_CAB_MODELS=${r.day_cab_models ?? 'unknown'}`);
-          console.log(`SLEEPER_MODELS=${r.sleeper_models ?? 'unknown'}`);
-          if (Number(r.matched_trucks||0) < 280 || Number(r.model_mismatches||0)!==0) process.exit(1);
+          const rows=d.flatMap(x=>x.results||[]);
+          const t=rows[0]||{}, r=rows[1]||{};
+          for (const [k,v] of Object.entries(t)) console.log(`${k.toUpperCase()}=${v}`);
+          for (const [k,v] of Object.entries(r)) console.log(`${k.toUpperCase()}=${v}`);
+          const bad=['model_mismatches','truck_year_remaining','truck_engine_remaining','truck_vin_remaining','truck_esn_remaining'].some(k=>Number(t[k]||0)!==0)
+            || ['trailer_year_remaining','trailer_vin_remaining','trailer_tire_remaining'].some(k=>Number(r[k]||0)!==0)
+            || Number(t.matched_trucks||0)<270 || Number(r.matched_trailers||0)<550;
+          if (bad) process.exit(1);
+          NODE
+
+          npx wrangler d1 execute DB --remote --config wrangler.equipment-final.jsonc --command "SELECT COUNT(*) AS active_trucks, SUM(CASE WHEN model_year IS NULL THEN 1 ELSE 0 END) AS missing_year, SUM(CASE WHEN engine IS NULL OR trim(engine)='' THEN 1 ELSE 0 END) AS missing_engine, SUM(CASE WHEN model IS NULL OR trim(model)='' THEN 1 ELSE 0 END) AS missing_model, SUM(CASE WHEN vin IS NULL OR trim(vin)='' THEN 1 ELSE 0 END) AS missing_vin, SUM(CASE WHEN esn IS NULL OR trim(esn)='' THEN 1 ELSE 0 END) AS missing_esn FROM equipment WHERE active=1 AND equipment_type='truck'; SELECT COUNT(*) AS active_trailers, SUM(CASE WHEN tire_size IS NULL OR trim(tire_size)='' THEN 1 ELSE 0 END) AS missing_tire_size FROM equipment WHERE active=1 AND equipment_type='trailer';" --json > /tmp/final-counts.json
+          node <<'NODE'
+          const fs=require('fs'); const d=JSON.parse(fs.readFileSync('/tmp/final-counts.json','utf8'));
+          for (const block of d) for (const row of (block.results||[])) console.log('FINAL_COUNTS='+JSON.stringify(row));
           NODE
 
       - name: Remove temporary staging table
@@ -138,6 +180,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          if [ -f wrangler.truck-model.jsonc ]; then
-            npx wrangler d1 execute DB --remote --config wrangler.truck-model.jsonc --command "DROP TABLE IF EXISTS _truck_model_stage_20260812;" --json >/dev/null 2>&1
+          if [ -f wrangler.equipment-final.jsonc ]; then
+            npx wrangler d1 execute DB --remote --config wrangler.equipment-final.jsonc --command "DROP TABLE IF EXISTS _equipment_final_stage_20260812;" --json >/dev/null 2>&1
           fi
