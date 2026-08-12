@@ -9,9 +9,19 @@ function repairNumber(value: unknown) {
   return Number(match[1]);
 }
 
+function deferred(status: unknown) {
+  return String(status ?? '').toLowerCase().startsWith('deferred to next');
+}
+
 async function enforceTechnicianScope(request: Request, body: Record<string, unknown>) {
   const user = await getSessionUser(env.DB, request);
   if (!user) throw new Error('Authentication required.');
+  const rawRepairId = body.id ?? body.repairId;
+  const match = String(rawRepairId ?? '').match(/^repair-(\d+)$/);
+  if (match) {
+    const row = await env.DB.prepare(`SELECT COALESCE(status,'') AS status FROM repairs WHERE id = ?`).bind(Number(match[1])).first<{status:string}>();
+    if (row && deferred(row.status)) throw new Error('This repair is saved for a future PM/Annual and is not active work yet.');
+  }
   if (user.role !== 'mechanic') return;
   if (!user.technicianId) throw new Error('This technician login is not linked to a technician record.');
 
@@ -28,7 +38,6 @@ async function enforceTechnicianScope(request: Request, body: Record<string, unk
   if (String(repair.status ?? '').toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
 }
 
-// Repair-part mutations stay centralized here so attach/remove always refresh the repair summary.
 async function refreshRepairPartsText(repairId: number) {
   const rows = await env.DB.prepare(`
     SELECT p.part_number, SUM(rp.quantity) AS quantity
@@ -45,9 +54,9 @@ async function refreshRepairPartsText(repairId: number) {
 
 export async function GET() {
   try {
-    return Response.json(await getWorkOrderData(env.DB), {
-      headers: { 'cache-control': 'no-store' },
-    });
+    const data = await getWorkOrderData(env.DB);
+    data.repairs = data.repairs.filter((repair) => !deferred(repair.status));
+    return Response.json(data, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'work_orders_get_failed', error: String(error) }));
     return Response.json({ error: 'Work orders could not be loaded.' }, { status: 500 });
@@ -72,8 +81,6 @@ export async function POST(request: Request) {
     return Response.json(await handleWorkOrderAction(env.DB, body));
   } catch (error) {
     console.error(JSON.stringify({ event: 'work_orders_post_failed', error: String(error) }));
-    return Response.json({
-      error: error instanceof Error ? error.message : 'Work-order action failed',
-    }, { status: 400 });
+    return Response.json({ error: error instanceof Error ? error.message : 'Work-order action failed' }, { status: 400 });
   }
 }

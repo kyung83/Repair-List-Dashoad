@@ -9,8 +9,8 @@ type Work = { id:string; source:string; unit:string; issue:string; status:string
 type Board = { user:{role:string}; repairs:Work[] };
 type AnnualForm = { reportNumber:string; repairId:string; inspectionDate:string; unit:string; inspector:string; printUrl:string };
 type AnnualData = { forms:AnnualForm[] };
-type Followup = { id:number; equipmentId:number; unit:string; description:string; status:string; targetTitle:string; taggedAt:string };
-type FollowupData = { followups:Followup[] };
+type FutureAction = { id:number; equipmentId:number; repairId:string; unit:string; location:string; description:string; targetEventType:"pm"|"annual"; repairStatus:string; taggedAt:string; plannedPartCount:number };
+type FutureData = { actions:FutureAction[] };
 
 function sameUnit(a:string,b:string){return a.trim().toLowerCase()===b.trim().toLowerCase();}
 function dateText(value:string){if(!value)return 'Not recorded';const date=new Date(value.includes('T')?value:`${value}T12:00:00`);return Number.isNaN(date.getTime())?value:date.toLocaleDateString();}
@@ -19,7 +19,7 @@ export default function UnitPage(){
   const [equipment,setEquipment]=useState<Equipment[]>([]);
   const [board,setBoard]=useState<Board|null>(null);
   const [forms,setForms]=useState<AnnualForm[]>([]);
-  const [followups,setFollowups]=useState<Followup[]>([]);
+  const [futureActions,setFutureActions]=useState<FutureAction[]>([]);
   const [query,setQuery]=useState("");
   const [selectedUnit,setSelectedUnit]=useState("");
   const [message,setMessage]=useState("");
@@ -31,14 +31,14 @@ export default function UnitPage(){
       fetch('/api/equipment',{cache:'no-store'}).then(async r=>{const p=await r.json() as EquipmentData&{error?:string};if(!r.ok)throw new Error(p.error||'Units could not be loaded.');return p;}),
       fetch('/api/repair-board',{cache:'no-store'}).then(async r=>{const p=await r.json() as Board&{error?:string};if(!r.ok)throw new Error(p.error||'Open work could not be loaded.');return p;}),
       fetch('/api/annual-inspections',{cache:'no-store'}).then(async r=>r.ok?await r.json() as AnnualData:{forms:[]}),
-      fetch('/api/pm-followups',{cache:'no-store'}).then(async r=>r.ok?await r.json() as FollowupData:{followups:[]}).catch(()=>({followups:[]})),
-    ]).then(([eq,b,annual,next])=>{setEquipment(eq.equipment);setBoard(b);setForms(annual.forms||[]);setFollowups(next.followups||[]);}).catch(error=>setMessage(error instanceof Error?error.message:'Unit information could not be loaded.'));
+      fetch('/api/maintenance-actions',{cache:'no-store'}).then(async r=>r.ok?await r.json() as FutureData:{actions:[]}).catch(()=>({actions:[]})),
+    ]).then(([eq,b,annual,future])=>{setEquipment(eq.equipment);setBoard(b);setForms(annual.forms||[]);setFutureActions(future.actions||[]);}).catch(error=>setMessage(error instanceof Error?error.message:'Unit information could not be loaded.'));
   },[]);
 
   const selected=useMemo(()=>equipment.find(item=>sameUnit(item.unit,selectedUnit))??null,[equipment,selectedUnit]);
   const openWork=useMemo(()=>selected?(board?.repairs??[]).filter(item=>item.equipmentId===selected.id||sameUnit(item.unit,selected.unit)):[],[board,selected]);
   const annuals=useMemo(()=>selected?forms.filter(item=>sameUnit(item.unit,selected.unit)):[],[forms,selected]);
-  const future=useMemo(()=>selected?followups.filter(item=>item.equipmentId===selected.id):[],[followups,selected]);
+  const future=useMemo(()=>selected?futureActions.filter(item=>item.equipmentId===selected.id):[],[futureActions,selected]);
 
   function openUnit(){
     const value=query.trim();if(!value)return setMessage('Enter a unit number.');
@@ -109,8 +109,8 @@ export default function UnitPage(){
       <section className="easy-attention">
         <div className="easy-card easy-card-body">
           <h3 className="easy-section-title">Next service work ({future.length})</h3>
-          <p className="easy-section-copy">Items intentionally saved to be handled on a future PM.</p>
-          <div className="easy-list">{future.map(item=><div key={item.id} className="easy-row"><div className="easy-row-main"><strong>{item.description}</strong><span>{item.status==='attached'?(item.targetTitle||'Attached to current PM'):'Waiting for next PM'}</span></div><span className="easy-badge orange">NEXT PM</span></div>)}{!future.length&&<div className="easy-empty">Nothing is waiting for the next PM.</div>}</div>
+          <p className="easy-section-copy">Items intentionally saved at the end of a PM or Annual. These are real repairs with parts that can be planned ahead.</p>
+          <div className="easy-list">{future.map(item=><div key={item.id} className="easy-row"><div className="easy-row-main"><strong>{item.description}</strong><span>Waiting for next {item.targetEventType==='annual'?'Annual':'PM'}{item.plannedPartCount?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</span></div><span className="easy-badge orange">NEXT {item.targetEventType==='annual'?'ANNUAL':'PM'}</span></div>)}{!future.length&&<div className="easy-empty">Nothing is waiting for a future PM or Annual.</div>}</div>
         </div>
         <div className="easy-card easy-card-body">
           <h3 className="easy-section-title">Annual forms</h3>

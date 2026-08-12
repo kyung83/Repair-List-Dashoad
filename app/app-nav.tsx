@@ -48,7 +48,6 @@ export default function AppNav(){
     { href:"/equipment", label:"Equipment List & Details" },
     { href:"/pm-schedules", label:"Maintenance Setup" },
     { href:"/annual-inspections", label:"Annual Forms" },
-    { href:"/next-pm-repairs", label:"Future PM Work" },
     { href:"/inventory", label:"Parts Inventory" },
     { href:"/invoices", label:"Invoices" },
     { href:"/reports", label:"Reports" },
