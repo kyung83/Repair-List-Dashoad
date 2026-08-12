@@ -1,4 +1,4 @@
-name: Locate Low Boy Trailer
+name: Set Low Boy Trailer Model
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  fix:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -24,7 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Locate source trailer 261 in production
+      - name: Set and verify Low Boy model
         shell: bash
         run: |
           set -euo pipefail
@@ -40,4 +40,11 @@ jobs:
           db_id="$(node -e 'const fs=require("fs");const d=JSON.parse(fs.readFileSync(0,"utf8"));const r=d.find(x=>x.name==="norlow-repair-production");if(r)process.stdout.write(r.uuid||r.id||r.database_id||"");' <<<"$list_json")"
           test -n "$db_id"
           sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.lowboy.jsonc
-          npx wrangler d1 execute DB --remote --config wrangler.lowboy.jsonc --command "SELECT id, unit, active, model, trailer_type, trailer_subtype FROM equipment WHERE equipment_type='trailer' AND (trim(unit)='261' OR lower(unit) LIKE '261%' OR lower(unit) LIKE '%261%') ORDER BY unit;" --json
+          norm="replace(replace(replace(lower(trim(unit)),'trl',''),' ',''),'-','')"
+          npx wrangler d1 execute DB --remote --config wrangler.lowboy.jsonc --command "UPDATE equipment SET model='Low Boy', updated_at=CURRENT_TIMESTAMP WHERE active=1 AND equipment_type='trailer' AND $norm='261';" --json
+          npx wrangler d1 execute DB --remote --config wrangler.lowboy.jsonc --command "SELECT COUNT(*) AS matched, SUM(CASE WHEN model='Low Boy' THEN 1 ELSE 0 END) AS correct, SUM(CASE WHEN trailer_type IS NOT NULL THEN 1 ELSE 0 END) AS typed FROM equipment WHERE active=1 AND equipment_type='trailer' AND $norm='261';" --json > /tmp/verify.json
+          node <<'NODE'
+          const fs=require('fs');const d=JSON.parse(fs.readFileSync('/tmp/verify.json','utf8'));const row=d.flatMap(x=>x.results||[])[0]||{};
+          console.log(`LOW_BOY_MATCHED=${row.matched||0}`);console.log(`LOW_BOY_CORRECT=${row.correct||0}`);console.log(`LOW_BOY_TYPED=${row.typed||0}`);
+          if(Number(row.matched||0)<1 || Number(row.correct||0)!==Number(row.matched||0)) process.exit(1);
+          NODE
