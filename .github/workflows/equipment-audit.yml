@@ -1,0 +1,66 @@
+name: Equipment Audit
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - .github/workflows/equipment-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Audit production equipment schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
+          token="${token#CLOUDFLARE_API_TOKEN=}"
+          token="${token#Bearer}"
+          token="${token#\"}"
+          token="${token%\"}"
+          export CLOUDFLARE_API_TOKEN="$token"
+
+          account_args=()
+          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            account_args=(--account-id "$CLOUDFLARE_ACCOUNT_ID")
+          fi
+
+          list_json="$(npx wrangler d1 list --json "${account_args[@]}")"
+          db_id="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(0,"utf8")); const row=data.find(x=>x.name==="norlow-repair-production"); if(row) process.stdout.write(row.uuid||row.id||row.database_id||"");' <<<"$list_json")"
+          test -n "$db_id"
+          sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$db_id/g" wrangler.template.jsonc > wrangler.audit.jsonc
+
+          npx wrangler d1 execute DB --remote --config wrangler.audit.jsonc --command "PRAGMA table_info(equipment);" --json > /tmp/schema.json
+          node <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/schema.json','utf8'));
+          const rows = data.flatMap(x => Array.isArray(x?.results) ? x.results : []);
+          console.log('EQUIPMENT_COLUMNS=' + rows.map(r => r.name).join(','));
+          NODE
+
+          npx wrangler d1 execute DB --remote --config wrangler.audit.jsonc --command "SELECT COUNT(*) AS active_trucks, SUM(CASE WHEN model_year IS NULL THEN 1 ELSE 0 END) AS missing_year, SUM(CASE WHEN engine IS NULL OR trim(engine)='' THEN 1 ELSE 0 END) AS missing_engine, SUM(CASE WHEN model IS NULL OR trim(model)='' THEN 1 ELSE 0 END) AS missing_model, SUM(CASE WHEN vin IS NULL OR trim(vin)='' THEN 1 ELSE 0 END) AS missing_vin FROM equipment WHERE active=1 AND equipment_type='truck';" --json > /tmp/counts.json
+          node <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/counts.json','utf8'));
+          const row = data.flatMap(x => Array.isArray(x?.results) ? x.results : [])[0] || {};
+          console.log('ACTIVE_TRUCKS=' + (row.active_trucks ?? 'unknown'));
+          console.log('MISSING_YEAR=' + (row.missing_year ?? 'unknown'));
+          console.log('MISSING_ENGINE=' + (row.missing_engine ?? 'unknown'));
+          console.log('MISSING_MODEL=' + (row.missing_model ?? 'unknown'));
+          console.log('MISSING_VIN=' + (row.missing_vin ?? 'unknown'));
+          NODE
