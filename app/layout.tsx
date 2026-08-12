@@ -4,6 +4,7 @@ import AppNav from "./app-nav";
 import "./globals.css";
 import "./professional-shell.css";
 import "./northern-brand.css";
+import "./easy-ui.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
