@@ -16,7 +16,7 @@ BEGIN
 END;
 
 -- Closing a scheduled PM records history, advances the PM sequence, and resets
--- the PM baseline to the mileage captured by the checklist (Geotab when available).
+-- the PM baseline to the unit's current mileage and today's date.
 CREATE TRIGGER IF NOT EXISTS trg_advance_pm_after_checklist_work_order
 AFTER UPDATE OF status ON repairs
 WHEN NEW.source = 'scheduled-pm'
@@ -29,12 +29,11 @@ BEGIN
   )
   SELECT NEW.equipment_id, 'pm',
          COALESCE(ps.pm_type, CAST(json_extract(p.sequence_json, '$[0]') AS TEXT)),
-         date('now'), COALESCE(c.mileage_at_completion, e.current_mileage),
+         date('now'), e.current_mileage,
          'Completed from PM checklist work order', printf('checklist-wo-%d', NEW.id)
   FROM equipment e
   JOIN equipment_pm_settings s ON s.equipment_id = e.id
   JOIN pm_profiles p ON p.id = s.profile_id
-  JOIN maintenance_checklist_runs c ON c.repair_id = NEW.id
   LEFT JOIN pm_status ps ON ps.equipment_id = e.id
   WHERE e.id = NEW.equipment_id;
 
@@ -63,13 +62,12 @@ BEGIN
       COALESCE(ps.pm_type, CAST(json_extract(p.sequence_json, '$[0]') AS TEXT), 'Service')
     ),
     'Current',
-    COALESCE(c.mileage_at_completion, e.current_mileage),
+    e.current_mileage,
     date('now'),
     CURRENT_TIMESTAMP
   FROM equipment e
   JOIN equipment_pm_settings s ON s.equipment_id = e.id
   JOIN pm_profiles p ON p.id = s.profile_id
-  JOIN maintenance_checklist_runs c ON c.repair_id = NEW.id
   LEFT JOIN pm_status ps ON ps.equipment_id = e.id
   WHERE e.id = NEW.equipment_id
   ON CONFLICT(equipment_id) DO UPDATE SET
