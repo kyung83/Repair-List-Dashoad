@@ -37,6 +37,8 @@ type ItemRow = {
   result: 'pending' | 'pass' | 'fail' | 'na';
   notes: string | null;
   updated_at: string;
+  corrective_repair_id: number | null;
+  corrective_repair_status: string | null;
 };
 type PhotoRow = {
   id: number;
@@ -45,6 +47,11 @@ type PhotoRow = {
   file_name: string | null;
   content_type: string | null;
   created_at: string;
+};
+type MutableItemRow = {
+  id: number;
+  item_text: string;
+  result: 'pending' | 'pass' | 'fail' | 'na';
 };
 
 function repairId(value: unknown) {
@@ -143,6 +150,104 @@ function photoUrl(key: string) {
   return `/api/photos/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
 
+function correctiveRepairTitle(kind: EventType, itemNumber: number, itemText: string, notes: string) {
+  const label = kind === 'annual' ? 'Annual inspection' : 'PM';
+  return `${label} checklist #${itemNumber} failed: ${itemText}${notes ? ` - ${notes}` : ''}`.slice(0, 500);
+}
+
+async function syncCorrectiveRepair(
+  user: AppUser,
+  repair: RepairRow,
+  itemNumber: number,
+  item: MutableItemRow,
+  result: string,
+  notes: string,
+) {
+  const equipmentId = Number(repair.equipment_id);
+  const kind = eventType(repair.source);
+
+  if (result === 'fail') {
+    const title = correctiveRepairTitle(kind, itemNumber, item.item_text, notes);
+    const inserted = await env.DB.prepare(`
+      INSERT OR IGNORE INTO repairs (
+        equipment_id, title, description, status, source, technician_id,
+        maintenance_checklist_item_id, opened_at, updated_at
+      ) VALUES (?, ?, ?, 'New', 'maintenance-checklist', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `).bind(equipmentId, title, notes || null, repair.technician_id, item.id).run();
+
+    await env.DB.prepare(`
+      UPDATE repairs
+      SET title = ?, description = ?,
+          status = CASE
+            WHEN lower(COALESCE(status,'')) LIKE '%complete%' THEN 'New'
+            ELSE status
+          END,
+          technician_id = COALESCE(technician_id, ?),
+          completed_at = CASE
+            WHEN lower(COALESCE(status,'')) LIKE '%complete%' THEN NULL
+            ELSE completed_at
+          END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE maintenance_checklist_item_id = ?
+        AND equipment_id = ?
+        AND source = 'maintenance-checklist'
+    `).bind(title, notes || null, repair.technician_id, item.id, equipmentId).run();
+
+    const corrective = await env.DB.prepare(`
+      SELECT id FROM repairs
+      WHERE maintenance_checklist_item_id = ? AND equipment_id = ?
+      LIMIT 1
+    `).bind(item.id, equipmentId).first<{ id: number }>();
+    if (!corrective) throw new Error('The corrective repair could not be attached to this failed checklist item.');
+
+    if (item.result !== 'fail') {
+      const action = Number(inserted.meta.changes ?? 0) > 0
+        ? 'created_from_maintenance_checklist'
+        : 'reopened_from_maintenance_checklist';
+      await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(
+        corrective.id,
+        user.id,
+        user.technicianId,
+        action,
+        `${kind === 'annual' ? 'Annual' : 'PM'} checklist item #${itemNumber} failed on unit ${repair.unit || equipmentId}.`.slice(0, 500),
+      ).run();
+    }
+    return;
+  }
+
+  if (item.result === 'fail' && (result === 'pass' || result === 'na')) {
+    const corrective = await env.DB.prepare(`
+      SELECT id FROM repairs
+      WHERE maintenance_checklist_item_id = ?
+        AND equipment_id = ?
+        AND source = 'maintenance-checklist'
+      LIMIT 1
+    `).bind(item.id, equipmentId).first<{ id: number }>();
+    if (!corrective) return;
+
+    const completed = await env.DB.prepare(`
+      UPDATE repairs
+      SET status = 'Completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+    `).bind(corrective.id).run();
+    if (Number(completed.meta.changes ?? 0) > 0) {
+      await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'completed_from_maintenance_checklist', ?)
+      `).bind(
+        corrective.id,
+        user.id,
+        user.technicianId,
+        `Checklist item #${itemNumber} changed from Fail to ${result === 'pass' ? 'Pass' : 'N/A'}.`.slice(0, 500),
+      ).run();
+    }
+  }
+}
+
 async function payloadFor(repair: RepairRow) {
   const run = await loadRun(repair.id);
   const kind = eventType(repair.source);
@@ -157,16 +262,18 @@ async function payloadFor(repair: RepairRow) {
       currentMileage: repair.current_mileage,
       mileageSource: repair.geotab_device_id ? 'Geotab' : 'Manual',
       mileageUpdatedAt: repair.mileage_updated_at,
-      items: checklistFor(kind).map((item) => ({ ...item, id: null, result: 'pending', notes: '', photos: [] })),
+      items: checklistFor(kind).map((item) => ({ ...item, id: null, result: 'pending', notes: '', photos: [], correctiveRepair: null })),
     };
   }
 
   const [items, photos] = await Promise.all([
     env.DB.prepare(`
-      SELECT id, item_number, section, item_text, result, notes, updated_at
-      FROM maintenance_checklist_items
-      WHERE checklist_run_id = ?
-      ORDER BY item_number
+      SELECT i.id, i.item_number, i.section, i.item_text, i.result, i.notes, i.updated_at,
+             cr.id AS corrective_repair_id, cr.status AS corrective_repair_status
+      FROM maintenance_checklist_items i
+      LEFT JOIN repairs cr ON cr.maintenance_checklist_item_id = i.id
+      WHERE i.checklist_run_id = ?
+      ORDER BY i.item_number
     `).bind(run.id).all<ItemRow>(),
     env.DB.prepare(`
       SELECT id, checklist_item_id, object_key, file_name, content_type, created_at
@@ -209,6 +316,10 @@ async function payloadFor(repair: RepairRow) {
       result: item.result,
       notes: item.notes ?? '',
       updatedAt: item.updated_at,
+      correctiveRepair: item.corrective_repair_id == null ? null : {
+        id: `repair-${item.corrective_repair_id}`,
+        status: item.corrective_repair_status ?? '',
+      },
       photos: (photosByItem.get(item.id) ?? []).map((photo) => ({
         id: photo.id,
         fileName: photo.file_name ?? 'Photo',
@@ -263,12 +374,22 @@ export async function POST(request: Request) {
       if (!['pending','pass','fail','na'].includes(result)) throw new Error('Choose Pass, Fail, or N/A.');
       const notes = String(body.notes ?? '').trim().slice(0, 1000);
       if (result === 'fail' && !notes) throw new Error('Add a note explaining a failed inspection item.');
+
+      const item = await env.DB.prepare(`
+        SELECT id, item_text, result
+        FROM maintenance_checklist_items
+        WHERE checklist_run_id = ? AND item_number = ?
+      `).bind(run.id, itemNumber).first<MutableItemRow>();
+      if (!item) throw new Error('Checklist item was not found.');
+
       const changed = await env.DB.prepare(`
         UPDATE maintenance_checklist_items
         SET result = ?, notes = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE checklist_run_id = ? AND item_number = ?
-      `).bind(result, notes || null, user.id, run.id, itemNumber).run();
+        WHERE id = ? AND checklist_run_id = ?
+      `).bind(result, notes || null, user.id, item.id, run.id).run();
       if (!Number(changed.meta.changes ?? 0)) throw new Error('Checklist item was not found.');
+
+      await syncCorrectiveRepair(user, repair, itemNumber, item, result, notes);
       await env.DB.prepare(`
         UPDATE maintenance_checklist_runs
         SET status = 'in_progress', ready_at = NULL, ready_by_user_id = NULL, updated_at = CURRENT_TIMESTAMP
