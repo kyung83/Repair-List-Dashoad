@@ -1,0 +1,49 @@
+name: Equipment Import Key Exchange
+
+on:
+  push:
+    branches:
+      - agent/cloudflare-standalone
+    paths:
+      - .github/workflows/equipment-key-exchange.yml
+
+permissions:
+  contents: read
+
+jobs:
+  key-exchange:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Generate one-time import keypair
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
+          token="${token#CLOUDFLARE_API_TOKEN=}"
+          token="${token#Bearer}"
+          token="${token#\"}"
+          token="${token%\"}"
+          test -n "$token"
+          export EQUIPMENT_WRAP_KEY="$token"
+
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out equipment-private.pem
+          openssl pkey -in equipment-private.pem -pubout -out equipment-public.pem
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in equipment-private.pem -out equipment-private.pem.enc -pass env:EQUIPMENT_WRAP_KEY
+          rm -f equipment-private.pem
+
+          echo 'NORLOW_EQUIPMENT_PUBLIC_KEY_BEGIN'
+          cat equipment-public.pem
+          echo 'NORLOW_EQUIPMENT_PUBLIC_KEY_END'
+
+      - name: Store encrypted private key
+        uses: actions/upload-artifact@v4
+        with:
+          name: norlow-equipment-import-key-${{ github.run_id }}
+          path: equipment-private.pem.enc
+          if-no-files-found: error
+          retention-days: 1
