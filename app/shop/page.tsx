@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 
 type User = {
   id: number;
@@ -272,6 +273,7 @@ export default function ShopPage() {
         const running = data.activeTimer?.repairId === selected.id;
         const canOpen = Boolean(data.user.technicianId) && (repairMine || repairAvailable);
         const blockedByOtherTimer = Boolean(data.activeTimer && !running);
+        const canManageChecklist = repairMine || data.user.role === "manager" || data.user.role === "admin";
         return (
           <section style={workspaceStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap" }}>
@@ -321,6 +323,8 @@ export default function ShopPage() {
               {!repairMine && repairAvailable && <div style={smallNotice}>Open this job first. Opening it assigns it to you and starts the labor timer.</div>}
               {!repairMine && !repairAvailable && <div style={lockedNotice}>This repair is assigned to {selected.assignedTo || "another technician"}. You can see it, but only that technician or a manager can work it.</div>}
               {repairMine && blockedByOtherTimer && <div style={smallNotice}>You have labor running on another repair. Stop that timer before opening or completing this one.</div>}
+
+              <MaintenanceChecklistPanel repairId={selected.id} canWork={canManageChecklist && !blockedByOtherTimer} />
 
               <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))", gap: 16 }}>
                 <div style={workspaceCard}>
