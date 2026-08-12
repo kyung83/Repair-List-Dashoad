@@ -6,12 +6,7 @@ CREATE TABLE IF NOT EXISTS maintenance_checklist_runs (
   equipment_id INTEGER NOT NULL,
   event_type TEXT NOT NULL CHECK (event_type IN ('pm','annual')),
   status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','ready','completed')),
-  mileage_at_start INTEGER,
-  mileage_at_completion INTEGER,
-  mileage_source TEXT,
-  mileage_updated_at TEXT,
   started_by_user_id INTEGER,
-  ready_by_user_id INTEGER,
   completed_by_user_id INTEGER,
   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ready_at TEXT,
@@ -20,7 +15,6 @@ CREATE TABLE IF NOT EXISTS maintenance_checklist_runs (
   FOREIGN KEY (repair_id) REFERENCES repairs(id) ON DELETE CASCADE,
   FOREIGN KEY (equipment_id) REFERENCES equipment(id) ON DELETE CASCADE,
   FOREIGN KEY (started_by_user_id) REFERENCES app_users(id) ON DELETE SET NULL,
-  FOREIGN KEY (ready_by_user_id) REFERENCES app_users(id) ON DELETE SET NULL,
   FOREIGN KEY (completed_by_user_id) REFERENCES app_users(id) ON DELETE SET NULL
 );
 
