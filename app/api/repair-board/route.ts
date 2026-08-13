@@ -11,6 +11,10 @@ function deferred(status: unknown) {
   return String(status ?? '').toLowerCase().startsWith('deferred to next');
 }
 
+function annualNotDueYet(status: unknown) {
+  return String(status ?? '').trim().toLowerCase() === 'annual due soon';
+}
+
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   return match ? Number(match[1]) : 0;
@@ -32,12 +36,14 @@ export async function GET(request: Request) {
     summary?: Record<string, number>;
     [key:string]: unknown;
   };
-  const repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status));
+  const repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status) && !annualNotDueYet(repair.status));
   payload.repairs = repairs;
   if (Array.isArray(payload.oosUnits)) {
     payload.oosUnits = payload.oosUnits.map((unit) => ({
       ...unit,
-      openWork: Array.isArray(unit.openWork) ? unit.openWork.filter((work) => !deferred(work.status)) : unit.openWork,
+      openWork: Array.isArray(unit.openWork)
+        ? unit.openWork.filter((work) => !deferred(work.status) && !annualNotDueYet(work.status))
+        : unit.openWork,
     }));
   }
   payload.summary = {
