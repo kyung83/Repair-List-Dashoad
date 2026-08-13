@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import FindNextJob from "./find-next-job";
+import YardScopeBanner from "./yard-scope-banner";
 
 export default function ShopLayout({children}:{children:ReactNode}){
   return <>
-    <FindNextJob />
+    <YardScopeBanner />
     {children}
   </>;
 }

@@ -2,105 +2,124 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { GET as originalGET, POST as originalPOST } from './original';
 
+type Yard = '' | 'clare' | 'cadillac';
+type ShopRepair = {
+  id: string;
+  equipmentId: number | null;
+  technicianId: number | null;
+  location?: string;
+  status?: string;
+  [key: string]: unknown;
+};
+
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   return match ? Number(match[1]) : 0;
 }
 
+function normalizeYard(value: unknown): Yard {
+  const yard = String(value ?? '').trim().toLowerCase();
+  return yard === 'clare' || yard === 'cadillac' ? yard : '';
+}
+
+function deferred(status: unknown) {
+  return String(status ?? '').toLowerCase().startsWith('deferred to next');
+}
+
+async function assignedYard(userId: number): Promise<Yard> {
+  const row = await env.DB.prepare("SELECT COALESCE(yard, '') AS yard FROM app_users WHERE id = ?")
+    .bind(userId)
+    .first<{ yard: string }>();
+  return normalizeYard(row?.yard);
+}
+
 async function isDeferredRepair(value: unknown) {
   const id = numericRepairId(value);
   if (!id) return false;
-  const row = await env.DB.prepare(`SELECT COALESCE(status,'') AS status FROM repairs WHERE id = ?`).bind(id).first<{status:string}>();
-  return Boolean(row && String(row.status).toLowerCase().startsWith('deferred to next'));
+  const row = await env.DB.prepare(`SELECT COALESCE(status,'') AS status FROM repairs WHERE id = ?`)
+    .bind(id)
+    .first<{ status: string }>();
+  return Boolean(row && deferred(row.status));
 }
 
-async function mechanicTakeAssignedRepair(request: Request, body: Record<string, unknown>) {
-  const id = numericRepairId(body.repairId ?? body.id);
-  if (!id) return null;
+async function equipmentYards() {
+  const rows = await env.DB.prepare(`
+    SELECT id, COALESCE(current_yard, '') AS current_yard
+    FROM equipment
+    WHERE active = 1
+  `).all<{ id: number; current_yard: string }>();
+  return new Map(rows.results.map((row) => [Number(row.id), normalizeYard(row.current_yard)]));
+}
+
+function physicalYard(repair: ShopRepair, yards: Map<number, Yard>) {
+  if (repair.equipmentId !== null) return yards.get(Number(repair.equipmentId)) ?? '';
+  return normalizeYard(repair.location);
+}
+
+async function validateYardPickup(request: Request, body: Record<string, unknown>) {
+  const action = String(body.action ?? '');
+  if (action !== 'openRepair' && action !== 'claimRepair') return null;
 
   const user = await getSessionUser(env.DB, request);
   if (!user || user.role !== 'mechanic' || !user.technicianId) return null;
 
+  const id = numericRepairId(body.repairId ?? body.id);
+  if (!id) return null;
   const repair = await env.DB.prepare(`
-    SELECT r.id, r.technician_id, COALESCE(r.status,'') AS status,
-           COALESCE(old.name,'') AS old_technician,
-           COALESCE(new.name,'') AS new_technician
+    SELECT r.technician_id, r.equipment_id,
+           COALESCE(e.current_yard, '') AS current_yard,
+           COALESCE(r.location, '') AS repair_location
     FROM repairs r
-    LEFT JOIN technicians old ON old.id = r.technician_id
-    LEFT JOIN technicians new ON new.id = ?
+    LEFT JOIN equipment e ON e.id = r.equipment_id
     WHERE r.id = ?
-  `).bind(user.technicianId, id).first<{
-    id:number;
-    technician_id:number|null;
-    status:string;
-    old_technician:string;
-    new_technician:string;
+  `).bind(id).first<{
+    technician_id: number | null;
+    equipment_id: number | null;
+    current_yard: string;
+    repair_location: string;
   }>();
-  if (!repair) return Response.json({ error: 'Repair was not found.' }, { status: 404 });
-  if (String(repair.status).toLowerCase().includes('complete')) return Response.json({ error: 'That repair is already completed.' }, { status: 400 });
-  if (repair.technician_id === null || Number(repair.technician_id) === Number(user.technicianId)) return null;
+  if (!repair || repair.technician_id !== null) return null;
 
-  const ownTimer = await env.DB.prepare('SELECT repair_id FROM repair_labor_timers WHERE user_id = ?').bind(user.id).first<{repair_id:number}>();
-  if (ownTimer) return Response.json({ error: `You already have labor running on repair #${ownTimer.repair_id}. Stop that timer before taking another job.` }, { status: 409 });
-
-  const activeOnTarget = await env.DB.prepare(`
-    SELECT rt.user_id, rt.technician_id, COALESCE(t.name,'another technician') AS technician_name
-    FROM repair_labor_timers rt
-    LEFT JOIN technicians t ON t.id = rt.technician_id
-    WHERE rt.repair_id = ?
-    LIMIT 1
-  `).bind(id).first<{user_id:number;technician_id:number;technician_name:string}>();
-  if (activeOnTarget) {
-    return Response.json({ error: `${activeOnTarget.technician_name} currently has labor running on this repair. It can be taken after that labor is stopped.` }, { status: 409 });
+  const yard = await assignedYard(user.id);
+  if (!yard) {
+    return Response.json({ error: 'Your user account needs a yard assignment before you can pick up unassigned work.' }, { status: 409 });
   }
-
-  const technicianName = repair.new_technician || user.displayName;
-  const oldTechnician = repair.old_technician || 'another technician';
-  const notes = String(body.notes ?? '').trim().slice(0, 500);
-  const result = await env.DB.batch([
-    env.DB.prepare(`
-      UPDATE repairs
-      SET technician_id = ?, driver = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-        AND technician_id = ?
-        AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
-        AND NOT EXISTS (SELECT 1 FROM repair_labor_timers WHERE repair_id = ?)
-    `).bind(user.technicianId, technicianName, id, repair.technician_id, id),
-    env.DB.prepare(`
-      INSERT INTO repair_labor_timers (user_id, repair_id, technician_id, notes)
-      SELECT ?, r.id, ?, ?
-      FROM repairs r
-      WHERE r.id = ?
-        AND r.technician_id = ?
-        AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
-        AND NOT EXISTS (SELECT 1 FROM repair_labor_timers WHERE repair_id = r.id)
-    `).bind(user.id, user.technicianId, notes, id, user.technicianId),
-    env.DB.prepare(`
-      INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
-      SELECT ?, ?, ?, 'reassigned', ?
-      WHERE EXISTS (SELECT 1 FROM repair_labor_timers WHERE user_id = ? AND repair_id = ?)
-    `).bind(id, user.id, user.technicianId, `${technicianName} took over this open repair from ${oldTechnician}.`, user.id, id),
-    env.DB.prepare(`
-      INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
-      SELECT ?, ?, ?, 'labor_started', ?
-      WHERE EXISTS (SELECT 1 FROM repair_labor_timers WHERE user_id = ? AND repair_id = ?)
-    `).bind(id, user.id, user.technicianId, `${technicianName} took the job and labor started automatically.`, user.id, id),
-  ]);
-
-  if (Number(result[1]?.meta.changes ?? 0) === 0) {
-    return Response.json({ error: 'That repair changed before you could take it. Refresh My Jobs and try again.' }, { status: 409 });
+  const repairYard = repair.equipment_id !== null ? normalizeYard(repair.current_yard) : normalizeYard(repair.repair_location);
+  if (repairYard !== yard) {
+    const where = repairYard ? `${repairYard[0].toUpperCase()}${repairYard.slice(1)} yard` : 'outside your assigned yard';
+    return Response.json({ error: `This repair is ${where}. You can only pick up unassigned work in your assigned yard.` }, { status: 403 });
   }
-
-  return Response.json({ ok:true, repairId:`repair-${id}`, laborStarted:true, takenOver:true, previousTechnician:oldTechnician });
+  return null;
 }
 
 export async function GET(request: Request) {
+  const user = await getSessionUser(env.DB, request);
   const response = await originalGET(request);
   if (!response.ok) return response;
-  const payload = await response.json() as { repairs?: Array<{status?:string}>; [key:string]: unknown };
-  if (Array.isArray(payload.repairs)) {
-    payload.repairs = payload.repairs.filter((repair) => !String(repair.status ?? '').toLowerCase().startsWith('deferred to next'));
+
+  const payload = await response.json() as {
+    user?: Record<string, unknown>;
+    activeTimer?: { repairId?: string } | null;
+    repairs?: ShopRepair[];
+    [key: string]: unknown;
+  };
+  const activeRepairId = String(payload.activeTimer?.repairId ?? '');
+  let repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status));
+
+  if (user && (user.role === 'mechanic' || user.role === 'manager')) {
+    const [yard, yards] = await Promise.all([assignedYard(user.id), equipmentYards()]);
+    if (yard) {
+      repairs = repairs.filter((repair) => physicalYard(repair, yards) === yard || repair.id === activeRepairId);
+    } else if (user.role === 'mechanic' && user.technicianId) {
+      repairs = repairs.filter((repair) => Number(repair.technicianId ?? 0) === Number(user.technicianId) || repair.id === activeRepairId);
+    } else {
+      repairs = [];
+    }
+    payload.user = { ...(payload.user ?? {}), yard, yardAssigned: Boolean(yard) };
+    payload.yardScope = { yard, yardAssigned: Boolean(yard) };
   }
+
+  payload.repairs = repairs;
   return Response.json(payload, { status: response.status, headers: { 'cache-control': 'no-store' } });
 }
 
@@ -111,10 +130,8 @@ export async function POST(request: Request) {
     if (await isDeferredRepair(body.repairId ?? body.id)) {
       return Response.json({ error: 'This repair is saved for a future PM/Annual and is not active shop work yet.' }, { status: 400 });
     }
-    if (String(body.action ?? '') === 'openRepair') {
-      const takeover = await mechanicTakeAssignedRepair(request.clone(), body);
-      if (takeover) return takeover;
-    }
+    const yardError = await validateYardPickup(request.clone(), body);
+    if (yardError) return yardError;
   } catch {
     // The original handler owns validation for malformed/non-JSON requests.
   }
