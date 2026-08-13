@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { GET as originalGET, POST as originalPOST } from './original';
 
 type BoardRepair = {
-  id:string; source:string; status:string; technicianId:number|null; activeTimer:unknown;
+  id:string; source:string; issue:string; status:string; technicianId:number|null; activeTimer:unknown;
   outOfService:boolean; equipmentType:string; equipmentId:number|null;
 };
 type OosUnit = { openWork?: Array<{status?:string}>; [key:string]: unknown };
@@ -11,8 +11,10 @@ function deferred(status: unknown) {
   return String(status ?? '').toLowerCase().startsWith('deferred to next');
 }
 
-function annualNotDueYet(status: unknown) {
-  return String(status ?? '').trim().toLowerCase() === 'annual due soon';
+function conciseMaintenanceIssue(repair: BoardRepair) {
+  if (repair.source === 'pm') return { ...repair, issue: 'PM' };
+  if (repair.source === 'annual') return { ...repair, issue: 'Annual' };
+  return repair;
 }
 
 function numericRepairId(value: unknown) {
@@ -36,13 +38,15 @@ export async function GET(request: Request) {
     summary?: Record<string, number>;
     [key:string]: unknown;
   };
-  const repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status) && !annualNotDueYet(repair.status));
+  const repairs = (payload.repairs ?? [])
+    .filter((repair) => !deferred(repair.status))
+    .map(conciseMaintenanceIssue);
   payload.repairs = repairs;
   if (Array.isArray(payload.oosUnits)) {
     payload.oosUnits = payload.oosUnits.map((unit) => ({
       ...unit,
       openWork: Array.isArray(unit.openWork)
-        ? unit.openWork.filter((work) => !deferred(work.status) && !annualNotDueYet(work.status))
+        ? unit.openWork.filter((work) => !deferred(work.status))
         : unit.openWork,
     }));
   }
