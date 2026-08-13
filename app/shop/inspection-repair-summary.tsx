@@ -1,0 +1,10 @@
+"use client";
+import type {ChecklistItem} from './maintenance-types';
+
+type Props={items:ChecklistItem[];eventType:'pm'|'annual';canWork:boolean;busy:boolean;onVerify:(item:ChecklistItem)=>void;onRefresh:()=>void};
+const complete=(status:string)=>status.toLowerCase().includes('complete');
+
+export default function InspectionRepairSummary({items,eventType,canWork,busy,onVerify,onRefresh}:Props){return <section className="easy-finish blocked" style={{marginTop:18}}>
+ <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'flex-start',flexWrap:'wrap'}}><div><p className="easy-eyebrow">REPAIRS FOUND DURING INSPECTION</p><strong style={{display:'block',fontSize:20,marginTop:5}}>{items.length} repair{items.length===1?'':'s'} to finish</strong><p style={{margin:'6px 0 0',lineHeight:1.5}}>The inspection questions are done. Work these repairs now, then verify each fix. The {eventType==='annual'?'Annual':'PM'} cannot close until every failed item passes.</p></div><button className="easy-button" disabled={busy} onClick={onRefresh}>Refresh Repair Status</button></div>
+ <div style={{marginTop:12,display:'grid',gap:9}}>{items.map(item=>{const repair=item.correctiveRepair,done=repair?complete(repair.status):false;return <div className="easy-row" key={item.number} style={{alignItems:'flex-start'}}><div className="easy-row-main"><strong>Item {item.number} — {item.text}</strong><span>{item.notes||'No failure note entered.'}</span>{repair&&<span>Repair {repair.id.replace('repair-','#')} · {repair.status||'Open'}</span>}</div><div style={{display:'grid',gap:7,justifyItems:'end'}}><span className={`easy-badge ${done?'green':'red'}`}>{done?'REPAIR COMPLETE':'NEEDS REPAIR'}</span>{repair&&<a className="easy-button danger" href={`/shop?repairId=${encodeURIComponent(repair.id)}`}>{done?'View Repair':'Open Repair Job'}</a>}{repair&&done&&canWork&&<button className="easy-button primary" disabled={busy} onClick={()=>onVerify(item)}>Verify Fixed & Pass</button>}</div></div>})}</div>
+ </section>}
