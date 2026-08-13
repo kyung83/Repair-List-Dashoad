@@ -331,28 +331,55 @@ export async function syncGeotabDvir(env: GeotabEnv) {
     const userNames = lookupById(users);
     const translations = lookupById([...defects, ...defectLists, ...defectParts, ...defectListParts]);
 
+    const [existingDevices, existingTrailers] = await Promise.all([
+      env.DB.prepare(`SELECT id, geotab_device_id FROM equipment WHERE geotab_device_id IS NOT NULL`).all(),
+      env.DB.prepare(`SELECT id, geotab_trailer_id FROM equipment WHERE geotab_trailer_id IS NOT NULL`).all(),
+    ]);
+    const deviceRowByGeotabId = new Map(
+      (existingDevices.results as { id: number; geotab_device_id: string }[]).map((row) => [String(row.geotab_device_id), row.id]),
+    );
+    const trailerRowByGeotabId = new Map(
+      (existingTrailers.results as { id: number; geotab_trailer_id: string }[]).map((row) => [String(row.geotab_trailer_id), row.id]),
+    );
+
     const equipmentStatements: D1PreparedStatement[] = [];
     for (const device of devices.filter((candidate) => isCurrentlyActiveDevice(candidate))) {
       const id = objectId(device);
       const unit = objectName(device);
       if (!id || !unit) continue;
-      equipmentStatements.push(env.DB.prepare(`
-        INSERT INTO equipment (unit, category, equipment_type, geotab_device_id, updated_at)
-        VALUES (?, 'fleet', 'truck', ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(unit) DO UPDATE SET equipment_type = 'truck', geotab_device_id = excluded.geotab_device_id,
-          active = 1, updated_at = CURRENT_TIMESTAMP
-      `).bind(unit, id));
+      const existingId = deviceRowByGeotabId.get(id);
+      if (existingId) {
+        equipmentStatements.push(env.DB.prepare(`
+          UPDATE equipment SET unit = ?, equipment_type = 'truck', active = 1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(unit, existingId));
+      } else {
+        equipmentStatements.push(env.DB.prepare(`
+          INSERT INTO equipment (unit, category, equipment_type, geotab_device_id, updated_at)
+          VALUES (?, 'fleet', 'truck', ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(unit) DO UPDATE SET equipment_type = 'truck', geotab_device_id = excluded.geotab_device_id,
+            active = 1, updated_at = CURRENT_TIMESTAMP
+        `).bind(unit, id));
+      }
     }
     for (const trailer of trailers) {
       const id = objectId(trailer);
       const unit = objectName(trailer);
       if (!id || !unit) continue;
-      equipmentStatements.push(env.DB.prepare(`
-        INSERT INTO equipment (unit, category, equipment_type, geotab_trailer_id, updated_at)
-        VALUES (?, 'fleet', 'trailer', ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(unit) DO UPDATE SET equipment_type = 'trailer', geotab_trailer_id = excluded.geotab_trailer_id,
-          active = 1, updated_at = CURRENT_TIMESTAMP
-      `).bind(unit, id));
+      const existingId = trailerRowByGeotabId.get(id);
+      if (existingId) {
+        equipmentStatements.push(env.DB.prepare(`
+          UPDATE equipment SET unit = ?, equipment_type = 'trailer', active = 1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(unit, existingId));
+      } else {
+        equipmentStatements.push(env.DB.prepare(`
+          INSERT INTO equipment (unit, category, equipment_type, geotab_trailer_id, updated_at)
+          VALUES (?, 'fleet', 'trailer', ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(unit) DO UPDATE SET equipment_type = 'trailer', geotab_trailer_id = excluded.geotab_trailer_id,
+            active = 1, updated_at = CURRENT_TIMESTAMP
+        `).bind(unit, id));
+      }
     }
     await runInChunks(env.DB, equipmentStatements);
 
