@@ -51,77 +51,9 @@ cat /tmp/r2-create.log
 
 sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" "$TEMPLATE_FILE" > "$CONFIG_FILE"
 
-# Temporary read-only diagnostic for source numbers that resolve to multiple active trailer rows.
-if npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" --command "SELECT COUNT(*) AS staged_rows FROM _manual_trailer_dates_20260813" >/tmp/trailer-stage-count.log 2>&1; then
-  cat /tmp/trailer-stage-count.log
-  echo "Ambiguous active trailer matches:"
-  npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" --command "
-    SELECT s.unit AS source_unit, COUNT(*) AS active_matches
-    FROM _manual_trailer_dates_20260813 s
-    JOIN equipment e
-      ON e.active = 1
-     AND (lower(COALESCE(e.equipment_type, '')) = 'trailer' OR e.geotab_trailer_id IS NOT NULL)
-     AND (
-          upper(trim(e.unit)) = upper(s.unit)
-          OR upper(trim(e.unit)) LIKE upper(s.unit) || ' %'
-          OR upper(trim(e.unit)) LIKE upper(s.unit) || '(%'
-          OR upper(trim(e.unit)) = 'TRL ' || upper(s.unit)
-          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || ' %'
-          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || '(%'
-          OR upper(trim(e.unit)) = 'TRAILER ' || upper(s.unit)
-          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || ' %'
-          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || '(%'
-        )
-    GROUP BY s.unit
-    HAVING COUNT(*) > 1
-    ORDER BY s.unit;
-  "
-  echo "Ambiguous active trailer records:"
-  npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" --command "
-    WITH ambiguous AS (
-      SELECT s.unit
-      FROM _manual_trailer_dates_20260813 s
-      JOIN equipment e
-        ON e.active = 1
-       AND (lower(COALESCE(e.equipment_type, '')) = 'trailer' OR e.geotab_trailer_id IS NOT NULL)
-       AND (
-            upper(trim(e.unit)) = upper(s.unit)
-            OR upper(trim(e.unit)) LIKE upper(s.unit) || ' %'
-            OR upper(trim(e.unit)) LIKE upper(s.unit) || '(%'
-            OR upper(trim(e.unit)) = 'TRL ' || upper(s.unit)
-            OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || ' %'
-            OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || '(%'
-            OR upper(trim(e.unit)) = 'TRAILER ' || upper(s.unit)
-            OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || ' %'
-            OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || '(%'
-          )
-      GROUP BY s.unit
-      HAVING COUNT(*) > 1
-    )
-    SELECT a.unit AS source_unit, e.id, e.unit AS equipment_unit, e.active, e.geotab_trailer_id,
-           e.service_date, e.annual_date, e.updated_at
-    FROM ambiguous a
-    JOIN equipment e
-      ON e.active = 1
-     AND (lower(COALESCE(e.equipment_type, '')) = 'trailer' OR e.geotab_trailer_id IS NOT NULL)
-     AND (
-          upper(trim(e.unit)) = upper(a.unit)
-          OR upper(trim(e.unit)) LIKE upper(a.unit) || ' %'
-          OR upper(trim(e.unit)) LIKE upper(a.unit) || '(%'
-          OR upper(trim(e.unit)) = 'TRL ' || upper(a.unit)
-          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(a.unit) || ' %'
-          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(a.unit) || '(%'
-          OR upper(trim(e.unit)) = 'TRAILER ' || upper(a.unit)
-          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(a.unit) || ' %'
-          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(a.unit) || '(%'
-        )
-    ORDER BY a.unit, e.id;
-  "
-fi
-
-# Migration 0056 failed before being applied because its original name matcher did not allow
-# Geotab operational notes after a trailer number. Use the reviewed corrected body whenever
-# bootstrapping so D1 records the same 0056 migration name with the safe active-trailer matcher.
+# Migration 0056 failed before being applied because the original matcher could not safely
+# distinguish trailer-number duplicates. Use the reviewed guarded body so D1 records the same
+# unapplied migration name while updating only the intended active trailer representations.
 cp scripts/manual-trailer-date-fix-20260813.sql migrations/0056_apply_manual_trailer_dates.sql
 
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
