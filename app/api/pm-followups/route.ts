@@ -95,6 +95,7 @@ export async function GET(request: Request) {
         LEFT JOIN repairs target ON target.id = n.target_repair_id
         LEFT JOIN technicians tt ON tt.id = target.technician_id
         WHERE n.status IN ('pending','attached')
+          AND COALESCE(n.target_event_type,'pm') = 'pm'
           AND (
             ? = 1
             OR n.target_repair_id IN (
@@ -169,20 +170,59 @@ export async function POST(request: Request) {
         equipmentId = Number(repair.equipment_id);
       }
 
-      const result = await env.DB.prepare(`
-        INSERT INTO pm_next_repairs (
-          equipment_id, description, status, origin_repair_id, queued_from_repair_id,
-          tagged_by_user_id, tagged_by_technician_id, tagged_at, updated_at
-        ) VALUES (?, ?, 'pending', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      const repairResult = await env.DB.prepare(`
+        INSERT INTO repairs (
+          equipment_id, title, description, status, priority, source, technician_id,
+          opened_at, updated_at
+        ) VALUES (?, ?, ?, 'Deferred to Next PM', '2', 'maintenance-action', NULL,
+                  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `).bind(
         equipmentId,
         description,
-        repairId,
-        repairId,
+        `Saved for next PM: ${description}`.slice(0, 1000),
+      ).run();
+      const childRepairId = Number(repairResult.meta.last_row_id);
+      if (!childRepairId) throw new Error('The future repair record could not be created.');
+
+      let queueId = 0;
+      try {
+        const result = await env.DB.prepare(`
+          INSERT INTO pm_next_repairs (
+            equipment_id, description, status, origin_repair_id, queued_from_repair_id,
+            tagged_by_user_id, tagged_by_technician_id, tagged_at, updated_at,
+            repair_id, target_event_type
+          ) VALUES (?, ?, 'pending', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, 'pm')
+        `).bind(
+          equipmentId,
+          description,
+          repairId,
+          repairId,
+          user.id,
+          user.technicianId ?? null,
+          childRepairId,
+        ).run();
+        queueId = Number(result.meta.last_row_id);
+      } catch (error) {
+        await env.DB.prepare(`
+          DELETE FROM repairs
+          WHERE id = ? AND source = 'maintenance-action' AND status = 'Deferred to Next PM'
+        `).bind(childRepairId).run().catch(() => undefined);
+        throw error;
+      }
+
+      await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'next_pm_requested', ?)
+      `).bind(
+        childRepairId,
         user.id,
         user.technicianId ?? null,
-      ).run();
-      return Response.json({ ok:true, id:Number(result.meta.last_row_id), equipmentId, description });
+        repairId
+          ? `Saved during PM ${repairId} for the next PM.`
+          : 'Added by office/manager for the next PM.',
+      ).run().catch(() => undefined);
+
+      return Response.json({ ok:true, id:queueId, repairId:`repair-${childRepairId}`, equipmentId, description });
     }
 
     if (action === 'completeNextPmRepair' || action === 'deferNextPmRepair') {
