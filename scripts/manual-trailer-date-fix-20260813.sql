@@ -1,17 +1,20 @@
 PRAGMA foreign_keys = ON;
 
--- Corrected runtime body for the unapplied 0056 trailer-date migration.
--- Apply the staged 2026-08-13 trailer service and annual dates to unique active trailer records.
--- All 599 numbered trailers must match. PUP3 is allowed to remain unmatched because the live
--- equipment table currently has no PUP3 record; if a unique active PUP3 trailer exists at apply
--- time, it will be updated too.
+-- Apply the authoritative 2026-08-13 trailer service and annual dates to every
+-- active trailer record that clearly represents a supplied trailer number.
+-- Three-digit trailer numbers only match TRL/TRAILER-prefixed equipment rows so
+-- a bare numeric vehicle/device with the same number is not changed.
+-- Five-digit trailer numbers match the exact number plus operational-note suffixes.
+-- PUP3 is optional because no live equipment record currently exists for it.
 -- Confirmed incomplete source dates: 249 annual=2025-09-05; 53101 annual=2026-05-31;
 -- 53260 service=2026-05-18.
 CREATE TABLE IF NOT EXISTS _manual_trailer_date_matches_20260813 (
-  source_unit TEXT PRIMARY KEY,
-  equipment_id INTEGER NOT NULL UNIQUE,
+  source_unit TEXT NOT NULL,
+  equipment_id INTEGER NOT NULL,
   service_date TEXT NOT NULL,
-  annual_date TEXT NOT NULL
+  annual_date TEXT NOT NULL,
+  PRIMARY KEY (source_unit, equipment_id),
+  UNIQUE (equipment_id)
 );
 DELETE FROM _manual_trailer_date_matches_20260813;
 
@@ -22,15 +25,39 @@ JOIN equipment e
   ON e.active = 1
  AND (lower(COALESCE(e.equipment_type, '')) = 'trailer' OR e.geotab_trailer_id IS NOT NULL)
  AND (
-      upper(trim(e.unit)) = upper(s.unit)
-      OR upper(trim(e.unit)) LIKE upper(s.unit) || ' %'
-      OR upper(trim(e.unit)) LIKE upper(s.unit) || '(%'
-      OR upper(trim(e.unit)) = 'TRL ' || upper(s.unit)
-      OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || ' %'
-      OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || '(%'
-      OR upper(trim(e.unit)) = 'TRAILER ' || upper(s.unit)
-      OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || ' %'
-      OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || '(%'
+      (
+        length(s.unit) = 3
+        AND (
+          upper(trim(e.unit)) = 'TRL ' || upper(s.unit)
+          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || ' %'
+          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || '(%'
+          OR upper(trim(e.unit)) = 'TRAILER ' || upper(s.unit)
+          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || ' %'
+          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || '(%'
+        )
+      )
+      OR (
+        length(s.unit) = 5
+        AND (
+          upper(trim(e.unit)) = upper(s.unit)
+          OR upper(trim(e.unit)) LIKE upper(s.unit) || ' %'
+          OR upper(trim(e.unit)) LIKE upper(s.unit) || '(%'
+          OR upper(trim(e.unit)) = 'TRL ' || upper(s.unit)
+          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || ' %'
+          OR upper(trim(e.unit)) LIKE 'TRL ' || upper(s.unit) || '(%'
+          OR upper(trim(e.unit)) = 'TRAILER ' || upper(s.unit)
+          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || ' %'
+          OR upper(trim(e.unit)) LIKE 'TRAILER ' || upper(s.unit) || '(%'
+        )
+      )
+      OR (
+        upper(s.unit) = 'PUP3'
+        AND (
+          upper(trim(e.unit)) = 'PUP3'
+          OR upper(trim(e.unit)) LIKE 'PUP3 %'
+          OR upper(trim(e.unit)) LIKE 'PUP3(%'
+        )
+      )
     );
 
 CREATE TABLE IF NOT EXISTS _manual_trailer_dates_guard_20260813 (
@@ -44,13 +71,13 @@ SELECT CASE WHEN
     SELECT 1 FROM _manual_trailer_dates_20260813
     WHERE unit = 'PUP3' AND service_date = '2026-06-05' AND annual_date = '2026-06-05'
   )
-  AND (SELECT COUNT(*) FROM _manual_trailer_date_matches_20260813) BETWEEN 599 AND 600
   AND NOT EXISTS (
     SELECT 1
     FROM _manual_trailer_dates_20260813 s
     WHERE s.unit <> 'PUP3'
       AND NOT EXISTS (
-        SELECT 1 FROM _manual_trailer_date_matches_20260813 m
+        SELECT 1
+        FROM _manual_trailer_date_matches_20260813 m
         WHERE m.source_unit = s.unit
       )
   )
