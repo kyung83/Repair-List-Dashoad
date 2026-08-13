@@ -8,6 +8,7 @@ type Link = { href:string; label:string; exact?:boolean };
 
 const managerPrimary: Link[] = [
   { href:"/", label:"Today", exact:true },
+  { href:"/shop", label:"My Jobs" },
   { href:"/repair-board", label:"Shop" },
   { href:"/unit", label:"Units" },
   { href:"/next-pm-repairs", label:"Future Repairs" },
@@ -77,6 +78,6 @@ export default function AppNav(){
     {user&&<div className="app-user-area">
       <span className="app-user-name" title={user.username||user.email}>{user.displayName}<small className="easy-role">{user.role}</small></span>
       <button type="button" onClick={()=>void signOut()}>Sign out</button>
-    </div>}
+    </div>
   </header>;
 }
