@@ -9,6 +9,10 @@ function isMaintenanceId(value: unknown) {
   return /^(?:pm|annual)-\d+$/.test(String(value ?? ''));
 }
 
+function annualNotDueYet(status: unknown) {
+  return String(status ?? '').trim().toLowerCase() === 'annual due soon';
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -24,7 +28,10 @@ export async function GET(request: Request) {
     ]);
 
     payload.dvir = payload.dvir.filter((defect) => !defect.repaired);
-    payload.repairs = [...maintenanceRepairs, ...payload.repairs];
+    payload.repairs = [
+      ...maintenanceRepairs.filter((repair) => !annualNotDueYet(repair.status)),
+      ...payload.repairs,
+    ];
 
     return Response.json(payload, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
