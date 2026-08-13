@@ -29,6 +29,13 @@ interface ExecutionContext {
 }
 
 const PUBLIC_PATHS = new Set(['/login','/setup','/api/auth/login','/api/auth/logout','/api/auth/me','/api/auth/setup','/favicon.svg']);
+const ASSIGNED_MAINTENANCE_WRITE_PATHS = new Set([
+  '/api/maintenance-actions',
+  '/api/maintenance-checklist',
+  '/api/maintenance-findings',
+  '/api/maintenance-signature',
+  '/api/maintenance-subrepairs',
+]);
 
 function isStaticAsset(pathname: string) {
   return pathname.startsWith('/_next/') || pathname.startsWith('/_vinext/') || pathname.startsWith('/assets/') || pathname.startsWith('/static/') || /\.(?:css|js|mjs|map|woff2?|ttf|otf|ico|svg|png|jpe?g|gif|webp|avif)$/i.test(pathname);
@@ -51,10 +58,11 @@ function accessDenied(url: URL, message = 'Your clearance does not allow this ac
 }
 
 async function mechanicCanWrite(request: Request, pathname: string) {
-  // Checklist route validates that the scheduled PM/annual is assigned to the
-  // technician. It also accepts multipart photo uploads, so do not require a
-  // JSON action parse at the Worker access layer.
-  if (pathname === '/api/maintenance-checklist') return true;
+  // These maintenance routes perform their own assignment/link validation before
+  // allowing a technician to change the PM/Annual, its findings, parts, or signoff.
+  // Let the assigned technician reach those route-level checks instead of blocking
+  // them at the Worker clearance layer.
+  if (ASSIGNED_MAINTENANCE_WRITE_PATHS.has(pathname)) return true;
 
   if (pathname !== '/api/work-orders' && pathname !== '/api/repairs' && pathname !== '/api/shop' && pathname !== '/api/pm-followups') return false;
   let action = '';
