@@ -1,2 +1,2 @@
 "use client";
-export {default} from './maintenance-checklist-panel-v2';
+export { default } from "./maintenance-checklist-panel-v3";
