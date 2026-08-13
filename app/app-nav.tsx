@@ -10,6 +10,7 @@ const managerPrimary: Link[] = [
   { href:"/", label:"Today", exact:true },
   { href:"/repair-board", label:"Shop" },
   { href:"/unit", label:"Units" },
+  { href:"/next-pm-repairs", label:"Future Repairs" },
   { href:"/reports/history", label:"History" },
 ];
 
@@ -47,7 +48,6 @@ export default function AppNav(){
     { href:"/work-orders", label:"Completed Work / WO Review" },
     { href:"/equipment", label:"Equipment List & Details" },
     { href:"/pm-schedules", label:"Maintenance Setup" },
-    { href:"/next-pm-repairs", label:"Next PM Repairs" },
     { href:"/annual-inspections", label:"Annual Forms" },
     { href:"/inventory", label:"Parts Inventory" },
     { href:"/invoices", label:"Invoices" },
@@ -69,7 +69,7 @@ export default function AppNav(){
       {more.length>0&&<details className="easy-more">
         <summary className="easy-nav-link">More ▾</summary>
         <div className="easy-more-menu">
-          {more.map((link,index)=><span key={link.href} style={{display:"contents"}}>{index===5&&canManage?<span className="easy-more-divider"/>:null}<a href={link.href}>{link.label}</a></span>)}
+          {more.map((link,index)=><span key={link.href} style={{display:"contents"}}>{index===4&&canManage?<span className="easy-more-divider"/>:null}<a href={link.href}>{link.label}</a></span>)}
           {user?.role==='admin'&&<><span className="easy-more-divider"/><a href="/admin/users">Users & Access</a></>}
         </div>
       </details>}
