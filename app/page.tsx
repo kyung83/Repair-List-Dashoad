@@ -100,6 +100,7 @@ export default function TodayPage(){
         <p className="easy-section-copy">The less-used setup screens are under More in the top menu.</p>
         <div className="easy-actions" style={{display:'grid'}}>
           <a className="easy-button primary" href="/repair-board">Open Shop Board</a>
+          <a className="easy-button orange" href="/next-pm-repairs">Add Next PM Repair</a>
           <a className="easy-button" href="/unit">Find a Unit</a>
           <a className="easy-button" href="/annual-inspections">Print Annual Form</a>
           <a className="easy-button" href="/inventory">Parts Inventory</a>
