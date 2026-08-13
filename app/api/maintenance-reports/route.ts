@@ -41,7 +41,7 @@ export async function GET(request:Request){
       LIMIT 1
     `).bind(id).first<HeaderRow>();
     if(!row)throw new Error('Maintenance inspection was not found.');
-    if(row.checklist_status!=='completed'||!row.repair_status.toLowerCase().includes('complete'))throw new Error('Complete the PM/Annual work order before printing the final truck copy.');
+    if(row.checklist_status!=='ready'&&row.checklist_status!=='completed')throw new Error('Finish and sign the PM/Annual inspection before printing the truck copy.');
     const items=await env.DB.prepare(`
       SELECT i.item_number,i.section,i.item_text,i.result,i.notes,
              cr.id AS corrective_repair_id,cr.status AS corrective_status,cr.completed_at AS corrective_completed_at
