@@ -3,7 +3,7 @@ name: Bootstrap Cloudflare
 on:
   push:
     branches:
-      - agent/cloudflare-standalone
+      - main
     paths:
       - ".github/workflows/cloudflare-bootstrap.yml"
       - "app/**"
