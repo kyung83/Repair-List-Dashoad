@@ -346,20 +346,22 @@ export async function syncGeotabDvir(env: GeotabEnv) {
     for (const device of devices.filter((candidate) => isCurrentlyActiveDevice(candidate))) {
       const id = objectId(device);
       const unit = objectName(device);
+      const serial = typeof device.serialNumber === 'string' ? device.serialNumber : null;
       if (!id || !unit) continue;
       const existingId = deviceRowByGeotabId.get(id);
       if (existingId) {
         equipmentStatements.push(env.DB.prepare(`
-          UPDATE equipment SET unit = ?, equipment_type = 'truck', active = 1, updated_at = CURRENT_TIMESTAMP
+          UPDATE equipment SET unit = ?, equipment_type = 'truck', active = 1,
+            geotab_serial = COALESCE(?, geotab_serial), updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).bind(unit, existingId));
+        `).bind(unit, serial, existingId));
       } else {
         equipmentStatements.push(env.DB.prepare(`
-          INSERT INTO equipment (unit, category, equipment_type, geotab_device_id, updated_at)
-          VALUES (?, 'fleet', 'truck', ?, CURRENT_TIMESTAMP)
+          INSERT INTO equipment (unit, category, equipment_type, geotab_device_id, geotab_serial, updated_at)
+          VALUES (?, 'fleet', 'truck', ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(unit) DO UPDATE SET equipment_type = 'truck', geotab_device_id = excluded.geotab_device_id,
             active = 1, updated_at = CURRENT_TIMESTAMP
-        `).bind(unit, id));
+        `).bind(unit, id, serial));
       }
     }
     for (const trailer of trailers) {
