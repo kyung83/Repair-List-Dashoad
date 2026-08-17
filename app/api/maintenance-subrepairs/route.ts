@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
-import { usePartOnRepair } from '@/lib/inventory-db';
+import { releaseRepairPartRequests, requestPartForRepair } from '@/lib/parts-lifecycle';
 
 type ParentRepair = {
   id: number;
@@ -35,6 +35,11 @@ async function requireUser(request: Request) {
   const user = await getSessionUser(env.DB, request);
   if (!user) throw new Error('Authentication required.');
   return user;
+}
+
+async function assignedYard(userId:number){
+  const row=await env.DB.prepare("SELECT COALESCE(yard,'') AS yard FROM app_users WHERE id=?").bind(userId).first<{yard:string}>();
+  return String(row?.yard??'');
 }
 
 async function loadParent(id: number) {
@@ -97,19 +102,6 @@ async function ensureChildAssignment(user: AppUser, parent: ParentRepair, child:
   }
 }
 
-async function refreshRepairPartsText(id: number) {
-  const rows = await env.DB.prepare(`
-    SELECT p.part_number, SUM(rp.quantity) AS quantity
-    FROM repair_parts rp
-    JOIN parts p ON p.id = rp.part_id
-    WHERE rp.repair_id = ?
-    GROUP BY p.id, p.part_number
-    ORDER BY p.part_number
-  `).bind(id).all<{ part_number: string; quantity: number }>();
-  const text = rows.results.map((row) => `${row.part_number} x${Number(row.quantity)}`).join(', ');
-  await env.DB.prepare('UPDATE repairs SET parts_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(text, id).run();
-}
-
 async function recordEvent(childId: number, user: AppUser, action: string, detail: string) {
   await env.DB.prepare(`
     INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
@@ -133,13 +125,26 @@ export async function POST(request: Request) {
       const quantity = Number(body.quantity ?? 0);
       if (!Number.isInteger(partId) || partId <= 0) throw new Error('Choose a part.');
       if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Enter a positive part quantity.');
-      const part = await env.DB.prepare('SELECT part_number, description FROM parts WHERE id = ? AND active = 1')
-        .bind(partId).first<{ part_number: string; description: string }>();
-      if (!part) throw new Error('Part was not found.');
-      await usePartOnRepair(env.DB, { repairId: `repair-${child.id}`, partId, quantity });
-      await refreshRepairPartsText(child.id);
-      await recordEvent(child.id, user, 'part_used_under_maintenance_labor', `Used ${quantity} x ${part.part_number} — ${part.description}. PM/Annual labor continued on repair #${parent.id}.`);
-      return Response.json({ ok: true, childRepairId: `repair-${child.id}`, maintenanceLaborContinues: true });
+      const result = await requestPartForRepair(env.DB, {
+        repairId: child.id,
+        partId,
+        quantity,
+        fallbackYard: await assignedYard(user.id),
+        userId: user.id,
+      });
+      await recordEvent(
+        child.id,
+        user,
+        result.awaitingParts ? 'part_requested_under_maintenance_labor' : 'part_used_under_maintenance_labor',
+        result.awaitingParts
+          ? `${result.partNumber}: ${result.reservedQuantity} reserved, ${result.shortageQuantity} awaiting in ${result.warehouseCode}. PM/Annual labor continued on repair #${parent.id}.`
+          : `Used ${result.usedImmediately} x ${result.partNumber} from ${result.warehouseCode}. PM/Annual labor continued on repair #${parent.id}.`,
+      );
+      return Response.json({
+        ...result,
+        childRepairId: `repair-${child.id}`,
+        maintenanceLaborContinues: true,
+      });
     }
 
     if (action === 'complete') {
@@ -150,6 +155,7 @@ export async function POST(request: Request) {
           WHERE id = ? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
         `).bind(child.id).run();
         if (Number(result.meta.changes ?? 0) === 0) throw new Error('Repair could not be completed.');
+        await releaseRepairPartRequests(env.DB, child.id, user.id);
         await recordEvent(child.id, user, 'completed_under_maintenance_labor', `Repair completed while PM/Annual labor continued on repair #${parent.id}.`);
       }
       let checklistItemPassed = false;
