@@ -50,6 +50,7 @@ export default function AppNav(){
     { href:"/equipment", label:"Equipment List & Details" },
     { href:"/pm-schedules", label:"Maintenance Setup" },
     { href:"/annual-inspections", label:"Annual Forms" },
+    { href:"/parts-desk", label:"Parts Desk" },
     { href:"/inventory", label:"Parts Inventory" },
     { href:"/invoices", label:"Invoices" },
     { href:"/reports", label:"Reports" },
@@ -70,7 +71,7 @@ export default function AppNav(){
       {more.length>0&&<details className="easy-more">
         <summary className="easy-nav-link">More ▾</summary>
         <div className="easy-more-menu">
-          {more.map((link,index)=><span key={link.href} style={{display:"contents"}}>{index===4&&canManage?<span className="easy-more-divider"/>:null}<a href={link.href}>{link.label}</a></span>)}
+          {more.map((link,index)=><span key={link.href} style={{display:"contents"}}>{index===6&&canManage?<span className="easy-more-divider"/>:null}<a href={link.href}>{link.label}</a></span>)}
           {user?.role==='admin'&&<><span className="easy-more-divider"/><a href="/admin/users">Users & Access</a></>}
         </div>
       </details>}
