@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 
-const SCOPE = /^(all|clare|cadillac):(truck-repairs|truck-pms|truck-annuals|trailers|trailer-pms|trailer-annuals|glass|other)$/;
+const SCOPE = /^(all|clare|cadillac|gr|taylor|boyne):(truck-repairs|truck-pms|truck-annuals|trailers|trailer-pms|trailer-annuals|glass|other)$/;
 
 async function userFor(request: Request) {
   const user = await getSessionUser(env.DB, request);

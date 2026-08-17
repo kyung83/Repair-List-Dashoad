@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { YARD_DEFINITIONS, yardLabel, type YardSelection } from "@/lib/yards";
 
-type Yard=""|"clare"|"cadillac";
+type Yard=YardSelection;
 type YardUser={id:number;username:string;displayName:string;role:"mechanic"|"manager";active:boolean;yard:Yard};
 
 export default function YardAssignments(){
@@ -38,7 +39,7 @@ export default function YardAssignments(){
       <div style={{padding:18,borderBottom:'1px solid #dce2e7'}}>
         <p style={{margin:0,color:'#f47b20',fontSize:11,fontWeight:900,letterSpacing:'.14em'}}>SHOP VISIBILITY</p>
         <h2 style={{margin:'6px 0 4px'}}>Yard assignments</h2>
-        <p style={{margin:0,color:'#6c7886',fontSize:13}}>Assign every technician and manager to Clare or Cadillac. Their My Jobs → All Open Units view will show open repairs in that yard. Assigned repairs stay assigned; only unassigned repairs can be picked up.</p>
+        <p style={{margin:0,color:'#6c7886',fontSize:13}}>Assign every technician and manager to Clare, Cadillac, GR, Taylor, or Boyne. Their My Jobs → All Open Units view will show open repairs in that yard. Assigned repairs stay assigned; only unassigned repairs can be picked up.</p>
       </div>
       {message&&<div style={{margin:14,padding:11,background:'#fff8e6',border:'1px solid #f2c66d',borderRadius:9}}>{message}</div>}
       <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',minWidth:680}}>
@@ -47,7 +48,7 @@ export default function YardAssignments(){
           <td style={{padding:12}}><strong>{user.displayName}</strong><div style={{fontSize:11,color:'#87929c'}}>@{user.username}</div></td>
           <td style={{padding:12,textTransform:'capitalize'}}>{user.role}</td>
           <td style={{padding:12}}><select value={user.yard} onChange={event=>patch(user.id,event.target.value as Yard)} style={input}>
-            <option value="">Not assigned</option><option value="clare">Clare</option><option value="cadillac">Cadillac</option>
+            <option value="">Not assigned</option>{YARD_DEFINITIONS.map(yard=><option key={yard.key} value={yard.key}>{yard.label}</option>)}
           </select></td>
           <td style={{padding:12}}>{user.active?'Active':'Inactive'}</td>
           <td style={{padding:12}}><button disabled={busy===user.id} onClick={()=>void save(user)}>{busy===user.id?'Saving…':'Save Yard'}</button></td>
@@ -57,5 +58,4 @@ export default function YardAssignments(){
   </main>;
 }
 
-function yardLabel(yard:Yard){return yard==='clare'?'Clare':yard==='cadillac'?'Cadillac':'Not assigned';}
 const input={padding:9,border:'1px solid #ccd5dd',borderRadius:8,background:'white',color:'#182331',minWidth:150};

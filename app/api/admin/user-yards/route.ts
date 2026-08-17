@@ -1,9 +1,9 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import { isYardKey, normalizeYard } from '@/lib/yards';
 
 function yardValue(value: unknown) {
-  const yard = String(value ?? '').trim().toLowerCase();
-  return yard === 'clare' || yard === 'cadillac' ? yard : '';
+  return normalizeYard(value);
 }
 
 export async function GET(request: Request) {
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const id = Number(body.id);
     const raw = String(body.yard ?? '').trim().toLowerCase();
     if (!Number.isInteger(id) || id <= 0) throw new Error('User could not be resolved.');
-    if (raw && raw !== 'clare' && raw !== 'cadillac') throw new Error('Yard must be Clare or Cadillac.');
+    if (raw && !isYardKey(raw)) throw new Error('Yard must be Clare, Cadillac, GR, Taylor, or Boyne.');
     const user = await env.DB.prepare('SELECT role FROM app_users WHERE id=?').bind(id).first<{role:string}>();
     if (!user) throw new Error('User not found.');
     if (user.role !== 'mechanic' && user.role !== 'manager') throw new Error('Yards are assigned to technicians and managers.');
