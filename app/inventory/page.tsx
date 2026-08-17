@@ -335,7 +335,7 @@ export default function InventoryPage() {
           ["ACTIVE PARTS", scopedSummary.partCount.toLocaleString()],
           ["BELOW MINIMUM", scopedSummary.lowStockCount.toLocaleString()],
           ["NEGATIVE STOCK", scopedSummary.negativeStockCount.toLocaleString()],
-          ["UNITS ON HAND", scopedSummary.totalUnits.toLocaleString()],
+          ["UNITS AVAILABLE", scopedSummary.totalUnits.toLocaleString()],
           ["INVENTORY VALUE", scopedSummary.inventoryValue.toLocaleString(undefined, { style: "currency", currency: "USD" })],
         ].map(([label, value]) => (
           <article key={label} style={{ padding: 20, borderRadius: 12, background: "white", border: "1px solid #dce2e7" }}>
@@ -352,7 +352,7 @@ export default function InventoryPage() {
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
-            <thead><tr>{["Part #", "Description", "On hand", "Minimum", "On order", "Location", "Vendors", "Used on", "Unit cost", "Actions"].map((heading) => <th key={heading} style={{ padding: 13, textAlign: "left", background: "#f7f9fa", color: "#657383", fontSize: 11 }}>{heading}</th>)}</tr></thead>
+            <thead><tr>{["Part #", "Description", "Available", "Minimum", "On order", "Location", "Vendors", "Used on", "Unit cost", "Actions"].map((heading) => <th key={heading} style={{ padding: 13, textAlign: "left", background: "#f7f9fa", color: "#657383", fontSize: 11 }}>{heading}</th>)}</tr></thead>
             <tbody>
               {visibleParts.map((item) => {
                 const links = vendorsForPart(item);
