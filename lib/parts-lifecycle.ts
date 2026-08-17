@@ -1,3 +1,5 @@
+import { yardWarehouseCode } from './yards';
+
 export type PartAvailability = {
   partId: number;
   partNumber: string;
@@ -112,7 +114,9 @@ function finite(value: unknown, fallback = 0) {
 
 export function normalizeWarehouseCode(value: unknown) {
   const text = String(value ?? '').trim().toUpperCase();
-  for (const code of ['CLARE', 'CADILLAC', 'BOYNE', 'LUDINGTON'] as const) {
+  const yardCode = yardWarehouseCode(value);
+  if (yardCode) return yardCode;
+  for (const code of ['BOYNE', 'LUDINGTON'] as const) {
     if (text === code || text.includes(code)) return code;
   }
   return '';
@@ -142,7 +146,7 @@ export async function resolveRepairWarehouse(db: D1Database, repairId: number, f
   if (!row) throw new Error('Repair was not found.');
   const code = normalizeWarehouseCode(row.equipment_id != null ? row.current_yard : row.repair_location)
     || normalizeWarehouseCode(fallbackYard);
-  if (!code) throw new Error('This repair needs a Clare/Cadillac shop location before parts can be requested or used.');
+  if (!code) throw new Error('This repair needs a recognized shop location before parts can be requested or used.');
   const warehouse = await warehouseByCode(db, code);
   if (!warehouse) throw new Error(`${code} is not configured as an active parts warehouse.`);
   return warehouse;

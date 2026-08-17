@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { syncGeotabYardPresence } from '@/lib/geotab-yard';
+import { normalizeYard, type YardSelection } from '@/lib/yards';
 
 type YardRow = {
   id: number;
@@ -18,16 +19,17 @@ type SyncRow = {
   positions: number;
   clare: number;
   cadillac: number;
+  gr: number;
+  taylor: number;
+  boyne: number;
   outside: number;
   clare_zone_found: number;
   cadillac_zone_found: number;
+  gr_zone_found: number;
+  taylor_zone_found: number;
+  boyne_zone_found: number;
   updated_at: string | null;
 };
-
-function yardKey(value: string): '' | 'clare' | 'cadillac' {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return normalized === 'clare' || normalized === 'cadillac' ? normalized : '';
-}
 
 async function session(request: Request) {
   const user = await getSessionUser(env.DB, request);
@@ -52,13 +54,14 @@ export async function GET(request: Request) {
         ORDER BY id
       `).all<YardRow>(),
       env.DB.prepare(`
-        SELECT status,message,positions,clare,cadillac,outside,clare_zone_found,cadillac_zone_found,updated_at
+        SELECT status,message,positions,clare,cadillac,gr,taylor,boyne,outside,
+               clare_zone_found,cadillac_zone_found,gr_zone_found,taylor_zone_found,boyne_zone_found,updated_at
         FROM geotab_yard_sync_state WHERE id = 1
       `).first<SyncRow>(),
     ]);
 
     const byEquipment: Record<string, {
-      currentYard: '' | 'clare' | 'cadillac';
+      currentYard: YardSelection;
       zoneName: string;
       latitude: number | null;
       longitude: number | null;
@@ -68,7 +71,7 @@ export async function GET(request: Request) {
 
     for (const row of rows.results) {
       byEquipment[String(row.id)] = {
-        currentYard: yardKey(row.current_yard),
+        currentYard: normalizeYard(row.current_yard),
         zoneName: row.current_yard_zone ?? '',
         latitude: row.geotab_latitude == null ? null : Number(row.geotab_latitude),
         longitude: row.geotab_longitude == null ? null : Number(row.geotab_longitude),
@@ -85,9 +88,15 @@ export async function GET(request: Request) {
         positions: Number(sync.positions ?? 0),
         clare: Number(sync.clare ?? 0),
         cadillac: Number(sync.cadillac ?? 0),
+        gr: Number(sync.gr ?? 0),
+        taylor: Number(sync.taylor ?? 0),
+        boyne: Number(sync.boyne ?? 0),
         outside: Number(sync.outside ?? 0),
         clareZoneFound: Boolean(sync.clare_zone_found),
         cadillacZoneFound: Boolean(sync.cadillac_zone_found),
+        grZoneFound: Boolean(sync.gr_zone_found),
+        taylorZoneFound: Boolean(sync.taylor_zone_found),
+        boyneZoneFound: Boolean(sync.boyne_zone_found),
         updatedAt: sync.updated_at ?? '',
       } : null,
     }, { headers: { 'cache-control': 'no-store' } });

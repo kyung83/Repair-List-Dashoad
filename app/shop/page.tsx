@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
+import { yardLabel } from "@/lib/yards";
 
 type User = {
   id:number; username:string; displayName:string;
@@ -41,7 +42,7 @@ function unitKey(repair:Repair){if(repair.equipmentId!=null)return `equipment-${
 function sameUnit(left:Repair,right:Repair){return unitKey(left)===unitKey(right)}
 function groupByUnit(repairs:Repair[]){const groups=new Map<string,UnitGroup>();for(const repair of repairs){const key=unitKey(repair),existing=groups.get(key);if(existing)existing.repairs.push(repair);else groups.set(key,{key,unit:repair.unit,equipmentId:repair.equipmentId,repairs:[repair]})}return [...groups.values()]}
 function numberText(value:number){return Number.isInteger(value)?String(value):value.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")}
-function prettyYard(value:string|undefined){const y=String(value||"").toLowerCase();return y?y[0].toUpperCase()+y.slice(1):"Shop"}
+function prettyYard(value:string|undefined){return yardLabel(value)||"Shop"}
 
 export default function ShopPage(){
   const[data,setData]=useState<ShopData|null>(null),[view,setView]=useState<View>("mine"),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[now,setNow]=useState(Date.now()),[selectedId,setSelectedId]=useState<string|null>(null),[partId,setPartId]=useState(""),[partQuantity,setPartQuantity]=useState(1);

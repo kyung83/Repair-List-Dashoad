@@ -8,8 +8,9 @@ import {
   releaseRepairPartRequests,
   requestPartForRepair,
 } from '@/lib/parts-lifecycle';
+import { normalizeYard, yardLabel, type YardSelection } from '@/lib/yards';
 
-type Yard = '' | 'clare' | 'cadillac';
+type Yard = YardSelection;
 type ShopRepair = {
   id: string;
   equipmentId: number | null;
@@ -23,11 +24,6 @@ type ShopPart = { id:number; partNumber:string; description:string; quantityOnHa
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   return match ? Number(match[1]) : 0;
-}
-
-function normalizeYard(value: unknown): Yard {
-  const yard = String(value ?? '').trim().toLowerCase();
-  return yard === 'clare' || yard === 'cadillac' ? yard : '';
 }
 
 function deferred(status: unknown) {
@@ -94,7 +90,7 @@ async function validateYardPickup(request: Request, body: Record<string, unknown
   }
   const repairYard = repair.equipment_id !== null ? normalizeYard(repair.current_yard) : normalizeYard(repair.repair_location);
   if (repairYard !== yard) {
-    const where = repairYard ? `${repairYard[0].toUpperCase()}${repairYard.slice(1)} yard` : 'outside your assigned yard';
+    const where = repairYard ? `${yardLabel(repairYard)} yard` : 'outside your assigned yard';
     return Response.json({ error: `This repair is ${where}. You can only pick up unassigned work in your assigned yard.` }, { status: 403 });
   }
   return null;
