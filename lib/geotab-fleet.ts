@@ -167,26 +167,20 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     currentGroups(auth),
   ]);
 
-  if (!devices.length) throw new Error('Geotab returned no devices; refusing to change active fleet state.');
+  if (!devices.length) throw new Error('Geotab returned no devices; refusing to update fleet metadata.');
   const activeDevices = devices.filter((device) => {
     const id = objectId(device);
     return id && id.toLowerCase() !== 'nodeviceid' && isCurrentlyActiveDevice(device);
   });
-  if (!activeDevices.length) throw new Error('Geotab returned no currently active devices; refusing to deactivate the fleet.');
+  if (!activeDevices.length) throw new Error('Geotab returned no currently active devices; refusing to treat this response as authoritative.');
 
   const trailerGroupIds = groups ? buildTrailerGroupIds(groups) : new Set<string>();
 
-  // Geotab keeps historical devices in the Device collection. Reset Device-only
-  // rows to inactive first, then reactivate only current Devices. A unit with a
-  // Geotab Trailer identity is owned by the trailer feed and must not be
-  // deactivated or reclassified by this Device sync.
-  await env.DB.prepare(`
-    UPDATE equipment
-    SET active = 0, updated_at = CURRENT_TIMESTAMP
-    WHERE geotab_device_id IS NOT NULL
-      AND (geotab_trailer_id IS NULL OR TRIM(geotab_trailer_id) = '')
-  `).run();
-
+  // IMPORTANT: absence from the Device response is not an archive signal. A
+  // service account can return a partial collection when permissions or scope
+  // change. Only devices Geotab explicitly reports as currently active are
+  // upserted/reactivated here. Equipment lifecycle archival remains a deliberate
+  // Master Equipment action tracked by archived_at/archive_reason.
   const statements: D1PreparedStatement[] = [];
   let vehicles = 0;
   let trailerDevices = 0;
