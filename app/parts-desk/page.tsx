@@ -15,9 +15,13 @@ type Group = {
   requested:number; reserved:number; used:number; shortage:number; waitingJobs:Job[]; stock:Stock|null;
 };
 type LowStock = Stock & { partId:number; partNumber:string; description:string; warehouseCode:string; warehouseName:string; reorderSuggested:number };
+type UnmatchedPart = {
+  id:number;repairId:string;requestedText:string;requestedQuantity:number;warehouseCode:string;
+  unit:string;assignedTo:string;priority:string;outOfService:boolean;createdAt:string;updatedAt:string;
+};
 type DeskData = {
-  jobShortages:Group[]; requests:Job[]; lowStock:LowStock[];
-  summary:{shortageLines:number;waitingJobs:number;readyJobs:number;lowStockLines:number}; updatedAt:string;
+  jobShortages:Group[]; requests:Job[]; lowStock:LowStock[]; unmatchedPartRequests?:UnmatchedPart[];
+  summary:{shortageLines:number;waitingJobs:number;readyJobs:number;lowStockLines:number;unmatchedParts?:number}; updatedAt:string;
 };
 
 const n=(value:number)=>Number.isInteger(value)?String(value):value.toFixed(2).replace(/0+$/,"").replace(/\.$/,"");
@@ -46,21 +50,41 @@ export default function PartsDeskPage(){
     }catch(e){setMessage(e instanceof Error?e.message:'Parts action failed.')}finally{setBusy('')}
   }
 
+  async function markUnmatchedHandled(requestId:number){
+    const key=`unmatched:${requestId}`;setBusy(key);setMessage('');
+    try{
+      const r=await fetch('/api/parts-desk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'handleUnmatched',requestId})});
+      const p=await r.json() as{ok?:boolean;error?:string};
+      if(!r.ok||!p.ok)throw new Error(p.error||'Unmatched request could not be updated.');
+      setMessage('Unmatched part request marked handled.');await load();
+    }catch(e){setMessage(e instanceof Error?e.message:'Unmatched request could not be updated.')}finally{setBusy('')}
+  }
+
   const groups=useMemo(()=>data?.jobShortages.filter(g=>yard==='ALL'||g.warehouseCode===yard)??[],[data,yard]);
   const lows=useMemo(()=>data?.lowStock.filter(g=>yard==='ALL'||g.warehouseCode===yard)??[],[data,yard]);
   const ready=useMemo(()=>data?.requests.filter(r=>(yard==='ALL'||r.warehouseCode===yard)&&r.reservedQuantity>0)??[],[data,yard]);
+  const unmatched=useMemo(()=>(data?.unmatchedPartRequests??[]).filter(r=>yard==='ALL'||r.warehouseCode===yard),[data,yard]);
 
   return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'36px 34px 100px',color:'#182331'}}>
     <ModuleTabs module="parts" />
     <header style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'end',flexWrap:'wrap'}}>
-      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#0d1b2b'}}>Parts Desk</h1><p style={{margin:0,color:'#667482'}}>One queue for repair shortages, receiving, reservations, and yard-level replenishment.</p></div>
+      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#0d1b2b'}}>Parts Desk</h1><p style={{margin:0,color:'#667482'}}>One queue for repair shortages, unknown part requests, receiving, reservations, and yard-level replenishment.</p></div>
       <div style={{display:'flex',gap:7}}>{['ALL','CLARE','CADILLAC'].map(code=><button key={code} onClick={()=>setYard(code)} style={yard===code?activeTab:tab}>{code==='ALL'?'All Yards':code[0]+code.slice(1).toLowerCase()}</button>)}</div>
     </header>
     {message&&<div style={notice}>{message}</div>}
 
     <section style={metrics}>{[
-      ['JOB SHORTAGES',data?.summary.shortageLines??0],['WAITING JOBS',data?.summary.waitingJobs??0],['READY / RESERVED',data?.summary.readyJobs??0],['LOW STOCK',data?.summary.lowStockLines??0]
+      ['UNMATCHED PARTS',data?.summary.unmatchedParts??0],['JOB SHORTAGES',data?.summary.shortageLines??0],['WAITING JOBS',data?.summary.waitingJobs??0],['READY / RESERVED',data?.summary.readyJobs??0],['LOW STOCK',data?.summary.lowStockLines??0]
     ].map(([label,value])=><article key={String(label)} style={metric}><span>{label}</span><strong>{value}</strong></article>)}</section>
+
+    <section style={panel}><div style={panelHead}><div><p style={eyebrow}>NEEDS IDENTIFICATION</p><h2 style={title}>Technician requested parts not in the catalog</h2></div><span style={muted}>{unmatched.length} open request{unmatched.length===1?'':'s'}</span></div>
+      {!unmatched.length?<div style={empty}>No unmatched technician part requests in this yard.</div>:<div style={{display:'grid',gap:9}}>{unmatched.map(item=><article key={item.id} style={unmatchedCard}>
+        <div style={{minWidth:0}}><strong style={{fontSize:18,color:'#0d1b2b'}}>{item.requestedText}</strong><div style={muted}>Typed by technician · Unit {item.unit||'—'} · {item.assignedTo||'Unassigned'} · {item.warehouseCode||'Unknown yard'}</div></div>
+        <div style={{textAlign:'center'}}><span style={smallLabel}>QTY</span><strong style={{display:'block',fontSize:22}}>{n(item.requestedQuantity)}</strong></div>
+        <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
+        <button disabled={Boolean(busy)} onClick={()=>void markUnmatchedHandled(item.id)} style={darkButton}>{busy===`unmatched:${item.id}`?'Saving…':'Mark handled'}</button>
+      </article>)}</div>}
+    </section>
 
     <section style={panel}><div style={panelHead}><div><p style={eyebrow}>REORDER QUEUE</p><h2 style={title}>Waiting on parts</h2></div><span style={muted}>{groups.length} part / yard line{groups.length===1?'':'s'}</span></div>
       {!groups.length?<div style={empty}>No repair shortages in this yard.</div>:groups.map(group=>{
@@ -84,13 +108,15 @@ export default function PartsDeskPage(){
 const eyebrow={margin:0,color:'#f47b20',fontSize:11,fontWeight:950,letterSpacing:'.14em'} as const;
 const title={margin:'5px 0 0',fontSize:22,color:'#0d1b2b'} as const;
 const muted={color:'#667482',fontSize:12} as const;
+const smallLabel={fontSize:10,color:'#77838d',fontWeight:900,letterSpacing:'.08em'} as const;
 const tab={border:'1px solid #cbd3da',borderRadius:999,padding:'9px 13px',background:'white',color:'#263746',fontWeight:900,cursor:'pointer'} as const;
 const activeTab={...tab,background:'#0d1b2b',borderColor:'#0d1b2b',color:'white'} as const;
 const notice={marginTop:16,padding:12,border:'1px solid #efc16c',borderRadius:9,background:'#fff8e6'} as const;
-const metrics={marginTop:18,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:10} as const;
+const metrics={marginTop:18,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10} as const;
 const metric={padding:16,border:'1px solid #dde4e9',borderRadius:11,background:'white'} as const;
 const panel={marginTop:16,padding:18,border:'1px solid #dce2e7',borderRadius:13,background:'white'} as const;
 const panelHead={display:'flex',justifyContent:'space-between',gap:12,alignItems:'end',flexWrap:'wrap',marginBottom:12} as const;
+const unmatchedCard={display:'grid',gridTemplateColumns:'minmax(220px,1fr) 70px 110px auto',gap:12,alignItems:'center',padding:14,border:'2px solid #e1b256',borderRadius:10,background:'#fff9ed'} as const;
 const queueCard={padding:15,border:'1px solid #e0e5e9',borderRadius:11,background:'#fbfcfd',marginTop:10} as const;
 const warningPill={display:'inline-flex',alignItems:'center',padding:'6px 10px',borderRadius:999,background:'#fff0d7',color:'#9a5a05',fontWeight:950,fontSize:12} as const;
 const stockGrid={display:'grid',gridTemplateColumns:'repeat(4,minmax(90px,1fr))',gap:8,marginTop:12} as const;
