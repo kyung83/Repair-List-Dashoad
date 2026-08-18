@@ -435,10 +435,15 @@ export async function GET(request: Request) {
 
   if (user && (user.role === 'mechanic' || user.role === 'manager')) {
     const yard = await assignedYard(user.id);
-    if (yard) {
+    if (user.role === 'mechanic' && user.technicianId) {
+      const technicianId = Number(user.technicianId);
+      repairs = repairs.filter((repair) => {
+        const assignedToMe = Number(repair.technicianId ?? 0) === technicianId;
+        if (assignedToMe || repair.id === activeRepairId) return true;
+        return Boolean(yard) && physicalYard(repair, yards) === yard;
+      });
+    } else if (yard) {
       repairs = repairs.filter((repair) => physicalYard(repair, yards) === yard || repair.id === activeRepairId);
-    } else if (user.role === 'mechanic' && user.technicianId) {
-      repairs = repairs.filter((repair) => Number(repair.technicianId ?? 0) === Number(user.technicianId) || repair.id === activeRepairId);
     } else {
       repairs = [];
     }
