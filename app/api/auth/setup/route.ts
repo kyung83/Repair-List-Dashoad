@@ -19,8 +19,10 @@ type PmImportReceipt = {
   unresolved_events: number;
   applied_at: string;
 };
+type WorkingManagerLinks = { linked: number };
+type WorkingManagerReceipt = { applied_at: string };
 
-const RELEASE = '2026-08-18-pm-import-0077';
+const RELEASE = '2026-08-18-working-managers-0078';
 
 async function deploymentHealth(db: D1Database) {
   const empty = {
@@ -32,6 +34,7 @@ async function deploymentHealth(db: D1Database) {
     '0064': false,
     '0065': false,
     '0077': false,
+    '0078': false,
   };
   try {
     const [
@@ -43,6 +46,8 @@ async function deploymentHealth(db: D1Database) {
       equipmentColumns,
       objects,
       pmImportReceipt,
+      workingManagerLinks,
+      workingManagerReceipt,
     ] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
@@ -76,7 +81,8 @@ async function deploymentHealth(db: D1Database) {
           'trg_geotab_assignment_reject_merged_update',
           'trg_equipment_prevent_restore_merged',
           'pm_import_unresolved_20260818',
-          'pm_import_receipts'
+          'pm_import_receipts',
+          'working_manager_feature_receipts'
         )
       `).all<{ type: string; name: string }>(),
       db.prepare(`
@@ -85,6 +91,22 @@ async function deploymentHealth(db: D1Database) {
         FROM pm_import_receipts
         WHERE import_batch = 'pm-sheet-2026-08-18'
       `).first<PmImportReceipt>(),
+      db.prepare(`
+        SELECT COUNT(*) AS linked
+        FROM app_users u
+        JOIN technicians t ON t.id = u.technician_id AND t.active = 1
+        WHERE u.active = 1 AND u.role = 'manager'
+          AND (
+            (u.username = 'jeffw' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jeff Wittig'))
+            OR
+            (u.username = 'jesseg' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jesse Graham'))
+          )
+      `).first<WorkingManagerLinks>(),
+      db.prepare(`
+        SELECT applied_at
+        FROM working_manager_feature_receipts
+        WHERE feature_key = 'working-manager-technician-links-0078'
+      `).first<WorkingManagerReceipt>(),
     ]);
 
     const repairNames = new Set(repairColumns.results.map((row) => row.name));
@@ -112,6 +134,10 @@ async function deploymentHealth(db: D1Database) {
         && Number(pmImportReceipt.future_repairs) === 54
         && Number(pmImportReceipt.unresolved_events) === 1,
     } : null;
+    const workingManagers = {
+      linked: Number(workingManagerLinks?.linked ?? 0),
+      featureAppliedAt: workingManagerReceipt?.applied_at ?? null,
+    };
 
     const migrations = {
       '0059': objectNames.has('unmatched_part_requests'),
@@ -156,12 +182,15 @@ async function deploymentHealth(db: D1Database) {
       '0077': objectNames.has('pm_import_unresolved_20260818')
         && objectNames.has('pm_import_receipts')
         && pmImport?.ok === true,
+      '0078': objectNames.has('working_manager_feature_receipts')
+        && Boolean(workingManagerReceipt?.applied_at),
     };
     return {
       ok: Object.values(migrations).every(Boolean),
       release: RELEASE,
       migrations,
       pmImport,
+      workingManagers,
       checkedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -171,6 +200,7 @@ async function deploymentHealth(db: D1Database) {
       release: RELEASE,
       migrations: empty,
       pmImport: null,
+      workingManagers: null,
       error: 'schema_check_failed',
       checkedAt: new Date().toISOString(),
     };

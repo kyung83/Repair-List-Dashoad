@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { GET as originalGET, POST as originalPOST } from './original';
+import { assignToMeFromBoard } from './self-assign';
 
 type BoardRepair = {
   id:string; source:string; issue:string; status:string; technicianId:number|null; activeTimer:unknown;
@@ -119,7 +120,7 @@ export async function GET(request: Request) {
     unassigned: repairs.filter((row) => row.technicianId === null).length,
     activeLabor: repairs.filter((row) => row.activeTimer !== null).length,
   };
-  return Response.json(payload, { status: response.status, headers: { 'cache-control': 'no-store' } });
+  return Response.json(payload, { status: response.status, headers: { 'cache-control':'no-store' } });
 }
 
 export async function POST(request: Request) {
@@ -131,8 +132,18 @@ export async function POST(request: Request) {
     // The original handler owns validation for malformed/non-JSON requests.
   }
 
+  if (body && String(body.action ?? '') === 'assignToMe') {
+    try {
+      const result = await assignToMeFromBoard(request, body);
+      return Response.json(result, { headers:{ 'cache-control':'no-store' } });
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_self_assign_failed', error:String(error) }));
+      return Response.json({ error:error instanceof Error ? error.message : 'Work could not be assigned.' }, { status:400 });
+    }
+  }
+
   if (body && await isDeferredRepair(body.repairId ?? body.id)) {
-    return Response.json({ error: 'This repair is intentionally saved for its next PM/Annual.' }, { status: 400 });
+    return Response.json({ error: 'This repair is intentionally saved for its next PM/Annual.' }, { status:400 });
   }
 
   if (body && String(body.action ?? '') === 'markDvirRepaired') {

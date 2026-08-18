@@ -81,7 +81,7 @@ async function mechanicCanWrite(request: Request, pathname: string) {
   // instead of blocking valid Shop and maintenance actions at the Worker layer.
   if (ASSIGNED_MAINTENANCE_WRITE_PATHS.has(pathname) || TECHNICIAN_SHOP_WRITE_PATHS.has(pathname)) return true;
 
-  if (pathname !== '/api/work-orders' && pathname !== '/api/repairs' && pathname !== '/api/shop' && pathname !== '/api/pm-followups') return false;
+  if (pathname !== '/api/work-orders' && pathname !== '/api/repairs' && pathname !== '/api/shop' && pathname !== '/api/pm-followups' && pathname !== '/api/repair-board') return false;
   let action = '';
   try {
     const body = await request.clone().json() as Record<string, unknown>;
@@ -90,6 +90,7 @@ async function mechanicCanWrite(request: Request, pathname: string) {
     return false;
   }
   if (pathname === '/api/shop') return TECHNICIAN_SHOP_ACTIONS.has(action);
+  if (pathname === '/api/repair-board') return action === 'assignToMe';
   if (pathname === '/api/pm-followups') return action === 'addNextPmRepair' || action === 'completeNextPmRepair' || action === 'deferNextPmRepair' || action === 'cancelNextPmRepair';
   if (pathname === '/api/repairs') return action === 'saveRepair' || action === 'completeRepair' || action === 'markRepaired';
   return action === 'completeRepair' || action === 'usePart' || action === 'addLabor';
