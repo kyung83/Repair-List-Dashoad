@@ -20,6 +20,7 @@ type PmImportReceipt = {
   applied_at: string;
 };
 type WorkingManagerLinks = { linked: number };
+type WorkingManagerReceipt = { applied_at: string };
 
 const RELEASE = '2026-08-18-working-managers-0078';
 
@@ -46,6 +47,7 @@ async function deploymentHealth(db: D1Database) {
       objects,
       pmImportReceipt,
       workingManagerLinks,
+      workingManagerReceipt,
     ] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
@@ -79,7 +81,8 @@ async function deploymentHealth(db: D1Database) {
           'trg_geotab_assignment_reject_merged_update',
           'trg_equipment_prevent_restore_merged',
           'pm_import_unresolved_20260818',
-          'pm_import_receipts'
+          'pm_import_receipts',
+          'working_manager_feature_receipts'
         )
       `).all<{ type: string; name: string }>(),
       db.prepare(`
@@ -99,6 +102,11 @@ async function deploymentHealth(db: D1Database) {
             (u.username = 'jesseg' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jesse Graham'))
           )
       `).first<WorkingManagerLinks>(),
+      db.prepare(`
+        SELECT applied_at
+        FROM working_manager_feature_receipts
+        WHERE feature_key = 'working-manager-technician-links-0078'
+      `).first<WorkingManagerReceipt>(),
     ]);
 
     const repairNames = new Set(repairColumns.results.map((row) => row.name));
@@ -128,7 +136,7 @@ async function deploymentHealth(db: D1Database) {
     } : null;
     const workingManagers = {
       linked: Number(workingManagerLinks?.linked ?? 0),
-      ok: Number(workingManagerLinks?.linked ?? 0) === 2,
+      featureAppliedAt: workingManagerReceipt?.applied_at ?? null,
     };
 
     const migrations = {
@@ -174,7 +182,8 @@ async function deploymentHealth(db: D1Database) {
       '0077': objectNames.has('pm_import_unresolved_20260818')
         && objectNames.has('pm_import_receipts')
         && pmImport?.ok === true,
-      '0078': workingManagers.ok,
+      '0078': objectNames.has('working_manager_feature_receipts')
+        && Boolean(workingManagerReceipt?.applied_at),
     };
     return {
       ok: Object.values(migrations).every(Boolean),
