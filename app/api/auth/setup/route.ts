@@ -10,12 +10,67 @@ import {
 
 type AuthEnv = typeof env & { AUTH_BOOTSTRAP_TOKEN?: string };
 
+const RELEASE = '2026-08-18-work-order-review-0062';
+
+async function deploymentHealth(db: D1Database) {
+  const empty = { '0059': false, '0060': false, '0061': false, '0062': false };
+  try {
+    const [repairColumns, dvirColumns, objects] = await Promise.all([
+      db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
+      db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
+      db.prepare(`
+        SELECT type, name
+        FROM sqlite_master
+        WHERE name IN (
+          'unmatched_part_requests',
+          'trg_geotab_truck_require_archive_state',
+          'trg_dvir_keep_local_repair',
+          'trg_dvir_keep_local_repair_row'
+        )
+      `).all<{ type: string; name: string }>(),
+    ]);
+
+    const repairNames = new Set(repairColumns.results.map((row) => row.name));
+    const dvirNames = new Set(dvirColumns.results.map((row) => row.name));
+    const objectNames = new Set(objects.results.map((row) => row.name));
+    const migrations = {
+      '0059': objectNames.has('unmatched_part_requests'),
+      '0060': objectNames.has('trg_geotab_truck_require_archive_state'),
+      '0061': dvirNames.has('local_repaired')
+        && objectNames.has('trg_dvir_keep_local_repair')
+        && objectNames.has('trg_dvir_keep_local_repair_row'),
+      '0062': repairNames.has('reviewed_at')
+        && repairNames.has('reviewed_by_user_id')
+        && repairNames.has('review_note'),
+    };
+    return {
+      ok: Object.values(migrations).every(Boolean),
+      release: RELEASE,
+      migrations,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'deployment_health_failed', error: String(error) }));
+    return {
+      ok: false,
+      release: RELEASE,
+      migrations: empty,
+      error: 'schema_check_failed',
+      checkedAt: new Date().toISOString(),
+    };
+  }
+}
+
 export async function GET() {
   const runtime = env as AuthEnv;
-  const count = await appUserCount(runtime.DB);
+  const [count, deployment] = await Promise.all([
+    appUserCount(runtime.DB),
+    deploymentHealth(runtime.DB),
+  ]);
   return Response.json({
     setupRequired: count === 0,
     bootstrapConfigured: Boolean(runtime.AUTH_BOOTSTRAP_TOKEN),
+    deployment,
   }, { headers: { 'cache-control': 'no-store' } });
 }
 
