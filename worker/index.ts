@@ -36,6 +36,23 @@ const ASSIGNED_MAINTENANCE_WRITE_PATHS = new Set([
   '/api/maintenance-signature',
   '/api/maintenance-subrepairs',
 ]);
+const TECHNICIAN_SHOP_ACTIONS = new Set([
+  'openRepair',
+  'claimRepair',
+  'startLabor',
+  'stopLabor',
+  'usePart',
+  'useReservedPart',
+  'removePlannedPart',
+  'completeRepair',
+  'startUnit',
+  'switchRepair',
+  'repairOutcome',
+  'doneUnit',
+]);
+const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
+  '/api/shop/found-repair',
+]);
 
 function isStaticAsset(pathname: string) {
   return pathname.startsWith('/_next/') || pathname.startsWith('/_vinext/') || pathname.startsWith('/assets/') || pathname.startsWith('/static/') || /\.(?:css|js|mjs|map|woff2?|ttf|otf|ico|svg|png|jpe?g|gif|webp|avif)$/i.test(pathname);
@@ -58,11 +75,10 @@ function accessDenied(url: URL, message = 'Your clearance does not allow this ac
 }
 
 async function mechanicCanWrite(request: Request, pathname: string) {
-  // These maintenance routes perform their own assignment/link validation before
-  // allowing a technician to change the PM/Annual, its findings, parts, or signoff.
-  // Let the assigned technician reach those route-level checks instead of blocking
-  // them at the Worker clearance layer.
-  if (ASSIGNED_MAINTENANCE_WRITE_PATHS.has(pathname)) return true;
+  // These routes perform their own assignment/link validation before allowing a
+  // technician to mutate work. Let the assigned technician reach route-level checks
+  // instead of blocking valid Shop and maintenance actions at the Worker layer.
+  if (ASSIGNED_MAINTENANCE_WRITE_PATHS.has(pathname) || TECHNICIAN_SHOP_WRITE_PATHS.has(pathname)) return true;
 
   if (pathname !== '/api/work-orders' && pathname !== '/api/repairs' && pathname !== '/api/shop' && pathname !== '/api/pm-followups') return false;
   let action = '';
@@ -72,7 +88,7 @@ async function mechanicCanWrite(request: Request, pathname: string) {
   } catch {
     return false;
   }
-  if (pathname === '/api/shop') return action === 'openRepair' || action === 'claimRepair' || action === 'startLabor' || action === 'stopLabor' || action === 'usePart' || action === 'removePlannedPart' || action === 'completeRepair';
+  if (pathname === '/api/shop') return TECHNICIAN_SHOP_ACTIONS.has(action);
   if (pathname === '/api/pm-followups') return action === 'addNextPmRepair' || action === 'completeNextPmRepair' || action === 'deferNextPmRepair' || action === 'cancelNextPmRepair';
   if (pathname === '/api/repairs') return action === 'saveRepair' || action === 'completeRepair' || action === 'markRepaired';
   return action === 'completeRepair' || action === 'usePart' || action === 'addLabor';
