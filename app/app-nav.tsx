@@ -54,6 +54,7 @@ export default function AppNav(){
   const primary=user?.role==='mechanic'?mechanicPrimary:user?.role==='viewer'?viewerPrimary:managerPrimary;
   const more:Link[] = user?.role==='admin' ? [
     { href:"/admin/users", label:"Users & Access" },
+    { href:"/admin/geotab-review", label:"Geotab Review" },
     { href:"/admin/history-import", label:"History Import" },
   ] : [];
 
