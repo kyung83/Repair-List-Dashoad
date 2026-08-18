@@ -235,7 +235,7 @@ export async function POST(request: Request) {
       if (!geotabDeviceId) throw new Error('Geotab device ID is required.');
       if (!Number.isInteger(equipmentId) || equipmentId <= 0) throw new Error('Choose a valid equipment record.');
 
-      const [queue, equipment, activeOwner] = await Promise.all([
+      const [queue, equipment, activeOwner, currentAssignmentOwner] = await Promise.all([
         env.DB.prepare(`
           SELECT geotab_device_id, serial_number, geotab_name, vin
           FROM geotab_reconciliation_queue
@@ -251,10 +251,20 @@ export async function POST(request: Request) {
           WHERE geotab_device_id = ? AND active = 1 AND id <> ?
           ORDER BY id LIMIT 1
         `).bind(geotabDeviceId, equipmentId).first<{ id: number; unit: string }>(),
+        env.DB.prepare(`
+          SELECT d.equipment_id, e.unit
+          FROM equipment_geotab_devices d
+          JOIN equipment e ON e.id = d.equipment_id
+          WHERE d.geotab_device_id = ? AND d.current = 1 AND d.equipment_id <> ?
+          ORDER BY d.id DESC LIMIT 1
+        `).bind(geotabDeviceId, equipmentId).first<{ equipment_id: number; unit: string }>(),
       ]);
       if (!queue) throw new Error('That Geotab review item is no longer open.');
       if (!equipment) throw new Error('Equipment record was not found.');
       if (equipment.archived_at) throw new Error('Restore the archived equipment record before linking a live Geotab device to it.');
+      if (currentAssignmentOwner) {
+        throw new Error(`This device is already assigned to ${currentAssignmentOwner.unit}. Resolve that assignment before moving it.`);
+      }
       if (activeOwner) {
         throw new Error(`This device is already active on ${activeOwner.unit}. Resolve that historical fork before moving it.`);
       }
