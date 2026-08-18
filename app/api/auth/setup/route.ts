@@ -19,8 +19,9 @@ type PmImportReceipt = {
   unresolved_events: number;
   applied_at: string;
 };
+type WorkingManagerLinks = { linked: number };
 
-const RELEASE = '2026-08-18-pm-import-0077';
+const RELEASE = '2026-08-18-working-managers-0078';
 
 async function deploymentHealth(db: D1Database) {
   const empty = {
@@ -32,6 +33,7 @@ async function deploymentHealth(db: D1Database) {
     '0064': false,
     '0065': false,
     '0077': false,
+    '0078': false,
   };
   try {
     const [
@@ -43,6 +45,7 @@ async function deploymentHealth(db: D1Database) {
       equipmentColumns,
       objects,
       pmImportReceipt,
+      workingManagerLinks,
     ] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
@@ -85,6 +88,17 @@ async function deploymentHealth(db: D1Database) {
         FROM pm_import_receipts
         WHERE import_batch = 'pm-sheet-2026-08-18'
       `).first<PmImportReceipt>(),
+      db.prepare(`
+        SELECT COUNT(*) AS linked
+        FROM app_users u
+        JOIN technicians t ON t.id = u.technician_id AND t.active = 1
+        WHERE u.active = 1 AND u.role = 'manager'
+          AND (
+            (u.username = 'jeffw' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jeff Wittig'))
+            OR
+            (u.username = 'jesseg' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jesse Graham'))
+          )
+      `).first<WorkingManagerLinks>(),
     ]);
 
     const repairNames = new Set(repairColumns.results.map((row) => row.name));
@@ -112,6 +126,10 @@ async function deploymentHealth(db: D1Database) {
         && Number(pmImportReceipt.future_repairs) === 54
         && Number(pmImportReceipt.unresolved_events) === 1,
     } : null;
+    const workingManagers = {
+      linked: Number(workingManagerLinks?.linked ?? 0),
+      ok: Number(workingManagerLinks?.linked ?? 0) === 2,
+    };
 
     const migrations = {
       '0059': objectNames.has('unmatched_part_requests'),
@@ -156,12 +174,14 @@ async function deploymentHealth(db: D1Database) {
       '0077': objectNames.has('pm_import_unresolved_20260818')
         && objectNames.has('pm_import_receipts')
         && pmImport?.ok === true,
+      '0078': workingManagers.ok,
     };
     return {
       ok: Object.values(migrations).every(Boolean),
       release: RELEASE,
       migrations,
       pmImport,
+      workingManagers,
       checkedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -171,6 +191,7 @@ async function deploymentHealth(db: D1Database) {
       release: RELEASE,
       migrations: empty,
       pmImport: null,
+      workingManagers: null,
       error: 'schema_check_failed',
       checkedAt: new Date().toISOString(),
     };
