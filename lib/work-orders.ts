@@ -34,6 +34,14 @@ function repairNumber(value:unknown){const match=String(value??'').match(/^repai
 function finiteNumber(value:unknown,fallback=0){const number=Number(value);return Number.isFinite(number)?number:fallback;}
 function completeStatus(value:unknown){return String(value??'').toLowerCase().includes('complete');}
 function timestamp(value:string|null|undefined){return String(value??'').trim();}
+function detroitDate(value:string){
+  const normalized=value.includes('T')?value:value.replace(' ','T')+'Z';
+  const date=new Date(normalized);
+  if(Number.isNaN(date.getTime()))return value.slice(0,10)||'unknown-date';
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Detroit',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+  const values=new Map(parts.map((part)=>[part.type,part.value]));
+  return `${values.get('year')}-${values.get('month')}-${values.get('day')}`;
+}
 
 export async function getWorkOrderData(db:D1Database){
  const [repairsResult,techniciansResult,partsResult,usageResult,dvirResult,laborResult,noteResult,defaultLaborRate]=await Promise.all([
@@ -51,7 +59,7 @@ export async function getWorkOrderData(db:D1Database){
   db.prepare(`SELECT id,name,email,phone FROM technicians WHERE active=1 ORDER BY name`).all<TechnicianRow>(),
   db.prepare(`SELECT id,part_number,description,quantity_on_hand,location FROM parts WHERE active=1 ORDER BY description,part_number`).all<PartRow>(),
   db.prepare(`
-    SELECT rp.repair_id,rp.part_id,p.part_number,p.description,rp.quantity,COALESCE(rp.unit_cost,p.unit_cost,0) AS unit_cost
+    SELECT rp.repair_id,rp.part_id,p.part_number,p.description,rp.quantity,rp.unit_cost AS unit_cost
     FROM repair_parts rp
     JOIN parts p ON p.id=rp.part_id
     ORDER BY rp.created_at,rp.id
@@ -92,11 +100,13 @@ export async function getWorkOrderData(db:D1Database){
   const laborHours=laborEntries.length?recordedLaborHours:fallbackLaborHours;
   const laborCost=laborEntries.length?recordedLaborCost:fallbackLaborHours*fallbackLaborRate;
   const usedParts=(usageByRepair.get(row.id)??[]).map(u=>{
-    const unitCost=Number(u.unit_cost??0);
+    const costRecorded=u.unit_cost!==null&&u.unit_cost!==undefined;
+    const unitCost=costRecorded?Number(u.unit_cost):0;
     const quantity=Number(u.quantity);
-    return {partId:u.part_id,partNumber:u.part_number,description:u.description,quantity,unitCost,lineCost:quantity*unitCost};
+    return {partId:u.part_id,partNumber:u.part_number,description:u.description,quantity,unitCost,lineCost:quantity*unitCost,costRecorded};
   });
   const partCost=usedParts.reduce((sum,item)=>sum+item.lineCost,0);
+  const missingPartCostLines=usedParts.filter((item)=>!item.costRecorded).length;
   const outsideCost=Number(row.outside_cost??0);
   const technicianNotes=(notesByRepair.get(row.id)??[]).map(note=>({
     id:note.id,technicianId:note.technician_id,technician:note.technician_name??'Technician',detail:note.detail,createdAt:note.created_at
@@ -105,7 +115,7 @@ export async function getWorkOrderData(db:D1Database){
     id:`repair-${row.id}`,numericId:row.id,equipmentId:row.equipment_id,unit:row.unit,issue:row.title,status:row.status,
     partsText:row.parts_text??'',assignedTo:row.technician_name??row.driver??'',technicianId:row.technician_id,
     location:row.location??'',relatedGeotabDefectId:row.geotab_defect_id??'',laborHours,laborRate:fallbackLaborRate,laborCost,
-    outsideCost,partCost,totalCost:laborCost+partCost+outsideCost,usedParts,laborEntries,technicianNotes,
+    outsideCost,partCost,missingPartCostLines,totalCost:laborCost+partCost+outsideCost,usedParts,laborEntries,technicianNotes,
     completedAt:timestamp(row.completed_at),reviewedAt:timestamp(row.reviewed_at),reviewedBy:row.reviewer_name??'',reviewNote:row.review_note??'',updatedAt:row.updated_at,
   };
  });
@@ -114,7 +124,7 @@ export async function getWorkOrderData(db:D1Database){
  const packageMap=new Map<string,RepairView[]>();
  for(const repair of repairs){
   if(!completeStatus(repair.status))continue;
-  const completionDate=(repair.completedAt||repair.updatedAt).slice(0,10)||'unknown-date';
+  const completionDate=detroitDate(repair.completedAt||repair.updatedAt);
   const equipmentKey=repair.equipmentId===null?repair.unit:`equipment-${repair.equipmentId}`;
   const technicianKey=repair.technicianId===null?repair.assignedTo:`technician-${repair.technicianId}`;
   const key=`${equipmentKey}|${technicianKey}|${completionDate}`;
@@ -127,7 +137,7 @@ export async function getWorkOrderData(db:D1Database){
     .sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   const laborEntries=group.flatMap(item=>item.laborEntries.map(entry=>({...entry,repairId:item.id,repairIssue:item.issue})));
   const usedParts=group.flatMap(item=>item.usedParts.map(part=>({...part,repairId:item.id,repairIssue:item.issue})));
-  const completionDate=(group[0]?.completedAt||group[0]?.updatedAt||'').slice(0,10);
+  const completionDate=detroitDate(group[0]?.completedAt||group[0]?.updatedAt||'');
   const completedAt=group.map(item=>item.completedAt||item.updatedAt).sort().at(-1)??'';
   const reviewed=group.every(item=>Boolean(item.reviewedAt));
   const reviewedAt=reviewed?(group.map(item=>item.reviewedAt).filter(Boolean).sort().at(-1)??''):'';
@@ -136,11 +146,12 @@ export async function getWorkOrderData(db:D1Database){
   const laborCost=group.reduce((sum,item)=>sum+item.laborCost,0);
   const partCost=group.reduce((sum,item)=>sum+item.partCost,0);
   const outsideCost=group.reduce((sum,item)=>sum+item.outsideCost,0);
+  const missingPartCostLines=group.reduce((sum,item)=>sum+item.missingPartCostLines,0);
   return {
     id:`work-${key.replace(/[^a-z0-9_-]+/gi,'-')}`,
     repairIds,unit:group[0]?.unit??'',equipmentId:group[0]?.equipmentId??null,technician:group[0]?.assignedTo??'',
     technicianId:group[0]?.technicianId??null,completionDate,completedAt,reviewed,reviewedAt,reviewedBy,reviewNote,
-    repairs:group,technicianNotes:notes,laborEntries,usedParts,
+    repairs:group,technicianNotes:notes,laborEntries,usedParts,missingPartCostLines,
     laborHours:group.reduce((sum,item)=>sum+item.laborHours,0),laborCost,partCost,outsideCost,totalCost:laborCost+partCost+outsideCost,
   };
  }).sort((a,b)=>Number(a.reviewed)-Number(b.reviewed)||b.completedAt.localeCompare(a.completedAt));
