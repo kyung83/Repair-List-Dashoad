@@ -52,14 +52,59 @@ async function refreshRepairPartsText(repairId: number) {
     .bind(text, repairId).run();
 }
 
-export async function GET() {
+async function approveWorkOrder(request: Request, body: Record<string, unknown>) {
+  const user = await getSessionUser(env.DB, request);
+  if (!user) throw new Error('Authentication required.');
+  if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required to approve work orders.');
+
+  const rawIds = Array.isArray(body.repairIds) ? body.repairIds : [];
+  const ids = [...new Set(rawIds.map((value) => repairNumber(value)))];
+  if (!ids.length) throw new Error('Choose a completed work order to approve.');
+  if (ids.length > 100) throw new Error('Too many repairs were included in one work order review.');
+
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await env.DB.prepare(`
+    SELECT id, COALESCE(status,'') AS status
+    FROM repairs
+    WHERE id IN (${placeholders})
+  `).bind(...ids).all<{id:number;status:string}>();
+  if (rows.results.length !== ids.length || rows.results.some((row) => !row.status.toLowerCase().includes('complete'))) {
+    throw new Error('Only completed repairs can be approved from Work Order Review.');
+  }
+
+  const reviewNote = String(body.reviewNote ?? '').trim().slice(0, 1000);
+  const reviewer = user.displayName || user.username || `User ${user.id}`;
+  await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE repairs
+      SET reviewed_at = CURRENT_TIMESTAMP,
+          reviewed_by_user_id = ?,
+          review_note = ?
+      WHERE id IN (${placeholders})
+    `).bind(user.id, reviewNote, ...ids),
+    ...ids.map((id) => env.DB.prepare(`
+      INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
+      SELECT r.id, ?, r.technician_id, 'work_order_reviewed', ?
+      FROM repairs r WHERE r.id = ?
+    `).bind(user.id, `${reviewer} approved the completed work order${reviewNote ? `: ${reviewNote}` : '.'}`.slice(0, 500), id)),
+  ]);
+  return { ok:true, approved:true, repairIds:ids.map((id) => `repair-${id}`), reviewedBy:reviewer };
+}
+
+export async function GET(request: Request) {
   try {
+    const user = await getSessionUser(env.DB, request);
+    if (!user) throw new Error('Authentication required.');
     const data = await getWorkOrderData(env.DB);
     data.repairs = data.repairs.filter((repair) => !deferred(repair.status));
-    return Response.json(data, { headers: { 'cache-control': 'no-store' } });
+    return Response.json({
+      ...data,
+      user:{ id:user.id, displayName:user.displayName, role:user.role },
+      canApprove:user.role === 'manager' || user.role === 'admin',
+    }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'work_orders_get_failed', error: String(error) }));
-    return Response.json({ error: 'Work orders could not be loaded.' }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : 'Work orders could not be loaded.' }, { status: 500 });
   }
 }
 
@@ -67,13 +112,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     await enforceTechnicianScope(request, body);
-    if (String(body.action ?? '') === 'usePart') {
+    const action = String(body.action ?? '');
+    if (action === 'approveWorkOrder') return Response.json(await approveWorkOrder(request, body));
+    if (action === 'usePart') {
       const result = await usePartOnRepair(env.DB, body);
       const match = String(body.repairId ?? '').match(/^repair-(\d+)$/);
       if (match) await refreshRepairPartsText(Number(match[1]));
       return Response.json(result);
     }
-    if (String(body.action ?? '') === 'removePart') {
+    if (action === 'removePart') {
       const result = await removePartFromRepair(env.DB, body);
       await refreshRepairPartsText(result.repairId);
       return Response.json(result);
