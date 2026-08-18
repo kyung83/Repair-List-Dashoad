@@ -36,6 +36,23 @@ CREATE TABLE IF NOT EXISTS equipment_merge_events (
 CREATE INDEX IF NOT EXISTS idx_equipment_merge_events_target
 ON equipment_merge_events(target_equipment_id, merged_at);
 
+-- Once a row becomes a merged tombstone, remove its legacy matching keys so the
+-- live Geotab sync cannot rediscover it by device ID, VIN, or unit name. The
+-- immutable merge event above retains the original unit/device/VIN and full row
+-- snapshot for audit. Device-assignment history is moved to the canonical row.
+CREATE TRIGGER IF NOT EXISTS trg_equipment_sanitize_merged_identity
+AFTER UPDATE OF merged_into_equipment_id ON equipment
+WHEN OLD.merged_into_equipment_id IS NULL
+  AND NEW.merged_into_equipment_id IS NOT NULL
+BEGIN
+  UPDATE equipment
+  SET unit = 'MERGED-' || NEW.id || '-' || NEW.unit,
+      geotab_device_id = NULL,
+      vin = NULL,
+      updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.id;
+END;
+
 -- Defense in depth: a merged row is a historical tombstone. Even if another
 -- code path tries to restore it, the database refuses to make it active again.
 CREATE TRIGGER IF NOT EXISTS trg_equipment_prevent_restore_merged
