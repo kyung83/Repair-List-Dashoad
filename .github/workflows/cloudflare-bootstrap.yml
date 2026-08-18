@@ -81,7 +81,7 @@ jobs:
           NODE
           echo "Dashboard bootstrap secret installed."
 
-      - name: Verify authentication boundary
+      - name: Verify authentication and deployment health
         if: steps.auth.outputs.ready == 'true'
         shell: bash
         run: |
@@ -107,6 +107,14 @@ jobs:
           if (typeof status.setupRequired !== 'boolean' || typeof status.bootstrapConfigured !== 'boolean') {
             throw new Error('Authentication setup status response is invalid.');
           }
+          const deployment = status.deployment;
+          if (!deployment || deployment.release !== '2026-08-18-work-order-review-0062') {
+            throw new Error(`Expected release 2026-08-18-work-order-review-0062, received ${JSON.stringify(deployment)}`);
+          }
+          if (deployment.ok !== true) {
+            throw new Error(`Production D1 migrations are incomplete: ${JSON.stringify(deployment.migrations || deployment)}`);
+          }
+          console.log(`Deployment verified. release=${deployment.release}, migrations=${JSON.stringify(deployment.migrations)}`);
           console.log(`Authentication setup endpoint ready. setupRequired=${status.setupRequired}, bootstrapConfigured=${status.bootstrapConfigured}`);
           NODE
 
@@ -126,4 +134,4 @@ jobs:
           done
           echo "Repair, work-order, inventory, and Geotab diagnostic APIs are not publicly readable."
 
-# Deployment retrigger: 2026-08-18T09:29-04:00
+# Deployment retrigger: 2026-08-18T11:38-04:00
