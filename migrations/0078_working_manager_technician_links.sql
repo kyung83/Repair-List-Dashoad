@@ -3,6 +3,12 @@ PRAGMA foreign_keys = ON;
 -- Jeff and Jesse are managers who also perform hands-on repair work. Keep their
 -- manager clearance while linking each login to the existing technician identity
 -- used by repairs, labor timers, PM checklists, parts, and technician notes.
+CREATE TABLE IF NOT EXISTS working_manager_feature_receipts (
+  feature_key TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  detail TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE _working_manager_link_validation_0078 (
   ok INTEGER NOT NULL CHECK (ok = 1)
 );
@@ -78,5 +84,15 @@ FROM app_users u
 JOIN technicians t ON t.id = u.technician_id AND t.active = 1
 WHERE (u.username = 'jeffw' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jeff Wittig'))
    OR (u.username = 'jesseg' COLLATE NOCASE AND lower(trim(t.name)) = lower('Jesse Graham'));
+
+-- This receipt is immutable deployment evidence that the validated link operation
+-- succeeded. Current account choices may change later without making old schema
+-- migrations appear unhealthy.
+INSERT OR REPLACE INTO working_manager_feature_receipts (feature_key, applied_at, detail)
+VALUES (
+  'working-manager-technician-links-0078',
+  CURRENT_TIMESTAMP,
+  'Jeff Wittig and Jesse Graham were linked to their active technician identities while retaining manager clearance.'
+);
 
 DROP TABLE _working_manager_link_validation_0078;
