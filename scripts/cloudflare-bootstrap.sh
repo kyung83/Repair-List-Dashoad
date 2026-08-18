@@ -56,11 +56,10 @@ sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" "$TEMPLATE_FILE" > "$CON
 # unapplied migration name while updating only the intended active trailer representations.
 cp scripts/manual-trailer-date-fix-20260813.sql migrations/0056_apply_manual_trailer_dates.sql
 
-npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
-
 chmod +x scripts/*.sh
 
-# Build with the Cloudflare Vite plugin using the generated production config.
+# Compile and validate the exact Worker snapshot before mutating production D1.
+# If TypeScript/Vite fails, the database remains on the currently deployed schema.
 export CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH="$CONFIG_FILE"
 npm run build
 
@@ -68,6 +67,9 @@ if [ ! -s "$OUTPUT_CONFIG" ]; then
   echo "Cloudflare output configuration was not produced at $OUTPUT_CONFIG"
   exit 1
 fi
+
+# Only apply schema changes after the application build is known-good.
+npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
 # Deploy the exact build snapshot produced by the Cloudflare Vite plugin.
 npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"

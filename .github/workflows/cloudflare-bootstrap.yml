@@ -112,15 +112,48 @@ jobs:
         run: |
           set -euo pipefail
           site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          expected_release="2026-08-18-geotab-identity-0063"
 
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "$site_url/login" -o /tmp/login.html
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "$site_url/setup" -o /tmp/setup.html
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-            "$site_url/api/auth/setup" -o /tmp/auth-setup.json
 
-          node - <<'NODE'
+          deployment_verified=false
+          for attempt in $(seq 1 15); do
+            if curl --fail --silent --show-error --retry 2 --retry-delay 1 --retry-all-errors \
+              "$site_url/api/auth/setup" -o /tmp/auth-setup.json; then
+              if EXPECTED_RELEASE="$expected_release" node - <<'NODE'
+          const fs = require('fs');
+          try {
+            const status = JSON.parse(fs.readFileSync('/tmp/auth-setup.json', 'utf8'));
+            const deployment = status.deployment;
+            const valid = typeof status.setupRequired === 'boolean'
+              && typeof status.bootstrapConfigured === 'boolean'
+              && deployment
+              && deployment.release === process.env.EXPECTED_RELEASE
+              && deployment.ok === true;
+            process.exit(valid ? 0 : 1);
+          } catch {
+            process.exit(1);
+          }
+          NODE
+              then
+                deployment_verified=true
+                break
+              fi
+            fi
+            echo "Waiting for deployed release/schema to propagate (attempt $attempt/15)..."
+            sleep 2
+          done
+
+          if [ "$deployment_verified" != "true" ]; then
+            echo "Live Worker did not report the expected release/schema. Last response:"
+            cat /tmp/auth-setup.json || true
+            exit 1
+          fi
+
+          EXPECTED_RELEASE="$expected_release" node - <<'NODE'
           const fs = require('fs');
           const login = fs.readFileSync('/tmp/login.html', 'utf8');
           const setup = fs.readFileSync('/tmp/setup.html', 'utf8');
@@ -133,8 +166,8 @@ jobs:
             throw new Error('Authentication setup status response is invalid.');
           }
           const deployment = status.deployment;
-          if (!deployment || deployment.release !== '2026-08-18-work-order-review-0062') {
-            throw new Error(`Expected release 2026-08-18-work-order-review-0062, received ${JSON.stringify(deployment)}`);
+          if (!deployment || deployment.release !== process.env.EXPECTED_RELEASE) {
+            throw new Error(`Expected release ${process.env.EXPECTED_RELEASE}, received ${JSON.stringify(deployment)}`);
           }
           if (deployment.ok !== true) {
             throw new Error(`Production D1 migrations are incomplete: ${JSON.stringify(deployment.migrations || deployment)}`);
@@ -173,7 +206,7 @@ jobs:
           description="Cloudflare deployment or D1 schema verification failed"
           if [ "$AUTH_READY" = "true" ] && [ "$JOB_STATUS" = "success" ]; then
             state="success"
-            description="Verified release 0062 and production D1 schema"
+            description="Verified release 0063 and production D1 schema"
           elif [ "$AUTH_READY" != "true" ]; then
             description="Cloudflare deployment authorization is missing"
           fi
@@ -193,4 +226,4 @@ jobs:
             "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
             --data-binary @/tmp/production-status-final.json >/dev/null
 
-# Deployment retrigger: 2026-08-18T11:43-04:00
+# Deployment retrigger: 2026-08-18T12:43-04:00
