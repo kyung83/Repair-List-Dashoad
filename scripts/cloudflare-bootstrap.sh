@@ -51,11 +51,6 @@ cat /tmp/r2-create.log
 
 sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" "$TEMPLATE_FILE" > "$CONFIG_FILE"
 
-# Migration 0056 failed before being applied because the original matcher could not safely
-# distinguish trailer-number duplicates. Use the reviewed guarded body so D1 records the same
-# unapplied migration name while updating only the intended active trailer representations.
-cp scripts/manual-trailer-date-fix-20260813.sql migrations/0056_apply_manual_trailer_dates.sql
-
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
 chmod +x scripts/*.sh
