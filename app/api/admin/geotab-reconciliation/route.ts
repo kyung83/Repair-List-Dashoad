@@ -273,9 +273,8 @@ export async function POST(request: Request) {
         env.DB.prepare(`
           UPDATE equipment_geotab_devices
           SET current = 0, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP), last_seen_at = CURRENT_TIMESTAMP
-          WHERE current = 1
-            AND ((equipment_id = ? AND geotab_device_id <> ?) OR (geotab_device_id = ? AND equipment_id <> ?))
-        `).bind(equipmentId, geotabDeviceId, geotabDeviceId, equipmentId),
+          WHERE current = 1 AND equipment_id = ? AND geotab_device_id <> ?
+        `).bind(equipmentId, geotabDeviceId),
         env.DB.prepare(`
           UPDATE equipment_geotab_devices
           SET current = 1,
@@ -294,22 +293,40 @@ export async function POST(request: Request) {
           )
         `).bind(queue.serial_number, queue.geotab_name, queue.vin, equipmentId, geotabDeviceId),
         env.DB.prepare(`
-          INSERT OR IGNORE INTO equipment_geotab_devices (
+          INSERT INTO equipment_geotab_devices (
             equipment_id, geotab_device_id, serial_number, geotab_name, vin_seen,
             assigned_at, last_seen_at, current, linked_by
-          ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 'admin-review')
-        `).bind(equipmentId, geotabDeviceId, queue.serial_number, queue.geotab_name, queue.vin),
+          )
+          SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 'admin-review'
+          WHERE NOT EXISTS (
+            SELECT 1 FROM equipment_geotab_devices
+            WHERE equipment_id = ? AND geotab_device_id = ? AND current = 1
+          )
+        `).bind(
+          equipmentId, geotabDeviceId, queue.serial_number, queue.geotab_name, queue.vin,
+          equipmentId, geotabDeviceId,
+        ),
         env.DB.prepare(`
           UPDATE equipment
           SET geotab_device_id = ?, active = 1, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND archived_at IS NULL
-        `).bind(geotabDeviceId, equipmentId),
+          WHERE id = ?
+            AND archived_at IS NULL
+            AND EXISTS (
+              SELECT 1 FROM equipment_geotab_devices
+              WHERE equipment_id = ? AND geotab_device_id = ? AND current = 1
+            )
+        `).bind(geotabDeviceId, equipmentId, equipmentId, geotabDeviceId),
         env.DB.prepare(`
           UPDATE geotab_reconciliation_queue
           SET status = 'resolved', resolved_equipment_id = ?, resolved_at = CURRENT_TIMESTAMP,
               resolved_by_user_id = ?, resolution_note = ?
-          WHERE geotab_device_id = ? AND status = 'open'
-        `).bind(equipmentId, auth.user.id, note, geotabDeviceId),
+          WHERE geotab_device_id = ?
+            AND status = 'open'
+            AND EXISTS (
+              SELECT 1 FROM equipment_geotab_devices
+              WHERE equipment_id = ? AND geotab_device_id = ? AND current = 1
+            )
+        `).bind(equipmentId, auth.user.id, note, geotabDeviceId, equipmentId, geotabDeviceId),
       ]);
       return Response.json({ ok: true, geotabDeviceId, equipmentId });
     }
