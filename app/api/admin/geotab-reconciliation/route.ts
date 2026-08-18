@@ -237,9 +237,12 @@ export async function POST(request: Request) {
 
       const [queue, equipment, activeOwner] = await Promise.all([
         env.DB.prepare(`
-          SELECT geotab_device_id FROM geotab_reconciliation_queue
+          SELECT geotab_device_id, serial_number, geotab_name, vin
+          FROM geotab_reconciliation_queue
           WHERE geotab_device_id = ? AND status = 'open'
-        `).bind(geotabDeviceId).first<{ geotab_device_id: string }>(),
+        `).bind(geotabDeviceId).first<{
+          geotab_device_id: string; serial_number: string | null; geotab_name: string; vin: string | null;
+        }>(),
         env.DB.prepare(`
           SELECT id, unit, archived_at FROM equipment WHERE id = ?
         `).bind(equipmentId).first<{ id: number; unit: string; archived_at: string | null }>(),
@@ -260,18 +263,32 @@ export async function POST(request: Request) {
         env.DB.prepare(`
           UPDATE equipment_geotab_devices
           SET current = 0, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP), last_seen_at = CURRENT_TIMESTAMP
-          WHERE current = 1 AND equipment_id = ? AND geotab_device_id <> ?
-        `).bind(equipmentId, geotabDeviceId),
+          WHERE current = 1
+            AND ((equipment_id = ? AND geotab_device_id <> ?) OR (geotab_device_id = ? AND equipment_id <> ?))
+        `).bind(equipmentId, geotabDeviceId, geotabDeviceId, equipmentId),
         env.DB.prepare(`
           UPDATE equipment_geotab_devices
-          SET current = 0, ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP), last_seen_at = CURRENT_TIMESTAMP
-          WHERE current = 1 AND geotab_device_id = ? AND equipment_id <> ?
-        `).bind(geotabDeviceId, equipmentId),
+          SET current = 1,
+              ended_at = NULL,
+              serial_number = COALESCE(?, serial_number),
+              geotab_name = COALESCE(?, geotab_name),
+              vin_seen = COALESCE(?, vin_seen),
+              linked_by = 'admin-review',
+              last_seen_at = CURRENT_TIMESTAMP
+          WHERE id = (
+            SELECT id
+            FROM equipment_geotab_devices
+            WHERE equipment_id = ? AND geotab_device_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+          )
+        `).bind(queue.serial_number, queue.geotab_name, queue.vin, equipmentId, geotabDeviceId),
         env.DB.prepare(`
-          INSERT INTO equipment_geotab_devices (
-            equipment_id, geotab_device_id, assigned_at, last_seen_at, current, linked_by
-          ) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 'admin-review')
-        `).bind(equipmentId, geotabDeviceId),
+          INSERT OR IGNORE INTO equipment_geotab_devices (
+            equipment_id, geotab_device_id, serial_number, geotab_name, vin_seen,
+            assigned_at, last_seen_at, current, linked_by
+          ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 'admin-review')
+        `).bind(equipmentId, geotabDeviceId, queue.serial_number, queue.geotab_name, queue.vin),
         env.DB.prepare(`
           UPDATE equipment
           SET geotab_device_id = ?, active = 1, updated_at = CURRENT_TIMESTAMP
