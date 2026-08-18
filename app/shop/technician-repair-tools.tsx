@@ -25,6 +25,13 @@ function qty(value:number|undefined){
   return Number.isInteger(number)?String(number):number.toFixed(2).replace(/0+$/,"").replace(/\.$/,"");
 }
 
+function partActionLabel(part:Part,quantity:number){
+  const available=Number(part.available??part.quantityOnHand??0);
+  if(available<=0)return "REQUEST PART";
+  if(available+0.000001>=quantity)return "APPLY PART";
+  return "USE / REQUEST";
+}
+
 export default function TechnicianRepairTools({repairId,canWork}:Props){
   const[note,setNote]=useState(""),[notes,setNotes]=useState<RepairNote[]>([]),[noteBusy,setNoteBusy]=useState(false),[noteMessage,setNoteMessage]=useState(""),[listening,setListening]=useState(false);
   const[parts,setParts]=useState<Part[]>([]),[search,setSearch]=useState(""),[selectedPart,setSelectedPart]=useState<Part|null>(null),[quantity,setQuantity]=useState(1),[partBusy,setPartBusy]=useState(false),[partMessage,setPartMessage]=useState("");
@@ -130,10 +137,10 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
     </div>
 
     <div style={toolCard}>
-      <div><strong style={heading}>PART LOOKUP</strong><span style={help}>Type the part once. If it matches inventory, use/request it. If it does not, send exactly what you typed to Parts Desk.</span></div>
+      <div><strong style={heading}>PART LOOKUP</strong><span style={help}>Type the part once. If it matches inventory, the button automatically applies it or requests the shortage. If there is no match, send exactly what you typed to Parts Desk.</span></div>
       <div style={searchRow}><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedPart(null);setPartMessage("")}} placeholder="Type part number or description…" style={input} disabled={partBusy||!canWork}/><input aria-label="Part quantity" type="number" min="0.01" step="any" value={quantity} onChange={event=>setQuantity(Number(event.target.value))} style={qtyInput} disabled={partBusy||!canWork}/></div>
       {matches.length>0&&<div style={results}>{matches.map(part=><button key={part.id} type="button" onClick={()=>{setSelectedPart(part);setSearch(`${part.partNumber} — ${part.description}`);setPartMessage("")}} style={selectedPart?.id===part.id?selectedResult:resultButton}><span><strong>{part.partNumber}</strong> — {part.description}</span><span style={availability}>{qty(part.available??part.quantityOnHand)} available</span></button>)}</div>}
-      {selectedPart&&<button type="button" onClick={()=>void useOrRequestPart()} style={partButton} disabled={partBusy||!canWork}>{partBusy?"Saving…":"USE / REQUEST"}</button>}
+      {selectedPart&&<button type="button" onClick={()=>void useOrRequestPart()} style={partButton} disabled={partBusy||!canWork}>{partBusy?"Saving…":partActionLabel(selectedPart,quantity)}</button>}
       {search.trim()&&matches.length===0&&!selectedPart&&<div style={unmatchedBox}><div><strong>No catalog match.</strong><div style={small}>Request exactly: “{search.trim()}” · Qty {qty(quantity)}</div></div><button type="button" onClick={()=>void requestTypedPart()} style={requestButton} disabled={partBusy||!canWork}>{partBusy?"Sending…":"REQUEST THIS PART"}</button></div>}
       {partMessage&&<div style={messageStyle}>{partMessage}</div>}
     </div>
