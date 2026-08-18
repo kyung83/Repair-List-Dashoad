@@ -29,8 +29,11 @@ type PartRequest={
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
 type ShopData={user:User;activeTimer:Timer|null;repairs:Repair[];parts:Part[];partRequests?:PartRequest[];partsReadyCount?:number;updatedAt:string};
 type View="mine"|"available"|"all";
+type WorkflowMode="repaired"|"waiting_parts"|"skipped";
 type ActionResult={
-  ok?:boolean;error?:string;repairId?:string;hours?:number;laborStarted?:boolean;completed?:boolean;removed?:boolean;
+  ok?:boolean;error?:string;repairId?:string;previousRepairId?:string;nextRepairId?:string;
+  hours?:number;laborStarted?:boolean;completed?:boolean;removed?:boolean;advanced?:boolean;
+  waitingOnPart?:boolean;skipped?:boolean;unitStopped?:boolean;switched?:boolean;
   requestId?:number;awaitingParts?:boolean;partiallyAvailable?:boolean;reservedQuantity?:number;shortageQuantity?:number;
   usedImmediately?:number;warehouseCode?:string;quantity?:number;partNumber?:string;
 };
@@ -45,79 +48,197 @@ function numberText(value:number){return Number.isInteger(value)?String(value):v
 function prettyYard(value:string|undefined){return yardLabel(value)||"Shop"}
 
 export default function ShopPage(){
-  const[data,setData]=useState<ShopData|null>(null),[view,setView]=useState<View>("mine"),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[now,setNow]=useState(Date.now()),[selectedId,setSelectedId]=useState<string|null>(null),[partId,setPartId]=useState(""),[partQuantity,setPartQuantity]=useState(1);
+  const[data,setData]=useState<ShopData|null>(null);
+  const[view,setView]=useState<View>("mine");
+  const[message,setMessage]=useState("");
+  const[busy,setBusy]=useState(false);
+  const[now,setNow]=useState(Date.now());
+  const[selectedId,setSelectedId]=useState<string|null>(null);
+  const[partId,setPartId]=useState("");
+  const[partQuantity,setPartQuantity]=useState(1);
 
-  async function load(){
-    const response=await fetch("/api/shop",{cache:"no-store"}),payload=await response.json() as ShopData&{error?:string};
+  async function load(preferredId?:string|null){
+    const response=await fetch("/api/shop",{cache:"no-store"});
+    const payload=await response.json() as ShopData&{error?:string};
     if(!response.ok)throw new Error(payload.error||"Shop jobs could not be loaded.");
-    setData(payload);setSelectedId(current=>current&&payload.repairs.some(repair=>repair.id===current)?current:payload.activeTimer?.repairId??null);
+    setData(payload);
+    setSelectedId(current=>{
+      const candidates=[preferredId,payload.activeTimer?.repairId,current].filter((value):value is string=>Boolean(value));
+      return candidates.find(id=>payload.repairs.some(repair=>repair.id===id))??null;
+    });
     if(payload.user.role==="manager"||payload.user.role==="admin")setView(current=>current==="mine"&&!payload.user.technicianId?"all":current);
   }
+
   useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:"Shop jobs could not be loaded."));const id=window.setInterval(()=>void load().catch(()=>undefined),30000);return()=>window.clearInterval(id)},[]);
   useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id)},[]);
 
-  async function action(body:Record<string,unknown>){
+  async function action(body:Record<string,unknown>,preferredId?:string|null){
     setBusy(true);setMessage("");
     try{
-      const response=await fetch("/api/shop",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),result=await response.json() as ActionResult;
+      const response=await fetch("/api/shop",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      const result=await response.json() as ActionResult;
       if(!response.ok||!result.ok)throw new Error(result.error||"Shop action failed.");
-      if(result.repairId&&!result.completed)setSelectedId(result.repairId);
-      if(result.completed){setSelectedId(null);setMessage(typeof result.hours==="number"?`Repair completed. ${result.hours.toFixed(2)} hours of running labor were saved.`:"Repair completed.")}
-      else if(typeof result.hours==="number")setMessage(`Labor saved: ${result.hours.toFixed(2)} hours.`);
-      else if(result.laborStarted)setMessage("Job opened. Labor timer started automatically.");
-      await load();return result;
+      await load(result.nextRepairId??result.repairId??preferredId);
+      return result;
     }catch(error){setMessage(error instanceof Error?error.message:"Shop action failed.");return null}finally{setBusy(false)}
   }
-  async function openJob(id:string){setSelectedId(id);await action({action:"openRepair",repairId:id})}
+
+  function hasPartShortage(repairId:string){return (data?.partRequests??[]).some(request=>request.repairId===repairId&&request.shortageQuantity>0)}
+  function repairMine(repair:Repair){return Boolean(data?.user.technicianId)&&repair.technicianId===data?.user.technicianId}
+  function repairAvailable(repair:Repair){return repair.technicianId===null}
+  function canTakeRepair(repair:Repair){return Boolean(data?.user.technicianId)&&(repairMine(repair)||repairAvailable(repair))}
+  function actionable(repair:Repair){return canTakeRepair(repair)&&!hasPartShortage(repair.id)}
+  function stateLabel(repair:Repair){if(data?.activeTimer?.repairId===repair.id)return "WORKING NOW";if(hasPartShortage(repair.id))return "WAITING ON PART";return "OPEN"}
+
+  async function startUnit(group:UnitGroup){
+    if(!data?.user.technicianId){setMessage("Your login must be linked to a technician before you can start shop work.");return}
+    const running=data.activeTimer?data.repairs.find(repair=>repair.id===data.activeTimer?.repairId):null;
+    if(running){
+      if(group.repairs.some(repair=>repair.id===running.id)){setSelectedId(running.id);setMessage(`You are already working on Unit ${group.unit||"—"}.`)}
+      else setMessage(`Finish Unit ${running.unit||"—"} before starting another unit.`);
+      return;
+    }
+    const selectedInGroup=selectedId?group.repairs.find(repair=>repair.id===selectedId&&actionable(repair)):null;
+    const target=selectedInGroup??group.repairs.find(repair=>repairMine(repair)&&!hasPartShortage(repair.id))??group.repairs.find(actionable);
+    if(!target){setMessage("There is no actionable repair on this unit right now.");return}
+    const result=await action({action:"openRepair",repairId:target.id},target.id);
+    if(result)setMessage(`Unit ${group.unit||"—"} started. Working now: ${target.issue}.`);
+  }
+
+  async function workHere(repair:Repair){
+    if(!data?.activeTimer){const group=groupByUnit([repair])[0];if(group)await startUnit(group);return}
+    if(data.activeTimer.repairId===repair.id){setSelectedId(repair.id);return}
+    const active=data.repairs.find(item=>item.id===data.activeTimer?.repairId);
+    if(!active||!sameUnit(active,repair)){setMessage(`Finish Unit ${active?.unit||data.activeTimer.unit||"—"} before starting another unit.`);return}
+    const result=await action({action:"switchRepair",repairId:repair.id},repair.id);
+    if(result)setMessage(`Labor saved and moved to: ${repair.issue}.`);
+  }
+
+  async function advanceRepair(repair:Repair,mode:WorkflowMode){
+    if(data?.activeTimer?.repairId!==repair.id){setMessage("Choose Work Here first so labor is recorded against the right repair.");return}
+    if(mode==="waiting_parts"&&!hasPartShortage(repair.id)){setMessage("Request the needed part below first. Once there is an actual shortage, Waiting on Part will move you on automatically.");return}
+    const result=await action({action:"advanceRepair",repairId:repair.id,mode},mode==="repaired"?null:repair.id);
+    if(!result)return;
+    if(mode==="repaired")setMessage(result.advanced?"Repair completed. Labor saved and the next repair started automatically.":"Repair completed. Labor saved. No other actionable repair is left on this unit.");
+    if(mode==="waiting_parts")setMessage(result.advanced?"Repair left open waiting on the part. The next repair started automatically.":"Repair left open waiting on the part. No other actionable repair is ready on this unit.");
+    if(mode==="skipped")setMessage(result.advanced?"Repair left open for later. The next repair started automatically.":"Repair left open for later. No other actionable repair is ready on this unit.");
+  }
+
+  async function doneWorking(){
+    const current=data?.activeTimer?.repairId??null;
+    const result=await action({action:"doneUnit"},current);
+    if(result)setMessage("Work paused. Labor was saved and every unfinished repair remains open.");
+  }
+
   function availabilityFor(part:Part,repair:Repair){const code=String(repair.yard||data?.user.yard||"").toUpperCase();if(!code)return Number(part.available??part.quantityOnHand??0);return Number(part.warehouseStocks?.find(stock=>stock.warehouseCode===code)?.available??0)}
 
-  async function addPartToRepair(repair:Repair){
-    if(!partId){setMessage("Choose a part first.");return}if(!Number.isFinite(partQuantity)||partQuantity<=0){setMessage("Enter a positive part quantity.");return}
-    const result=await action({action:"usePart",repairId:repair.id,partId:Number(partId),quantity:partQuantity});
-    if(result){setPartId("");setPartQuantity(1);if(result.awaitingParts)setMessage(result.reservedQuantity?`${numberText(result.reservedQuantity)} reserved in ${result.warehouseCode}; ${numberText(result.shortageQuantity||0)} still awaiting. Parts Desk was updated automatically.`:`Part request queued for ${result.warehouseCode}. Parts Desk was updated automatically.`);else setMessage(`${numberText(result.usedImmediately||partQuantity)} part unit(s) used from ${result.warehouseCode||prettyYard(repair.yard)} inventory.`)}
+  async function autoAdvanceShortage(repair:Repair,result:ActionResult,label:string){
+    const shortage=numberText(result.shortageQuantity||0);
+    const reserved=numberText(result.reservedQuantity||0);
+    if(data?.activeTimer?.repairId!==repair.id){
+      setMessage(`${label}: ${reserved} reserved, ${shortage} short. This repair is now waiting on the part.`);
+      return;
+    }
+    const moved=await action({action:"advanceRepair",repairId:repair.id,mode:"waiting_parts"},repair.id);
+    if(!moved)return;
+    setMessage(moved.advanced
+      ? `${label}: ${shortage} short. Parts Desk was updated, labor was saved, and the next repair started automatically.`
+      : `${label}: ${shortage} short. Parts Desk was updated and labor was saved. No other actionable repair is ready on this unit.`);
   }
-  async function usePlannedPart(repair:Repair,planned:PlannedPart){const remaining=Math.max(0,planned.quantity-planned.usedQuantity);if(remaining<=0)return;const result=await action({action:"usePart",repairId:repair.id,partId:planned.partId,quantity:remaining});if(result)setMessage(result.awaitingParts?`${planned.partNumber}: ${numberText(result.reservedQuantity||0)} reserved, ${numberText(result.shortageQuantity||0)} awaiting. Parts Desk was updated automatically.`:`${numberText(result.usedImmediately||remaining)} × ${planned.partNumber} used from ${result.warehouseCode}.`)}
-  async function useReserved(request:PartRequest){const result=await action({action:"useReservedPart",requestId:request.id,quantity:request.reservedQuantity});if(result)setMessage(`${numberText(result.quantity||request.reservedQuantity)} × ${request.partNumber} used from reserved ${request.warehouseCode} stock.`)}
-  async function removePlannedPart(repair:Repair,planned:PlannedPart){if(!window.confirm(`Mark ${planned.partNumber} — ${planned.description} as not needed for this PM?\n\nThis only removes it from this PM. It does not change the master PM kit or inventory.`))return;const result=await action({action:"removePlannedPart",repairId:repair.id,plannedPartId:planned.id});if(result)setMessage(`${planned.partNumber} marked not needed for this PM.`)}
-  async function completeJob(repair:Repair){if(!window.confirm(`Complete the repair for Unit ${repair.unit||"—"}: ${repair.issue}?`))return;await action({action:"completeRepair",repairId:repair.id})}
+
+  async function addPartToRepair(repair:Repair){
+    if(!partId){setMessage("Choose a part first.");return}
+    if(!Number.isFinite(partQuantity)||partQuantity<=0){setMessage("Enter a positive part quantity.");return}
+    const result=await action({action:"usePart",repairId:repair.id,partId:Number(partId),quantity:partQuantity},repair.id);
+    if(!result)return;
+    setPartId("");setPartQuantity(1);
+    if(result.awaitingParts){await autoAdvanceShortage(repair,result,result.partNumber||"Part");return}
+    setMessage(`${numberText(result.usedImmediately||partQuantity)} part unit(s) used from ${result.warehouseCode||prettyYard(repair.yard)} inventory.`);
+  }
+
+  async function usePlannedPart(repair:Repair,planned:PlannedPart){
+    const remaining=Math.max(0,planned.quantity-planned.usedQuantity);if(remaining<=0)return;
+    const result=await action({action:"usePart",repairId:repair.id,partId:planned.partId,quantity:remaining},repair.id);
+    if(!result)return;
+    if(result.awaitingParts){await autoAdvanceShortage(repair,result,planned.partNumber);return}
+    setMessage(`${numberText(result.usedImmediately||remaining)} × ${planned.partNumber} used from ${result.warehouseCode}.`);
+  }
+
+  async function useReserved(request:PartRequest){const result=await action({action:"useReservedPart",requestId:request.id,quantity:request.reservedQuantity},request.repairId);if(result)setMessage(`${numberText(result.quantity||request.reservedQuantity)} × ${request.partNumber} used from reserved ${request.warehouseCode} stock.`)}
+  async function removePlannedPart(repair:Repair,planned:PlannedPart){if(!window.confirm(`Mark ${planned.partNumber} — ${planned.description} as not needed for this PM?\n\nThis only removes it from this PM. It does not change the master PM kit or inventory.`))return;const result=await action({action:"removePlannedPart",repairId:repair.id,plannedPartId:planned.id},repair.id);if(result)setMessage(`${planned.partNumber} marked not needed for this PM.`)}
 
   const mine=useMemo(()=>!data?.user.technicianId?[]:data.repairs.filter(repair=>repair.technicianId===data.user.technicianId),[data]);
   const available=useMemo(()=>data?.repairs.filter(repair=>repair.technicianId===null)??[],[data]);
   const visible=useMemo(()=>!data?[]:view==="mine"?mine:view==="available"?available:data.repairs,[data,view,mine,available]);
-  const visibleGroups=useMemo(()=>groupByUnit(visible),[visible]),mineGroups=useMemo(()=>groupByUnit(mine),[mine]),availableGroups=useMemo(()=>groupByUnit(available),[available]),allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
+  const visibleGroups=useMemo(()=>groupByUnit(visible),[visible]);
+  const mineGroups=useMemo(()=>groupByUnit(mine),[mine]);
+  const availableGroups=useMemo(()=>groupByUnit(available),[available]);
+  const allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
   const selected=useMemo(()=>data?.repairs.find(repair=>repair.id===selectedId)??null,[data,selectedId]);
   const selectedUnitRepairs=useMemo(()=>selected&&data?data.repairs.filter(repair=>sameUnit(repair,selected)):[],[data,selected]);
   const selectedRequests=useMemo(()=>selected?(data?.partRequests??[]).filter(request=>request.repairId===selected.id):[],[data,selected]);
   const readyForMe=useMemo(()=>(data?.partRequests??[]).filter(request=>request.reservedQuantity>0&&(!data?.user.technicianId||request.technicianId===data.user.technicianId)),[data]);
+  const activeRepair=useMemo(()=>data?.repairs.find(repair=>repair.id===data.activeTimer?.repairId)??null,[data]);
 
   return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"34px 34px 100px",color:"#182331"}}>
-    <header style={{display:"flex",justifyContent:"space-between",gap:20,alignItems:"flex-end",flexWrap:"wrap"}}><div><p style={{margin:0,color:"#f47b20",fontWeight:900,fontSize:12,letterSpacing:".16em"}}>TECHNICIAN SHOP QUEUE</p><h1 style={{margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"}}>Shop Jobs</h1><p style={{margin:0,color:"#667482"}}>Jobs are grouped by unit. Parts availability is scoped to the job's yard.</p></div><div style={{textAlign:"right"}}><strong style={{display:"block"}}>{data?.user.displayName??"Loading…"}</strong><span style={{fontSize:13,color:"#667482"}}>{data?.user.username?`@${data.user.username}`:""}</span></div></header>
+    <header style={{display:"flex",justifyContent:"space-between",gap:20,alignItems:"flex-end",flexWrap:"wrap"}}>
+      <div><p style={{margin:0,color:"#f47b20",fontWeight:900,fontSize:12,letterSpacing:".16em"}}>TECHNICIAN SHOP QUEUE</p><h1 style={{margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"}}>Shop Jobs</h1><p style={{margin:0,color:"#667482"}}>Start a unit once. The app saves labor and moves repair-to-repair for you.</p></div>
+      <div style={{textAlign:"right"}}><strong style={{display:"block"}}>{data?.user.displayName??"Loading…"}</strong><span style={{fontSize:13,color:"#667482"}}>{data?.user.username?`@${data.user.username}`:""}</span></div>
+    </header>
+
     {message&&<div style={noticeStyle}>{message}</div>}
     {data?.user.role==="mechanic"&&!data.user.technicianId&&<div style={{...noticeStyle,background:"#fff1f0",borderColor:"#efb3ad"}}>Your login exists, but it is not linked to a technician record yet. Ask an administrator to open Users and save your mechanic account.</div>}
 
-    {readyForMe.length>0&&<section style={{marginTop:16,padding:15,border:"2px solid #62a77d",borderRadius:12,background:"#f0fbf4"}}><div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}><div><strong style={{color:"#176440"}}>Parts ready for {readyForMe.length} repair line{readyForMe.length===1?"":"s"}</strong><div style={{fontSize:12,color:"#5e7567",marginTop:3}}>Receiving allocated these automatically. Open the repair to use the reserved quantity.</div></div></div><div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:9}}>{readyForMe.slice(0,6).map(request=><button key={request.id} onClick={()=>setSelectedId(request.repairId)} style={readyButton}>Unit {request.unit||"—"} · {request.partNumber} · {numberText(request.reservedQuantity)} ready</button>)}</div></section>}
+    {readyForMe.length>0&&<section style={{marginTop:16,padding:15,border:"2px solid #62a77d",borderRadius:12,background:"#f0fbf4"}}><div><strong style={{color:"#176440"}}>Parts ready for {readyForMe.length} repair line{readyForMe.length===1?"":"s"}</strong><div style={{fontSize:12,color:"#5e7567",marginTop:3}}>Receiving allocated these automatically. Open the repair to use the reserved quantity.</div></div><div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:9}}>{readyForMe.slice(0,6).map(request=><button key={request.id} onClick={()=>setSelectedId(request.repairId)} style={readyButton}>Unit {request.unit||"—"} · {request.partNumber} · {numberText(request.reservedQuantity)} ready</button>)}</div></section>}
 
-    {data?.activeTimer&&<section style={{marginTop:20,background:"#0d1b2b",color:"white",borderRadius:14,padding:20,display:"flex",justifyContent:"space-between",gap:20,alignItems:"center",flexWrap:"wrap"}}><div><p style={{margin:"0 0 5px",fontSize:11,fontWeight:900,letterSpacing:".15em",color:"#ff9a4c"}}>LABOR RUNNING</p><button onClick={()=>setSelectedId(data.activeTimer!.repairId)} style={activeJobButton}>Unit {data.activeTimer.unit||"—"} — {data.activeTimer.title}</button><div style={{marginTop:5,color:"#cbd6df"}}>Started {new Date(timerStartMs(data.activeTimer.startedAt)).toLocaleString()}</div></div><div style={{display:"flex",alignItems:"center",gap:16}}><span style={{fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",fontSize:28,fontWeight:900}}>{duration(data.activeTimer.startedAt,now)}</span><button disabled={busy} onClick={()=>void action({action:"stopLabor",repairId:data.activeTimer?.repairId})} style={dangerButton}>Stop Labor</button></div></section>}
+    {data?.activeTimer&&<section style={workingBanner}><div><p style={{margin:"0 0 5px",fontSize:11,fontWeight:900,letterSpacing:".15em",color:"#ff9a4c"}}>WORKING NOW</p><button onClick={()=>setSelectedId(data.activeTimer!.repairId)} style={activeJobButton}>Unit {data.activeTimer.unit||"—"} — {data.activeTimer.title}</button><div style={{marginTop:5,color:"#cbd6df"}}>This repair session started {new Date(timerStartMs(data.activeTimer.startedAt)).toLocaleString()}</div></div><div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}><span style={{fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",fontSize:28,fontWeight:900}}>{duration(data.activeTimer.startedAt,now)}</span><button disabled={busy} onClick={()=>void doneWorking()} style={doneButton}>Done Working on Unit</button></div></section>}
 
     <section style={{marginTop:22,display:"flex",gap:10,flexWrap:"wrap"}}><button onClick={()=>setView("mine")} style={view==="mine"?activeTab:tabButton}>My Units ({mineGroups.length})</button><button onClick={()=>setView("available")} style={view==="available"?activeTab:tabButton}>Available Units ({availableGroups.length})</button><button onClick={()=>setView("all")} style={view==="all"?activeTab:tabButton}>All Open Units ({allGroups.length})</button></section>
 
-    {selected&&data&&(()=>{const repairMine=selected.technicianId===data.user.technicianId&&data.user.technicianId!==null,repairAvailable=selected.technicianId===null,running=data.activeTimer?.repairId===selected.id,canOpen=Boolean(data.user.technicianId)&&(repairMine||repairAvailable),blockedByOtherTimer=Boolean(data.activeTimer&&!running),canManageChecklist=repairMine||data.user.role==="manager"||data.user.role==="admin";return <section style={workspaceStyle}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:18,flexWrap:"wrap"}}><div><p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>UNIT WORKSPACE</p><h2 style={{margin:"7px 0 4px",fontSize:27,color:"#0d1b2b"}}>Unit {selected.unit||"—"}</h2><div style={{color:"#667482"}}>{selectedUnitRepairs.length} open job{selectedUnitRepairs.length===1?"":"s"} · {prettyYard(selected.yard)} inventory</div></div></div>
-      <div style={{marginTop:15,display:"grid",gap:8}}>{selectedUnitRepairs.map(repair=>{const rowMine=repair.technicianId===data.user.technicianId&&data.user.technicianId!==null,rowAvailable=repair.technicianId===null,rowRunning=data.activeTimer?.repairId===repair.id,rowCanOpen=Boolean(data.user.technicianId)&&(rowMine||rowAvailable)&&!data.activeTimer;return <div key={repair.id} style={{...unitJobRow,borderColor:repair.id===selected.id?"#f47b20":"#dfe5ea"}}><button onClick={()=>setSelectedId(repair.id)} style={unitJobTitle}>{repair.issue}</button><div style={{minWidth:160,color:"#667482",fontSize:12}}>{repair.status||"Open"} · {rowAvailable?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`}</div><div style={{display:"flex",gap:7,justifyContent:"flex-end",flexWrap:"wrap"}}>{rowCanOpen&&<button disabled={busy} onClick={()=>void openJob(repair.id)} style={smallPrimaryButton}>Open & Start</button>}{rowRunning&&<span style={runningBadge}>Labor Running</span>}<button onClick={()=>setSelectedId(repair.id)} style={smallSecondaryButton}>Work on Job</button></div></div>})}</div>
+    {selected&&data&&(()=>{
+      const isMine=repairMine(selected),isAvailable=repairAvailable(selected),running=data.activeTimer?.repairId===selected.id;
+      const activeSameUnit=Boolean(activeRepair&&sameUnit(activeRepair,selected));
+      const waiting=hasPartShortage(selected.id);
+      const canManageChecklist=data.user.role==="manager"||data.user.role==="admin"||running;
+      const group:UnitGroup={key:unitKey(selected),unit:selected.unit,equipmentId:selected.equipmentId,repairs:selectedUnitRepairs};
+      const actionableCount=selectedUnitRepairs.filter(actionable).length;
+      return <section style={workspaceStyle}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:18,flexWrap:"wrap",alignItems:"center"}}><div><p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>UNIT WORKSPACE</p><h2 style={{margin:"7px 0 4px",fontSize:27,color:"#0d1b2b"}}>Unit {selected.unit||"—"}</h2><div style={{color:"#667482"}}>{selectedUnitRepairs.length} repair{selectedUnitRepairs.length===1?"":"s"} remaining · {actionableCount} actionable · {prettyYard(selected.yard)} inventory</div></div><div style={{display:"flex",gap:9,flexWrap:"wrap"}}>{!data.activeTimer&&actionableCount>0&&<button disabled={busy} onClick={()=>void startUnit(group)} style={primaryButton}>Start Working on Unit</button>}{activeSameUnit&&<button disabled={busy} onClick={()=>void doneWorking()} style={secondaryButton}>Done Working on Unit</button>}</div></div>
 
-      <div style={{marginTop:20,paddingTop:18,borderTop:"1px solid #e1e6ea"}}><div style={{display:"flex",justifyContent:"space-between",gap:18,flexWrap:"wrap"}}><div><p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>SELECTED REPAIR</p><h3 style={{margin:"6px 0 4px",fontSize:23,color:"#0d1b2b"}}>{selected.issue}</h3><div style={{color:"#667482"}}>{selected.location||"No location"} · {selected.status} · {repairAvailable?"Unassigned":`Assigned to ${selected.assignedTo||"technician"}`}</div></div><div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>{canOpen&&!data.activeTimer&&<button disabled={busy} onClick={()=>void openJob(selected.id)} style={primaryButton}>Open Job & Start Labor</button>}{running&&<button disabled={busy} onClick={()=>void action({action:"stopLabor",repairId:selected.id})} style={dangerButton}>Stop Labor</button>}{repairMine&&!blockedByOtherTimer&&<button disabled={busy} onClick={()=>void completeJob(selected)} style={completeButton}>Complete Repair</button>}</div></div>
-      {!repairMine&&repairAvailable&&<div style={smallNotice}>Open this job first. Opening it assigns it to you and starts the labor timer.</div>}{!repairMine&&!repairAvailable&&<div style={lockedNotice}>This repair is assigned to {selected.assignedTo||"another technician"}. You can see it, but only that technician or a manager can work it.</div>}{repairMine&&blockedByOtherTimer&&<div style={smallNotice}>You have labor running on another repair. Stop that timer before opening or completing this one.</div>}
-      <MaintenanceChecklistPanel repairId={selected.id} canWork={canManageChecklist&&!blockedByOtherTimer}/>
+        <div style={{marginTop:15,display:"grid",gap:8}}>{selectedUnitRepairs.map(repair=>{
+          const rowRunning=data.activeTimer?.repairId===repair.id,rowWaiting=hasPartShortage(repair.id),rowCanTake=canTakeRepair(repair);
+          return <div key={repair.id} style={{...unitJobRow,borderColor:rowRunning?"#f47b20":repair.id===selected.id?"#0d1b2b":"#dfe5ea",background:rowRunning?"#fff8f1":"#fbfcfd"}}><button onClick={()=>setSelectedId(repair.id)} style={unitJobTitle}>{repair.issue}</button><div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}><span style={rowRunning?workingBadge:rowWaiting?waitingBadge:openBadge}>{stateLabel(repair)}</span><span style={{color:"#667482",fontSize:11}}>{repairAvailable(repair)?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`}</span></div><div style={{display:"flex",gap:7,justifyContent:"flex-end",flexWrap:"wrap"}}>{activeSameUnit&&!rowRunning&&rowCanTake&&!rowWaiting&&<button disabled={busy} onClick={()=>void workHere(repair)} style={smallPrimaryButton}>Work Here</button>}<button onClick={()=>setSelectedId(repair.id)} style={smallSecondaryButton}>View</button></div></div>
+        })}</div>
 
-      <div style={{marginTop:20,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(330px,1fr))",gap:16}}><div style={workspaceCard}><h3 style={workspaceHeading}>Parts</h3>
-        {selectedRequests.length>0&&<div style={{display:"grid",gap:7,marginBottom:13}}>{selectedRequests.map(request=><div key={request.id} style={{...requestRow,borderColor:request.shortageQuantity>0?"#e3ba69":"#7eb391",background:request.shortageQuantity>0?"#fff9ed":"#f1faf4"}}><div><strong>{request.partNumber}</strong><span>{request.description}</span></div><div style={{fontSize:11,color:"#5f6f7d"}}>{numberText(request.usedQuantity)} used · {numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</div>{repairMine&&request.reservedQuantity>0&&<button disabled={busy} onClick={()=>void useReserved(request)} style={plannedUseButton}>Use {numberText(request.reservedQuantity)} Reserved</button>}</div>)}</div>}
-        {selected.plannedParts.length>0&&<div style={plannedBox}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}><strong style={{color:"#76420a"}}>PM Kit · Planned Parts</strong><span style={{color:"#8c6233",fontSize:11}}>{selected.plannedParts[0]?.kitName||"PM Kit"}</span></div><div style={{marginTop:9,display:"grid",gap:7}}>{selected.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity),inventoryPart=data.parts.find(part=>part.id===planned.partId),stock=inventoryPart?availabilityFor(inventoryPart,selected):0;return <div key={planned.id} style={plannedRow}><div style={{minWidth:0}}><strong style={{display:"block",color:"#253542"}}>{planned.partNumber} · {numberText(planned.quantity)} planned</strong><span style={{display:"block",marginTop:2,color:"#697782",fontSize:11}}>{planned.description}</span><span style={{display:"block",marginTop:2,color:planned.usedQuantity>=planned.quantity?"#176440":"#7c684e",fontSize:10,fontWeight:800}}>{numberText(planned.usedQuantity)} used · {numberText(remaining)} remaining · {numberText(stock)} available in {prettyYard(selected.yard)}</span></div><div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>{remaining<=0?<span style={usedBadge}>Used</span>:<>{repairMine&&<button disabled={busy} onClick={()=>void usePlannedPart(selected,planned)} style={plannedUseButton}>{stock+0.000001>=remaining?`Use ${numberText(remaining)}`:`Request ${numberText(remaining)}`}</button>}{repairMine&&planned.usedQuantity<=0&&<button disabled={busy} onClick={()=>void removePlannedPart(selected,planned)} style={notNeededButton}>Not Needed</button>}</>}</div></div>})}</div></div>}
-        <div style={{minHeight:32,marginTop:selected.plannedParts.length?13:0}}><strong style={{display:"block",marginBottom:6,color:"#52616c",fontSize:11,textTransform:"uppercase",letterSpacing:".05em"}}>Parts Actually Used</strong>{selected.usedParts.length?selected.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>):<span style={mutedText}>No parts used yet.</span>}</div>
-        {repairMine&&<div style={{marginTop:12,display:"grid",gridTemplateColumns:"1fr 90px auto",gap:8}}><select value={partId} onChange={event=>setPartId(event.target.value)} style={inputStyle} disabled={busy}><option value="">Choose / request part</option>{data.parts.map(part=>{const qty=availabilityFor(part,selected);return <option key={part.id} value={part.id}>{part.partNumber} — {part.description} ({numberText(qty)} available)</option>})}</select><input type="number" min="0.01" step="any" value={partQuantity} onChange={event=>setPartQuantity(Number(event.target.value))} style={inputStyle} disabled={busy}/><button disabled={busy} onClick={()=>void addPartToRepair(selected)} style={secondaryButton}>Use / Request</button></div>}
-      </div><div style={workspaceCard}><h3 style={workspaceHeading}>Labor</h3><strong style={{display:"block",fontSize:25,color:"#0d1b2b"}}>{selected.laborHours.toFixed(2)} hours logged</strong>{running&&data.activeTimer&&<div style={{marginTop:8,color:"#b45309",fontWeight:800}}>Current timer: {duration(data.activeTimer.startedAt,now)}</div>}<div style={{marginTop:10,display:"grid",gap:5}}>{selected.laborEntries.slice(0,6).map(entry=><div key={entry.id} style={{fontSize:12,color:"#657383"}}>{entry.laborDate} · {entry.technician} · {entry.hours.toFixed(2)} hr{entry.notes?` · ${entry.notes}`:""}</div>)}{!selected.laborEntries.length&&<span style={mutedText}>Completed timer sessions will appear here.</span>}</div></div></div></div>
-    </section>})()}
+        <div style={{marginTop:20,paddingTop:18,borderTop:"1px solid #e1e6ea"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:18,flexWrap:"wrap",alignItems:"center"}}><div><p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>SELECTED REPAIR</p><h3 style={{margin:"6px 0 4px",fontSize:23,color:"#0d1b2b"}}>{selected.issue}</h3><div style={{color:"#667482"}}>{selected.location||"No location"} · {stateLabel(selected)} · {isAvailable?"Unassigned":`Assigned to ${selected.assignedTo||"technician"}`}</div></div>{running&&isMine&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button disabled={busy} onClick={()=>void advanceRepair(selected,"repaired")} style={repairedButton}>Repaired</button><button disabled={busy||!waiting} onClick={()=>void advanceRepair(selected,"waiting_parts")} style={waitingActionButton}>Waiting on Part</button><button disabled={busy} onClick={()=>void advanceRepair(selected,"skipped")} style={skipButton}>Skip for Now</button></div>}{activeSameUnit&&!running&&canTakeRepair(selected)&&!waiting&&<button disabled={busy} onClick={()=>void workHere(selected)} style={primaryButton}>Work on This Repair</button>}</div>
 
-    <section style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:14}}>{visibleGroups.map(group=>{const runningRepair=group.repairs.find(repair=>data?.activeTimer?.repairId===repair.id)??null,selectedInGroup=group.repairs.some(repair=>repair.id===selectedId),totalHours=group.repairs.reduce((sum,repair)=>sum+repair.laborHours,0),locations=[...new Set(group.repairs.map(repair=>repair.location).filter(Boolean))];return <article key={group.key} style={{background:"white",border:runningRepair?"2px solid #f47b20":selectedInGroup?"2px solid #0d1b2b":"1px solid #dce2e7",borderRadius:13,padding:18,boxShadow:"0 4px 18px #12202f0d"}}><div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"baseline"}}><span style={{fontSize:15,color:"#f47b20",fontWeight:900}}>UNIT {group.unit||"—"}</span><span style={{fontSize:12,fontWeight:900,color:"#5d6975"}}>{group.repairs.length} OPEN JOB{group.repairs.length===1?"":"S"}</span></div><div style={{marginTop:7,color:"#667482",fontSize:12}}>{locations.length?locations.join(" · "):"No location"} · {totalHours.toFixed(2)} total labor hours</div><div style={{marginTop:13,display:"grid",gap:8}}>{group.repairs.map(repair=>{const repairMine=repair.technicianId===data?.user.technicianId&&data?.user.technicianId!==null,repairAvailable=repair.technicianId===null,repairRunning=data?.activeTimer?.repairId===repair.id,canOpen=Boolean(data?.user.technicianId)&&(repairMine||repairAvailable)&&!data?.activeTimer,partsWaiting=(data?.partRequests??[]).filter(request=>request.repairId===repair.id&&request.shortageQuantity>0).length;return <div key={repair.id} style={queueJobRow}><button onClick={()=>setSelectedId(repair.id)} style={queueJobTitle}>{repair.issue}</button><div style={{marginTop:3,color:"#667482",fontSize:11}}>{repair.status||"Open"} · {repairAvailable?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`} · {repair.laborHours.toFixed(2)} hr{partsWaiting?` · ${partsWaiting} part line awaiting`:""}</div><div style={{marginTop:8,display:"flex",gap:7,flexWrap:"wrap"}}>{canOpen&&<button disabled={busy} onClick={()=>void openJob(repair.id)} style={smallPrimaryButton}>Open Job</button>}{repairRunning&&<span style={runningBadge}>Labor Running</span>}<button onClick={()=>setSelectedId(repair.id)} style={smallSecondaryButton}>View</button></div></div>})}</div><button onClick={()=>setSelectedId(runningRepair?.id??group.repairs[0]?.id??null)} style={unitButton}>View All {group.repairs.length} Job{group.repairs.length===1?"":"s"} for Unit {group.unit||"—"}</button></article>})}{data&&!visibleGroups.length&&<div style={{gridColumn:"1 / -1",background:"white",border:"1px dashed #cbd4dc",borderRadius:13,padding:34,textAlign:"center",color:"#667482"}}><strong style={{display:"block",color:"#24313d",marginBottom:5}}>No units in this view</strong>{view==="available"?"There are no units with unassigned open repairs right now.":"Assigned and open unit jobs will appear here."}</div>}</section>
+          {!isMine&&isAvailable&&!data.activeTimer&&<div style={smallNotice}>Use Start Working on Unit above. The app will claim an actionable repair and start labor automatically.</div>}
+          {!isMine&&!isAvailable&&<div style={lockedNotice}>This repair is assigned to {selected.assignedTo||"another technician"}. You can see it, but only that technician or a manager can work it.</div>}
+          {running&&!waiting&&<div style={smallNotice}>If a needed part is short, request it below. The app will save labor and move you to the next repair automatically.</div>}
+          {waiting&&<div style={{...smallNotice,background:"#fff4df",color:"#80591a"}}>This repair has an unresolved part shortage. It stays open and will be skipped by automatic handoff until parts are available.</div>}
+
+          <MaintenanceChecklistPanel repairId={selected.id} canWork={canManageChecklist}/>
+
+          <div style={{marginTop:20,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(330px,1fr))",gap:16}}><div style={workspaceCard}><h3 style={workspaceHeading}>Parts</h3>
+            {selectedRequests.length>0&&<div style={{display:"grid",gap:7,marginBottom:13}}>{selectedRequests.map(request=><div key={request.id} style={{...requestRow,borderColor:request.shortageQuantity>0?"#e3ba69":"#7eb391",background:request.shortageQuantity>0?"#fff9ed":"#f1faf4"}}><div><strong>{request.partNumber}</strong><span style={{display:"block",fontSize:11,color:"#657383"}}>{request.description}</span></div><div style={{fontSize:11,color:"#5f6f7d"}}>{numberText(request.usedQuantity)} used · {numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} short</div>{isMine&&request.reservedQuantity>0&&<button disabled={busy} onClick={()=>void useReserved(request)} style={plannedUseButton}>Use {numberText(request.reservedQuantity)} Reserved</button>}</div>)}</div>}
+            {selected.plannedParts.length>0&&<div style={plannedBox}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}><strong style={{color:"#76420a"}}>PM Kit · Planned Parts</strong><span style={{color:"#8c6233",fontSize:11}}>{selected.plannedParts[0]?.kitName||"PM Kit"}</span></div><div style={{marginTop:9,display:"grid",gap:7}}>{selected.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity),inventoryPart=data.parts.find(part=>part.id===planned.partId),stock=inventoryPart?availabilityFor(inventoryPart,selected):0;return <div key={planned.id} style={plannedRow}><div style={{minWidth:0}}><strong style={{display:"block",color:"#253542"}}>{planned.partNumber} · {numberText(planned.quantity)} planned</strong><span style={{display:"block",marginTop:2,color:"#697782",fontSize:11}}>{planned.description}</span><span style={{display:"block",marginTop:2,color:planned.usedQuantity>=planned.quantity?"#176440":"#7c684e",fontSize:10,fontWeight:800}}>{numberText(planned.usedQuantity)} used · {numberText(remaining)} remaining · {numberText(stock)} available in {prettyYard(selected.yard)}</span></div><div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>{remaining<=0?<span style={usedBadge}>Used</span>:<>{isMine&&<button disabled={busy} onClick={()=>void usePlannedPart(selected,planned)} style={plannedUseButton}>{stock+0.000001>=remaining?`Use ${numberText(remaining)}`:`Request ${numberText(remaining)}`}</button>}{isMine&&planned.usedQuantity<=0&&<button disabled={busy} onClick={()=>void removePlannedPart(selected,planned)} style={notNeededButton}>Not Needed</button>}</>}</div></div>})}</div></div>}
+            <div style={{minHeight:32,marginTop:selected.plannedParts.length?13:0}}><strong style={{display:"block",marginBottom:6,color:"#52616c",fontSize:11,textTransform:"uppercase",letterSpacing:".05em"}}>Parts Actually Used</strong>{selected.usedParts.length?selected.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>):<span style={mutedText}>No parts used yet.</span>}</div>
+            {isMine&&<div style={{marginTop:12,display:"grid",gridTemplateColumns:"minmax(170px,1fr) 90px auto",gap:8}}><select value={partId} onChange={event=>setPartId(event.target.value)} style={inputStyle} disabled={busy}><option value="">Choose / request part</option>{data.parts.map(part=>{const qty=availabilityFor(part,selected);return <option key={part.id} value={part.id}>{part.partNumber} — {part.description} ({numberText(qty)} available)</option>})}</select><input type="number" min="0.01" step="any" value={partQuantity} onChange={event=>setPartQuantity(Number(event.target.value))} style={inputStyle} disabled={busy}/><button disabled={busy} onClick={()=>void addPartToRepair(selected)} style={secondaryButton}>Use / Request</button></div>}
+          </div><div style={workspaceCard}><h3 style={workspaceHeading}>Labor</h3><strong style={{display:"block",fontSize:25,color:"#0d1b2b"}}>{selected.laborHours.toFixed(2)} hours logged</strong>{running&&data.activeTimer&&<div style={{marginTop:8,color:"#b45309",fontWeight:800}}>Current repair session: {duration(data.activeTimer.startedAt,now)}</div>}<div style={{marginTop:10,display:"grid",gap:5}}>{selected.laborEntries.slice(0,6).map(entry=><div key={entry.id} style={{fontSize:12,color:"#657383"}}>{entry.laborDate} · {entry.technician} · {entry.hours.toFixed(2)} hr{entry.notes?` · ${entry.notes}`:""}</div>)}{!selected.laborEntries.length&&<span style={mutedText}>Each automatic repair handoff creates a separate labor entry here.</span>}</div></div></div>
+        </div>
+      </section>
+    })()}
+
+    <section style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:14}}>{visibleGroups.map(group=>{
+      const runningRepair=group.repairs.find(repair=>data?.activeTimer?.repairId===repair.id)??null;
+      const selectedInGroup=group.repairs.some(repair=>repair.id===selectedId);
+      const totalHours=group.repairs.reduce((sum,repair)=>sum+repair.laborHours,0);
+      const locations=[...new Set(group.repairs.map(repair=>repair.location).filter(Boolean))];
+      const waitingCount=group.repairs.filter(repair=>hasPartShortage(repair.id)).length;
+      const actionableCount=group.repairs.filter(actionable).length;
+      return <article key={group.key} style={{background:"white",border:runningRepair?"2px solid #f47b20":selectedInGroup?"2px solid #0d1b2b":"1px solid #dce2e7",borderRadius:13,padding:18,boxShadow:"0 4px 18px #12202f0d"}}><div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"baseline"}}><span style={{fontSize:15,color:"#f47b20",fontWeight:900}}>UNIT {group.unit||"—"}</span><span style={{fontSize:12,fontWeight:900,color:"#5d6975"}}>{group.repairs.length} REPAIR{group.repairs.length===1?"":"S"} LEFT</span></div><div style={{marginTop:7,color:"#667482",fontSize:12}}>{locations.length?locations.join(" · "):"No location"} · {totalHours.toFixed(2)} labor hours{waitingCount?` · ${waitingCount} waiting on part`:""}</div><div style={{marginTop:13,display:"grid",gap:8}}>{group.repairs.map(repair=><div key={repair.id} style={queueJobRow}><button onClick={()=>setSelectedId(repair.id)} style={queueJobTitle}>{repair.issue}</button><div style={{marginTop:4,display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}><span style={data?.activeTimer?.repairId===repair.id?workingBadge:hasPartShortage(repair.id)?waitingBadge:openBadge}>{stateLabel(repair)}</span><span style={{color:"#667482",fontSize:11}}>{repairAvailable(repair)?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`} · {repair.laborHours.toFixed(2)} hr</span></div></div>)}</div><div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>{runningRepair?<button onClick={()=>setSelectedId(runningRepair.id)} style={primaryButton}>Continue Unit</button>:!data?.activeTimer&&actionableCount>0&&data?.user.technicianId?<button disabled={busy} onClick={()=>void startUnit(group)} style={primaryButton}>Start Working on Unit</button>:null}<button onClick={()=>setSelectedId(group.repairs[0]?.id??null)} style={secondaryButton}>View Unit</button></div></article>
+    })}{data&&!visibleGroups.length&&<div style={{gridColumn:"1 / -1",background:"white",border:"1px dashed #cbd4dc",borderRadius:13,padding:34,textAlign:"center",color:"#667482"}}><strong style={{display:"block",color:"#24313d",marginBottom:5}}>No units in this view</strong>{view==="available"?"There are no units with unassigned open repairs right now.":"Assigned and open unit repairs will appear here."}</div>}</section>
   </main>
 }
 
@@ -128,9 +249,12 @@ const primaryButton={border:0,borderRadius:9,padding:"10px 14px",background:"#f4
 const smallPrimaryButton={border:0,borderRadius:7,padding:"7px 9px",background:"#f47b20",color:"white",fontWeight:900,fontSize:11,cursor:"pointer"} as const;
 const secondaryButton={border:"1px solid #cbd3da",borderRadius:9,padding:"9px 12px",background:"#f7f9fa",color:"#182331",fontWeight:800,cursor:"pointer"} as const;
 const smallSecondaryButton={border:"1px solid #cbd3da",borderRadius:7,padding:"6px 9px",background:"#f7f9fa",color:"#182331",fontWeight:800,fontSize:11,cursor:"pointer"} as const;
-const dangerButton={border:0,borderRadius:9,padding:"10px 14px",background:"#c83e32",color:"white",fontWeight:900,cursor:"pointer"} as const;
-const completeButton={border:0,borderRadius:9,padding:"10px 14px",background:"#16784c",color:"white",fontWeight:900,cursor:"pointer"} as const;
+const doneButton={border:"1px solid #778799",borderRadius:9,padding:"10px 14px",background:"white",color:"#0d1b2b",fontWeight:900,cursor:"pointer"} as const;
+const repairedButton={border:0,borderRadius:9,padding:"11px 15px",background:"#16784c",color:"white",fontWeight:900,cursor:"pointer"} as const;
+const waitingActionButton={border:0,borderRadius:9,padding:"11px 15px",background:"#d08a16",color:"white",fontWeight:900,cursor:"pointer"} as const;
+const skipButton={border:"1px solid #aab4bd",borderRadius:9,padding:"10px 14px",background:"white",color:"#3d4b57",fontWeight:900,cursor:"pointer"} as const;
 const inputStyle={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #ccd4db",borderRadius:8,background:"white",color:"#182331"} as const;
+const workingBanner={marginTop:20,background:"#0d1b2b",color:"white",borderRadius:14,padding:20,display:"flex",justifyContent:"space-between",gap:20,alignItems:"center",flexWrap:"wrap" as const} as const;
 const workspaceStyle={marginTop:18,background:"white",border:"1px solid #d6dde3",borderRadius:15,padding:20,boxShadow:"0 8px 30px #12202f12"} as const;
 const workspaceCard={border:"1px solid #e0e5e9",borderRadius:11,padding:15,background:"#fbfcfd"} as const;
 const workspaceHeading={margin:"0 0 11px",color:"#0d1b2b",fontSize:17} as const;
@@ -147,8 +271,9 @@ const lockedNotice={marginTop:12,padding:"9px 11px",borderRadius:8,background:"#
 const activeJobButton={display:"block",border:0,padding:0,background:"transparent",color:"white",textAlign:"left" as const,fontSize:22,fontWeight:900,cursor:"pointer"} as const;
 const queueJobRow={padding:11,border:"1px solid #e1e6ea",borderRadius:9,background:"#fbfcfd"} as const;
 const queueJobTitle={display:"block",width:"100%",border:0,padding:0,background:"transparent",color:"#182331",textAlign:"left" as const,fontSize:15,fontWeight:900,cursor:"pointer"} as const;
-const unitJobRow={display:"grid",gridTemplateColumns:"minmax(220px,1fr) minmax(160px,auto) auto",gap:12,alignItems:"center",padding:"10px 12px",border:"1px solid #dfe5ea",borderRadius:9,background:"#fbfcfd"} as const;
+const unitJobRow={display:"grid",gridTemplateColumns:"minmax(220px,1fr) minmax(190px,auto) auto",gap:12,alignItems:"center",padding:"10px 12px",border:"1px solid #dfe5ea",borderRadius:9,background:"#fbfcfd"} as const;
 const unitJobTitle={border:0,padding:0,background:"transparent",color:"#0d1b2b",fontWeight:900,textAlign:"left" as const,cursor:"pointer"} as const;
-const runningBadge={display:"inline-flex",alignItems:"center",padding:"6px 9px",borderRadius:999,background:"#fff0e4",color:"#a94a08",fontWeight:900,fontSize:11} as const;
-const unitButton={width:"100%",marginTop:12,border:"1px solid #cbd3da",borderRadius:9,padding:"9px 12px",background:"white",color:"#182331",fontWeight:900,cursor:"pointer"} as const;
+const openBadge={display:"inline-flex",alignItems:"center",padding:"5px 8px",borderRadius:999,background:"#eef2f5",color:"#4f5f6d",fontWeight:900,fontSize:10} as const;
+const workingBadge={display:"inline-flex",alignItems:"center",padding:"5px 8px",borderRadius:999,background:"#fff0e4",color:"#a94a08",fontWeight:900,fontSize:10} as const;
+const waitingBadge={display:"inline-flex",alignItems:"center",padding:"5px 8px",borderRadius:999,background:"#fff3d6",color:"#8a5a08",fontWeight:900,fontSize:10} as const;
 const readyButton={border:"1px solid #8abd9b",borderRadius:999,padding:"7px 10px",background:"white",color:"#176440",fontWeight:900,cursor:"pointer",fontSize:11} as const;
