@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type EquipmentHistory = {
   repairs: number;
@@ -300,6 +301,7 @@ export default function EquipmentMasterPage() {
 
   return (
     <main className="module-page equipment-master-page">
+      <ModuleTabs module="units" />
       <header className="module-header">
         <div>
           <p className="module-eyebrow">FLEET MASTER</p>

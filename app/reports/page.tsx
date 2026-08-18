@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type Summary = {
   activeUnits: number;
@@ -304,6 +305,7 @@ export default function ReportsPage() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "34px 34px 110px" }}>
+      <ModuleTabs module="reports" />
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 18, flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#6d28d9", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>FLEET INTELLIGENCE</p>

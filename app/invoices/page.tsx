@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type BillingData = { laborRate:number; customers:Array<{id:number;name:string;contactName:string;email:string;phone:string;address:string}>; invoices:Array<{id:number;invoiceNumber:string;repairId:number|null;invoiceDate:string;dueDate:string;status:string;billToName:string;subtotal:number;taxRate:number;taxAmount:number;total:number;unit:string;repairTitle:string}>; repairs:Array<{id:string;unit:string;title:string;status:string;partsCost:number;laborHours:number;laborCost:number;outsideCost:number;total:number}>; updatedAt:string };
 type InvoiceDetail = { invoice:{id:number;invoiceNumber:string;unit:string;repairTitle:string;billToName:string;billToContact:string;billToEmail:string;billToPhone:string;billToAddress:string;invoiceDate:string;dueDate:string;status:string;subtotal:number;taxRate:number;taxAmount:number;total:number;notes:string;paidAt:string}; lines:Array<{id:number;type:string;description:string;quantity:number;unitPrice:number;amount:number}> };
@@ -21,6 +22,7 @@ export default function InvoicesPage(){
  async function openInvoice(id:number){const r=await fetch(`/api/invoices?id=${id}`,{cache:'no-store'});const p=await r.json() as InvoiceDetail&{error?:string};if(!r.ok)throw new Error(p.error||'Invoice could not be loaded');setDetail(p);}
  async function createInvoice(e:FormEvent){e.preventDefault();const result=await post({action:'createInvoice',...form,customerId:form.customerId||null,taxRate:Number(form.taxRate),extraAmount:Number(form.extraAmount||0)});if(result?.id){await openInvoice(result.id);}}
  return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'34px 34px 110px',color:'#172033'}}>
+  <ModuleTabs module="parts" />
   <header><p style={{margin:0,color:'#0f766e',fontWeight:900,letterSpacing:'.14em',fontSize:12}}>SHOP BILLING</p><h1 style={{margin:'7px 0 0',fontSize:34}}>Invoices & Labor Rate</h1><p style={{color:'#64748b'}}>Build invoices directly from repair parts, tracked labor, and outside/vendor charges.</p></header>
   {message&&<div style={{marginTop:14,padding:11,background:'#fff8e6',border:'1px solid #f2c66d',borderRadius:8}}>{message}</div>}
   <section style={{...panel,marginTop:18,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:16}}>

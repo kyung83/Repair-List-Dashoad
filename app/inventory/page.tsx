@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type WarehouseStock = {
   id: number;
@@ -288,6 +289,7 @@ export default function InventoryPage() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "42px", color: "#182331" }}>
+      <ModuleTabs module="parts" />
       <header style={{ display: "flex", justifyContent: "space-between", gap: 24, alignItems: "flex-end" }}>
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 800, letterSpacing: ".16em" }}>PARTS OPERATIONS</p>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type Job = {
   id:number; repairId:string; partId:number; partNumber:string; description:string;
@@ -50,6 +51,7 @@ export default function PartsDeskPage(){
   const ready=useMemo(()=>data?.requests.filter(r=>(yard==='ALL'||r.warehouseCode===yard)&&r.reservedQuantity>0)??[],[data,yard]);
 
   return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'36px 34px 100px',color:'#182331'}}>
+    <ModuleTabs module="parts" />
     <header style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'end',flexWrap:'wrap'}}>
       <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#0d1b2b'}}>Parts Desk</h1><p style={{margin:0,color:'#667482'}}>One queue for repair shortages, receiving, reservations, and yard-level replenishment.</p></div>
       <div style={{display:'flex',gap:7}}>{['ALL','CLARE','CADILLAC'].map(code=><button key={code} onClick={()=>setYard(code)} style={yard===code?activeTab:tab}>{code==='ALL'?'All Yards':code[0]+code.slice(1).toLowerCase()}</button>)}</div>

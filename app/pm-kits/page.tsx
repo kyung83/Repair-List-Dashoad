@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MaintenanceTabs from "../maintenance-tabs";
 
 type Part = { id: number; partNumber: string; description: string; quantityOnHand: number };
 type Truck = { id: number; unit: string; modelYear: number | null; make: string; model: string; engine: string; equipmentType: string };
@@ -195,13 +196,13 @@ export default function PmKitsPage() {
 
   return (
     <main style={pageStyle}>
+      <MaintenanceTabs />
       <header style={headerStyle}>
         <div>
           <p style={eyebrow}>MAINTENANCE SETUP</p>
           <h1 style={{ margin: "5px 0", fontSize: 32 }}>Truck PM Kits</h1>
           <p style={subtitle}>Build reusable expected-parts kits by PM type and truck year range, make, model, and engine. Matching parts are copied to each PM work order without reducing inventory.</p>
         </div>
-        <a href="/pm-schedules" style={linkButton}>PM Schedules</a>
       </header>
 
       {message && <div style={noticeStyle}>{message}</div>}
@@ -298,4 +299,3 @@ const lightButton = { minHeight: 36, border: "1px solid #cbd3da", borderRadius: 
 const orangeButton = { ...lightButton, background: "#fff0df", borderColor: "#e69a52", color: "#8c4708" } as const;
 const saveButton = { ...lightButton, background: "#0d1b2b", borderColor: "#0d1b2b", color: "white" } as const;
 const removeButton = { ...lightButton, background: "#fff0ef", borderColor: "#e4aaa5", color: "#8b312a" } as const;
-const linkButton = { ...saveButton, display: "inline-flex", alignItems: "center", textDecoration: "none" } as const;

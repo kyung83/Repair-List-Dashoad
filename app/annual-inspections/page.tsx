@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MaintenanceTabs from "../maintenance-tabs";
 
 type AnnualForm = {
   reportNumber: string;
@@ -49,7 +50,27 @@ export default function AnnualInspectionsPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/annual-inspections", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as Payload;
+        if (!response.ok) throw new Error(payload.error || "Annual forms could not be loaded.");
+        return payload;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setForms(payload.forms);
+        setMessage("");
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : "Annual forms could not be loaded.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -62,10 +83,11 @@ export default function AnnualInspectionsPage() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "34px 34px 110px" }}>
+      <MaintenanceTabs />
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 18, flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>PERIODIC INSPECTION RECORDS</p>
-          <h1 style={{ margin: "7px 0 4px", fontSize: 34 }}>Annual Forms</h1>
+          <h1 style={{ margin: "7px 0 4px", fontSize: 34 }}>Completed Annual Forms</h1>
           <p style={{ margin: 0, maxWidth: 850, color: "#64748b", lineHeight: 1.5 }}>
             Completed Annual inspection forms are kept here for the truck copy and later reprints. Print the newest form after the Annual closes; if the paper copy is lost, search the unit and print the same stored inspection again.
           </p>
