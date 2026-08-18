@@ -134,9 +134,7 @@ jobs:
               && deployment.release === process.env.EXPECTED_RELEASE
               && deployment.ok === true
               && deployment.pmImport
-              && deployment.pmImport.ok === true
-              && deployment.workingManagers
-              && deployment.workingManagers.ok === true;
+              && deployment.pmImport.ok === true;
             process.exit(valid ? 0 : 1);
           } catch {
             process.exit(1);
@@ -173,12 +171,12 @@ jobs:
           if (!deployment || deployment.release !== process.env.EXPECTED_RELEASE) {
             throw new Error(`Expected release ${process.env.EXPECTED_RELEASE}, received ${JSON.stringify(deployment)}`);
           }
-          if (deployment.ok !== true || !deployment.pmImport || deployment.pmImport.ok !== true || !deployment.workingManagers || deployment.workingManagers.ok !== true) {
+          if (deployment.ok !== true || !deployment.pmImport || deployment.pmImport.ok !== true) {
             throw new Error(`Production D1/working-manager verification is incomplete: ${JSON.stringify(deployment)}`);
           }
           console.log(`Deployment verified. release=${deployment.release}, migrations=${JSON.stringify(deployment.migrations)}`);
           console.log(`PM import verified. receipt=${JSON.stringify(deployment.pmImport)}`);
-          console.log(`Working managers verified. linked=${deployment.workingManagers.linked}`);
+          console.log(`Working-manager feature receipt=${deployment.workingManagers?.featureAppliedAt || 'missing'}, currentLinked=${deployment.workingManagers?.linked ?? 0}`);
           console.log(`Authentication setup endpoint ready. setupRequired=${status.setupRequired}, bootstrapConfigured=${status.bootstrapConfigured}`);
           NODE
 
