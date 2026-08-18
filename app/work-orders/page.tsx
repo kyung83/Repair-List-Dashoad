@@ -3,198 +3,220 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
 
-type UsedPart = { partId: number; partNumber: string; description: string; quantity: number };
-type LaborEntry = { id: number; technicianId: number | null; technician: string; laborDate: string; hours: number; rate: number; amount: number; notes: string };
-type Dvir = { defectId: string; asset: string; driver: string; defect: string };
-type Repair = {
-  id: string;
-  unit: string;
-  issue: string;
-  status: string;
-  partsText: string;
-  assignedTo: string;
-  technicianId: number | null;
-  location: string;
-  relatedGeotabDefectId: string;
-  usedParts: UsedPart[];
-  laborEntries: LaborEntry[];
-  laborHours: number;
-  laborRate: number;
-  laborCost: number;
-  outsideCost: number;
+type UsedPart = {
+  repairId:string;
+  repairIssue:string;
+  partId:number;
+  partNumber:string;
+  description:string;
+  quantity:number;
+  unitCost:number;
+  lineCost:number;
+  costRecorded:boolean;
 };
-type WorkOrderData = { repairs: Repair[]; dvir: Dvir[]; defaultLaborRate: number; updatedAt: string };
-type StatusFilter = "all" | "open" | "completed";
+type LaborEntry = {
+  repairId:string;
+  repairIssue:string;
+  id:number;
+  technicianId:number|null;
+  technician:string;
+  laborDate:string;
+  hours:number;
+  rate:number;
+  amount:number;
+  notes:string;
+};
+type TechnicianNote = {
+  repairId:string;
+  repairIssue:string;
+  id:number;
+  technicianId:number|null;
+  technician:string;
+  detail:string;
+  createdAt:string;
+};
+type Repair = {
+  id:string;
+  numericId:number;
+  equipmentId:number|null;
+  unit:string;
+  issue:string;
+  status:string;
+  assignedTo:string;
+  technicianId:number|null;
+  location:string;
+  laborHours:number;
+  laborCost:number;
+  partCost:number;
+  outsideCost:number;
+  totalCost:number;
+  completedAt:string;
+  reviewedAt:string;
+};
+type ReviewPackage = {
+  id:string;
+  repairIds:string[];
+  unit:string;
+  equipmentId:number|null;
+  technician:string;
+  technicianId:number|null;
+  completionDate:string;
+  completedAt:string;
+  reviewed:boolean;
+  reviewedAt:string;
+  reviewedBy:string;
+  reviewNote:string;
+  repairs:Repair[];
+  technicianNotes:TechnicianNote[];
+  laborEntries:LaborEntry[];
+  usedParts:UsedPart[];
+  missingPartCostLines:number;
+  laborHours:number;
+  laborCost:number;
+  partCost:number;
+  outsideCost:number;
+  totalCost:number;
+};
+type WorkOrderData = {
+  repairs:Repair[];
+  reviewPackages:ReviewPackage[];
+  summary:{needsReview:number;reviewed:number;openRepairs:number;completedRepairs:number;completedValue:number};
+  canApprove:boolean;
+  user:{id:number;displayName:string;role:string};
+  updatedAt:string;
+};
+type ReviewFilter="needs"|"reviewed"|"all";
 
-function isComplete(item: Repair) {
-  return item.status.toLowerCase().includes("complete");
-}
+function isComplete(item:Repair){return item.status.toLowerCase().includes("complete");}
+function money(value:number){return Number(value||0).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});}
+function dateTime(value:string){if(!value)return "—";const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";const parsed=new Date(normalized);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();}
 
-function money(value: number) {
-  return value.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-}
+export default function WorkOrdersPage(){
+  const [data,setData]=useState<WorkOrderData|null>(null);
+  const [message,setMessage]=useState("");
+  const [query,setQuery]=useState("");
+  const [reviewFilter,setReviewFilter]=useState<ReviewFilter>("needs");
+  const [expanded,setExpanded]=useState<Set<string>>(()=>new Set());
+  const [reviewNotes,setReviewNotes]=useState<Record<string,string>>({});
+  const [saving,setSaving]=useState("");
 
-export default function WorkOrdersPage() {
-  const [data, setData] = useState<WorkOrderData | null>(null);
-  const [message, setMessage] = useState("");
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-
-  async function load() {
-    const response = await fetch("/api/work-orders", { cache: "no-store" });
-    const payload = await response.json() as WorkOrderData & { error?: string };
-    if (!response.ok) throw new Error(payload.error || "Unable to load work orders.");
+  async function load(){
+    const response=await fetch("/api/work-orders",{cache:"no-store"});
+    const payload=await response.json() as WorkOrderData&{error?:string};
+    if(!response.ok)throw new Error(payload.error||"Unable to load work orders.");
     setData(payload);
   }
 
-  useEffect(() => {
-    void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Unable to load work orders."));
-  }, []);
+  useEffect(()=>{void load().catch((error:unknown)=>setMessage(error instanceof Error?error.message:"Unable to load work orders."));},[]);
 
-  const visibleRepairs = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return (data?.repairs ?? []).filter((item) => {
-      if (statusFilter === "open" && isComplete(item)) return false;
-      if (statusFilter === "completed" && !isComplete(item)) return false;
-      const related = data?.dvir.find((row) => row.defectId === item.relatedGeotabDefectId);
-      if (!needle) return true;
-      return [item.unit, item.issue, item.status, item.assignedTo, item.partsText, item.location, related?.defect ?? "", ...item.usedParts.flatMap((part) => [part.partNumber, part.description])].join(" ").toLowerCase().includes(needle);
+  const visiblePackages=useMemo(()=>{
+    const needle=query.trim().toLowerCase();
+    return (data?.reviewPackages??[]).filter((item)=>{
+      if(reviewFilter==="needs"&&item.reviewed)return false;
+      if(reviewFilter==="reviewed"&&!item.reviewed)return false;
+      if(!needle)return true;
+      return [
+        item.unit,item.technician,item.completionDate,item.reviewedBy,item.reviewNote,
+        ...item.repairs.flatMap((repair)=>[repair.id,repair.issue,repair.status]),
+        ...item.technicianNotes.flatMap((note)=>[note.technician,note.detail]),
+        ...item.usedParts.flatMap((part)=>[part.partNumber,part.description]),
+      ].join(" ").toLowerCase().includes(needle);
     });
-  }, [data, query, statusFilter]);
+  },[data,query,reviewFilter]);
 
-  const totals = useMemo(() => {
-    const repairs = data?.repairs ?? [];
-    const open = repairs.filter((item) => !isComplete(item)).length;
-    const completed = repairs.length - open;
-    const laborHours = repairs.reduce((sum, item) => sum + Number(item.laborHours || 0), 0);
-    const recordedCost = repairs.reduce((sum, item) => sum + Number(item.laborCost || 0) + Number(item.outsideCost || 0), 0);
-    return { total: repairs.length, open, completed, laborHours, recordedCost };
-  }, [data]);
+  const openRepairs=useMemo(()=>{
+    const needle=query.trim().toLowerCase();
+    return (data?.repairs??[]).filter((item)=>!isComplete(item)&&(!needle||[item.unit,item.issue,item.assignedTo,item.location].join(" ").toLowerCase().includes(needle)));
+  },[data,query]);
 
-  function toggle(id: string) {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function toggle(id:string){setExpanded((current)=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;});}
+
+  async function approve(item:ReviewPackage){
+    setSaving(item.id);setMessage("");
+    try{
+      const response=await fetch("/api/work-orders",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approveWorkOrder",repairIds:item.repairIds,reviewNote:reviewNotes[item.id]??""})});
+      const payload=await response.json() as {error?:string};
+      if(!response.ok)throw new Error(payload.error||"Work order could not be approved.");
+      setMessage(`Approved completed work order for Unit ${item.unit}.`);
+      setReviewNotes((current)=>({...current,[item.id]:""}));
+      await load();
+    }catch(error){setMessage(error instanceof Error?error.message:"Work order could not be approved.");}
+    finally{setSaving("");}
   }
 
-  return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "30px 34px 80px", color: "#182331" }}>
-      <ModuleTabs module="shop" />
-      <header style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-end", flexWrap: "wrap" }}>
-        <div>
-          <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>WORK ORDER REVIEW</p>
-          <h1 style={{ margin: "6px 0 0", fontSize: 31 }}>Review work orders</h1>
-          <p style={{ margin: "7px 0 0", color: "#64748b", maxWidth: 850, fontSize: 13 }}>
-            Read-only review. Technicians assign parts, record labor, and complete repairs from Shop Jobs as they work. This screen is only for reviewing the resulting work order record.
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 7 }}>
-          <a href="/repair-board" style={linkButtonStyle}>Repair Board</a>
-          <button type="button" onClick={() => void load()} style={buttonStyle}>Refresh</button>
-        </div>
-      </header>
+  const summary=data?.summary??{needsReview:0,reviewed:0,openRepairs:0,completedRepairs:0,completedValue:0};
 
-      {message && <div style={{ marginTop: 12, padding: 10, background: "#fff8e6", border: "1px solid #f2c66d", fontSize: 12 }}>{message}</div>}
+  return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"30px 34px 80px",color:"#182331"}}>
+    <ModuleTabs module="shop"/>
+    <header style={{display:"flex",justifyContent:"space-between",gap:20,alignItems:"flex-end",flexWrap:"wrap"}}>
+      <div>
+        <p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>WORK ORDER REVIEW</p>
+        <h1 style={{margin:"6px 0 0",fontSize:31}}>Completed work for manager review</h1>
+        <p style={{margin:"7px 0 0",color:"#64748b",maxWidth:900,fontSize:13}}>Completed technician work is combined by unit, technician, and work date. Review the repairs, technician notes, labor, parts and costs together, then approve the work order.</p>
+      </div>
+      <div style={{display:"flex",gap:7}}><a href="/repair-board" style={linkButtonStyle}>Repair Board</a><button type="button" onClick={()=>void load()} style={buttonStyle}>Refresh</button></div>
+    </header>
 
-      <section style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(5,minmax(120px,1fr))", border: "1px solid #cfd6db", background: "white" }}>
-        <Metric label="Open" value={String(totals.open)} />
-        <Metric label="Completed" value={String(totals.completed)} />
-        <Metric label="Total records" value={String(totals.total)} />
-        <Metric label="Labor hours" value={totals.laborHours.toFixed(2)} />
-        <Metric label="Labor + outside" value={money(totals.recordedCost)} last />
-      </section>
+    {message&&<div style={{marginTop:12,padding:10,background:"#fff8e6",border:"1px solid #f2c66d",fontSize:12}}>{message}</div>}
 
-      <section style={{ marginTop: 12, border: "1px solid #cfd6db", background: "white" }}>
-        <div style={{ padding: 10, borderBottom: "1px solid #dce2e7", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search unit, repair, technician, part, DVIR..." style={{ ...inputStyle, flex: 1, minWidth: 280 }} />
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)} style={{ ...inputStyle, width: 155 }}>
-            <option value="all">All work orders</option>
-            <option value="open">Open only</option>
-            <option value="completed">Completed only</option>
-          </select>
-          <span style={{ color: "#6c7886", fontSize: 11, minWidth: 95, textAlign: "right" }}>{visibleRepairs.length} shown</span>
-        </div>
+    <section style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(5,minmax(120px,1fr))",border:"1px solid #cfd6db",background:"white"}}>
+      <Metric label="Needs review" value={String(summary.needsReview)}/><Metric label="Reviewed" value={String(summary.reviewed)}/><Metric label="Open repairs" value={String(summary.openRepairs)}/><Metric label="Completed repairs" value={String(summary.completedRepairs)}/><Metric label="Completed value" value={money(summary.completedValue)} last/>
+    </section>
 
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1050 }}>
-            <thead>
-              <tr style={{ background: "#eef1f2", color: "#5b6770", fontSize: 9, letterSpacing: ".05em", textTransform: "uppercase", textAlign: "left" }}>
-                <th style={thStyle}>Unit</th><th style={thStyle}>Repair</th><th style={thStyle}>Status</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Parts</th><th style={thStyle}>Labor</th><th style={thStyle}>Cost</th><th style={thStyle}>Review</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRepairs.map((item) => {
-                const complete = isComplete(item);
-                const open = expanded.has(item.id);
-                const related = data?.dvir.find((row) => row.defectId === item.relatedGeotabDefectId);
-                return (
-                  <Fragment key={item.id}>
-                    <tr style={{ borderTop: "1px solid #e7ebee", background: complete ? "#f8faf9" : "white" }}>
-                      <td style={{ ...tdStyle, fontWeight: 900, color: "#0d1b2b" }}>{item.unit || "—"}</td>
-                      <td style={tdStyle}><strong style={{ color: "#263746" }}>{item.issue}</strong>{related && <small style={{ display: "block", marginTop: 2, color: "#8b5d09" }}>DVIR: {related.defect}</small>}</td>
-                      <td style={tdStyle}><span style={{ display: "inline-flex", padding: "3px 7px", border: `1px solid ${complete ? "#9fcab4" : "#c7ced2"}`, background: complete ? "#e9f6ef" : "#f2f4f5", color: complete ? "#176440" : "#53616d", fontSize: 10, fontWeight: 900 }}>{item.status}</span></td>
-                      <td style={tdStyle}>{item.assignedTo || "Unassigned"}</td>
-                      <td style={tdStyle}>{item.location || "—"}</td>
-                      <td style={tdStyle}>{item.usedParts.length ? `${item.usedParts.length} line${item.usedParts.length === 1 ? "" : "s"}` : item.partsText || "—"}</td>
-                      <td style={tdStyle}>{item.laborHours.toFixed(2)} hr</td>
-                      <td style={tdStyle}>{money(Number(item.laborCost || 0) + Number(item.outsideCost || 0))}</td>
-                      <td style={tdStyle}><button type="button" onClick={() => toggle(item.id)} style={buttonStyle}>{open ? "Close" : "Review"}</button></td>
-                    </tr>
-                    {open && (
-                      <tr style={{ borderTop: "1px solid #e7ebee", background: "#fafbfc" }}>
-                        <td colSpan={9} style={{ padding: 12 }}>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(160px,1fr))", gap: 10 }}>
-                            <Detail label="Work order" value={item.id} />
-                            <Detail label="Technician" value={item.assignedTo || "Unassigned"} />
-                            <Detail label="Labor" value={`${item.laborHours.toFixed(2)} hr · ${money(item.laborCost)}`} />
-                            <Detail label="Outside cost" value={money(item.outsideCost)} />
-                            {related && <Detail label="Related DVIR" value={`${related.asset} · ${related.defect}`} />}
-                            <Detail label="Parts summary" value={item.partsText || "No part summary"} />
-                          </div>
+    <section style={{marginTop:12,border:"1px solid #cfd6db",background:"white"}}>
+      <div style={{padding:10,borderBottom:"1px solid #dce2e7",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <strong style={{fontSize:12,marginRight:4}}>COMPLETED WORK ORDERS</strong>
+        <input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search unit, technician, repair, note, part..." style={{...inputStyle,flex:1,minWidth:280}}/>
+        <select value={reviewFilter} onChange={(event)=>setReviewFilter(event.target.value as ReviewFilter)} style={{...inputStyle,width:165}}><option value="needs">Needs review</option><option value="reviewed">Reviewed history</option><option value="all">All completed</option></select>
+        <span style={{color:"#6c7886",fontSize:11,minWidth:85,textAlign:"right"}}>{visiblePackages.length} shown</span>
+      </div>
 
-                          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "minmax(280px,1fr) minmax(420px,2fr)", gap: 12 }}>
-                            <div style={{ border: "1px solid #e0e5e8", background: "white" }}>
-                              <div style={subheadStyle}>Parts used</div>
-                              {item.usedParts.length ? item.usedParts.map((part, index) => <div key={`${part.partId}-${index}`} style={{ display: "grid", gridTemplateColumns: "100px 1fr auto", gap: 8, padding: "7px 9px", borderTop: "1px solid #edf0f2", fontSize: 11 }}><strong>{part.partNumber}</strong><span>{part.description}</span><span>× {part.quantity}</span></div>) : <div style={emptyStyle}>No parts recorded.</div>}
-                            </div>
-                            <div style={{ border: "1px solid #e0e5e8", background: "white" }}>
-                              <div style={subheadStyle}>Labor entries</div>
-                              {item.laborEntries.length ? item.laborEntries.map((entry) => <div key={entry.id} style={{ display: "grid", gridTemplateColumns: "95px 130px 80px 100px 1fr", gap: 8, padding: "7px 9px", borderTop: "1px solid #edf0f2", fontSize: 11 }}><span>{entry.laborDate}</span><strong>{entry.technician}</strong><span>{entry.hours} hr</span><span>{money(entry.amount)}</span><span style={{ color: "#64748b" }}>{entry.notes || "—"}</span></div>) : <div style={emptyStyle}>No labor entries recorded.</div>}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-          {!visibleRepairs.length && <div style={{ padding: 24, color: "#64748b", textAlign: "center", fontSize: 12 }}>No work orders match this search/filter.</div>}
-        </div>
-      </section>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:1220}}>
+        <thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Completed</th><th style={thStyle}>Technician</th><th style={thStyle}>Repairs</th><th style={thStyle}>Notes</th><th style={thStyle}>Labor</th><th style={thStyle}>Parts</th><th style={thStyle}>Outside</th><th style={thStyle}>Total</th><th style={thStyle}>Review status</th><th style={thStyle}>Review</th></tr></thead>
+        <tbody>{visiblePackages.map((item)=>{
+          const open=expanded.has(item.id);
+          return <Fragment key={item.id}>
+            <tr style={{borderTop:"1px solid #e7ebee",background:item.reviewed?"#f8faf9":"#fffdf6"}}>
+              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#64748b"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button></td>
+            </tr>
+            {open&&<tr style={{borderTop:"1px solid #e7ebee",background:"#fafbfc"}}><td colSpan={11} style={{padding:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(150px,1fr))",gap:10}}><Detail label="Unit" value={item.unit||"—"}/><Detail label="Technician" value={item.technician||"Unassigned"}/><Detail label="Completed" value={dateTime(item.completedAt)}/><Detail label="Labor cost" value={money(item.laborCost)}/><Detail label={item.missingPartCostLines?"Recorded total":"Total cost"} value={money(item.totalCost)}/></div>
 
-      <footer style={{ marginTop: 9, color: "#74808a", fontSize: 10, textAlign: "right" }}>{data ? `Read-only snapshot updated ${new Date(data.updatedAt).toLocaleString()}` : "Loading work order review..."}</footer>
-    </main>
-  );
+              <div style={{marginTop:12,border:"1px solid #dfe5e9",background:"white"}}><div style={subheadStyle}>Repairs completed in this work order</div>{item.repairs.map((repair)=><div key={repair.id} style={{display:"grid",gridTemplateColumns:"110px 1fr 110px",gap:8,padding:"8px 10px",borderTop:"1px solid #edf0f2",fontSize:11}}><strong>{repair.id}</strong><span>{repair.issue}</span><span>{repair.status}</span></div>)}</div>
+
+              <div style={{marginTop:12,display:"grid",gridTemplateColumns:"minmax(300px,1fr) minmax(440px,1.45fr)",gap:12}}>
+                <div style={panelStyle}><div style={subheadStyle}>Technician repair notes</div>{item.technicianNotes.length?item.technicianNotes.map((note)=><div key={note.id} style={{padding:"8px 10px",borderTop:"1px solid #edf0f2",fontSize:11}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><strong>{note.technician}</strong><span style={{color:"#7a858d"}}>{dateTime(note.createdAt)}</span></div><div style={{marginTop:4,color:"#263746",whiteSpace:"pre-wrap"}}>{note.detail}</div><small style={{display:"block",marginTop:4,color:"#7a858d"}}>{note.repairIssue}</small></div>):<div style={emptyStyle}>No technician repair notes were recorded.</div>}</div>
+                <div style={panelStyle}><div style={subheadStyle}>Labor entries</div>{item.laborEntries.length?item.laborEntries.map((entry)=><div key={`${entry.repairId}-${entry.id}`} style={{display:"grid",gridTemplateColumns:"95px 130px 65px 75px 90px 1fr",gap:7,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11}}><span>{entry.laborDate}</span><strong>{entry.technician}</strong><span>{entry.hours} hr</span><span>{money(entry.rate)}/hr</span><strong>{money(entry.amount)}</strong><span style={{color:"#64748b"}}>{entry.notes||entry.repairIssue}</span></div>):<div style={emptyStyle}>No labor entries recorded.</div>}</div>
+              </div>
+
+              <div style={{marginTop:12,display:"grid",gridTemplateColumns:"minmax(460px,2fr) minmax(280px,1fr)",gap:12}}>
+                <div style={panelStyle}><div style={subheadStyle}>Parts applied</div>{item.usedParts.length?item.usedParts.map((part,index)=><div key={`${part.repairId}-${part.partId}-${index}`} style={{display:"grid",gridTemplateColumns:"105px 1fr 60px 120px 100px",gap:8,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11}}><strong>{part.partNumber}</strong><span>{part.description}<small style={{display:"block",color:"#7a858d"}}>{part.repairIssue}</small></span><span>× {part.quantity}</span><span>{part.costRecorded?`${money(part.unitCost)} ea.`:"Cost not recorded"}</span><strong>{part.costRecorded?money(part.lineCost):"—"}</strong></div>):<div style={emptyStyle}>No parts applied.</div>}</div>
+                <div style={panelStyle}><div style={subheadStyle}>Cost summary</div><Cost label="Labor" value={item.laborCost}/><Cost label="Parts recorded" value={item.partCost}/><Cost label="Outside" value={item.outsideCost}/><Cost label={item.missingPartCostLines?"RECORDED TOTAL":"TOTAL"} value={item.totalCost} strong/>{item.missingPartCostLines>0&&<div style={{padding:10,borderTop:"1px solid #f2c66d",background:"#fff8e6",fontSize:10,color:"#8a5a00"}}>{item.missingPartCostLines} legacy part line{item.missingPartCostLines===1?" has":"s have"} no captured historical unit cost and are excluded from the recorded total.</div>}</div>
+              </div>
+
+              {item.reviewed?<div style={{marginTop:12,padding:10,border:"1px solid #b9d8c8",background:"#f1faf5",fontSize:11}}><strong>Reviewed by {item.reviewedBy||"manager"}</strong> · {dateTime(item.reviewedAt)}{item.reviewNote&&<div style={{marginTop:4}}>{item.reviewNote}</div>}</div>:<div style={{marginTop:12,padding:12,border:"1px solid #e0c47a",background:"#fffaf0"}}><strong style={{fontSize:11}}>MANAGER / ADMIN REVIEW</strong><textarea value={reviewNotes[item.id]??""} onChange={(event)=>setReviewNotes((current)=>({...current,[item.id]:event.target.value}))} placeholder="Optional review note" maxLength={1000} style={{...inputStyle,width:"100%",minHeight:60,marginTop:7,resize:"vertical"}}/>{data?.canApprove?<button type="button" disabled={saving===item.id} onClick={()=>void approve(item)} style={{...buttonStyle,marginTop:7,fontWeight:900}}>{saving===item.id?"Saving...":"APPROVE WORK ORDER"}</button>:<div style={{marginTop:7,fontSize:11,color:"#7a858d"}}>Manager or administrator access is required to approve.</div>}</div>}
+            </td></tr>}
+          </Fragment>;
+        })}</tbody>
+      </table>{!visiblePackages.length&&<div style={{padding:24,color:"#64748b",textAlign:"center",fontSize:12}}>No completed work orders match this view.</div>}</div>
+    </section>
+
+    <section style={{marginTop:14,border:"1px solid #cfd6db",background:"white"}}><div style={{padding:10,borderBottom:"1px solid #dce2e7",fontSize:12,fontWeight:900}}>OPEN REPAIRS — NOT YET COMPLETED</div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:850}}><thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Repair</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Labor</th></tr></thead><tbody>{openRepairs.slice(0,100).map((repair)=><tr key={repair.id} style={{borderTop:"1px solid #e7ebee"}}><td style={{...tdStyle,fontWeight:900}}>{repair.unit||"—"}</td><td style={tdStyle}>{repair.issue}</td><td style={tdStyle}>{repair.assignedTo||"Unassigned"}</td><td style={tdStyle}>{repair.location||"—"}</td><td style={tdStyle}>{repair.laborHours.toFixed(2)} hr</td></tr>)}</tbody></table>{!openRepairs.length&&<div style={emptyStyle}>No open repairs match this search.</div>}</div></section>
+
+    <footer style={{marginTop:9,color:"#74808a",fontSize:10,textAlign:"right"}}>{data?`Snapshot updated ${new Date(data.updatedAt).toLocaleString()}`:"Loading work order review..."}</footer>
+  </main>;
 }
 
-function Metric({ label, value, last = false }: { label: string; value: string; last?: boolean }) {
-  return <article style={{ minHeight: 64, padding: "10px 12px", borderRight: last ? 0 : "1px solid #dce2e7" }}><span style={{ display: "block", color: "#6f7b84", fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".05em" }}>{label}</span><strong style={{ display: "block", marginTop: 4, color: "#0d1b2b", fontSize: 21 }}>{value}</strong></article>;
-}
+function Metric({label,value,last=false}:{label:string;value:string;last?:boolean}){return <article style={{minHeight:64,padding:"10px 12px",borderRight:last?0:"1px solid #dce2e7"}}><span style={{display:"block",color:"#6f7b84",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>{label}</span><strong style={{display:"block",marginTop:4,color:"#0d1b2b",fontSize:21}}>{value}</strong></article>;}
+function Detail({label,value}:{label:string;value:string}){return <div><span style={{display:"block",color:"#74808a",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</span><strong style={{display:"block",marginTop:2,fontSize:11,color:"#263746"}}>{value}</strong></div>;}
+function Cost({label,value,strong=false}:{label:string;value:number;strong?:boolean}){return <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderTop:"1px solid #edf0f2",fontSize:11,fontWeight:strong?900:500}}><span>{label}</span><span>{money(value)}</span></div>;}
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return <div><span style={{ display: "block", color: "#74808a", fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</span><strong style={{ display: "block", marginTop: 2, fontSize: 11, color: "#263746" }}>{value}</strong></div>;
-}
-
-const inputStyle = { minHeight: 34, padding: "6px 8px", border: "1px solid #c7ced3", borderRadius: 4, background: "white", color: "#263746" } as const;
-const buttonStyle = { minHeight: 30, padding: "0 9px", border: "1px solid #bcc5cb", borderRadius: 4, background: "white", color: "#263746", fontSize: 10, fontWeight: 900 } as const;
-const linkButtonStyle = { ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" } as const;
-const thStyle = { padding: "7px 8px", borderRight: "1px solid #d7dde1" } as const;
-const tdStyle = { padding: "8px", fontSize: 11, verticalAlign: "middle" } as const;
-const subheadStyle = { padding: "7px 9px", background: "#eef1f2", color: "#59656e", fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".04em" } as const;
-const emptyStyle = { padding: 10, borderTop: "1px solid #edf0f2", color: "#7a858d", fontSize: 11 } as const;
+const inputStyle={minHeight:34,padding:"6px 8px",border:"1px solid #c7ced3",borderRadius:4,background:"white",color:"#263746"} as const;
+const buttonStyle={minHeight:30,padding:"0 9px",border:"1px solid #bcc5cb",borderRadius:4,background:"white",color:"#263746",fontSize:10,fontWeight:900} as const;
+const linkButtonStyle={...buttonStyle,display:"inline-flex",alignItems:"center",textDecoration:"none"} as const;
+const headRowStyle={background:"#eef1f2",color:"#5b6770",fontSize:9,letterSpacing:".05em",textTransform:"uppercase" as const,textAlign:"left" as const};
+const thStyle={padding:"7px 8px",borderRight:"1px solid #d7dde1"} as const;
+const tdStyle={padding:"8px",fontSize:11,verticalAlign:"middle"} as const;
+const subheadStyle={padding:"7px 9px",background:"#eef1f2",color:"#59656e",fontSize:9,fontWeight:900,textTransform:"uppercase" as const,letterSpacing:".04em"};
+const panelStyle={border:"1px solid #e0e5e8",background:"white"} as const;
+const emptyStyle={padding:10,borderTop:"1px solid #edf0f2",color:"#7a858d",fontSize:11} as const;
