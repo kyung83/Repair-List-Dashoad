@@ -52,6 +52,7 @@ const TECHNICIAN_SHOP_ACTIONS = new Set([
 ]);
 const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/found-repair',
+  '/api/shop/unmatched-part',
 ]);
 
 function isStaticAsset(pathname: string) {

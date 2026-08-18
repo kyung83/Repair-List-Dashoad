@@ -5,6 +5,7 @@ import {
   orderPartForWarehouse,
   receivePartForWarehouse,
 } from '@/lib/parts-lifecycle';
+import { getUnmatchedPartRequests, handleUnmatchedPartRequest } from '@/lib/unmatched-parts';
 
 async function requirePartsDeskUser(request: Request) {
   const user = await getSessionUser(env.DB, request);
@@ -16,7 +17,15 @@ async function requirePartsDeskUser(request: Request) {
 export async function GET(request: Request) {
   try {
     await requirePartsDeskUser(request);
-    return Response.json(await getPartsDeskData(env.DB), { headers: { 'cache-control': 'no-store' } });
+    const [data, unmatchedPartRequests] = await Promise.all([
+      getPartsDeskData(env.DB),
+      getUnmatchedPartRequests(env.DB),
+    ]);
+    return Response.json({
+      ...data,
+      unmatchedPartRequests,
+      summary:{...data.summary,unmatchedParts:unmatchedPartRequests.length},
+    }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Parts Desk could not be loaded.' }, { status: 403 });
   }
@@ -27,6 +36,9 @@ export async function POST(request: Request) {
     const user = await requirePartsDeskUser(request);
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
+    if (action === 'handleUnmatched') {
+      return Response.json(await handleUnmatchedPartRequest(env.DB, Number(body.requestId ?? 0)));
+    }
     const partId = Number(body.partId ?? 0);
     const warehouseCode = String(body.warehouseCode ?? '');
     const quantity = Number(body.quantity ?? 0);
