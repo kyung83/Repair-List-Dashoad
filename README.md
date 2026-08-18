@@ -8,7 +8,8 @@ Standalone Cloudflare application for repairs, direct Geotab DVIR synchronizatio
 - D1 as the source of truth for repairs, equipment, PM status, DVIR cache, parts, vendors, and repair-part usage
 - R2 for future repair attachments and inventory documents
 - Direct MyGeotab API integration; no Google Apps Script dependency
-- Geotab imports remain paused until service-account permissions are verified and dashboard access control is enabled
+- Geotab yard presence is scheduled every 10 minutes, and fleet/DVIR synchronization is scheduled every 2 hours. Successful production sync requires valid service-account credentials and the required MyGeotab permissions.
+- Dashboard access control is enforced at the Worker boundary; unauthenticated application and API requests are redirected or rejected before application handlers run.
 
 ## Required encrypted Worker secrets
 
