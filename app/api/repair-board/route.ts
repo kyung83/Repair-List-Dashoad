@@ -1,4 +1,6 @@
 import { env } from 'cloudflare:workers';
+import { getSessionUser } from '@/lib/auth';
+import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { GET as originalGET, POST as originalPOST } from './original';
 
 type BoardRepair = {
@@ -27,6 +29,63 @@ async function isDeferredRepair(value: unknown) {
   if (!id) return false;
   const row = await env.DB.prepare(`SELECT COALESCE(status,'') AS status FROM repairs WHERE id = ?`).bind(id).first<{status:string}>();
   return Boolean(row && deferred(row.status));
+}
+
+async function markDvirRepairedFromBoard(request: Request, body: Record<string, unknown>) {
+  const user = await getSessionUser(env.DB, request);
+  if (!user) throw new Error('Authentication required.');
+  if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required for this change.');
+
+  const defectId = String(body.defectId ?? '').trim();
+  if (!defectId) throw new Error('DVIR defect was not found.');
+  const row = await env.DB.prepare(`
+    SELECT geotab_log_id
+    FROM dvir_defects
+    WHERE geotab_defect_id = ?
+  `).bind(defectId).first<{geotab_log_id:string}>();
+  if (!row) throw new Error('DVIR defect was not found.');
+  const logId = String(body.logId ?? row.geotab_log_id ?? '').trim();
+  if (!logId) throw new Error('The Geotab DVIR log could not be found.');
+
+  const local = await env.DB.prepare(`
+    UPDATE dvir_defects
+    SET repaired = 1,
+        local_repaired = 1,
+        repair_date = COALESCE(repair_date, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE geotab_defect_id = ?
+  `).bind(defectId).run();
+  if (Number(local.meta.changes ?? 0) === 0) throw new Error('DVIR defect could not be marked repaired.');
+
+  let geotabSynced = false;
+  let warning = '';
+  try {
+    await markGeotabDefectRepaired(env, logId, defectId);
+    await env.DB.prepare(`
+      UPDATE dvir_defects
+      SET local_repaired = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE geotab_defect_id = ?
+    `).bind(defectId).run();
+    geotabSynced = true;
+  } catch (error) {
+    warning = 'Marked repaired on the Repair Board. Geotab writeback is pending because Geotab could not accept the update.';
+    console.warn(JSON.stringify({
+      event:'repair_board_dvir_geotab_writeback_pending',
+      defectId,
+      logId,
+      userId:user.id,
+      error:String(error),
+    }));
+  }
+
+  return Response.json({
+    ok:true,
+    defectId,
+    logId,
+    localRepaired:true,
+    geotabSynced,
+    warning:warning || undefined,
+  }, { headers:{ 'cache-control':'no-store' } });
 }
 
 export async function GET(request: Request) {
@@ -65,13 +124,25 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const clone = request.clone();
+  let body: Record<string, unknown> | null = null;
   try {
-    const body = await clone.json() as Record<string, unknown>;
-    if (await isDeferredRepair(body.repairId ?? body.id)) {
-      return Response.json({ error: 'This repair is intentionally saved for its next PM/Annual.' }, { status: 400 });
-    }
+    body = await clone.json() as Record<string, unknown>;
   } catch {
     // The original handler owns validation for malformed/non-JSON requests.
   }
+
+  if (body && await isDeferredRepair(body.repairId ?? body.id)) {
+    return Response.json({ error: 'This repair is intentionally saved for its next PM/Annual.' }, { status: 400 });
+  }
+
+  if (body && String(body.action ?? '') === 'markDvirRepaired') {
+    try {
+      return await markDvirRepairedFromBoard(request, body);
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_mark_dvir_repaired_failed', error:String(error) }));
+      return Response.json({ error:error instanceof Error ? error.message : 'DVIR defect could not be marked repaired.' }, { status:400 });
+    }
+  }
+
   return originalPOST(request);
 }
