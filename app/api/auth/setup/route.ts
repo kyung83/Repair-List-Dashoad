@@ -10,10 +10,10 @@ import {
 
 type AuthEnv = typeof env & { AUTH_BOOTSTRAP_TOKEN?: string };
 
-const RELEASE = '2026-08-18-work-order-review-0062';
+const RELEASE = '2026-08-18-geotab-identity-0063';
 
 async function deploymentHealth(db: D1Database) {
-  const empty = { '0059': false, '0060': false, '0061': false, '0062': false };
+  const empty = { '0059': false, '0060': false, '0061': false, '0062': false, '0063': false };
   try {
     const [repairColumns, dvirColumns, objects] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
@@ -25,7 +25,12 @@ async function deploymentHealth(db: D1Database) {
           'unmatched_part_requests',
           'trg_geotab_truck_require_archive_state',
           'trg_dvir_keep_local_repair',
-          'trg_dvir_keep_local_repair_row'
+          'trg_dvir_keep_local_repair_row',
+          'equipment_geotab_devices',
+          'geotab_reconciliation_queue',
+          'geotab_mileage_anomalies',
+          'idx_equipment_geotab_devices_current_device',
+          'idx_equipment_geotab_devices_current_equipment'
         )
       `).all<{ type: string; name: string }>(),
     ]);
@@ -42,6 +47,11 @@ async function deploymentHealth(db: D1Database) {
       '0062': repairNames.has('reviewed_at')
         && repairNames.has('reviewed_by_user_id')
         && repairNames.has('review_note'),
+      '0063': objectNames.has('equipment_geotab_devices')
+        && objectNames.has('geotab_reconciliation_queue')
+        && objectNames.has('geotab_mileage_anomalies')
+        && objectNames.has('idx_equipment_geotab_devices_current_device')
+        && objectNames.has('idx_equipment_geotab_devices_current_equipment'),
     };
     return {
       ok: Object.values(migrations).every(Boolean),
