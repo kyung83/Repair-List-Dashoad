@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
-          expected_release="2026-08-18-equipment-merge-0065"
+          expected_release="2026-08-18-pm-import-0077"
 
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "$site_url/login" -o /tmp/login.html
@@ -132,7 +132,9 @@ jobs:
               && typeof status.bootstrapConfigured === 'boolean'
               && deployment
               && deployment.release === process.env.EXPECTED_RELEASE
-              && deployment.ok === true;
+              && deployment.ok === true
+              && deployment.pmImport
+              && deployment.pmImport.ok === true;
             process.exit(valid ? 0 : 1);
           } catch {
             process.exit(1);
@@ -169,10 +171,11 @@ jobs:
           if (!deployment || deployment.release !== process.env.EXPECTED_RELEASE) {
             throw new Error(`Expected release ${process.env.EXPECTED_RELEASE}, received ${JSON.stringify(deployment)}`);
           }
-          if (deployment.ok !== true) {
-            throw new Error(`Production D1 migrations are incomplete: ${JSON.stringify(deployment.migrations || deployment)}`);
+          if (deployment.ok !== true || !deployment.pmImport || deployment.pmImport.ok !== true) {
+            throw new Error(`Production D1/PM import verification is incomplete: ${JSON.stringify(deployment)}`);
           }
           console.log(`Deployment verified. release=${deployment.release}, migrations=${JSON.stringify(deployment.migrations)}`);
+          console.log(`PM import verified. receipt=${JSON.stringify(deployment.pmImport)}`);
           console.log(`Authentication setup endpoint ready. setupRequired=${status.setupRequired}, bootstrapConfigured=${status.bootstrapConfigured}`);
           NODE
 
@@ -206,7 +209,7 @@ jobs:
           description="Cloudflare deployment or D1 schema verification failed"
           if [ "$AUTH_READY" = "true" ] && [ "$JOB_STATUS" = "success" ]; then
             state="success"
-            description="Verified release 0065 and production D1 schema"
+            description="Verified PM import 0077 and production D1"
           elif [ "$AUTH_READY" != "true" ]; then
             description="Cloudflare deployment authorization is missing"
           fi

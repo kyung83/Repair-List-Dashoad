@@ -9,13 +9,41 @@ import {
 } from '@/lib/auth';
 
 type AuthEnv = typeof env & { AUTH_BOOTSTRAP_TOKEN?: string };
+type PmImportReceipt = {
+  pm_events: number;
+  resolved_units: number;
+  pm_40: number;
+  pm_20a: number;
+  pm_20b: number;
+  future_repairs: number;
+  unresolved_events: number;
+  applied_at: string;
+};
 
-const RELEASE = '2026-08-18-equipment-merge-0065';
+const RELEASE = '2026-08-18-pm-import-0077';
 
 async function deploymentHealth(db: D1Database) {
-  const empty = { '0059': false, '0060': false, '0061': false, '0062': false, '0063': false, '0064': false, '0065': false };
+  const empty = {
+    '0059': false,
+    '0060': false,
+    '0061': false,
+    '0062': false,
+    '0063': false,
+    '0064': false,
+    '0065': false,
+    '0077': false,
+  };
   try {
-    const [repairColumns, dvirColumns, assignmentColumns, reconciliationColumns, anomalyColumns, equipmentColumns, objects] = await Promise.all([
+    const [
+      repairColumns,
+      dvirColumns,
+      assignmentColumns,
+      reconciliationColumns,
+      anomalyColumns,
+      equipmentColumns,
+      objects,
+      pmImportReceipt,
+    ] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('equipment_geotab_devices')`).all<{ name: string }>(),
@@ -46,9 +74,17 @@ async function deploymentHealth(db: D1Database) {
           'trg_equipment_keep_merged_unit_retired',
           'trg_geotab_assignment_reject_merged_insert',
           'trg_geotab_assignment_reject_merged_update',
-          'trg_equipment_prevent_restore_merged'
+          'trg_equipment_prevent_restore_merged',
+          'pm_import_unresolved_20260818',
+          'pm_import_receipts'
         )
       `).all<{ type: string; name: string }>(),
+      db.prepare(`
+        SELECT pm_events, resolved_units, pm_40, pm_20a, pm_20b,
+               future_repairs, unresolved_events, applied_at
+        FROM pm_import_receipts
+        WHERE import_batch = 'pm-sheet-2026-08-18'
+      `).first<PmImportReceipt>(),
     ]);
 
     const repairNames = new Set(repairColumns.results.map((row) => row.name));
@@ -58,6 +94,25 @@ async function deploymentHealth(db: D1Database) {
     const anomalyNames = new Set(anomalyColumns.results.map((row) => row.name));
     const equipmentNames = new Set(equipmentColumns.results.map((row) => row.name));
     const objectNames = new Set(objects.results.map((row) => row.name));
+
+    const pmImport = pmImportReceipt ? {
+      events: Number(pmImportReceipt.pm_events),
+      resolvedUnits: Number(pmImportReceipt.resolved_units),
+      pm40: Number(pmImportReceipt.pm_40),
+      pm20A: Number(pmImportReceipt.pm_20a),
+      pm20B: Number(pmImportReceipt.pm_20b),
+      futureRepairs: Number(pmImportReceipt.future_repairs),
+      unresolvedEvents: Number(pmImportReceipt.unresolved_events),
+      appliedAt: pmImportReceipt.applied_at,
+      ok: Number(pmImportReceipt.pm_events) === 508
+        && Number(pmImportReceipt.resolved_units) === 263
+        && Number(pmImportReceipt.pm_40) === 262
+        && Number(pmImportReceipt.pm_20a) === 163
+        && Number(pmImportReceipt.pm_20b) === 83
+        && Number(pmImportReceipt.future_repairs) === 54
+        && Number(pmImportReceipt.unresolved_events) === 1,
+    } : null;
+
     const migrations = {
       '0059': objectNames.has('unmatched_part_requests'),
       '0060': objectNames.has('trg_geotab_truck_require_archive_state'),
@@ -98,11 +153,15 @@ async function deploymentHealth(db: D1Database) {
         && objectNames.has('trg_geotab_assignment_reject_merged_insert')
         && objectNames.has('trg_geotab_assignment_reject_merged_update')
         && objectNames.has('trg_equipment_prevent_restore_merged'),
+      '0077': objectNames.has('pm_import_unresolved_20260818')
+        && objectNames.has('pm_import_receipts')
+        && pmImport?.ok === true,
     };
     return {
       ok: Object.values(migrations).every(Boolean),
       release: RELEASE,
       migrations,
+      pmImport,
       checkedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -111,6 +170,7 @@ async function deploymentHealth(db: D1Database) {
       ok: false,
       release: RELEASE,
       migrations: empty,
+      pmImport: null,
       error: 'schema_check_failed',
       checkedAt: new Date().toISOString(),
     };
