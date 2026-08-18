@@ -1,0 +1,47 @@
+PRAGMA foreign_keys = ON;
+
+-- Historical Geotab forks are retired as tombstones rather than deleted. The
+-- canonical equipment row keeps the live identity while the merged row remains
+-- available for audit/provenance and cannot be restored into service.
+ALTER TABLE equipment ADD COLUMN merged_into_equipment_id INTEGER REFERENCES equipment(id);
+ALTER TABLE equipment ADD COLUMN merged_at TEXT;
+ALTER TABLE equipment ADD COLUMN merged_by_user_id INTEGER REFERENCES app_users(id);
+ALTER TABLE equipment ADD COLUMN merge_note TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_equipment_merged_into
+ON equipment(merged_into_equipment_id, merged_at);
+
+CREATE TABLE IF NOT EXISTS equipment_merge_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_equipment_id INTEGER NOT NULL UNIQUE,
+  target_equipment_id INTEGER NOT NULL,
+  source_unit TEXT NOT NULL,
+  target_unit TEXT NOT NULL,
+  source_geotab_device_id TEXT,
+  target_geotab_device_id TEXT,
+  source_vin TEXT,
+  target_vin TEXT,
+  source_snapshot_json TEXT NOT NULL,
+  target_snapshot_json TEXT NOT NULL,
+  reference_counts_json TEXT NOT NULL,
+  merged_by_user_id INTEGER,
+  merge_note TEXT,
+  merged_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (source_equipment_id) REFERENCES equipment(id),
+  FOREIGN KEY (target_equipment_id) REFERENCES equipment(id),
+  FOREIGN KEY (merged_by_user_id) REFERENCES app_users(id) ON DELETE SET NULL,
+  CHECK (source_equipment_id <> target_equipment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_equipment_merge_events_target
+ON equipment_merge_events(target_equipment_id, merged_at);
+
+-- Defense in depth: a merged row is a historical tombstone. Even if another
+-- code path tries to restore it, the database refuses to make it active again.
+CREATE TRIGGER IF NOT EXISTS trg_equipment_prevent_restore_merged
+BEFORE UPDATE OF active, archived_at ON equipment
+WHEN OLD.merged_into_equipment_id IS NOT NULL
+  AND (NEW.active <> 0 OR NEW.archived_at IS NULL)
+BEGIN
+  SELECT RAISE(ABORT, 'Merged equipment records cannot be restored.');
+END;
