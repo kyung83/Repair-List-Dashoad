@@ -11,6 +11,10 @@ async function requireAdmin(request: Request) {
   return { user, response: null };
 }
 
+function movableReferenceCount(counts: Record<string, number>) {
+  return Object.entries(counts).reduce((sum, [key, value]) => key === 'priorMergeEvents' ? sum : sum + Number(value || 0), 0);
+}
+
 async function thirdPartyCurrentOwnerBlock(sourceId: number, targetId: number, geotabDeviceId: string | null) {
   const deviceId = String(geotabDeviceId ?? '').trim();
   if (!deviceId) return null;
@@ -45,7 +49,7 @@ export async function POST(request: Request) {
         target: preview.target,
         sourceCounts: preview.sourceCounts,
         targetCounts: preview.targetCounts,
-        referencesToMove: preview.referencesToMove,
+        referencesToMove: movableReferenceCount(preview.sourceCounts),
         blockers,
         warnings: preview.warnings,
         currentDeviceAssignment: preview.currentDeviceAssignment,
@@ -59,6 +63,7 @@ export async function POST(request: Request) {
       if (preview.blockers.length) throw new Error(preview.blockers.join(' '));
       const ownerBlock = await thirdPartyCurrentOwnerBlock(preview.source.id, preview.target.id, preview.source.geotab_device_id);
       if (ownerBlock) throw new Error(ownerBlock);
+      const referencesMoved = movableReferenceCount(preview.sourceCounts);
 
       const result = await mergeEquipmentFork(
         env.DB,
@@ -67,7 +72,7 @@ export async function POST(request: Request) {
         auth.user.id,
         body.note,
       );
-      return Response.json(result, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ ...result, referencesMoved }, { headers: { 'cache-control': 'no-store' } });
     }
 
     return Response.json({ error: 'Unknown equipment merge action.' }, { status: 400 });
