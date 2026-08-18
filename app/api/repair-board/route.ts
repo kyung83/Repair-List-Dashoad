@@ -61,6 +61,11 @@ async function markDvirRepairedFromBoard(request: Request, body: Record<string, 
   let warning = '';
   try {
     await markGeotabDefectRepaired(env, logId, defectId);
+    await env.DB.prepare(`
+      UPDATE dvir_defects
+      SET local_repaired = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE geotab_defect_id = ?
+    `).bind(defectId).run();
     geotabSynced = true;
   } catch (error) {
     warning = 'Marked repaired on the Repair Board. Geotab writeback is pending because Geotab could not accept the update.';
