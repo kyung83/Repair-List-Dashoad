@@ -71,6 +71,16 @@ fi
 # Only apply schema changes after the application build is known-good.
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
+# Temporary read-only PM import diagnostic. The staged unit labels are already part of
+# the migration source; this prints only resolution state so the final import can be
+# mapped to current in-use Equipment records without weakening the safety guard.
+echo "PM import diagnostics:"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT metric, value FROM pm_import_diagnostics_20260818 ORDER BY metric;"
+echo "PM import unresolved units:"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT staged_unit, match_kind, candidate_count FROM pm_import_unit_resolution_20260818 WHERE equipment_id IS NULL ORDER BY staged_unit;"
+
 # Deploy the exact build snapshot produced by the Cloudflare Vite plugin.
 npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"
 
