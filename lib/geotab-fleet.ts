@@ -326,9 +326,11 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
   }
 
   const assignedByDevice = new Map<string, number>();
+  const assignedDeviceByEquipment = new Map<number, string>();
   const claimedEquipmentIds = new Set<number>();
   for (const assignment of assignmentResult.results) {
     assignedByDevice.set(assignment.geotab_device_id, assignment.equipment_id);
+    assignedDeviceByEquipment.set(assignment.equipment_id, assignment.geotab_device_id);
     claimedEquipmentIds.add(assignment.equipment_id);
   }
 
@@ -368,7 +370,6 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     const groupAssetClass = groups
       ? (entityBelongsToTrailerGroup(device, trailerGroupIds) ? 'trailer' : 'vehicle')
       : null;
-    const incomingType = groupAssetClass === 'trailer' ? 'trailer' : 'truck';
     if (groupAssetClass === 'trailer') trailerDevices += 1;
     else vehicles += 1;
 
@@ -417,7 +418,13 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
 
     const equipment = resolution.equipment;
     const alreadyAssignedEquipmentId = assignedByDevice.get(id);
-    if (resolution.method !== 'assignment' && claimedEquipmentIds.has(equipment.id)) {
+    const currentlyAssignedDeviceId = assignedDeviceByEquipment.get(equipment.id);
+    const safeVinSwap = resolution.method === 'vin'
+      && Boolean(currentlyAssignedDeviceId)
+      && currentlyAssignedDeviceId !== id
+      && !activeDeviceIds.has(currentlyAssignedDeviceId!);
+
+    if (resolution.method !== 'assignment' && claimedEquipmentIds.has(equipment.id) && !safeVinSwap) {
       identityQuarantined += 1;
       addStatementGroup([
         env.DB.prepare(`
@@ -444,6 +451,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     identityMatches[resolution.method] += 1;
     claimedEquipmentIds.add(equipment.id);
     assignedByDevice.set(id, equipment.id);
+    assignedDeviceByEquipment.set(equipment.id, id);
 
     const statementGroup: D1PreparedStatement[] = [];
     if (alreadyAssignedEquipmentId === equipment.id) {
