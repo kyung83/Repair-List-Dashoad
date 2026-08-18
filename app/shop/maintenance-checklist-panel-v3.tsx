@@ -3,6 +3,7 @@
 import {useEffect,useState} from 'react';
 import MaintenanceChecklistPanelV2 from './maintenance-checklist-panel-v2';
 import PmSheetDetails from './pm-sheet-details';
+import TechnicianRepairTools from './technician-repair-tools';
 import type {ChecklistData,Part} from './maintenance-types';
 
 type Props={repairId:string;canWork:boolean;parts?:Part[]};
@@ -32,6 +33,7 @@ export default function MaintenanceChecklistPanelV3(props:Props){
   );
 
   return <>
+    <TechnicianRepairTools repairId={props.repairId} canWork={props.canWork}/>
     {showTires&&<PmSheetDetails repairId={props.repairId} canWork={props.canWork} tiresOnly/>}
     <MaintenanceChecklistPanelV2 {...props}/>
   </>;
