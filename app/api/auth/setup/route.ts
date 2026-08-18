@@ -10,17 +10,18 @@ import {
 
 type AuthEnv = typeof env & { AUTH_BOOTSTRAP_TOKEN?: string };
 
-const RELEASE = '2026-08-18-geotab-review-0064';
+const RELEASE = '2026-08-18-equipment-merge-0065';
 
 async function deploymentHealth(db: D1Database) {
-  const empty = { '0059': false, '0060': false, '0061': false, '0062': false, '0063': false, '0064': false };
+  const empty = { '0059': false, '0060': false, '0061': false, '0062': false, '0063': false, '0064': false, '0065': false };
   try {
-    const [repairColumns, dvirColumns, assignmentColumns, reconciliationColumns, anomalyColumns, objects] = await Promise.all([
+    const [repairColumns, dvirColumns, assignmentColumns, reconciliationColumns, anomalyColumns, equipmentColumns, objects] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('equipment_geotab_devices')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('geotab_reconciliation_queue')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('geotab_mileage_anomalies')`).all<{ name: string }>(),
+      db.prepare(`SELECT name FROM pragma_table_info('equipment')`).all<{ name: string }>(),
       db.prepare(`
         SELECT type, name
         FROM sqlite_master
@@ -36,7 +37,16 @@ async function deploymentHealth(db: D1Database) {
           'idx_equipment_geotab_devices_current_equipment',
           'idx_geotab_device_assignments_review',
           'idx_geotab_reconciliation_resolved_by',
-          'idx_geotab_mileage_reviewed_by'
+          'idx_geotab_mileage_reviewed_by',
+          'equipment_merge_events',
+          'idx_equipment_merged_into',
+          'idx_equipment_merge_events_target',
+          'trg_equipment_sanitize_merged_identity',
+          'trg_equipment_keep_merged_identity_retired',
+          'trg_equipment_keep_merged_unit_retired',
+          'trg_geotab_assignment_reject_merged_insert',
+          'trg_geotab_assignment_reject_merged_update',
+          'trg_equipment_prevent_restore_merged'
         )
       `).all<{ type: string; name: string }>(),
     ]);
@@ -46,6 +56,7 @@ async function deploymentHealth(db: D1Database) {
     const assignmentNames = new Set(assignmentColumns.results.map((row) => row.name));
     const reconciliationNames = new Set(reconciliationColumns.results.map((row) => row.name));
     const anomalyNames = new Set(anomalyColumns.results.map((row) => row.name));
+    const equipmentNames = new Set(equipmentColumns.results.map((row) => row.name));
     const objectNames = new Set(objects.results.map((row) => row.name));
     const migrations = {
       '0059': objectNames.has('unmatched_part_requests'),
@@ -74,6 +85,19 @@ async function deploymentHealth(db: D1Database) {
         && objectNames.has('idx_geotab_device_assignments_review')
         && objectNames.has('idx_geotab_reconciliation_resolved_by')
         && objectNames.has('idx_geotab_mileage_reviewed_by'),
+      '0065': equipmentNames.has('merged_into_equipment_id')
+        && equipmentNames.has('merged_at')
+        && equipmentNames.has('merged_by_user_id')
+        && equipmentNames.has('merge_note')
+        && objectNames.has('equipment_merge_events')
+        && objectNames.has('idx_equipment_merged_into')
+        && objectNames.has('idx_equipment_merge_events_target')
+        && objectNames.has('trg_equipment_sanitize_merged_identity')
+        && objectNames.has('trg_equipment_keep_merged_identity_retired')
+        && objectNames.has('trg_equipment_keep_merged_unit_retired')
+        && objectNames.has('trg_geotab_assignment_reject_merged_insert')
+        && objectNames.has('trg_geotab_assignment_reject_merged_update')
+        && objectNames.has('trg_equipment_prevent_restore_merged'),
     };
     return {
       ok: Object.values(migrations).every(Boolean),
