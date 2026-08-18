@@ -75,6 +75,6 @@ export default function AppNav(){
     {user&&<div className="app-user-area">
       <span className="app-user-name" title={user.username||user.email}>{user.displayName}<small className="easy-role">{user.role}</small></span>
       <button type="button" onClick={()=>void signOut()}>Sign out</button>
-    </div>
+    </div>}
   </header>;
 }
