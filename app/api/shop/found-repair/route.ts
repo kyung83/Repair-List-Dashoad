@@ -6,49 +6,110 @@ function numericRepairId(value: unknown) {
   return match ? Number(match[1]) : 0;
 }
 
+type ActiveRepair = {
+  repair_id:number;
+  technician_id:number;
+  equipment_id:number|null;
+  location:string;
+  unit:string;
+};
+
+async function activeRepairForUser(userId:number, technicianId:number, expectedRepairId:number) {
+  const active = await env.DB.prepare(`
+    SELECT rt.repair_id, rt.technician_id, r.equipment_id,
+           COALESCE(r.location, '') AS location,
+           COALESCE(e.unit, '') AS unit
+    FROM repair_labor_timers rt
+    JOIN repairs r ON r.id = rt.repair_id
+    LEFT JOIN equipment e ON e.id = r.equipment_id
+    WHERE rt.user_id = ?
+  `).bind(userId).first<ActiveRepair>();
+  if (!active || Number(active.repair_id) !== expectedRepairId) {
+    throw new Error('Repair notes are available for the repair that is WORKING NOW.');
+  }
+  if (Number(active.technician_id) !== technicianId) {
+    throw new Error('The active labor session does not belong to your technician account.');
+  }
+  return active;
+}
+
+async function technicianName(technicianId:number) {
+  const technician = await env.DB.prepare('SELECT id, name FROM technicians WHERE id = ? AND active = 1')
+    .bind(technicianId)
+    .first<{id:number;name:string}>();
+  if (!technician) throw new Error('The linked technician record is not active.');
+  return technician;
+}
+
+async function repairNotes(repairId:number) {
+  const result = await env.DB.prepare(`
+    SELECT e.id, COALESCE(e.detail, '') AS detail, e.created_at,
+           COALESCE(t.name, 'Technician') AS technician_name
+    FROM repair_job_events e
+    LEFT JOIN technicians t ON t.id = e.technician_id
+    WHERE e.repair_id = ? AND e.action = 'technician_note'
+    ORDER BY e.created_at DESC, e.id DESC
+    LIMIT 20
+  `).bind(repairId).all<{id:number;detail:string;created_at:string;technician_name:string}>();
+  return result.results.map((row) => ({
+    id:Number(row.id),
+    detail:row.detail,
+    technician:row.technician_name,
+    createdAt:row.created_at,
+  }));
+}
+
+export async function GET(request: Request) {
+  try {
+    const user = await getSessionUser(env.DB, request);
+    if (!user) throw new Error('Authentication required.');
+    if (user.role !== 'mechanic' || !user.technicianId) throw new Error('A technician account is required.');
+    const repairId = numericRepairId(new URL(request.url).searchParams.get('repairId'));
+    if (!repairId) throw new Error('The active repair was not found.');
+    await activeRepairForUser(user.id, Number(user.technicianId), repairId);
+    return Response.json({ ok:true, repairId:`repair-${repairId}`, notes:await repairNotes(repairId) }, { headers:{ 'cache-control':'no-store' } });
+  } catch (error) {
+    return Response.json({ error:error instanceof Error ? error.message : 'Repair notes could not be loaded.' }, { status:400, headers:{ 'cache-control':'no-store' } });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
     if (user.role !== 'mechanic' || !user.technicianId) {
-      throw new Error('A technician account is required to add a repair from the unit workspace.');
+      throw new Error('A technician account is required to update the unit workspace.');
     }
 
     const body = await request.json() as Record<string, unknown>;
     const expectedRepairId = numericRepairId(body.repairId);
-    const issue = String(body.issue ?? '').trim().slice(0, 500);
     if (!expectedRepairId) throw new Error('The active repair was not found.');
-    if (!issue) throw new Error('Enter what you found.');
+    const active = await activeRepairForUser(user.id, Number(user.technicianId), expectedRepairId);
+    const technician = await technicianName(Number(user.technicianId));
+    const action = String(body.action ?? 'foundRepair');
 
-    const active = await env.DB.prepare(`
-      SELECT rt.repair_id, rt.technician_id, r.equipment_id,
-             COALESCE(r.location, '') AS location,
-             COALESCE(e.unit, '') AS unit
-      FROM repair_labor_timers rt
-      JOIN repairs r ON r.id = rt.repair_id
-      LEFT JOIN equipment e ON e.id = r.equipment_id
-      WHERE rt.user_id = ?
-    `).bind(user.id).first<{
-      repair_id:number;
-      technician_id:number;
-      equipment_id:number|null;
-      location:string;
-      unit:string;
-    }>();
-    if (!active || Number(active.repair_id) !== expectedRepairId) {
-      throw new Error('Found Something Else is only available for the repair that is WORKING NOW.');
+    if (action === 'note') {
+      const note = String(body.note ?? '').trim().slice(0, 2000);
+      if (!note) throw new Error('Type or dictate a repair note first.');
+      const result = await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'technician_note', ?)
+      `).bind(expectedRepairId, user.id, technician.id, note).run();
+      return Response.json({
+        ok:true,
+        noteSaved:true,
+        repairId:`repair-${expectedRepairId}`,
+        noteId:Number(result.meta.last_row_id),
+        laborUnchanged:true,
+      });
     }
-    if (Number(active.technician_id) !== Number(user.technicianId)) {
-      throw new Error('The active labor session does not belong to your technician account.');
-    }
+
+    if (action !== 'foundRepair') throw new Error('Unknown unit workspace action.');
+    const issue = String(body.issue ?? '').trim().slice(0, 500);
+    if (!issue) throw new Error('Enter what you found.');
     if (active.equipment_id === null) {
       throw new Error('This repair is not linked to a fleet unit, so another repair cannot be added from the unit workspace.');
     }
-
-    const technician = await env.DB.prepare('SELECT id, name FROM technicians WHERE id = ? AND active = 1')
-      .bind(user.technicianId)
-      .first<{id:number;name:string}>();
-    if (!technician) throw new Error('The linked technician record is not active.');
 
     const result = await env.DB.prepare(`
       INSERT INTO repairs (equipment_id, title, status, priority, source, location, technician_id, updated_at)
@@ -75,7 +136,7 @@ export async function POST(request: Request) {
       laborUnchanged:true,
     });
   } catch (error) {
-    console.error(JSON.stringify({ event:'shop_found_repair_failed', error:String(error) }));
-    return Response.json({ error:error instanceof Error ? error.message : 'Repair could not be added.' }, { status:400 });
+    console.error(JSON.stringify({ event:'shop_unit_workspace_action_failed', error:String(error) }));
+    return Response.json({ error:error instanceof Error ? error.message : 'Unit workspace action could not be completed.' }, { status:400 });
   }
 }
