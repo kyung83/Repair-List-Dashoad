@@ -65,6 +65,9 @@ npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_A
 echo "Equipment candidates for unit 247:"
 npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
   --command "SELECT e.id,e.unit,e.active,e.archived_at,e.merged_into_equipment_id,e.equipment_type,e.geotab_device_id,e.vin,e.current_mileage,d.geotab_device_id AS current_assignment FROM equipment e LEFT JOIN equipment_geotab_devices d ON d.equipment_id=e.id AND d.current=1 WHERE lower(e.unit) LIKE '%247%' OR lower(replace(replace(trim(CASE WHEN instr(e.unit,'(')>0 THEN substr(e.unit,1,instr(e.unit,'(')-1) ELSE e.unit END),' ',''),'-',''))='247' ORDER BY e.active DESC,e.archived_at IS NULL DESC,e.id;"
+echo "Previous PM import audit for 247(DC):"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT a.import_batch,a.source_unit,a.alias_unit,a.matched_equipment_id,a.matched_unit,a.match_method,a.service_date,a.last_mileage,e.id AS equipment_id,e.unit AS current_unit,e.active,e.archived_at,e.merged_into_equipment_id,e.equipment_type,e.geotab_device_id,e.vin,e.current_mileage FROM pm_history_import_audit a LEFT JOIN equipment e ON e.id=a.matched_equipment_id WHERE lower(trim(a.source_unit))='247(dc)' ORDER BY a.imported_at DESC,a.id DESC;"
 
 npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"
 echo "Cloudflare bootstrap completed."
