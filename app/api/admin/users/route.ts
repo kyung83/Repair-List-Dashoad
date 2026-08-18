@@ -8,10 +8,26 @@ async function requireAdmin(request: Request) {
   return { user, response: null };
 }
 
-async function ensureTechnician(displayName: string, currentId: number | null = null) {
+async function ensureTechnicianAvailable(technicianId: number, ownerUserId: number | null) {
+  const linked = ownerUserId
+    ? await env.DB.prepare(`
+        SELECT id, display_name FROM app_users
+        WHERE technician_id = ? AND active = 1 AND id <> ?
+        ORDER BY id LIMIT 1
+      `).bind(technicianId, ownerUserId).first<{ id:number; display_name:string }>()
+    : await env.DB.prepare(`
+        SELECT id, display_name FROM app_users
+        WHERE technician_id = ? AND active = 1
+        ORDER BY id LIMIT 1
+      `).bind(technicianId).first<{ id:number; display_name:string }>();
+  if (linked) throw new Error(`That technician identity is already linked to ${linked.display_name}. Disable or unlink that account first.`);
+}
+
+async function ensureTechnician(displayName: string, currentId: number | null = null, ownerUserId: number | null = null) {
   if (currentId) {
     const current = await env.DB.prepare('SELECT id FROM technicians WHERE id = ? AND active = 1').bind(currentId).first<{ id: number }>();
     if (current) {
+      await ensureTechnicianAvailable(currentId, ownerUserId);
       await env.DB.prepare('UPDATE technicians SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(displayName, currentId).run();
       return currentId;
     }
@@ -19,7 +35,11 @@ async function ensureTechnician(displayName: string, currentId: number | null = 
   const existing = await env.DB.prepare(`
     SELECT id FROM technicians WHERE lower(trim(name)) = lower(trim(?)) AND active = 1 ORDER BY id LIMIT 1
   `).bind(displayName).first<{ id: number }>();
-  if (existing) return Number(existing.id);
+  if (existing) {
+    const technicianId = Number(existing.id);
+    await ensureTechnicianAvailable(technicianId, ownerUserId);
+    return technicianId;
+  }
   const result = await env.DB.prepare('INSERT INTO technicians (name, email, phone, active) VALUES (?, ?, ?, 1)')
     .bind(displayName, '', '').run();
   return Number(result.meta.last_row_id);
@@ -105,7 +125,7 @@ export async function POST(request: Request) {
         ? Boolean(body.worksOnRepairs)
         : current.technician_id !== null;
       const worksOnRepairs = shouldLinkTechnician(role, explicitWorkingChoice);
-      const technicianId = worksOnRepairs ? await ensureTechnician(displayName, current.technician_id) : null;
+      const technicianId = worksOnRepairs ? await ensureTechnician(displayName, current.technician_id, id) : null;
       await env.DB.prepare(`
         UPDATE app_users SET username = ?, display_name = ?, role = ?, technician_id = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
       `).bind(username, displayName, role, technicianId, active ? 1 : 0, id).run();
