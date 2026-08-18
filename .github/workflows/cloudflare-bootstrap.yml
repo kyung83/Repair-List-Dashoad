@@ -125,3 +125,5 @@ jobs:
             fi
           done
           echo "Repair, work-order, inventory, and Geotab diagnostic APIs are not publicly readable."
+
+# Deployment retrigger: 2026-08-18T09:29-04:00
