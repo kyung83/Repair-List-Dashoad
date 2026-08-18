@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MaintenanceTabs from "../maintenance-tabs";
 
 type AnnualUnit = {
   id: number;
@@ -169,6 +170,7 @@ export default function AnnualSchedulesPage() {
 
   return (
     <main style={pageStyle}>
+      <MaintenanceTabs />
       <header style={headerStyle}>
         <div>
           <p style={eyebrowStyle}>TRUCK &amp; TRAILER COMPLIANCE</p>
@@ -177,7 +179,6 @@ export default function AnnualSchedulesPage() {
             Update each unit&apos;s last completed Annual date here. The next due date is calculated from that date and the assigned Annual-day interval.
           </p>
         </div>
-        <a href="/annual-inspections" style={formsLinkStyle}>Completed Annual Forms</a>
       </header>
 
       {message && <div style={noticeStyle}>{message}</div>}
@@ -252,7 +253,6 @@ const tableCardStyle = { marginTop: 12, overflow: "hidden", border: "1px solid #
 const inputStyle = { minHeight: 40, boxSizing: "border-box" as const, padding: "7px 10px", border: "1px solid #cbd5dd", borderRadius: 8, background: "white", color: "#172033" } as const;
 const buttonStyle = { minHeight: 40, padding: "0 13px", border: "1px solid #cbd5dd", borderRadius: 8, background: "white", color: "#263746", fontWeight: 900, cursor: "pointer" } as const;
 const orangeButtonStyle = { ...buttonStyle, borderColor: "#f47b20", background: "#f47b20", color: "white" } as const;
-const formsLinkStyle = { ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" } as const;
 const tabStyle = { ...buttonStyle, minWidth: 130 } as const;
 const activeTabStyle = { ...tabStyle, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
 const noticeStyle = { marginTop: 14, padding: 12, border: "1px solid #f2c66d", borderRadius: 9, background: "#fff8e6", color: "#654d18" } as const;

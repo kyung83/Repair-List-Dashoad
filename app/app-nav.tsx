@@ -4,16 +4,15 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 type User = { id:number; username:string; email:string; displayName:string; role:"viewer"|"mechanic"|"manager"|"admin" };
-type Link = { href:string; label:string; exact?:boolean };
+type Link = { href:string; label:string; exact?:boolean; activeFor?:string[] };
 
 const managerPrimary: Link[] = [
-  { href:"/", label:"Today", exact:true },
   { href:"/shop", label:"My Jobs" },
-  { href:"/repair-board", label:"Shop" },
-  { href:"/unit", label:"Units" },
-  { href:"/annual-schedules", label:"Annuals" },
-  { href:"/next-pm-repairs", label:"Future Repairs" },
-  { href:"/reports/history", label:"History" },
+  { href:"/repair-board", label:"Shop Board", activeFor:["/work-orders"] },
+  { href:"/unit", label:"Units", activeFor:["/equipment"] },
+  { href:"/pm-schedules", label:"Maintenance", activeFor:["/pm-kits","/annual-schedules","/annual-inspections","/next-pm-repairs"] },
+  { href:"/parts-desk", label:"Parts", activeFor:["/inventory","/invoices"] },
+  { href:"/reports", label:"Reports" },
 ];
 
 const mechanicPrimary: Link[] = [
@@ -22,8 +21,16 @@ const mechanicPrimary: Link[] = [
   { href:"/annual-inspections", label:"Forms" },
 ];
 
+const viewerPrimary: Link[] = [
+  { href:"/unit", label:"Units", activeFor:["/equipment"] },
+  { href:"/work-orders", label:"Completed Work" },
+  { href:"/annual-inspections", label:"Annual Forms" },
+  { href:"/reports", label:"Reports" },
+];
+
 function isActive(pathname:string, link:Link){
-  return link.exact ? pathname === link.href : pathname === link.href || pathname.startsWith(`${link.href}/`);
+  if(link.exact)return pathname===link.href;
+  return [link.href,...(link.activeFor??[])].some(path=>pathname===path||pathname.startsWith(`${path}/`));
 }
 
 export default function AppNav(){
@@ -44,23 +51,10 @@ export default function AppNav(){
   }
 
   if(hidden)return null;
-  const canManage=user?.role==='manager'||user?.role==='admin';
-  const primary=user?.role==='mechanic'?mechanicPrimary:managerPrimary;
-  const more:Link[] = canManage ? [
-    { href:"/work-orders", label:"Completed Work / WO Review" },
-    { href:"/equipment", label:"Equipment List & Details" },
-    { href:"/pm-schedules", label:"Maintenance Setup" },
-    { href:"/annual-inspections", label:"Annual Forms" },
-    { href:"/parts-desk", label:"Parts Desk" },
-    { href:"/inventory", label:"Parts Inventory" },
-    { href:"/invoices", label:"Invoices" },
-    { href:"/reports", label:"Reports" },
-    { href:"/pm-kits", label:"PM Kits" },
-  ] : user?.role==='viewer' ? [
-    { href:"/work-orders", label:"Completed Work" },
-    { href:"/equipment", label:"Equipment List" },
-    { href:"/annual-inspections", label:"Annual Forms" },
-    { href:"/reports", label:"Reports" },
+  const primary=user?.role==='mechanic'?mechanicPrimary:user?.role==='viewer'?viewerPrimary:managerPrimary;
+  const more:Link[] = user?.role==='admin' ? [
+    { href:"/admin/users", label:"Users & Access" },
+    { href:"/admin/history-import", label:"History Import" },
   ] : [];
 
   return <header className="easy-nav">
@@ -72,8 +66,7 @@ export default function AppNav(){
       {more.length>0&&<details className="easy-more">
         <summary className="easy-nav-link">More ▾</summary>
         <div className="easy-more-menu">
-          {more.map((link,index)=><span key={link.href} style={{display:"contents"}}>{index===6&&canManage?<span className="easy-more-divider"/>:null}<a href={link.href}>{link.label}</a></span>)}
-          {user?.role==='admin'&&<><span className="easy-more-divider"/><a href="/admin/users">Users & Access</a></>}
+          {more.map(link=><a key={link.href} href={link.href}>{link.label}</a>)}
         </div>
       </details>}
     </nav>

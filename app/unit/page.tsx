@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type History = { repairs:number; maintenanceEvents:number; historicalRos:number; expenses:number; lastRepairDate:string };
 type Equipment = { id:number; unit:string; category:string; equipmentType:string; active:boolean; archived:boolean; source:"Geotab"|"Manual"; currentMileage:number|null; mileageUpdatedAt:string; serviceDate:string; annualDate:string; notes:string; driver:string; location:string; vin:string; licensePlate:string; licenseState:string; modelYear:number|null; make:string; model:string; history:History };
@@ -52,6 +53,7 @@ export default function UnitPage(){
   const currentRepairs=openWork.filter(item=>!['pm','annual','pm-repair','annual-repair'].includes(item.source));
 
   return <main className="easy-page"><div className="easy-page-narrow">
+    <ModuleTabs module="units" />
     <p className="easy-eyebrow">FIND A UNIT</p><h1 className="easy-title">Truck & trailer lookup</h1>
     <p className="easy-subtitle">If you know the unit number, you should be able to get to everything else from here.</p>
     {message&&<div className="easy-notice">{message}</div>}

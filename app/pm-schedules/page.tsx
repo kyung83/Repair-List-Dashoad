@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MaintenanceTabs from "../maintenance-tabs";
 
 type Profile = { id: number; name: string; sequence: string[] };
 type Preset = {
@@ -108,7 +109,22 @@ export default function PmSchedulesPage() {
   }
 
   useEffect(() => {
-    void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Maintenance setup could not be loaded."));
+    let cancelled = false;
+    void fetch("/api/maintenance-setup", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as SetupData & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Maintenance setup could not be loaded.");
+        return payload;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setData(payload);
+        setDrafts(Object.fromEntries(payload.categories.map((category) => [category, ruleFromPreset(payload.presets.find((preset) => preset.category === category))])));
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : "Maintenance setup could not be loaded.");
+      });
+    return () => { cancelled = true; };
   }, []);
 
   async function post(body: Record<string, unknown>, success: string) {
@@ -222,10 +238,11 @@ export default function PmSchedulesPage() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "28px 32px 70px", color: "#172033" }}>
+      <MaintenanceTabs />
       <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div>
-          <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>PM SCHEDULE SETUP</p>
-          <h1 style={{ margin: "6px 0 0", fontSize: 30, color: "#0d1b2b" }}>Maintenance schedules</h1>
+          <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>MAINTENANCE SCHEDULES</p>
+          <h1 style={{ margin: "6px 0 0", fontSize: 30, color: "#0d1b2b" }}>PM Schedules</h1>
           <p style={{ margin: "6px 0 0", color: "#64748b", maxWidth: 820, fontSize: 13 }}>
             Compact schedule groups up top; the unit assignment table stays below for bulk setup and corrections.
           </p>

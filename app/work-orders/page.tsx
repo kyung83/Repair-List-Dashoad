@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import ModuleTabs from "../module-tabs";
 
 type UsedPart = { partId: number; partNumber: string; description: string; quantity: number };
 type LaborEntry = { id: number; technicianId: number | null; technician: string; laborDate: string; hours: number; rate: number; amount: number; notes: string };
@@ -82,6 +83,7 @@ export default function WorkOrdersPage() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "30px 34px 80px", color: "#182331" }}>
+      <ModuleTabs module="shop" />
       <header style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>WORK ORDER REVIEW</p>
