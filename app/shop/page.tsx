@@ -132,21 +132,36 @@ export default function ShopPage(){
 
   function availabilityFor(part:Part,repair:Repair){const code=String(repair.yard||data?.user.yard||"").toUpperCase();if(!code)return Number(part.available??part.quantityOnHand??0);return Number(part.warehouseStocks?.find(stock=>stock.warehouseCode===code)?.available??0)}
 
+  async function autoAdvanceShortage(repair:Repair,result:ActionResult,label:string){
+    const shortage=numberText(result.shortageQuantity||0);
+    const reserved=numberText(result.reservedQuantity||0);
+    if(data?.activeTimer?.repairId!==repair.id){
+      setMessage(`${label}: ${reserved} reserved, ${shortage} short. This repair is now waiting on the part.`);
+      return;
+    }
+    const moved=await action({action:"advanceRepair",repairId:repair.id,mode:"waiting_parts"},repair.id);
+    if(!moved)return;
+    setMessage(moved.advanced
+      ? `${label}: ${shortage} short. Parts Desk was updated, labor was saved, and the next repair started automatically.`
+      : `${label}: ${shortage} short. Parts Desk was updated and labor was saved. No other actionable repair is ready on this unit.`);
+  }
+
   async function addPartToRepair(repair:Repair){
     if(!partId){setMessage("Choose a part first.");return}
     if(!Number.isFinite(partQuantity)||partQuantity<=0){setMessage("Enter a positive part quantity.");return}
     const result=await action({action:"usePart",repairId:repair.id,partId:Number(partId),quantity:partQuantity},repair.id);
-    if(result){
-      setPartId("");setPartQuantity(1);
-      if(result.awaitingParts)setMessage(result.reservedQuantity?`${numberText(result.reservedQuantity)} reserved in ${result.warehouseCode}; ${numberText(result.shortageQuantity||0)} still short. Waiting on Part is now ready.`:`Part request queued for ${result.warehouseCode}. Waiting on Part is now ready.`);
-      else setMessage(`${numberText(result.usedImmediately||partQuantity)} part unit(s) used from ${result.warehouseCode||prettyYard(repair.yard)} inventory.`);
-    }
+    if(!result)return;
+    setPartId("");setPartQuantity(1);
+    if(result.awaitingParts){await autoAdvanceShortage(repair,result,result.partNumber||"Part");return}
+    setMessage(`${numberText(result.usedImmediately||partQuantity)} part unit(s) used from ${result.warehouseCode||prettyYard(repair.yard)} inventory.`);
   }
 
   async function usePlannedPart(repair:Repair,planned:PlannedPart){
     const remaining=Math.max(0,planned.quantity-planned.usedQuantity);if(remaining<=0)return;
     const result=await action({action:"usePart",repairId:repair.id,partId:planned.partId,quantity:remaining},repair.id);
-    if(result)setMessage(result.awaitingParts?`${planned.partNumber}: ${numberText(result.reservedQuantity||0)} reserved, ${numberText(result.shortageQuantity||0)} short. Waiting on Part is now ready.`:`${numberText(result.usedImmediately||remaining)} × ${planned.partNumber} used from ${result.warehouseCode}.`);
+    if(!result)return;
+    if(result.awaitingParts){await autoAdvanceShortage(repair,result,planned.partNumber);return}
+    setMessage(`${numberText(result.usedImmediately||remaining)} × ${planned.partNumber} used from ${result.warehouseCode}.`);
   }
 
   async function useReserved(request:PartRequest){const result=await action({action:"useReservedPart",requestId:request.id,quantity:request.reservedQuantity},request.repairId);if(result)setMessage(`${numberText(result.quantity||request.reservedQuantity)} × ${request.partNumber} used from reserved ${request.warehouseCode} stock.`)}
@@ -200,7 +215,7 @@ export default function ShopPage(){
 
           {!isMine&&isAvailable&&!data.activeTimer&&<div style={smallNotice}>Use Start Working on Unit above. The app will claim an actionable repair and start labor automatically.</div>}
           {!isMine&&!isAvailable&&<div style={lockedNotice}>This repair is assigned to {selected.assignedTo||"another technician"}. You can see it, but only that technician or a manager can work it.</div>}
-          {running&&!waiting&&<div style={smallNotice}>If a needed part is short, request it below. Then Waiting on Part becomes a one-tap handoff to the next repair.</div>}
+          {running&&!waiting&&<div style={smallNotice}>If a needed part is short, request it below. The app will save labor and move you to the next repair automatically.</div>}
           {waiting&&<div style={{...smallNotice,background:"#fff4df",color:"#80591a"}}>This repair has an unresolved part shortage. It stays open and will be skipped by automatic handoff until parts are available.</div>}
 
           <MaintenanceChecklistPanel repairId={selected.id} canWork={canManageChecklist}/>
