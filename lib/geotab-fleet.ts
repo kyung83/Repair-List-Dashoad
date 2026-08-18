@@ -22,6 +22,7 @@ type EquipmentIdentityRow = {
 type AssignmentRow = {
   equipment_id: number;
   geotab_device_id: string;
+  mileage_offset: number;
 };
 type IdentityResolution = {
   equipment: EquipmentIdentityRow;
@@ -331,7 +332,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
       FROM equipment
     `).all<EquipmentIdentityRow>(),
     env.DB.prepare(`
-      SELECT equipment_id, geotab_device_id
+      SELECT equipment_id, geotab_device_id, mileage_offset
       FROM equipment_geotab_devices
       WHERE current = 1
     `).all<AssignmentRow>(),
@@ -360,10 +361,12 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
 
   const assignedByDevice = new Map<string, number>();
   const assignedDeviceByEquipment = new Map<number, string>();
+  const mileageOffsetByDevice = new Map<string, number>();
   const claimedEquipmentIds = new Set<number>();
   for (const assignment of assignmentResult.results) {
     assignedByDevice.set(assignment.geotab_device_id, assignment.equipment_id);
     assignedDeviceByEquipment.set(assignment.equipment_id, assignment.geotab_device_id);
+    mileageOffsetByDevice.set(assignment.geotab_device_id, Number(assignment.mileage_offset ?? 0));
     claimedEquipmentIds.add(assignment.equipment_id);
   }
 
@@ -416,8 +419,10 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     const serialNumber = text(get(device, 'serialNumber', 'SerialNumber')).trim() || null;
     const plate = text(get(device, 'licensePlate', 'LicensePlate')).trim() || null;
     const plateState = text(get(device, 'licenseState', 'LicenseState')).trim() || null;
-    const mileage = odometers.get(id) ?? null;
-    if (mileage != null) mileageReceived += 1;
+    const rawMileage = odometers.get(id) ?? null;
+    const mileageOffset = mileageOffsetByDevice.get(id) ?? 0;
+    const adjustedMileage = rawMileage == null ? null : rawMileage + mileageOffset;
+    if (rawMileage != null) mileageReceived += 1;
 
     const resolution = resolveIdentity(
       id,
@@ -535,26 +540,41 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     }
 
     let trustedMileage: number | null = null;
-    if (mileage != null) {
-      const decision = mileageDecision(equipment, mileage);
+    if (adjustedMileage != null && rawMileage != null) {
+      const decision = mileageDecision(equipment, adjustedMileage);
       if (decision.accepted) {
-        trustedMileage = mileage;
+        trustedMileage = adjustedMileage;
         mileageUpdates += 1;
       } else if (decision.reason) {
         mileageAnomalies += 1;
         statementGroup.push(env.DB.prepare(`
-          INSERT OR IGNORE INTO geotab_mileage_anomalies (
+          INSERT INTO geotab_mileage_anomalies (
             equipment_id, geotab_device_id, serial_number, previous_mileage,
-            incoming_mileage, previous_updated_at, reason, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+            incoming_mileage, raw_mileage, adjusted_mileage, previous_updated_at,
+            reason, status, created_at
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM geotab_mileage_anomalies existing
+            WHERE existing.equipment_id = ?
+              AND existing.geotab_device_id = ?
+              AND COALESCE(existing.raw_mileage, existing.incoming_mileage) = ?
+              AND existing.status IN ('pending', 'dismissed')
+          )
         `).bind(
           equipment.id,
           id,
           serialNumber,
           equipment.current_mileage,
-          mileage,
+          adjustedMileage,
+          rawMileage,
+          adjustedMileage,
           equipment.mileage_updated_at,
           decision.reason,
+          equipment.id,
+          id,
+          rawMileage,
         ));
       }
     }
