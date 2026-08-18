@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { getSessionUser } from '@/lib/auth';
 import {
   applyAnnualSchedule,
   clearAnnualSchedule,
@@ -6,8 +7,19 @@ import {
   getAnnualScheduleData,
 } from '@/lib/annual-schedules';
 
-export async function GET() {
+async function authorize(request: Request) {
+  const user = await getSessionUser(env.DB, request);
+  if (!user) return Response.json({ error: 'Not signed in.' }, { status: 401 });
+  if (user.role !== 'manager' && user.role !== 'admin') {
+    return Response.json({ error: 'Manager or administrator access is required.' }, { status: 403 });
+  }
+  return null;
+}
+
+export async function GET(request: Request) {
   try {
+    const denied = await authorize(request);
+    if (denied) return denied;
     return Response.json(await getAnnualScheduleData(env.DB), { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'annual_schedule_get_failed', error: String(error) }));
@@ -17,6 +29,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const denied = await authorize(request);
+    if (denied) return denied;
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
     if (action === 'applyAnnual') return Response.json(await applyAnnualSchedule(env.DB, body));

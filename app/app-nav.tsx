@@ -11,6 +11,7 @@ const managerPrimary: Link[] = [
   { href:"/shop", label:"My Jobs" },
   { href:"/repair-board", label:"Shop" },
   { href:"/unit", label:"Units" },
+  { href:"/annual-schedules", label:"Annuals" },
   { href:"/next-pm-repairs", label:"Future Repairs" },
   { href:"/reports/history", label:"History" },
 ];
