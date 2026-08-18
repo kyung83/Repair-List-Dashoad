@@ -31,7 +31,6 @@ type IdentityQuarantine = {
   reason: string;
   candidateIds: number[];
 };
-
 type MileageDecision = {
   accepted: boolean;
   reason?: 'decrease' | 'implausible_increase';
@@ -89,6 +88,10 @@ function pushMap<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const values = map.get(key);
   if (values) values.push(value);
   else map.set(key, [value]);
+}
+
+function distinctIds(values: number[]) {
+  return [...new Set(values)];
 }
 
 function mileageDecision(
@@ -225,6 +228,21 @@ async function currentGroups(auth: Auth) {
   }
 }
 
+function identityVinConflict(
+  equipment: EquipmentIdentityRow,
+  incomingVin: string | null,
+  byVin: Map<string, EquipmentIdentityRow[]>,
+  reason: string,
+): IdentityQuarantine | null {
+  const storedVin = validVin(equipment.vin);
+  if (!incomingVin || !storedVin || incomingVin === storedVin) return null;
+  const incomingVinCandidates = byVin.get(incomingVin) ?? [];
+  return {
+    reason,
+    candidateIds: distinctIds([equipment.id, ...incomingVinCandidates.map((candidate) => candidate.id)]),
+  };
+}
+
 function resolveIdentity(
   deviceId: string,
   incomingVin: string | null,
@@ -234,22 +252,30 @@ function resolveIdentity(
   byDevice: Map<string, EquipmentIdentityRow[]>,
   byVin: Map<string, EquipmentIdentityRow[]>,
   byUnit: Map<string, EquipmentIdentityRow[]>,
+  returnedDeviceIds: Set<string>,
   activeDeviceIds: Set<string>,
 ): IdentityResolution | IdentityQuarantine {
   const assignedEquipmentId = assignedByDevice.get(deviceId);
   if (assignedEquipmentId != null) {
     const equipment = equipmentById.get(assignedEquipmentId);
-    if (equipment) return { equipment, method: 'assignment' };
-    return { reason: 'assignment_missing_equipment', candidateIds: [assignedEquipmentId] };
+    if (!equipment) return { reason: 'assignment_missing_equipment', candidateIds: [assignedEquipmentId] };
+    const vinConflict = identityVinConflict(equipment, incomingVin, byVin, 'assigned_device_vin_conflict');
+    return vinConflict ?? { equipment, method: 'assignment' };
   }
 
   const deviceCandidates = byDevice.get(deviceId) ?? [];
   if (deviceCandidates.length === 1) {
-    return { equipment: deviceCandidates[0], method: 'device_id' };
+    const candidate = deviceCandidates[0];
+    const vinConflict = identityVinConflict(candidate, incomingVin, byVin, 'device_id_vin_conflict');
+    return vinConflict ?? { equipment: candidate, method: 'device_id' };
   }
   if (deviceCandidates.length > 1) {
     const activeUnarchived = deviceCandidates.filter((candidate) => candidate.active === 1 && !candidate.archived_at);
-    if (activeUnarchived.length === 1) return { equipment: activeUnarchived[0], method: 'device_id' };
+    if (activeUnarchived.length === 1) {
+      const candidate = activeUnarchived[0];
+      const vinConflict = identityVinConflict(candidate, incomingVin, byVin, 'device_id_vin_conflict');
+      return vinConflict ?? { equipment: candidate, method: 'device_id' };
+    }
     return { reason: 'duplicate_device_id', candidateIds: deviceCandidates.map((candidate) => candidate.id) };
   }
 
@@ -259,8 +285,13 @@ function resolveIdentity(
       const candidate = vinCandidates[0];
       if (candidate.archived_at) return { reason: 'vin_match_is_archived', candidateIds: [candidate.id] };
       const priorDeviceId = candidate.geotab_device_id?.trim() || null;
-      if (priorDeviceId && priorDeviceId !== deviceId && activeDeviceIds.has(priorDeviceId)) {
-        return { reason: 'vin_match_has_other_active_device', candidateIds: [candidate.id] };
+      if (priorDeviceId && priorDeviceId !== deviceId) {
+        if (activeDeviceIds.has(priorDeviceId)) {
+          return { reason: 'vin_match_has_other_active_device', candidateIds: [candidate.id] };
+        }
+        if (!returnedDeviceIds.has(priorDeviceId)) {
+          return { reason: 'vin_match_prior_device_not_visible', candidateIds: [candidate.id] };
+        }
       }
       return { equipment: candidate, method: 'vin' };
     }
@@ -274,6 +305,8 @@ function resolveIdentity(
   if (unitCandidates.length === 1) {
     const candidate = unitCandidates[0];
     if (candidate.archived_at) return { reason: 'unit_match_is_archived', candidateIds: [candidate.id] };
+    const vinConflict = identityVinConflict(candidate, incomingVin, byVin, 'unit_match_vin_conflict');
+    if (vinConflict) return vinConflict;
     const priorDeviceId = candidate.geotab_device_id?.trim() || null;
     if (priorDeviceId && priorDeviceId !== deviceId) {
       return { reason: 'unit_match_has_other_device', candidateIds: [candidate.id] };
@@ -334,16 +367,22 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     claimedEquipmentIds.add(assignment.equipment_id);
   }
 
+  const returnedDeviceIds = new Set(
+    devices.map((device) => objectId(device)).filter((id): id is string => Boolean(id) && id.toLowerCase() !== 'nodeviceid'),
+  );
   const activeDeviceIds = new Set(
     activeDevices.map((device) => objectId(device)).filter((id): id is string => Boolean(id)),
   );
+  const explicitlyInactiveDeviceIds = new Set(
+    [...returnedDeviceIds].filter((id) => !activeDeviceIds.has(id)),
+  );
   const trailerGroupIds = groups ? buildTrailerGroupIds(groups) : new Set<string>();
 
-  // IMPORTANT: absence from the Device response is not an archive signal. A
-  // service account can return a partial collection when permissions or scope
-  // change. Positive, high-confidence identity matches may add fresh metadata;
+  // IMPORTANT: absence from the Device response is not an archive or device-swap
+  // signal. Positive, high-confidence identity matches may add fresh metadata;
   // missing or ambiguous information cannot create, archive, relink, or rename
-  // equipment.
+  // equipment. A device swap requires the old device to be positively returned
+  // by Geotab and explicitly inactive, never merely absent.
   const batches: D1PreparedStatement[][] = [];
   let batch: D1PreparedStatement[] = [];
   const addStatementGroup = (group: D1PreparedStatement[]) => {
@@ -389,6 +428,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
       byDevice,
       byVin,
       byUnit,
+      returnedDeviceIds,
       activeDeviceIds,
     );
 
@@ -422,7 +462,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     const safeVinSwap = resolution.method === 'vin'
       && Boolean(currentlyAssignedDeviceId)
       && currentlyAssignedDeviceId !== id
-      && !activeDeviceIds.has(currentlyAssignedDeviceId!);
+      && explicitlyInactiveDeviceIds.has(currentlyAssignedDeviceId!);
 
     if (resolution.method !== 'assignment' && claimedEquipmentIds.has(equipment.id) && !safeVinSwap) {
       identityQuarantined += 1;
