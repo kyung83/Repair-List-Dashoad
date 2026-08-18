@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { getSessionUser, type AppUser } from '@/lib/auth';
+import { getSessionUser } from '@/lib/auth';
 import { GET as originalGET, POST as originalPOST } from './original';
 import {
   consumeReservedPart,
@@ -192,7 +192,7 @@ async function repairHasPartShortage(repairId: number) {
   return Boolean(row);
 }
 
-async function nextActionableRepair(current: WorkflowRepair, technicianId: number) {
+async function nextActionableRepair(current: WorkflowRepair, technicianId: number, userId: number) {
   if (current.equipment_id === null) return null;
   return env.DB.prepare(`
     SELECT r.id, r.equipment_id, r.technician_id, COALESCE(r.status,'') AS status, COALESCE(r.title,'') AS title
@@ -208,21 +208,67 @@ async function nextActionableRepair(current: WorkflowRepair, technicianId: numbe
         WHERE q.repair_id = r.id AND q.status = 'open'
           AND q.requested_quantity > q.used_quantity + q.reserved_quantity + 0.000001
       )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM repair_job_events skipped
+        WHERE skipped.repair_id = r.id
+          AND skipped.user_id = ?
+          AND skipped.action = 'skipped_for_now'
+          AND skipped.id > (
+            SELECT MAX(started.id)
+            FROM repair_job_events started
+            JOIN repairs started_repair ON started_repair.id = started.repair_id
+            WHERE started.user_id = ?
+              AND started.action = 'unit_work_started'
+              AND started_repair.equipment_id = r.equipment_id
+          )
+      )
     ORDER BY CASE WHEN r.technician_id = ? THEN 0 ELSE 1 END,
              CASE trim(COALESCE(r.priority,'2')) WHEN '1' THEN 0 WHEN '2' THEN 1 WHEN '3' THEN 2 ELSE 1 END,
              r.opened_at ASC, r.id ASC
     LIMIT 1
-  `).bind(current.equipment_id, current.id, technicianId, technicianId).first<WorkflowRepair>();
+  `).bind(current.equipment_id, current.id, technicianId, userId, userId, technicianId).first<WorkflowRepair>();
 }
 
 async function handleTechnicianWorkflow(request: Request, body: Record<string, unknown>) {
   const action = String(body.action ?? '');
-  if (!['switchRepair','advanceRepair','doneUnit'].includes(action)) return null;
+  if (!['startUnit','switchRepair','advanceRepair','doneUnit'].includes(action)) return null;
 
   const user = await getSessionUser(env.DB, request);
   if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
   if (!user.technicianId) {
     return Response.json({ error: 'This account is not linked to a technician.' }, { status: 409 });
+  }
+
+  if (action === 'startUnit') {
+    const targetId = numericRepairId(body.repairId ?? body.id);
+    if (!targetId) return Response.json({ error: 'Choose a repair on the unit to begin.' }, { status: 400 });
+    if (await activeRepairForUser(user.id)) {
+      return Response.json({ error: 'You are already working on a unit. Finish that unit first.' }, { status: 409 });
+    }
+    const target = await workflowRepair(targetId);
+    if (!target) return Response.json({ error: 'Repair was not found.' }, { status: 404 });
+    if (deferred(target.status) || target.status.toLowerCase().includes('complete')) {
+      return Response.json({ error: 'That repair is not active shop work.' }, { status: 400 });
+    }
+    if (target.technician_id !== null && Number(target.technician_id) !== Number(user.technicianId)) {
+      return Response.json({ error: 'That repair is assigned to another technician.' }, { status: 403 });
+    }
+    if (await repairHasPartShortage(targetId)) {
+      return Response.json({ error: 'That repair is waiting on a short part. Choose another repair on the unit.' }, { status: 409 });
+    }
+    const yardError = await validateYardPickup(request.clone(), { action: 'openRepair', repairId: `repair-${targetId}` });
+    if (yardError) return yardError;
+    const opened = await runOriginalAction(request, { action: 'openRepair', repairId: `repair-${targetId}` });
+    if (!opened.payload.ok) return originalFailure(opened, 'Unit work could not be started.');
+    await repairJobEvent(
+      targetId,
+      user.id,
+      user.technicianId,
+      'unit_work_started',
+      'Technician started a unit work session. Repair handoffs will save separate labor entries automatically.',
+    );
+    return Response.json({ ...opened.payload, unitStarted: true });
   }
 
   if (action === 'doneUnit') {
@@ -258,11 +304,21 @@ async function handleTechnicianWorkflow(request: Request, body: Record<string, u
       return Response.json({ error: 'That repair is assigned to another technician.' }, { status: 403 });
     }
 
+    const yardError = await validateYardPickup(request.clone(), { action: 'openRepair', repairId: `repair-${targetId}` });
+    if (yardError) return yardError;
+
     const active = await activeRepairForUser(user.id);
     if (!active) {
       const opened = await runOriginalAction(request, { action: 'openRepair', repairId: `repair-${targetId}` });
       if (!opened.payload.ok) return originalFailure(opened, 'Repair could not be opened.');
-      return Response.json({ ...opened.payload, switched: false });
+      await repairJobEvent(
+        targetId,
+        user.id,
+        user.technicianId,
+        'unit_work_started',
+        'Technician started a unit work session from a repair selection.',
+      );
+      return Response.json({ ...opened.payload, switched: false, unitStarted: true });
     }
     if (Number(active.repair_id) === targetId) {
       return Response.json({ ok: true, repairId: `repair-${targetId}`, alreadyRunning: true });
@@ -348,22 +404,25 @@ async function handleTechnicianWorkflow(request: Request, body: Record<string, u
     }
   }
 
-  const next = await nextActionableRepair(current, user.technicianId);
+  const next = await nextActionableRepair(current, user.technicianId, user.id);
   if (next) {
-    const opened = await runOriginalAction(request, { action: 'openRepair', repairId: `repair-${next.id}` });
-    if (opened.payload.ok) {
-      return Response.json({
-        ok: true,
-        repairId: `repair-${next.id}`,
-        previousRepairId: `repair-${currentId}`,
-        nextRepairId: `repair-${next.id}`,
-        completed: mode === 'repaired',
-        waitingOnPart: mode === 'waiting_parts',
-        skipped: mode === 'skipped',
-        advanced: true,
-        laborStarted: true,
-        hours,
-      });
+    const nextYardError = await validateYardPickup(request.clone(), { action: 'openRepair', repairId: `repair-${next.id}` });
+    if (!nextYardError) {
+      const opened = await runOriginalAction(request, { action: 'openRepair', repairId: `repair-${next.id}` });
+      if (opened.payload.ok) {
+        return Response.json({
+          ok: true,
+          repairId: `repair-${next.id}`,
+          previousRepairId: `repair-${currentId}`,
+          nextRepairId: `repair-${next.id}`,
+          completed: mode === 'repaired',
+          waitingOnPart: mode === 'waiting_parts',
+          skipped: mode === 'skipped',
+          advanced: true,
+          laborStarted: true,
+          hours,
+        });
+      }
     }
   }
 
@@ -467,7 +526,7 @@ export async function POST(request: Request) {
       return Response.json({ ...result, repairId: `repair-${result.repairId}` });
     }
   } catch (error) {
-    if (body && ['usePart','useReservedPart','switchRepair','advanceRepair','doneUnit'].includes(String(body.action ?? ''))) {
+    if (body && ['usePart','useReservedPart','startUnit','switchRepair','advanceRepair','doneUnit'].includes(String(body.action ?? ''))) {
       return Response.json({ error: error instanceof Error ? error.message : 'Shop action failed.' }, { status: 400 });
     }
     // The original handler owns validation for other malformed/non-JSON requests.
