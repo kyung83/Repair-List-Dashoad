@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
-          expected_release="2026-08-18-geotab-review-0064"
+          expected_release="2026-08-18-equipment-merge-0065"
 
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "$site_url/login" -o /tmp/login.html
@@ -182,7 +182,7 @@ jobs:
             exit 1
           fi
 
-          for endpoint in /api/repairs /api/work-orders /api/inventory /api/admin/geotab-reconciliation '/api/repairs?checkGeotab=1'; do
+          for endpoint in /api/repairs /api/work-orders /api/inventory /api/admin/geotab-reconciliation /api/admin/equipment-merge '/api/repairs?checkGeotab=1'; do
             status="$(curl --silent --show-error -o /tmp/protected.json -w '%{http_code}' "$site_url$endpoint")"
             if [ "$status" != "401" ] && [ "$status" != "503" ]; then
               echo "Protected endpoint $endpoint returned unexpected HTTP $status."
@@ -190,7 +190,7 @@ jobs:
               exit 1
             fi
           done
-          echo "Repair, work-order, inventory, Geotab review, and diagnostic APIs are not publicly readable."
+          echo "Repair, work-order, inventory, Geotab review, equipment merge, and diagnostic APIs are not publicly readable."
 
       - name: Publish production deployment status
         if: always()
@@ -206,7 +206,7 @@ jobs:
           description="Cloudflare deployment or D1 schema verification failed"
           if [ "$AUTH_READY" = "true" ] && [ "$JOB_STATUS" = "success" ]; then
             state="success"
-            description="Verified release 0064 and production D1 schema"
+            description="Verified release 0065 and production D1 schema"
           elif [ "$AUTH_READY" != "true" ]; then
             description="Cloudflare deployment authorization is missing"
           fi
