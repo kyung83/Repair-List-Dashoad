@@ -17,13 +17,24 @@ PRAGMA foreign_keys = ON;
 --   2. the row with the most repair history,
 --   3. the row with a real/highest mileage reading,
 --   4. the oldest equipment row as a deterministic tie-breaker.
-UPDATE equipment AS e
+--
+-- UPDATE OR IGNORE is deliberate defense in depth for production data that may
+-- contain an already-active sibling outside the expected candidate shape. Such
+-- a device is left as-is rather than aborting all later migrations.
+UPDATE OR IGNORE equipment AS e
 SET active = 1,
     updated_at = CURRENT_TIMESTAMP
 WHERE e.geotab_device_id IS NOT NULL
   AND TRIM(e.geotab_device_id) <> ''
   AND (e.geotab_trailer_id IS NULL OR TRIM(e.geotab_trailer_id) = '')
   AND e.archived_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM equipment AS already_active
+    WHERE already_active.id <> e.id
+      AND already_active.geotab_device_id = e.geotab_device_id
+      AND already_active.active = 1
+  )
   AND e.id = (
     SELECT candidate.id
     FROM equipment AS candidate
@@ -39,13 +50,18 @@ WHERE e.geotab_device_id IS NOT NULL
     LIMIT 1
   );
 
+-- Always install the reviewed duplicate-aware definition. Dropping first is
+-- safe because this migration has not yet been recorded as applied in production
+-- and also protects environments where an earlier manual trigger was created.
+DROP TRIGGER IF EXISTS trg_geotab_truck_require_archive_state;
+
 -- Defense in depth at the database boundary. Manual archiveEquipmentMasterItem
 -- sets archived_at in the same UPDATE as active=0, so intentional archives are
 -- allowed. Source-system/sync-only active=0 writes are rejected for an
 -- unarchived Geotab truck only when doing so cannot violate the production
 -- one-active-row-per-device constraint. If another row for the same device is
 -- already active, leave this duplicate/alias row inactive.
-CREATE TRIGGER IF NOT EXISTS trg_geotab_truck_require_archive_state
+CREATE TRIGGER trg_geotab_truck_require_archive_state
 AFTER UPDATE OF active ON equipment
 WHEN NEW.active = 0
   AND NEW.archived_at IS NULL
@@ -60,7 +76,7 @@ WHEN NEW.active = 0
       AND other.active = 1
   )
 BEGIN
-  UPDATE equipment
+  UPDATE OR IGNORE equipment
   SET active = 1
   WHERE id = NEW.id;
 END;
