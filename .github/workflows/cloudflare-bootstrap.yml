@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: norlow-cloudflare-bootstrap-v5
@@ -47,6 +48,30 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             echo "Cloudflare is not authorized. Add CLOUDFLARE_API_TOKEN and rerun."
           fi
+
+      - name: Mark production deployment pending
+        if: steps.auth.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE' >/tmp/production-status.json
+          process.stdout.write(JSON.stringify({
+            state: 'pending',
+            context: 'production/cloudflare',
+            description: 'Cloudflare deployment and D1 migration verification running',
+            target_url: process.env.TARGET_URL,
+          }));
+          NODE
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            --data-binary @/tmp/production-status.json >/dev/null
 
       - name: Check out project
         if: steps.auth.outputs.ready == 'true'
@@ -134,4 +159,38 @@ jobs:
           done
           echo "Repair, work-order, inventory, and Geotab diagnostic APIs are not publicly readable."
 
-# Deployment retrigger: 2026-08-18T11:38-04:00
+      - name: Publish production deployment status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTH_READY: ${{ steps.auth.outputs.ready }}
+          JOB_STATUS: ${{ job.status }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state="failure"
+          description="Cloudflare deployment or D1 schema verification failed"
+          if [ "$AUTH_READY" = "true" ] && [ "$JOB_STATUS" = "success" ]; then
+            state="success"
+            description="Verified release 0062 and production D1 schema"
+          elif [ "$AUTH_READY" != "true" ]; then
+            description="Cloudflare deployment authorization is missing"
+          fi
+          STATUS_STATE="$state" STATUS_DESCRIPTION="$description" node - <<'NODE' >/tmp/production-status-final.json
+          process.stdout.write(JSON.stringify({
+            state: process.env.STATUS_STATE,
+            context: 'production/cloudflare',
+            description: process.env.STATUS_DESCRIPTION,
+            target_url: process.env.TARGET_URL,
+          }));
+          NODE
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            --data-binary @/tmp/production-status-final.json >/dev/null
+
+# Deployment retrigger: 2026-08-18T11:43-04:00
