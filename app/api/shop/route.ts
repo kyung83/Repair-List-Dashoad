@@ -214,14 +214,14 @@ async function nextActionableRepair(current: WorkflowRepair, technicianId: numbe
         WHERE skipped.repair_id = r.id
           AND skipped.user_id = ?
           AND skipped.action = 'skipped_for_now'
-          AND skipped.id > (
+          AND skipped.id > COALESCE((
             SELECT MAX(started.id)
             FROM repair_job_events started
             JOIN repairs started_repair ON started_repair.id = started.repair_id
             WHERE started.user_id = ?
               AND started.action = 'unit_work_started'
               AND started_repair.equipment_id = r.equipment_id
-          )
+          ), 0)
       )
     ORDER BY CASE WHEN r.technician_id = ? THEN 0 ELSE 1 END,
              CASE trim(COALESCE(r.priority,'2')) WHEN '1' THEN 0 WHEN '2' THEN 1 WHEN '3' THEN 2 ELSE 1 END,
@@ -232,7 +232,7 @@ async function nextActionableRepair(current: WorkflowRepair, technicianId: numbe
 
 async function handleTechnicianWorkflow(request: Request, body: Record<string, unknown>) {
   const action = String(body.action ?? '');
-  if (!['startUnit','switchRepair','advanceRepair','doneUnit'].includes(action)) return null;
+  if (!['startUnit','openRepair','switchRepair','advanceRepair','doneUnit'].includes(action)) return null;
 
   const user = await getSessionUser(env.DB, request);
   if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
@@ -240,10 +240,14 @@ async function handleTechnicianWorkflow(request: Request, body: Record<string, u
     return Response.json({ error: 'This account is not linked to a technician.' }, { status: 409 });
   }
 
-  if (action === 'startUnit') {
+  if (action === 'startUnit' || action === 'openRepair') {
     const targetId = numericRepairId(body.repairId ?? body.id);
     if (!targetId) return Response.json({ error: 'Choose a repair on the unit to begin.' }, { status: 400 });
-    if (await activeRepairForUser(user.id)) {
+    const active = await activeRepairForUser(user.id);
+    if (active) {
+      if (Number(active.repair_id) === targetId) {
+        return Response.json({ ok: true, repairId: `repair-${targetId}`, alreadyRunning: true });
+      }
       return Response.json({ error: 'You are already working on a unit. Finish that unit first.' }, { status: 409 });
     }
     const target = await workflowRepair(targetId);
@@ -526,7 +530,7 @@ export async function POST(request: Request) {
       return Response.json({ ...result, repairId: `repair-${result.repairId}` });
     }
   } catch (error) {
-    if (body && ['usePart','useReservedPart','startUnit','switchRepair','advanceRepair','doneUnit'].includes(String(body.action ?? ''))) {
+    if (body && ['usePart','useReservedPart','startUnit','openRepair','switchRepair','advanceRepair','doneUnit'].includes(String(body.action ?? ''))) {
       return Response.json({ error: error instanceof Error ? error.message : 'Shop action failed.' }, { status: 400 });
     }
     // The original handler owns validation for other malformed/non-JSON requests.
