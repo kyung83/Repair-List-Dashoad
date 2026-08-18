@@ -42,6 +42,10 @@ async function deploymentHealth(db: D1Database) {
           'idx_equipment_merged_into',
           'idx_equipment_merge_events_target',
           'trg_equipment_sanitize_merged_identity',
+          'trg_equipment_keep_merged_identity_retired',
+          'trg_equipment_keep_merged_unit_retired',
+          'trg_geotab_assignment_reject_merged_insert',
+          'trg_geotab_assignment_reject_merged_update',
           'trg_equipment_prevent_restore_merged'
         )
       `).all<{ type: string; name: string }>(),
@@ -89,6 +93,10 @@ async function deploymentHealth(db: D1Database) {
         && objectNames.has('idx_equipment_merged_into')
         && objectNames.has('idx_equipment_merge_events_target')
         && objectNames.has('trg_equipment_sanitize_merged_identity')
+        && objectNames.has('trg_equipment_keep_merged_identity_retired')
+        && objectNames.has('trg_equipment_keep_merged_unit_retired')
+        && objectNames.has('trg_geotab_assignment_reject_merged_insert')
+        && objectNames.has('trg_geotab_assignment_reject_merged_update')
         && objectNames.has('trg_equipment_prevent_restore_merged'),
     };
     return {
