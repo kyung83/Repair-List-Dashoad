@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import s from "./repair-board.module.css";
 
 type Equipment={id:number;unit:string;equipmentType:string;driver:string;location:string};
@@ -31,7 +31,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   const[selected,setSelected]=useState<Equipment|null>(initial);
   const[search,setSearch]=useState(initial?.unit??"");
   const[addNew,setAddNew]=useState(false);
-  const[newType,setNewType]=useState<EquipmentKind>("other");
+  const[newType,setNewType]=useState<EquipmentKind>(initial?kind(initial.equipmentType):"other");
   const[newLocation,setNewLocation]=useState(initial?.location??"");
   const[issue,setIssue]=useState("");
   const[parts,setParts]=useState("");
@@ -40,17 +40,6 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   const[lastSavedUnit,setLastSavedUnit]=useState("");
   const[busy,setBusy]=useState(false);
   const[message,setMessage]=useState("");
-
-  useEffect(()=>{
-    const next=equipment.find(item=>item.id===initialEquipmentId)??null;
-    setSelected(next);
-    setSearch(next?.unit??"");
-    setAddNew(false);
-    setNewType(next?kind(next.equipmentType):"other");
-    setNewLocation(next?.location??"");
-    setLastSavedUnit("");
-    setMessage("");
-  },[equipment,initialEquipmentId]);
 
   const matches=useMemo(()=>{
     if(lockEquipment||selected)return[];
