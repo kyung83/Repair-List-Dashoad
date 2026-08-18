@@ -9,6 +9,33 @@ type Login = { database: string; userName: string; password: string };
 type Auth = { endpoint: string; credentials: Credentials };
 type ProtectedConfig = { database: string; serviceUsername: string; servicePassword: string };
 type Payload<T> = { result?: T; error?: { message?: string; name?: string } };
+type EquipmentIdentityRow = {
+  id: number;
+  unit: string;
+  geotab_device_id: string | null;
+  vin: string | null;
+  active: number;
+  archived_at: string | null;
+  current_mileage: number | null;
+  mileage_updated_at: string | null;
+};
+type AssignmentRow = {
+  equipment_id: number;
+  geotab_device_id: string;
+};
+type IdentityResolution = {
+  equipment: EquipmentIdentityRow;
+  method: 'assignment' | 'device_id' | 'vin' | 'unit';
+};
+type IdentityQuarantine = {
+  reason: string;
+  candidateIds: number[];
+};
+
+type MileageDecision = {
+  accepted: boolean;
+  reason?: 'decrease' | 'implausible_increase';
+};
 
 let loginPromise: Promise<Login> | undefined;
 
@@ -45,6 +72,45 @@ function isCurrentlyActiveDevice(device: JsonRecord, now = Date.now()) {
   const activeFrom = dateValue(get(device, 'activeFrom', 'ActiveFrom'));
   const activeTo = dateValue(get(device, 'activeTo', 'ActiveTo'));
   return (activeFrom == null || activeFrom <= now) && (activeTo == null || activeTo > now);
+}
+
+function validVin(value: unknown) {
+  const vin = text(value).trim().toUpperCase();
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return null;
+  if (/^([A-Z0-9])\1{16}$/.test(vin)) return null;
+  return vin;
+}
+
+function normalizedUnit(value: unknown) {
+  return text(value).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function pushMap<K, V>(map: Map<K, V[]>, key: K, value: V) {
+  const values = map.get(key);
+  if (values) values.push(value);
+  else map.set(key, [value]);
+}
+
+function mileageDecision(
+  equipment: EquipmentIdentityRow,
+  incomingMileage: number,
+  now = Date.now(),
+): MileageDecision {
+  const currentMileage = equipment.current_mileage;
+  if (currentMileage == null) return { accepted: true };
+  if (incomingMileage < currentMileage) return { accepted: false, reason: 'decrease' };
+
+  const previousUpdatedAt = dateValue(equipment.mileage_updated_at);
+  if (previousUpdatedAt == null) return { accepted: true };
+
+  const elapsedHours = Math.max(1, (now - previousUpdatedAt) / 3_600_000);
+  // 120 mph continuously is intentionally generous. This guard is for obvious
+  // device-swap/baseline errors, not normal driving-pattern enforcement.
+  const maximumPlausibleIncrease = Math.max(500, Math.ceil(elapsedHours * 120));
+  if (incomingMileage - currentMileage > maximumPlausibleIncrease) {
+    return { accepted: false, reason: 'implausible_increase' };
+  }
+  return { accepted: true };
 }
 
 function decodeBase64(value: string) {
@@ -159,12 +225,83 @@ async function currentGroups(auth: Auth) {
   }
 }
 
+function resolveIdentity(
+  deviceId: string,
+  incomingVin: string | null,
+  unit: string,
+  equipmentById: Map<number, EquipmentIdentityRow>,
+  assignedByDevice: Map<string, number>,
+  byDevice: Map<string, EquipmentIdentityRow[]>,
+  byVin: Map<string, EquipmentIdentityRow[]>,
+  byUnit: Map<string, EquipmentIdentityRow[]>,
+  activeDeviceIds: Set<string>,
+): IdentityResolution | IdentityQuarantine {
+  const assignedEquipmentId = assignedByDevice.get(deviceId);
+  if (assignedEquipmentId != null) {
+    const equipment = equipmentById.get(assignedEquipmentId);
+    if (equipment) return { equipment, method: 'assignment' };
+    return { reason: 'assignment_missing_equipment', candidateIds: [assignedEquipmentId] };
+  }
+
+  const deviceCandidates = byDevice.get(deviceId) ?? [];
+  if (deviceCandidates.length === 1) {
+    return { equipment: deviceCandidates[0], method: 'device_id' };
+  }
+  if (deviceCandidates.length > 1) {
+    const activeUnarchived = deviceCandidates.filter((candidate) => candidate.active === 1 && !candidate.archived_at);
+    if (activeUnarchived.length === 1) return { equipment: activeUnarchived[0], method: 'device_id' };
+    return { reason: 'duplicate_device_id', candidateIds: deviceCandidates.map((candidate) => candidate.id) };
+  }
+
+  if (incomingVin) {
+    const vinCandidates = byVin.get(incomingVin) ?? [];
+    if (vinCandidates.length === 1) {
+      const candidate = vinCandidates[0];
+      if (candidate.archived_at) return { reason: 'vin_match_is_archived', candidateIds: [candidate.id] };
+      const priorDeviceId = candidate.geotab_device_id?.trim() || null;
+      if (priorDeviceId && priorDeviceId !== deviceId && activeDeviceIds.has(priorDeviceId)) {
+        return { reason: 'vin_match_has_other_active_device', candidateIds: [candidate.id] };
+      }
+      return { equipment: candidate, method: 'vin' };
+    }
+    if (vinCandidates.length > 1) {
+      return { reason: 'duplicate_vin', candidateIds: vinCandidates.map((candidate) => candidate.id) };
+    }
+  }
+
+  const unitKey = normalizedUnit(unit);
+  const unitCandidates = unitKey ? (byUnit.get(unitKey) ?? []) : [];
+  if (unitCandidates.length === 1) {
+    const candidate = unitCandidates[0];
+    if (candidate.archived_at) return { reason: 'unit_match_is_archived', candidateIds: [candidate.id] };
+    const priorDeviceId = candidate.geotab_device_id?.trim() || null;
+    if (priorDeviceId && priorDeviceId !== deviceId) {
+      return { reason: 'unit_match_has_other_device', candidateIds: [candidate.id] };
+    }
+    return { equipment: candidate, method: 'unit' };
+  }
+  if (unitCandidates.length > 1) {
+    return { reason: 'duplicate_normalized_unit', candidateIds: unitCandidates.map((candidate) => candidate.id) };
+  }
+
+  return { reason: 'unmatched_device', candidateIds: [] };
+}
+
 export async function syncGeotabFleetMaster(env: GeotabEnv) {
   const auth = await authenticate(env);
-  const [devices, odometers, groups] = await Promise.all([
+  const [devices, odometers, groups, equipmentResult, assignmentResult] = await Promise.all([
     call<JsonRecord[]>(auth, 'Get', { typeName: 'Device' }),
     currentOdometers(auth),
     currentGroups(auth),
+    env.DB.prepare(`
+      SELECT id, unit, geotab_device_id, vin, active, archived_at, current_mileage, mileage_updated_at
+      FROM equipment
+    `).all<EquipmentIdentityRow>(),
+    env.DB.prepare(`
+      SELECT equipment_id, geotab_device_id
+      FROM equipment_geotab_devices
+      WHERE current = 1
+    `).all<AssignmentRow>(),
   ]);
 
   if (!devices.length) throw new Error('Geotab returned no devices; refusing to update fleet metadata.');
@@ -174,17 +311,54 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
   });
   if (!activeDevices.length) throw new Error('Geotab returned no currently active devices; refusing to treat this response as authoritative.');
 
+  const equipmentById = new Map<number, EquipmentIdentityRow>();
+  const byDevice = new Map<string, EquipmentIdentityRow[]>();
+  const byVin = new Map<string, EquipmentIdentityRow[]>();
+  const byUnit = new Map<string, EquipmentIdentityRow[]>();
+  for (const equipment of equipmentResult.results) {
+    equipmentById.set(equipment.id, equipment);
+    const deviceId = equipment.geotab_device_id?.trim();
+    if (deviceId) pushMap(byDevice, deviceId, equipment);
+    const vin = validVin(equipment.vin);
+    if (vin) pushMap(byVin, vin, equipment);
+    const unitKey = normalizedUnit(equipment.unit);
+    if (unitKey) pushMap(byUnit, unitKey, equipment);
+  }
+
+  const assignedByDevice = new Map<string, number>();
+  const claimedEquipmentIds = new Set<number>();
+  for (const assignment of assignmentResult.results) {
+    assignedByDevice.set(assignment.geotab_device_id, assignment.equipment_id);
+    claimedEquipmentIds.add(assignment.equipment_id);
+  }
+
+  const activeDeviceIds = new Set(
+    activeDevices.map((device) => objectId(device)).filter((id): id is string => Boolean(id)),
+  );
   const trailerGroupIds = groups ? buildTrailerGroupIds(groups) : new Set<string>();
 
   // IMPORTANT: absence from the Device response is not an archive signal. A
   // service account can return a partial collection when permissions or scope
-  // change. Only devices Geotab explicitly reports as currently active are
-  // upserted/reactivated here. Equipment lifecycle archival remains a deliberate
-  // Master Equipment action tracked by archived_at/archive_reason.
-  const statements: D1PreparedStatement[] = [];
+  // change. Positive, high-confidence identity matches may add fresh metadata;
+  // missing or ambiguous information cannot create, archive, relink, or rename
+  // equipment.
+  const batches: D1PreparedStatement[][] = [];
+  let batch: D1PreparedStatement[] = [];
+  const addStatementGroup = (group: D1PreparedStatement[]) => {
+    if (batch.length && batch.length + group.length > 60) {
+      batches.push(batch);
+      batch = [];
+    }
+    batch.push(...group);
+  };
+
   let vehicles = 0;
   let trailerDevices = 0;
+  let mileageReceived = 0;
   let mileageUpdates = 0;
+  let mileageAnomalies = 0;
+  let identityQuarantined = 0;
+  const identityMatches = { assignment: 0, device_id: 0, vin: 0, unit: 0 };
 
   for (const device of activeDevices) {
     const id = objectId(device);
@@ -198,44 +372,213 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     if (groupAssetClass === 'trailer') trailerDevices += 1;
     else vehicles += 1;
 
-    const vin = text(get(device, 'vehicleIdentificationNumber', 'VehicleIdentificationNumber')).trim().toUpperCase() || null;
+    const vin = validVin(get(device, 'vehicleIdentificationNumber', 'VehicleIdentificationNumber'));
+    const serialNumber = text(get(device, 'serialNumber', 'SerialNumber')).trim() || null;
     const plate = text(get(device, 'licensePlate', 'LicensePlate')).trim() || null;
     const plateState = text(get(device, 'licenseState', 'LicenseState')).trim() || null;
     const mileage = odometers.get(id) ?? null;
-    if (mileage != null) mileageUpdates += 1;
+    if (mileage != null) mileageReceived += 1;
 
-    statements.push(env.DB.prepare(`
-      INSERT INTO equipment (
-        unit, category, equipment_type, geotab_device_id, geotab_asset_class,
-        vin, license_plate, license_state, current_mileage, mileage_updated_at, active, updated_at
-      ) VALUES (?, 'fleet', ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, 1, CURRENT_TIMESTAMP)
-      ON CONFLICT(unit) DO UPDATE SET
-        geotab_asset_class = COALESCE(excluded.geotab_asset_class, equipment.geotab_asset_class),
-        equipment_type = CASE
-          WHEN equipment.geotab_trailer_id IS NOT NULL AND TRIM(equipment.geotab_trailer_id) <> '' THEN 'trailer'
-          WHEN COALESCE(excluded.geotab_asset_class, equipment.geotab_asset_class) = 'trailer' THEN 'trailer'
-          WHEN COALESCE(excluded.geotab_asset_class, equipment.geotab_asset_class) = 'vehicle' THEN 'truck'
-          ELSE equipment.equipment_type
-        END,
-        geotab_device_id = excluded.geotab_device_id,
-        model_year = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.model_year END,
-        make = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.make END,
-        model = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.model END,
-        engine = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.engine END,
-        vin_decoded_at = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.vin_decoded_at END,
-        vin_decode_source = CASE WHEN COALESCE(equipment.vin, '') <> COALESCE(excluded.vin, '') THEN NULL ELSE equipment.vin_decode_source END,
-        vin = excluded.vin,
-        license_plate = excluded.license_plate,
-        license_state = excluded.license_state,
-        current_mileage = COALESCE(excluded.current_mileage, equipment.current_mileage),
-        mileage_updated_at = CASE WHEN excluded.current_mileage IS NULL THEN equipment.mileage_updated_at ELSE CURRENT_TIMESTAMP END,
-        active = 1,
-        updated_at = CURRENT_TIMESTAMP
-    `).bind(unit, incomingType, id, groupAssetClass, vin, plate, plateState, mileage, mileage));
+    const resolution = resolveIdentity(
+      id,
+      vin,
+      unit,
+      equipmentById,
+      assignedByDevice,
+      byDevice,
+      byVin,
+      byUnit,
+      activeDeviceIds,
+    );
+
+    if (!('equipment' in resolution)) {
+      identityQuarantined += 1;
+      addStatementGroup([
+        env.DB.prepare(`
+          INSERT INTO geotab_reconciliation_queue (
+            geotab_device_id, serial_number, geotab_name, vin, reason,
+            candidate_equipment_ids, status, first_seen_at, last_seen_at,
+            resolved_equipment_id, resolved_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL)
+          ON CONFLICT(geotab_device_id) DO UPDATE SET
+            serial_number = excluded.serial_number,
+            geotab_name = excluded.geotab_name,
+            vin = excluded.vin,
+            reason = excluded.reason,
+            candidate_equipment_ids = excluded.candidate_equipment_ids,
+            status = 'open',
+            last_seen_at = CURRENT_TIMESTAMP,
+            resolved_equipment_id = NULL,
+            resolved_at = NULL
+        `).bind(id, serialNumber, unit, vin, resolution.reason, JSON.stringify(resolution.candidateIds)),
+      ]);
+      continue;
+    }
+
+    const equipment = resolution.equipment;
+    const alreadyAssignedEquipmentId = assignedByDevice.get(id);
+    if (resolution.method !== 'assignment' && claimedEquipmentIds.has(equipment.id)) {
+      identityQuarantined += 1;
+      addStatementGroup([
+        env.DB.prepare(`
+          INSERT INTO geotab_reconciliation_queue (
+            geotab_device_id, serial_number, geotab_name, vin, reason,
+            candidate_equipment_ids, status, first_seen_at, last_seen_at,
+            resolved_equipment_id, resolved_at
+          ) VALUES (?, ?, ?, ?, 'equipment_already_claimed', ?, 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL)
+          ON CONFLICT(geotab_device_id) DO UPDATE SET
+            serial_number = excluded.serial_number,
+            geotab_name = excluded.geotab_name,
+            vin = excluded.vin,
+            reason = excluded.reason,
+            candidate_equipment_ids = excluded.candidate_equipment_ids,
+            status = 'open',
+            last_seen_at = CURRENT_TIMESTAMP,
+            resolved_equipment_id = NULL,
+            resolved_at = NULL
+        `).bind(id, serialNumber, unit, vin, JSON.stringify([equipment.id])),
+      ]);
+      continue;
+    }
+
+    identityMatches[resolution.method] += 1;
+    claimedEquipmentIds.add(equipment.id);
+    assignedByDevice.set(id, equipment.id);
+
+    const statementGroup: D1PreparedStatement[] = [];
+    if (alreadyAssignedEquipmentId === equipment.id) {
+      statementGroup.push(env.DB.prepare(`
+        UPDATE equipment_geotab_devices
+        SET serial_number = COALESCE(?, serial_number),
+            geotab_name = ?,
+            vin_seen = COALESCE(?, vin_seen),
+            last_seen_at = CURRENT_TIMESTAMP
+        WHERE current = 1
+          AND geotab_device_id = ?
+          AND equipment_id = ?
+      `).bind(serialNumber, unit, vin, id, equipment.id));
+    } else {
+      statementGroup.push(
+        env.DB.prepare(`
+          UPDATE equipment_geotab_devices
+          SET current = 0,
+              ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+              last_seen_at = CURRENT_TIMESTAMP
+          WHERE current = 1
+            AND equipment_id = ?
+            AND geotab_device_id <> ?
+        `).bind(equipment.id, id),
+        env.DB.prepare(`
+          UPDATE equipment_geotab_devices
+          SET current = 0,
+              ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+              last_seen_at = CURRENT_TIMESTAMP
+          WHERE current = 1
+            AND geotab_device_id = ?
+            AND equipment_id <> ?
+        `).bind(id, equipment.id),
+        env.DB.prepare(`
+          INSERT OR IGNORE INTO equipment_geotab_devices (
+            equipment_id, geotab_device_id, serial_number, geotab_name, vin_seen,
+            assigned_at, last_seen_at, current, linked_by
+          ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, ?)
+        `).bind(equipment.id, id, serialNumber, unit, vin, resolution.method),
+      );
+    }
+
+    let trustedMileage: number | null = null;
+    if (mileage != null) {
+      const decision = mileageDecision(equipment, mileage);
+      if (decision.accepted) {
+        trustedMileage = mileage;
+        mileageUpdates += 1;
+      } else if (decision.reason) {
+        mileageAnomalies += 1;
+        statementGroup.push(env.DB.prepare(`
+          INSERT OR IGNORE INTO geotab_mileage_anomalies (
+            equipment_id, geotab_device_id, serial_number, previous_mileage,
+            incoming_mileage, previous_updated_at, reason, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+        `).bind(
+          equipment.id,
+          id,
+          serialNumber,
+          equipment.current_mileage,
+          mileage,
+          equipment.mileage_updated_at,
+          decision.reason,
+        ));
+      }
+    }
+
+    statementGroup.push(env.DB.prepare(`
+      UPDATE equipment
+      SET geotab_asset_class = COALESCE(?, geotab_asset_class),
+          equipment_type = CASE
+            WHEN geotab_trailer_id IS NOT NULL AND TRIM(geotab_trailer_id) <> '' THEN 'trailer'
+            WHEN COALESCE(?, geotab_asset_class) = 'trailer' THEN 'trailer'
+            WHEN COALESCE(?, geotab_asset_class) = 'vehicle' THEN 'truck'
+            ELSE equipment_type
+          END,
+          geotab_device_id = ?,
+          model_year = CASE WHEN ? IS NOT NULL AND COALESCE(vin, '') <> ? THEN NULL ELSE model_year END,
+          make = CASE WHEN ? IS NOT NULL AND COALESCE(vin, '') <> ? THEN NULL ELSE make END,
+          model = CASE WHEN ? IS NOT NULL AND COALESCE(vin, '') <> ? THEN NULL ELSE model END,
+          engine = CASE WHEN ? IS NOT NULL AND COALESCE(vin, '') <> ? THEN NULL ELSE engine END,
+          vin_decoded_at = CASE WHEN ? IS NOT NULL AND COALESCE(vin, '') <> ? THEN NULL ELSE vin_decoded_at END,
+          vin_decode_source = CASE WHEN ? IS NOT NULL AND COALESCE(vin, '') <> ? THEN NULL ELSE vin_decode_source END,
+          vin = COALESCE(?, vin),
+          license_plate = COALESCE(?, license_plate),
+          license_state = COALESCE(?, license_state),
+          current_mileage = COALESCE(?, current_mileage),
+          mileage_updated_at = CASE WHEN ? IS NULL THEN mileage_updated_at ELSE CURRENT_TIMESTAMP END,
+          active = CASE WHEN archived_at IS NULL THEN 1 ELSE active END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(
+      groupAssetClass,
+      groupAssetClass,
+      groupAssetClass,
+      id,
+      vin, vin,
+      vin, vin,
+      vin, vin,
+      vin, vin,
+      vin, vin,
+      vin, vin,
+      vin,
+      plate,
+      plateState,
+      trustedMileage,
+      trustedMileage,
+      equipment.id,
+    ));
+
+    statementGroup.push(env.DB.prepare(`
+      UPDATE geotab_reconciliation_queue
+      SET status = 'resolved',
+          last_seen_at = CURRENT_TIMESTAMP,
+          resolved_equipment_id = ?,
+          resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP)
+      WHERE geotab_device_id = ?
+        AND status = 'open'
+    `).bind(equipment.id, id));
+
+    addStatementGroup(statementGroup);
   }
 
-  for (let index = 0; index < statements.length; index += 75) {
-    await env.DB.batch(statements.slice(index, index + 75));
+  if (batch.length) batches.push(batch);
+  for (const statements of batches) {
+    await env.DB.batch(statements);
+  }
+
+  if (identityQuarantined > 0 || mileageAnomalies > 0) {
+    console.warn(JSON.stringify({
+      event: 'geotab_fleet_sync_attention',
+      identityQuarantined,
+      mileageAnomalies,
+      identityMatches,
+    }));
   }
 
   let vinDecode = { requested: 0, updated: 0 };
@@ -253,7 +596,11 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     trailerGroupCount: trailerGroupIds.size,
     groupCatalogAvailable: Boolean(groups),
     historicalDevicesIgnored: Math.max(0, devices.length - activeDevices.length),
+    identityMatches,
+    identityQuarantined,
+    mileageReceived,
     mileageUpdates,
+    mileageAnomalies,
     vinDecode,
   };
 }
