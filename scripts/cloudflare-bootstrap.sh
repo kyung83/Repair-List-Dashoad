@@ -67,6 +67,16 @@ if [ ! -s "$OUTPUT_CONFIG" ]; then
   exit 1
 fi
 
+# Read-only diagnostics for migration 0078. These intentionally run after the
+# build but before migrations so a failed validation can be resolved from live
+# facts without changing production data.
+echo "Working manager user preflight:"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT u.id,u.username,u.display_name,u.role,u.active,u.technician_id,COALESCE(t.name,'') AS technician_name FROM app_users u LEFT JOIN technicians t ON t.id=u.technician_id WHERE lower(COALESCE(u.username,'')) IN ('jeffw','jesseg') OR lower(trim(u.display_name)) IN ('jeff wittig','jesse graham') ORDER BY u.id;"
+echo "Working manager technician preflight:"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT t.id,t.name,t.active,u.id AS linked_user_id,COALESCE(u.username,'') AS linked_username,COALESCE(u.role,'') AS linked_role,COALESCE(u.active,0) AS linked_user_active FROM technicians t LEFT JOIN app_users u ON u.technician_id=t.id WHERE lower(trim(t.name)) IN ('jeff wittig','jesse graham') ORDER BY t.id,u.id;"
+
 # Apply schema/data migrations only after the application build is known-good.
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
