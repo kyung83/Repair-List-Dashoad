@@ -10,14 +10,17 @@ import {
 
 type AuthEnv = typeof env & { AUTH_BOOTSTRAP_TOKEN?: string };
 
-const RELEASE = '2026-08-18-geotab-identity-0063';
+const RELEASE = '2026-08-18-geotab-review-0064';
 
 async function deploymentHealth(db: D1Database) {
-  const empty = { '0059': false, '0060': false, '0061': false, '0062': false, '0063': false };
+  const empty = { '0059': false, '0060': false, '0061': false, '0062': false, '0063': false, '0064': false };
   try {
-    const [repairColumns, dvirColumns, objects] = await Promise.all([
+    const [repairColumns, dvirColumns, assignmentColumns, reconciliationColumns, anomalyColumns, objects] = await Promise.all([
       db.prepare(`SELECT name FROM pragma_table_info('repairs')`).all<{ name: string }>(),
       db.prepare(`SELECT name FROM pragma_table_info('dvir_defects')`).all<{ name: string }>(),
+      db.prepare(`SELECT name FROM pragma_table_info('equipment_geotab_devices')`).all<{ name: string }>(),
+      db.prepare(`SELECT name FROM pragma_table_info('geotab_reconciliation_queue')`).all<{ name: string }>(),
+      db.prepare(`SELECT name FROM pragma_table_info('geotab_mileage_anomalies')`).all<{ name: string }>(),
       db.prepare(`
         SELECT type, name
         FROM sqlite_master
@@ -30,13 +33,19 @@ async function deploymentHealth(db: D1Database) {
           'geotab_reconciliation_queue',
           'geotab_mileage_anomalies',
           'idx_equipment_geotab_devices_current_device',
-          'idx_equipment_geotab_devices_current_equipment'
+          'idx_equipment_geotab_devices_current_equipment',
+          'idx_geotab_device_assignments_review',
+          'idx_geotab_reconciliation_resolved_by',
+          'idx_geotab_mileage_reviewed_by'
         )
       `).all<{ type: string; name: string }>(),
     ]);
 
     const repairNames = new Set(repairColumns.results.map((row) => row.name));
     const dvirNames = new Set(dvirColumns.results.map((row) => row.name));
+    const assignmentNames = new Set(assignmentColumns.results.map((row) => row.name));
+    const reconciliationNames = new Set(reconciliationColumns.results.map((row) => row.name));
+    const anomalyNames = new Set(anomalyColumns.results.map((row) => row.name));
     const objectNames = new Set(objects.results.map((row) => row.name));
     const migrations = {
       '0059': objectNames.has('unmatched_part_requests'),
@@ -52,6 +61,19 @@ async function deploymentHealth(db: D1Database) {
         && objectNames.has('geotab_mileage_anomalies')
         && objectNames.has('idx_equipment_geotab_devices_current_device')
         && objectNames.has('idx_equipment_geotab_devices_current_equipment'),
+      '0064': assignmentNames.has('mileage_offset')
+        && assignmentNames.has('mileage_calibrated_at')
+        && assignmentNames.has('mileage_calibrated_by_user_id')
+        && reconciliationNames.has('resolved_by_user_id')
+        && reconciliationNames.has('resolution_note')
+        && anomalyNames.has('raw_mileage')
+        && anomalyNames.has('adjusted_mileage')
+        && anomalyNames.has('trusted_mileage')
+        && anomalyNames.has('reviewed_by_user_id')
+        && anomalyNames.has('review_note')
+        && objectNames.has('idx_geotab_device_assignments_review')
+        && objectNames.has('idx_geotab_reconciliation_resolved_by')
+        && objectNames.has('idx_geotab_mileage_reviewed_by'),
     };
     return {
       ok: Object.values(migrations).every(Boolean),
