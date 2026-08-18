@@ -25,12 +25,24 @@ async function activeRepairForUser(userId:number, technicianId:number, expectedR
     WHERE rt.user_id = ?
   `).bind(userId).first<ActiveRepair>();
   if (!active || Number(active.repair_id) !== expectedRepairId) {
-    throw new Error('Repair notes are available for the repair that is WORKING NOW.');
+    throw new Error('Found Something Else is available for the repair that is WORKING NOW.');
   }
   if (Number(active.technician_id) !== technicianId) {
     throw new Error('The active labor session does not belong to your technician account.');
   }
   return active;
+}
+
+async function assignedRepairForTechnician(repairId:number, technicianId:number) {
+  const repair = await env.DB.prepare(`
+    SELECT id, technician_id, COALESCE(status, '') AS status
+    FROM repairs
+    WHERE id = ?
+  `).bind(repairId).first<{id:number;technician_id:number|null;status:string}>();
+  if (!repair) throw new Error('Repair was not found.');
+  if (Number(repair.technician_id ?? 0) !== technicianId) throw new Error('This repair is not assigned to you.');
+  if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
+  return repair;
 }
 
 async function technicianName(technicianId:number) {
@@ -65,8 +77,8 @@ export async function GET(request: Request) {
     if (!user) throw new Error('Authentication required.');
     if (user.role !== 'mechanic' || !user.technicianId) throw new Error('A technician account is required.');
     const repairId = numericRepairId(new URL(request.url).searchParams.get('repairId'));
-    if (!repairId) throw new Error('The active repair was not found.');
-    await activeRepairForUser(user.id, Number(user.technicianId), repairId);
+    if (!repairId) throw new Error('The repair was not found.');
+    await assignedRepairForTechnician(repairId, Number(user.technicianId));
     return Response.json({ ok:true, repairId:`repair-${repairId}`, notes:await repairNotes(repairId) }, { headers:{ 'cache-control':'no-store' } });
   } catch (error) {
     return Response.json({ error:error instanceof Error ? error.message : 'Repair notes could not be loaded.' }, { status:400, headers:{ 'cache-control':'no-store' } });
@@ -83,12 +95,13 @@ export async function POST(request: Request) {
 
     const body = await request.json() as Record<string, unknown>;
     const expectedRepairId = numericRepairId(body.repairId);
-    if (!expectedRepairId) throw new Error('The active repair was not found.');
-    const active = await activeRepairForUser(user.id, Number(user.technicianId), expectedRepairId);
-    const technician = await technicianName(Number(user.technicianId));
+    if (!expectedRepairId) throw new Error('The repair was not found.');
+    const technicianId = Number(user.technicianId);
+    const technician = await technicianName(technicianId);
     const action = String(body.action ?? 'foundRepair');
 
     if (action === 'note') {
+      await assignedRepairForTechnician(expectedRepairId, technicianId);
       const note = String(body.note ?? '').trim().slice(0, 2000);
       if (!note) throw new Error('Type or dictate a repair note first.');
       const result = await env.DB.prepare(`
@@ -105,6 +118,7 @@ export async function POST(request: Request) {
     }
 
     if (action !== 'foundRepair') throw new Error('Unknown unit workspace action.');
+    const active = await activeRepairForUser(user.id, technicianId, expectedRepairId);
     const issue = String(body.issue ?? '').trim().slice(0, 500);
     if (!issue) throw new Error('Enter what you found.');
     if (active.equipment_id === null) {
