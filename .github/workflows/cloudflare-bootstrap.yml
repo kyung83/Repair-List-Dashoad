@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
-          expected_release="2026-08-18-pm-import-0077"
+          expected_release="2026-08-18-working-managers-0078"
 
           curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
             "$site_url/login" -o /tmp/login.html
@@ -134,7 +134,9 @@ jobs:
               && deployment.release === process.env.EXPECTED_RELEASE
               && deployment.ok === true
               && deployment.pmImport
-              && deployment.pmImport.ok === true;
+              && deployment.pmImport.ok === true
+              && deployment.workingManagers
+              && deployment.workingManagers.ok === true;
             process.exit(valid ? 0 : 1);
           } catch {
             process.exit(1);
@@ -171,11 +173,12 @@ jobs:
           if (!deployment || deployment.release !== process.env.EXPECTED_RELEASE) {
             throw new Error(`Expected release ${process.env.EXPECTED_RELEASE}, received ${JSON.stringify(deployment)}`);
           }
-          if (deployment.ok !== true || !deployment.pmImport || deployment.pmImport.ok !== true) {
-            throw new Error(`Production D1/PM import verification is incomplete: ${JSON.stringify(deployment)}`);
+          if (deployment.ok !== true || !deployment.pmImport || deployment.pmImport.ok !== true || !deployment.workingManagers || deployment.workingManagers.ok !== true) {
+            throw new Error(`Production D1/working-manager verification is incomplete: ${JSON.stringify(deployment)}`);
           }
           console.log(`Deployment verified. release=${deployment.release}, migrations=${JSON.stringify(deployment.migrations)}`);
           console.log(`PM import verified. receipt=${JSON.stringify(deployment.pmImport)}`);
+          console.log(`Working managers verified. linked=${deployment.workingManagers.linked}`);
           console.log(`Authentication setup endpoint ready. setupRequired=${status.setupRequired}, bootstrapConfigured=${status.bootstrapConfigured}`);
           NODE
 
@@ -185,7 +188,7 @@ jobs:
             exit 1
           fi
 
-          for endpoint in /api/repairs /api/work-orders /api/inventory /api/admin/geotab-reconciliation /api/admin/equipment-merge '/api/repairs?checkGeotab=1'; do
+          for endpoint in /api/repairs /api/repair-board /api/work-orders /api/inventory /api/admin/geotab-reconciliation /api/admin/equipment-merge '/api/repairs?checkGeotab=1'; do
             status="$(curl --silent --show-error -o /tmp/protected.json -w '%{http_code}' "$site_url$endpoint")"
             if [ "$status" != "401" ] && [ "$status" != "503" ]; then
               echo "Protected endpoint $endpoint returned unexpected HTTP $status."
@@ -193,7 +196,7 @@ jobs:
               exit 1
             fi
           done
-          echo "Repair, work-order, inventory, Geotab review, equipment merge, and diagnostic APIs are not publicly readable."
+          echo "Repair, Repair Board, work-order, inventory, Geotab review, equipment merge, and diagnostic APIs are not publicly readable."
 
       - name: Publish production deployment status
         if: always()
@@ -209,7 +212,7 @@ jobs:
           description="Cloudflare deployment or D1 schema verification failed"
           if [ "$AUTH_READY" = "true" ] && [ "$JOB_STATUS" = "success" ]; then
             state="success"
-            description="Verified PM import 0077 and production D1"
+            description="Verified working managers 0078 and production D1"
           elif [ "$AUTH_READY" != "true" ]; then
             description="Cloudflare deployment authorization is missing"
           fi
