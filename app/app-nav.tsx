@@ -55,6 +55,7 @@ export default function AppNav(){
   const more:Link[] = user?.role==='admin' ? [
     { href:"/admin/users", label:"Users & Access" },
     { href:"/admin/geotab-review", label:"Geotab Review" },
+    { href:"/admin/equipment-merge", label:"Equipment Fork Merge" },
     { href:"/admin/history-import", label:"History Import" },
   ] : [];
 
@@ -74,6 +75,6 @@ export default function AppNav(){
     {user&&<div className="app-user-area">
       <span className="app-user-name" title={user.username||user.email}>{user.displayName}<small className="easy-role">{user.role}</small></span>
       <button type="button" onClick={()=>void signOut()}>Sign out</button>
-    </div>}
+    </div>
   </header>;
 }
