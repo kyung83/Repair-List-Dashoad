@@ -76,6 +76,12 @@ npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_A
 echo "Working manager technician preflight:"
 npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
   --command "SELECT t.id,t.name,t.active,u.id AS linked_user_id,COALESCE(u.username,'') AS linked_username,COALESCE(u.role,'') AS linked_role,COALESCE(u.active,0) AS linked_user_active FROM technicians t LEFT JOIN app_users u ON u.technician_id=t.id WHERE lower(trim(t.name)) IN ('jeff wittig','jesse graham') ORDER BY t.id,u.id;"
+echo "Jesse technician candidates:"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT t.id,t.name,t.active,u.id AS linked_user_id,COALESCE(u.username,'') AS linked_username,COALESCE(u.display_name,'') AS linked_display_name,COALESCE(u.role,'') AS linked_role,COALESCE(u.active,0) AS linked_user_active FROM technicians t LEFT JOIN app_users u ON u.technician_id=t.id WHERE t.id=3 OR lower(t.name) LIKE '%jesse%' OR lower(replace(replace(replace(trim(t.name),'  ',' '),'  ',' '),'  ',' ')) LIKE '%jesse%graham%' ORDER BY t.id,u.id;"
+echo "Low-ID technician roster:"
+npx wrangler d1 execute "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}" \
+  --command "SELECT id,name,active FROM technicians WHERE id BETWEEN 1 AND 10 ORDER BY id;"
 
 # Apply schema/data migrations only after the application build is known-good.
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
