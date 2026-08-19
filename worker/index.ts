@@ -50,6 +50,11 @@ const TECHNICIAN_SHOP_ACTIONS = new Set([
   'repairOutcome',
   'doneUnit',
 ]);
+const TECHNICIAN_REPAIR_BOARD_ACTIONS = new Set([
+  'assignToMe',
+  'createRepairForMe',
+  'setUnitOos',
+]);
 const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/found-repair',
   '/api/shop/unmatched-part',
@@ -90,7 +95,7 @@ async function mechanicCanWrite(request: Request, pathname: string) {
     return false;
   }
   if (pathname === '/api/shop') return TECHNICIAN_SHOP_ACTIONS.has(action);
-  if (pathname === '/api/repair-board') return action === 'assignToMe';
+  if (pathname === '/api/repair-board') return TECHNICIAN_REPAIR_BOARD_ACTIONS.has(action);
   if (pathname === '/api/pm-followups') return action === 'addNextPmRepair' || action === 'completeNextPmRepair' || action === 'deferNextPmRepair' || action === 'cancelNextPmRepair';
   if (pathname === '/api/repairs') return action === 'saveRepair' || action === 'completeRepair' || action === 'markRepaired';
   return action === 'completeRepair' || action === 'usePart' || action === 'addLabor';
@@ -114,27 +119,7 @@ async function handleLogin(request: Request, env: Env, url: URL) {
   const origin = request.headers.get('origin');
   if (origin && origin !== url.origin) return Response.json({ error: 'Cross-site sign-in request rejected.' }, { status: 403 });
   try {
-    if (await appUserCount(env.DB) === 0) return Response.json({ error: 'Administrator setup is required.', setupRequired: true }, { status: 428, headers: { 'cache-control': 'no-store' } });
-    const body = await request.json() as Record<string, unknown>;
-    const result = await authenticateUser(env.DB, body.username ?? body.email, body.password, request.headers.get('cf-connecting-ip') || '');
-    if (result.blocked) return Response.json({ error: 'Too many failed sign-in attempts. Try again in about 15 minutes.' }, { status: 429, headers: { 'retry-after': '900', 'cache-control': 'no-store' } });
-    if (!result.user) return Response.json({ error: 'Username or password is incorrect.' }, { status: 401, headers: { 'cache-control': 'no-store' } });
-    const token = await createSession(env.DB, result.user.id);
-    return Response.json({ ok: true, user: result.user }, { headers: { 'set-cookie': sessionCookie(token, request.url), 'cache-control': 'no-store' } });
-  } catch (error) {
-    console.error(JSON.stringify({ event: 'worker_login_failed', error: String(error) }));
-    return Response.json({ error: 'Sign in could not be completed.' }, { status: 500, headers: { 'cache-control': 'no-store' } });
-  }
-}
-
-async function enforceDashboardAccess(request: Request, env: Env, url: URL): Promise<Response | null> {
-  if (PUBLIC_PATHS.has(url.pathname) || isStaticAsset(url.pathname)) return null;
-  const origin = request.headers.get('origin');
-  if (!['GET','HEAD','OPTIONS'].includes(request.method.toUpperCase()) && origin && origin !== url.origin) return Response.json({ error: 'Cross-site write request rejected.' }, { status: 403 });
-  const user = await getSessionUser(env.DB, request);
-  if (!user) {
-    const count = await appUserCount(env.DB);
-    if (count === 0) return isApi(url.pathname) ? Response.json({ error: 'Dashboard administrator setup is required.', setupRequired: true }, { status: 503 }) : setupRedirect(url);
+    if (await appUserCount(env.DB) === 0) return Response.json({ error: 'Administrator setup is required.', setupRequired: true }, { status: 503 }) : setupRedirect(url);
     return isApi(url.pathname) ? Response.json({ error: 'Authentication required.' }, { status: 401 }) : loginRedirect(url);
   }
   if (!(await userCanAccess(request, user, url))) return accessDenied(url);
