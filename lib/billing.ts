@@ -3,6 +3,28 @@ function money(value: unknown, fallback = 0) {
   return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : fallback;
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function percentage(value: unknown, label: string) {
+  const text = String(value ?? '').trim();
+  if (!text) return 0;
+  const number = Number(text);
+  if (!Number.isFinite(number) || number < 0 || number > 1000) {
+    throw new Error(`${label} must be between 0% and 1000%.`);
+  }
+  return Math.round(number * 100) / 100;
+}
+
+function optionalRate(value: unknown, label: string) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const rate = money(value, -1);
+  if (rate < 0) throw new Error(`${label} must be zero or greater.`);
+  return rate;
+}
+
 function positiveId(value: unknown, label: string) {
   const raw = String(value ?? '').replace(/^repair-/, '').replace(/^invoice-/, '');
   const id = Number(raw);
@@ -265,13 +287,29 @@ export async function createInvoice(db: D1Database, body: Record<string, unknown
   const invoiceDate = dateOnly(body.invoiceDate, 'Invoice date', true);
   const dueDate = String(body.dueDate ?? '').trim() ? dateOnly(body.dueDate, 'Due date') : null;
   const taxRate = money(body.taxRate, 0);
+
+  // Billing adjustments are invoice-only. They deliberately do not rewrite the
+  // work-order cost history, technician labor rates, or inventory part costs.
+  const partsMarkupPercent = percentage(body.partsMarkupPercent, 'Parts markup');
+  const outsideMarkupPercent = percentage(body.outsideMarkupPercent, 'Outside / vendor markup');
+  const laborBillingRate = optionalRate(body.laborBillingRate, 'Labor invoice rate');
+  for (const line of lines) {
+    if (line.type === 'part' && partsMarkupPercent > 0) {
+      line.unitPrice = roundMoney(line.unitPrice * (1 + partsMarkupPercent / 100));
+    } else if (line.type === 'labor' && laborBillingRate !== null) {
+      line.unitPrice = laborBillingRate;
+    } else if (line.type === 'outside' && outsideMarkupPercent > 0) {
+      line.unitPrice = roundMoney(line.unitPrice * (1 + outsideMarkupPercent / 100));
+    }
+  }
+
   const extraDescription = String(body.extraDescription ?? '').trim().slice(0, 300);
   const extraAmount = money(body.extraAmount, 0);
   if (extraDescription && extraAmount > 0) lines.push({ type: 'other', description: extraDescription, quantity: 1, unitPrice: extraAmount });
   if (!lines.length) throw new Error('This work order has no billable parts, labor, outside cost, or extra charge.');
-  const subtotal = Math.round(lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0) * 100) / 100;
-  const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
-  const total = Math.round((subtotal + taxAmount) * 100) / 100;
+  const subtotal = roundMoney(lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0));
+  const taxAmount = roundMoney(subtotal * (taxRate / 100));
+  const total = roundMoney(subtotal + taxAmount);
 
   const result = await db.prepare(`
     INSERT INTO invoices (repair_id,equipment_id,customer_id,bill_to_name,bill_to_contact,bill_to_email,bill_to_phone,bill_to_address,invoice_date,due_date,status,subtotal,tax_rate,tax_amount,total,notes)
@@ -289,7 +327,7 @@ export async function createInvoice(db: D1Database, body: Record<string, unknown
     ...lines.map((line, index) => db.prepare(`
       INSERT INTO invoice_lines (invoice_id,line_type,description,quantity,unit_price,amount,sort_order)
       VALUES (?,?,?,?,?,?,?)
-    `).bind(invoiceId,line.type,line.description,line.quantity,line.unitPrice,Math.round(line.quantity*line.unitPrice*100)/100,index)),
+    `).bind(invoiceId,line.type,line.description,line.quantity,line.unitPrice,roundMoney(line.quantity*line.unitPrice),index)),
   ]);
 
   return {
