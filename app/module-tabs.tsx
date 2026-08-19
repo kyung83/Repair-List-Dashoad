@@ -16,6 +16,7 @@ const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
     tabs: [
       { href: "/repair-board", label: "Open Work", roles: workingRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
+      // Printing is a separate full-sheet view so review/edit screens stay compact.
       { href: "/work-orders/print", label: "Print Work Orders", roles: officeRoles },
     ],
   },
