@@ -27,7 +27,7 @@ type TechnicianRow = { id:number; name:string; email:string|null; phone:string|n
 type PartRow = { id:number; part_number:string; description:string; quantity_on_hand:number; unit_cost:number|null; location:string|null };
 type UsageRow = { id:number; repair_id:number; part_id:number; part_number:string; description:string; quantity:number; unit_cost:number|null };
 type DvirRow = { geotab_defect_id:string; asset_unit:string; driver:string|null; defect:string };
-type LaborRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; labor_date:string; hours:number; rate:number; notes:string|null };
+type LaborRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; labor_date:string; hours:number; rate:number; notes:string|null; started_at:string|null; ended_at:string|null };
 type TechnicianNoteRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; detail:string; created_at:string };
 
 function repairNumber(value:unknown){const match=String(value??'').match(/^repair-(\d+)$/);if(!match)throw new Error('Repair row not found');return Number(match[1]);}
@@ -66,7 +66,8 @@ export async function getWorkOrderData(db:D1Database){
   `).all<UsageRow>(),
   db.prepare(`SELECT geotab_defect_id,asset_unit,driver,defect FROM dvir_defects WHERE repaired=0 ORDER BY updated_at DESC`).all<DvirRow>(),
   db.prepare(`
-    SELECT l.id,l.repair_id,l.technician_id,t.name AS technician_name,l.labor_date,l.hours,l.rate,l.notes
+    SELECT l.id,l.repair_id,l.technician_id,t.name AS technician_name,l.labor_date,l.hours,l.rate,l.notes,
+           l.started_at,l.ended_at
     FROM repair_labor_entries l
     LEFT JOIN technicians t ON t.id=l.technician_id
     ORDER BY l.labor_date,l.id
@@ -91,7 +92,8 @@ export async function getWorkOrderData(db:D1Database){
  const repairs=repairsResult.results.map(row=>{
   const laborEntries=(laborByRepair.get(row.id)??[]).map(l=>({
     id:l.id,technicianId:l.technician_id,technician:l.technician_name??'Shop labor',laborDate:l.labor_date,
-    hours:Number(l.hours),rate:Number(l.rate),amount:Number(l.hours)*Number(l.rate),notes:l.notes??''
+    hours:Number(l.hours),rate:Number(l.rate),amount:Number(l.hours)*Number(l.rate),notes:l.notes??'',
+    startedAt:timestamp(l.started_at),endedAt:timestamp(l.ended_at)
   }));
   const recordedLaborHours=laborEntries.reduce((sum,item)=>sum+item.hours,0);
   const recordedLaborCost=laborEntries.reduce((sum,item)=>sum+item.amount,0);
