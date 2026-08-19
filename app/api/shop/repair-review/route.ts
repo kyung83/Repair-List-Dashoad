@@ -6,6 +6,32 @@ function numericRepairId(value: unknown) {
   return match ? Number(match[1]) : 0;
 }
 
+function isManagerRole(role: string) {
+  return role === 'manager' || role === 'admin';
+}
+
+async function loadRepair(id: number) {
+  return env.DB.prepare(`
+    SELECT r.id, r.technician_id, COALESCE(r.title, '') AS title,
+           COALESCE(r.status, '') AS status, COALESCE(e.unit, '') AS unit
+    FROM repairs r
+    LEFT JOIN equipment e ON e.id = r.equipment_id
+    WHERE r.id = ?
+  `).bind(id).first<{
+    id:number;
+    technician_id:number|null;
+    title:string;
+    status:string;
+    unit:string;
+  }>();
+}
+
+function mechanicOwnsRepair(user: { role:string; technicianId:number|null }, repair: { technician_id:number|null }) {
+  return user.role === 'mechanic'
+    && Boolean(user.technicianId)
+    && Number(repair.technician_id ?? 0) === Number(user.technicianId);
+}
+
 export async function GET(request: Request) {
   try {
     const user = await getSessionUser(env.DB, request);
@@ -17,30 +43,20 @@ export async function GET(request: Request) {
     const id = numericRepairId(new URL(request.url).searchParams.get('repairId'));
     if (!id) throw new Error('Repair was not found.');
 
-    const repair = await env.DB.prepare(`
-      SELECT r.id, r.technician_id, COALESCE(r.title, '') AS title,
-             COALESCE(r.status, '') AS status, COALESCE(e.unit, '') AS unit
-      FROM repairs r
-      LEFT JOIN equipment e ON e.id = r.equipment_id
-      WHERE r.id = ?
-    `).bind(id).first<{
-      id:number;
-      technician_id:number|null;
-      title:string;
-      status:string;
-      unit:string;
-    }>();
+    const repair = await loadRepair(id);
     if (!repair) throw new Error('Repair was not found.');
 
-    if (user.role === 'mechanic') {
-      if (!user.technicianId || Number(repair.technician_id ?? 0) !== Number(user.technicianId)) {
-        throw new Error('This repair is not assigned to you.');
-      }
+    const manager = isManagerRole(user.role);
+    const mechanicOwner = mechanicOwnsRepair(user, repair);
+    if (user.role === 'mechanic' && !mechanicOwner) {
+      throw new Error('This repair is not assigned to you.');
     }
+    const completed = repair.status.toLowerCase().includes('complete');
+    const canCorrect = manager || (mechanicOwner && !completed);
 
     const [notes, parts, labor, requests] = await Promise.all([
       env.DB.prepare(`
-        SELECT e.id, COALESCE(e.detail, '') AS detail, e.created_at,
+        SELECT e.id, e.user_id, e.technician_id, COALESCE(e.detail, '') AS detail, e.created_at,
                COALESCE(t.name, 'Technician') AS technician_name
         FROM repair_job_events e
         LEFT JOIN technicians t ON t.id = e.technician_id
@@ -48,6 +64,8 @@ export async function GET(request: Request) {
         ORDER BY e.created_at ASC, e.id ASC
       `).bind(id).all<{
         id:number;
+        user_id:number|null;
+        technician_id:number|null;
         detail:string;
         created_at:string;
         technician_name:string;
@@ -110,6 +128,7 @@ export async function GET(request: Request) {
 
     return Response.json({
       ok:true,
+      canCorrect,
       repair:{
         id:`repair-${repair.id}`,
         unit:repair.unit,
@@ -121,6 +140,10 @@ export async function GET(request: Request) {
         detail:row.detail,
         technician:row.technician_name,
         createdAt:row.created_at,
+        canEdit:manager || (canCorrect && (
+          Number(row.user_id ?? 0) === Number(user.id)
+          || (row.user_id == null && Number(row.technician_id ?? 0) === Number(user.technicianId ?? 0))
+        )),
       })),
       parts:parts.results.map((row)=>({
         partId:Number(row.part_id),
@@ -163,5 +186,81 @@ export async function GET(request: Request) {
     }, { headers:{ 'cache-control':'no-store' } });
   } catch (error) {
     return Response.json({ error:error instanceof Error ? error.message : 'Repair review could not be loaded.' }, { status:400, headers:{ 'cache-control':'no-store' } });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const user = await getSessionUser(env.DB, request);
+    if (!user) throw new Error('Authentication required.');
+    if (!['mechanic', 'manager', 'admin'].includes(user.role)) {
+      throw new Error('This account cannot edit repair notes.');
+    }
+
+    const body = await request.json() as Record<string, unknown>;
+    const action = String(body.action ?? '');
+    if (action !== 'editNote') throw new Error('Unknown repair review action.');
+
+    const repairId = numericRepairId(body.repairId);
+    const noteId = Number(body.noteId ?? 0);
+    const detail = String(body.detail ?? '').trim().slice(0, 2000);
+    if (!repairId || !Number.isInteger(noteId) || noteId <= 0) throw new Error('Repair and note are required.');
+    if (!detail) throw new Error('Repair note cannot be blank.');
+
+    const repair = await loadRepair(repairId);
+    if (!repair) throw new Error('Repair was not found.');
+
+    const note = await env.DB.prepare(`
+      SELECT id, repair_id, user_id, technician_id, action, COALESCE(detail, '') AS detail
+      FROM repair_job_events
+      WHERE id = ? AND repair_id = ? AND action = 'technician_note'
+    `).bind(noteId, repairId).first<{
+      id:number;
+      repair_id:number;
+      user_id:number|null;
+      technician_id:number|null;
+      action:string;
+      detail:string;
+    }>();
+    if (!note) throw new Error('Repair note was not found.');
+
+    const manager = isManagerRole(user.role);
+    const mechanicOwner = mechanicOwnsRepair(user, repair);
+    const ownNote = Number(note.user_id ?? 0) === Number(user.id)
+      || (note.user_id == null && Number(note.technician_id ?? 0) === Number(user.technicianId ?? 0));
+    if (!manager) {
+      if (!mechanicOwner) throw new Error('This repair is not assigned to you.');
+      if (repair.status.toLowerCase().includes('complete')) throw new Error('Completed repair notes must be corrected by a manager.');
+      if (!ownNote) throw new Error('Technicians can edit only their own repair notes.');
+    }
+
+    const previous = note.detail;
+    await env.DB.batch([
+      env.DB.prepare(`
+        UPDATE repair_job_events
+        SET detail = ?
+        WHERE id = ? AND repair_id = ? AND action = 'technician_note'
+      `).bind(detail, noteId, repairId),
+      env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'technician_note_edited', ?)
+      `).bind(
+        repairId,
+        user.id,
+        user.technicianId ?? note.technician_id,
+        `${user.displayName} edited note #${noteId}. Previous: ${previous} | Updated: ${detail}`.slice(0, 2000),
+      ),
+    ]);
+
+    return Response.json({
+      ok:true,
+      repairId:`repair-${repairId}`,
+      note:{
+        id:noteId,
+        detail,
+      },
+    }, { headers:{ 'cache-control':'no-store' } });
+  } catch (error) {
+    return Response.json({ error:error instanceof Error ? error.message : 'Repair note could not be edited.' }, { status:400, headers:{ 'cache-control':'no-store' } });
   }
 }
