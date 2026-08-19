@@ -3,8 +3,8 @@
 import {useEffect,useMemo,useState} from "react";
 
 type PartOption={id:number;partNumber:string;description:string;quantityOnHand:number;unitCost:number|null;location:string};
-type LaborEntry={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string};
-type LaborSummary={key:string;repairId:string;repairIssue:string;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;segments:number};
+type LaborEntry={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string;startedAt?:string;endedAt?:string};
+type LaborSummary={key:string;repairId:string;repairIssue:string;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;segments:number;timeRanges:string[]};
 type UsedPart={usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean};
 type TechnicianNote={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;detail:string;createdAt:string};
 type Repair={id:string;issue:string;status:string;technicianId:number|null;outsideCost:number;laborRate:number;reviewedAt:string};
@@ -23,19 +23,23 @@ type PartDraft={quantity:string;unitCost:string};
 
 function money(value:number){return Number(value||0).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});}
 function dateTime(value:string){if(!value)return "—";const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";const parsed=new Date(normalized);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();}
+function timeOnly(value:string){if(!value)return"";const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";const parsed=new Date(normalized);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}
+function laborRange(entry:LaborEntry){const start=timeOnly(entry.startedAt||"");const end=timeOnly(entry.endedAt||"");if(start&&end)return`${start}–${end}`;if(start)return`Started ${start}`;if(end)return`Ended ${end}`;return"";}
 function partLabel(part:PartOption){return `${part.partNumber} — ${part.description}`;}
 function summarizeLabor(entries:LaborEntry[]){
   const grouped=new Map<string,LaborSummary>();
   for(const entry of entries){
     const technicianKey=entry.technicianId===null?entry.technician:`tech-${entry.technicianId}`;
     const key=`${entry.repairId}|${technicianKey}|${entry.laborDate}|${Number(entry.rate).toFixed(4)}`;
+    const range=laborRange(entry);
     const current=grouped.get(key);
     if(current){
       current.hours+=Number(entry.hours||0);
       current.amount+=Number(entry.amount||0);
       current.segments+=1;
+      if(range)current.timeRanges.push(range);
     }else{
-      grouped.set(key,{key,repairId:entry.repairId,repairIssue:entry.repairIssue,technicianId:entry.technicianId,technician:entry.technician,laborDate:entry.laborDate,hours:Number(entry.hours||0),rate:Number(entry.rate||0),amount:Number(entry.amount||0),segments:1});
+      grouped.set(key,{key,repairId:entry.repairId,repairIssue:entry.repairIssue,technicianId:entry.technicianId,technician:entry.technician,laborDate:entry.laborDate,hours:Number(entry.hours||0),rate:Number(entry.rate||0),amount:Number(entry.amount||0),segments:1,timeRanges:range?[range]:[]});
     }
   }
   return [...grouped.values()].sort((a,b)=>a.laborDate.localeCompare(b.laborDate)||a.repairIssue.localeCompare(b.repairIssue)||a.technician.localeCompare(b.technician));
@@ -118,9 +122,9 @@ export default function InlineWorkOrderReviewEditor({item,canManage,defaultLabor
 
       <div style={panelStyle}>
         <div style={subheadStyle}><span>Labor by repair</span>{editable&&<span style={editHintStyle}>TIMER SEGMENTS KEPT BELOW FOR AUDIT / EDITING</span>}</div>
-        {laborSummaries.length?laborSummaries.map(summary=><div key={summary.key} style={{display:"grid",gridTemplateColumns:"minmax(170px,1.4fr) 125px 92px 76px 88px 92px",gap:7,padding:"8px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
+        {laborSummaries.length?laborSummaries.map(summary=><div key={summary.key} style={{display:"grid",gridTemplateColumns:"minmax(170px,1.3fr) 125px minmax(210px,1.25fr) 76px 88px 92px",gap:7,padding:"8px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
           <span><strong>{summary.repairIssue}</strong><small style={{display:"block",marginTop:2,color:"#7a858d"}}>{summary.repairId}{summary.segments>1?` · ${summary.segments} timer segments combined`:""}</small></span>
-          <strong>{summary.technician}</strong><span>{summary.laborDate}</span><span>{summary.hours.toFixed(2)} hr</span><span>{money(summary.rate)}/hr</span><strong>{money(summary.amount)}</strong>
+          <strong>{summary.technician}</strong><span><strong>{summary.laborDate}</strong><small style={{display:"block",marginTop:2,color:"#64748b"}}>{summary.timeRanges.length?summary.timeRanges.join(" · "):"No timer timestamp"}</small></span><span>{summary.hours.toFixed(2)} hr</span><span>{money(summary.rate)}/hr</span><strong>{money(summary.amount)}</strong>
         </div>):<div style={emptyStyle}>No labor entries recorded.</div>}
 
         {editable&&<>
@@ -129,8 +133,9 @@ export default function InlineWorkOrderReviewEditor({item,canManage,defaultLabor
             const draft=laborDrafts[entry.id]??{hours:String(entry.hours),rate:String(entry.rate),notes:entry.notes||entry.repairIssue};
             const amount=Number(draft.hours||0)*Number(draft.rate||0);
             const changed=Number(draft.hours)!==Number(entry.hours)||Number(draft.rate)!==Number(entry.rate)||draft.notes!==(entry.notes||entry.repairIssue);
-            return <div key={`${entry.repairId}-${entry.id}`} style={{display:"grid",gridTemplateColumns:"92px 125px 72px 88px 92px minmax(150px,1fr) 116px",gap:7,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
-              <span>{entry.laborDate}</span><strong>{entry.technician}</strong>
+            const range=laborRange(entry);
+            return <div key={`${entry.repairId}-${entry.id}`} style={{display:"grid",gridTemplateColumns:"150px 125px 72px 88px 92px minmax(150px,1fr) 116px",gap:7,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
+              <span>{entry.laborDate}<small style={{display:"block",marginTop:2,color:"#64748b"}}>{range||"Manual / no timer timestamp"}</small></span><strong>{entry.technician}</strong>
               <input type="number" min="0.01" max="24" step="0.01" value={draft.hours} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,hours:event.target.value}}))} style={compactInputStyle}/>
               <input type="number" min="0" step="0.01" value={draft.rate} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,rate:event.target.value}}))} style={compactInputStyle}/>
               <strong>{money(amount)}</strong>
