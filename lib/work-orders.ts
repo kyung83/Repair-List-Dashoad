@@ -24,8 +24,8 @@ type RepairRow = {
   updated_at:string;
 };
 type TechnicianRow = { id:number; name:string; email:string|null; phone:string|null };
-type PartRow = { id:number; part_number:string; description:string; quantity_on_hand:number; location:string|null };
-type UsageRow = { repair_id:number; part_id:number; part_number:string; description:string; quantity:number; unit_cost:number|null };
+type PartRow = { id:number; part_number:string; description:string; quantity_on_hand:number; unit_cost:number|null; location:string|null };
+type UsageRow = { id:number; repair_id:number; part_id:number; part_number:string; description:string; quantity:number; unit_cost:number|null };
 type DvirRow = { geotab_defect_id:string; asset_unit:string; driver:string|null; defect:string };
 type LaborRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; labor_date:string; hours:number; rate:number; notes:string|null };
 type TechnicianNoteRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; detail:string; created_at:string };
@@ -57,9 +57,9 @@ export async function getWorkOrderData(db:D1Database){
     ORDER BY CASE WHEN lower(r.status) LIKE '%complete%' THEN 1 ELSE 0 END,r.updated_at DESC
   `).all<RepairRow>(),
   db.prepare(`SELECT id,name,email,phone FROM technicians WHERE active=1 ORDER BY name`).all<TechnicianRow>(),
-  db.prepare(`SELECT id,part_number,description,quantity_on_hand,location FROM parts WHERE active=1 ORDER BY description,part_number`).all<PartRow>(),
+  db.prepare(`SELECT id,part_number,description,quantity_on_hand,unit_cost,location FROM parts WHERE active=1 ORDER BY description,part_number`).all<PartRow>(),
   db.prepare(`
-    SELECT rp.repair_id,rp.part_id,p.part_number,p.description,rp.quantity,rp.unit_cost AS unit_cost
+    SELECT rp.id,rp.repair_id,rp.part_id,p.part_number,p.description,rp.quantity,rp.unit_cost AS unit_cost
     FROM repair_parts rp
     JOIN parts p ON p.id=rp.part_id
     ORDER BY rp.created_at,rp.id
@@ -103,7 +103,7 @@ export async function getWorkOrderData(db:D1Database){
     const costRecorded=u.unit_cost!==null&&u.unit_cost!==undefined;
     const unitCost=costRecorded?Number(u.unit_cost):0;
     const quantity=Number(u.quantity);
-    return {partId:u.part_id,partNumber:u.part_number,description:u.description,quantity,unitCost,lineCost:quantity*unitCost,costRecorded};
+    return {usageId:u.id,partId:u.part_id,partNumber:u.part_number,description:u.description,quantity,unitCost,lineCost:quantity*unitCost,costRecorded};
   });
   const partCost=usedParts.reduce((sum,item)=>sum+item.lineCost,0);
   const missingPartCostLines=usedParts.filter((item)=>!item.costRecorded).length;
@@ -168,7 +168,7 @@ export async function getWorkOrderData(db:D1Database){
     completedValue:reviewPackages.reduce((sum,item)=>sum+item.totalCost,0),
   },
   technicians:techniciansResult.results.map(r=>({id:r.id,name:r.name,email:r.email??'',phone:r.phone??''})),
-  parts:partsResult.results.map(r=>({id:r.id,partNumber:r.part_number,description:r.description,quantityOnHand:Number(r.quantity_on_hand),location:r.location??''})),
+  parts:partsResult.results.map(r=>({id:r.id,partNumber:r.part_number,description:r.description,quantityOnHand:Number(r.quantity_on_hand),unitCost:r.unit_cost==null?null:Number(r.unit_cost),location:r.location??''})),
   dvir:dvirResult.results.map(r=>({defectId:r.geotab_defect_id,asset:r.asset_unit,driver:r.driver??'',defect:r.defect})),
   updatedAt:new Date().toISOString(),
  };
