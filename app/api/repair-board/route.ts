@@ -3,6 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { GET as originalGET, POST as originalPOST } from './original';
 import { assignToMeFromBoard } from './self-assign';
+import { createRepairForTechnician, setUnitOosByTechnician } from './technician-actions';
 
 type BoardRepair = {
   id:string; source:string; issue:string; status:string; technicianId:number|null; activeTimer:unknown;
@@ -139,6 +140,29 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error(JSON.stringify({ event:'repair_board_self_assign_failed', error:String(error) }));
       return Response.json({ error:error instanceof Error ? error.message : 'Work could not be assigned.' }, { status:400 });
+    }
+  }
+
+  if (body && String(body.action ?? '') === 'createRepairForMe') {
+    try {
+      const result = await createRepairForTechnician(request, body);
+      return Response.json(result, { headers:{ 'cache-control':'no-store' } });
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_technician_create_failed', error:String(error) }));
+      return Response.json({ error:error instanceof Error ? error.message : 'Repair could not be added.' }, { status:400 });
+    }
+  }
+
+  if (body && String(body.action ?? '') === 'setUnitOos') {
+    const user = await getSessionUser(env.DB,request);
+    if (user?.role === 'mechanic') {
+      try {
+        const result = await setUnitOosByTechnician(request, body);
+        return Response.json(result, { headers:{ 'cache-control':'no-store' } });
+      } catch (error) {
+        console.error(JSON.stringify({ event:'repair_board_technician_oos_failed', error:String(error) }));
+        return Response.json({ error:error instanceof Error ? error.message : 'Unit could not be placed out of service.' }, { status:400 });
+      }
     }
   }
 
