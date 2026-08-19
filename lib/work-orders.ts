@@ -28,7 +28,9 @@ type PartRow = { id:number; part_number:string; description:string; quantity_on_
 type UsageRow = { id:number; repair_id:number; part_id:number; part_number:string; description:string; quantity:number; unit_cost:number|null };
 type DvirRow = { geotab_defect_id:string; asset_unit:string; driver:string|null; defect:string };
 type LaborRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; labor_date:string; hours:number; rate:number; notes:string|null; started_at:string|null; ended_at:string|null };
+type LaborEventRow = { id:number; repair_id:number; user_id:number|null; technician_id:number|null; action:string; detail:string; created_at:string };
 type TechnicianNoteRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; detail:string; created_at:string };
+type TimerSegment = { startedAt:string; endedAt:string; hours:number|null };
 
 function repairNumber(value:unknown){const match=String(value??'').match(/^repair-(\d+)$/);if(!match)throw new Error('Repair row not found');return Number(match[1]);}
 function finiteNumber(value:unknown,fallback=0){const number=Number(value);return Number.isFinite(number)?number:fallback;}
@@ -42,9 +44,12 @@ function detroitDate(value:string){
   const values=new Map(parts.map((part)=>[part.type,part.value]));
   return `${values.get('year')}-${values.get('month')}-${values.get('day')}`;
 }
+function laborSegmentKey(repairId:number,technicianId:number|null){return `${repairId}|${technicianId??'none'}`;}
+function laborActorKey(row:LaborEventRow){return `${row.repair_id}|${row.technician_id??'none'}|${row.user_id??'none'}`;}
+function hoursFromStopDetail(detail:string){const match=detail.match(/saved at\s+([0-9]+(?:\.[0-9]+)?)\s+hours/i);return match?Number(match[1]):null;}
 
 export async function getWorkOrderData(db:D1Database){
- const [repairsResult,techniciansResult,partsResult,usageResult,dvirResult,laborResult,noteResult,defaultLaborRate]=await Promise.all([
+ const [repairsResult,techniciansResult,partsResult,usageResult,dvirResult,laborResult,laborEventResult,noteResult,defaultLaborRate]=await Promise.all([
   db.prepare(`
     SELECT r.id,r.equipment_id,COALESCE(e.unit,'') AS unit,r.title,r.status,r.parts_text,r.driver,r.location,
            r.technician_id,t.name AS technician_name,r.geotab_defect_id,r.labor_hours,r.labor_rate,r.outside_cost,
@@ -73,6 +78,12 @@ export async function getWorkOrderData(db:D1Database){
     ORDER BY l.labor_date,l.id
   `).all<LaborRow>(),
   db.prepare(`
+    SELECT id,repair_id,user_id,technician_id,action,COALESCE(detail,'') AS detail,created_at
+    FROM repair_job_events
+    WHERE action IN ('labor_started','labor_stopped')
+    ORDER BY created_at,id
+  `).all<LaborEventRow>(),
+  db.prepare(`
     SELECT e.id,e.repair_id,e.technician_id,t.name AS technician_name,COALESCE(e.detail,'') AS detail,e.created_at
     FROM repair_job_events e
     LEFT JOIN technicians t ON t.id=e.technician_id
@@ -89,12 +100,43 @@ export async function getWorkOrderData(db:D1Database){
  const notesByRepair=new Map<number,TechnicianNoteRow[]>();
  for(const row of noteResult.results){const list=notesByRepair.get(row.repair_id)??[];list.push(row);notesByRepair.set(row.repair_id,list);}
 
+ const openTimerStarts=new Map<string,string>();
+ const timerSegments=new Map<string,TimerSegment[]>();
+ for(const event of laborEventResult.results){
+  const actorKey=laborActorKey(event);
+  if(event.action==='labor_started'){
+    openTimerStarts.set(actorKey,event.created_at);
+    continue;
+  }
+  if(event.action!=='labor_stopped')continue;
+  const startedAt=openTimerStarts.get(actorKey);
+  if(!startedAt)continue;
+  const key=laborSegmentKey(event.repair_id,event.technician_id);
+  const list=timerSegments.get(key)??[];
+  list.push({startedAt,endedAt:event.created_at,hours:hoursFromStopDetail(event.detail)});
+  timerSegments.set(key,list);
+  openTimerStarts.delete(actorKey);
+ }
+ const usedTimerSegments=new Map<string,Set<number>>();
+ function takeTimerSegment(repairId:number,technicianId:number|null,hours:number){
+  const key=laborSegmentKey(repairId,technicianId);
+  const list=timerSegments.get(key)??[];
+  const used=usedTimerSegments.get(key)??new Set<number>();
+  let index=list.findIndex((segment,i)=>!used.has(i)&&segment.hours!==null&&Math.abs(Number(segment.hours)-hours)<=0.011);
+  if(index<0)index=list.findIndex((segment,i)=>!used.has(i)&&segment.hours===null);
+  if(index<0)return null;
+  used.add(index);usedTimerSegments.set(key,used);return list[index];
+ }
+
  const repairs=repairsResult.results.map(row=>{
-  const laborEntries=(laborByRepair.get(row.id)??[]).map(l=>({
-    id:l.id,technicianId:l.technician_id,technician:l.technician_name??'Shop labor',laborDate:l.labor_date,
-    hours:Number(l.hours),rate:Number(l.rate),amount:Number(l.hours)*Number(l.rate),notes:l.notes??'',
-    startedAt:timestamp(l.started_at),endedAt:timestamp(l.ended_at)
-  }));
+  const laborEntries=(laborByRepair.get(row.id)??[]).map(l=>{
+    const segment=takeTimerSegment(row.id,l.technician_id,Number(l.hours));
+    return {
+      id:l.id,technicianId:l.technician_id,technician:l.technician_name??'Shop labor',laborDate:l.labor_date,
+      hours:Number(l.hours),rate:Number(l.rate),amount:Number(l.hours)*Number(l.rate),notes:l.notes??'',
+      startedAt:timestamp(l.started_at)||segment?.startedAt||'',endedAt:timestamp(l.ended_at)||segment?.endedAt||''
+    };
+  });
   const recordedLaborHours=laborEntries.reduce((sum,item)=>sum+item.hours,0);
   const recordedLaborCost=laborEntries.reduce((sum,item)=>sum+item.amount,0);
   const fallbackLaborHours=Number(row.labor_hours??0);
