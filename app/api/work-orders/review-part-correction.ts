@@ -51,16 +51,23 @@ export async function addReviewPart(request: Request, body: Record<string,unknow
   const unitCost = body.unitCost === undefined || body.unitCost === null || String(body.unitCost).trim() === ''
     ? Number(stock.unit_cost ?? part.unit_cost ?? 0)
     : money(body.unitCost);
+
+  // Re-check stock inside the D1 batch transaction. The insert is conditional, so a
+  // stale preflight can never create a repair-part row without a matching stock debit.
   const results = await env.DB.batch([
+    env.DB.prepare(`
+      INSERT INTO repair_parts (repair_id,part_id,quantity,unit_cost,warehouse_stock_id)
+      SELECT ?,?,?,?,?
+      WHERE EXISTS (
+        SELECT 1 FROM part_warehouse_stock
+        WHERE id = ? AND part_id = ? AND quantity_on_hand >= ?
+      )
+    `).bind(repairId,partId,quantity,unitCost,stock.id,stock.id,partId,quantity),
     env.DB.prepare(`
       UPDATE part_warehouse_stock
       SET quantity_on_hand = quantity_on_hand - ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND part_id = ? AND quantity_on_hand >= ?
     `).bind(quantity,stock.id,partId,quantity),
-    env.DB.prepare(`
-      INSERT INTO repair_parts (repair_id,part_id,quantity,unit_cost,warehouse_stock_id)
-      VALUES (?,?,?,?,?)
-    `).bind(repairId,partId,quantity,unitCost,stock.id),
     env.DB.prepare(`
       UPDATE parts
       SET quantity_on_hand = COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id = ?), quantity_on_hand),
@@ -68,9 +75,10 @@ export async function addReviewPart(request: Request, body: Record<string,unknow
       WHERE id = ?
     `).bind(partId,partId),
   ]);
-  if (Number(results[0]?.meta?.changes ?? 0) !== 1) throw new Error('Stock changed before the correction could be saved. Refresh and try again.');
-  const usageId = Number(results[1]?.meta?.last_row_id ?? 0);
-  if (!usageId) throw new Error('The part correction could not be recorded.');
+  const usageId = Number(results[0]?.meta?.last_row_id ?? 0);
+  if (Number(results[0]?.meta?.changes ?? 0) !== 1 || !usageId || Number(results[1]?.meta?.changes ?? 0) !== 1) {
+    throw new Error('Stock changed before the correction could be saved. Refresh and try again.');
+  }
 
   const rows = await env.DB.prepare(`
     SELECT p.part_number,SUM(rp.quantity) AS quantity
