@@ -2,8 +2,18 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
+import InlineWorkOrderReviewEditor from "./inline-review-editor";
 
+type PartOption = {
+  id:number;
+  partNumber:string;
+  description:string;
+  quantityOnHand:number;
+  unitCost:number|null;
+  location:string;
+};
 type UsedPart = {
+  usageId:number;
   repairId:string;
   repairIssue:string;
   partId:number;
@@ -46,6 +56,7 @@ type Repair = {
   technicianId:number|null;
   location:string;
   laborHours:number;
+  laborRate:number;
   laborCost:number;
   partCost:number;
   outsideCost:number;
@@ -78,6 +89,8 @@ type ReviewPackage = {
   totalCost:number;
 };
 type WorkOrderData = {
+  defaultLaborRate:number;
+  parts:PartOption[];
   repairs:Repair[];
   reviewPackages:ReviewPackage[];
   summary:{needsReview:number;reviewed:number;openRepairs:number;completedRepairs:number;completedValue:number};
@@ -152,7 +165,7 @@ export default function WorkOrdersPage(){
       <div>
         <p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>WORK ORDER REVIEW</p>
         <h1 style={{margin:"6px 0 0",fontSize:31}}>Completed work for manager review</h1>
-        <p style={{margin:"7px 0 0",color:"#64748b",maxWidth:900,fontSize:13}}>Completed technician work is combined by unit, technician, and work date. Review the repairs, technician notes, labor, parts and costs together, then approve the work order.</p>
+        <p style={{margin:"7px 0 0",color:"#64748b",maxWidth:900,fontSize:13}}>Open a completed work order and correct repair wording, labor, parts and outside cost directly in the review rows before approval.</p>
       </div>
       <div style={{display:"flex",gap:7}}><a href="/repair-board" style={linkButtonStyle}>Repair Board</a><button type="button" onClick={()=>void load()} style={buttonStyle}>Refresh</button></div>
     </header>
@@ -182,19 +195,9 @@ export default function WorkOrdersPage(){
             {open&&<tr style={{borderTop:"1px solid #e7ebee",background:"#fafbfc"}}><td colSpan={11} style={{padding:14}}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(150px,1fr))",gap:10}}><Detail label="Unit" value={item.unit||"—"}/><Detail label="Technician" value={item.technician||"Unassigned"}/><Detail label="Completed" value={dateTime(item.completedAt)}/><Detail label="Labor cost" value={money(item.laborCost)}/><Detail label={item.missingPartCostLines?"Recorded total":"Total cost"} value={money(item.totalCost)}/></div>
 
-              <div style={{marginTop:12,border:"1px solid #dfe5e9",background:"white"}}><div style={subheadStyle}>Repairs completed in this work order</div>{item.repairs.map((repair)=><div key={repair.id} style={{display:"grid",gridTemplateColumns:"110px 1fr 110px",gap:8,padding:"8px 10px",borderTop:"1px solid #edf0f2",fontSize:11}}><strong>{repair.id}</strong><span>{repair.issue}</span><span>{repair.status}</span></div>)}</div>
+              <InlineWorkOrderReviewEditor item={item} canManage={Boolean(data?.canApprove)} defaultLaborRate={data?.defaultLaborRate??0} parts={data?.parts??[]} onChanged={load}/>
 
-              <div style={{marginTop:12,display:"grid",gridTemplateColumns:"minmax(300px,1fr) minmax(440px,1.45fr)",gap:12}}>
-                <div style={panelStyle}><div style={subheadStyle}>Technician repair notes</div>{item.technicianNotes.length?item.technicianNotes.map((note)=><div key={note.id} style={{padding:"8px 10px",borderTop:"1px solid #edf0f2",fontSize:11}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><strong>{note.technician}</strong><span style={{color:"#7a858d"}}>{dateTime(note.createdAt)}</span></div><div style={{marginTop:4,color:"#263746",whiteSpace:"pre-wrap"}}>{note.detail}</div><small style={{display:"block",marginTop:4,color:"#7a858d"}}>{note.repairIssue}</small></div>):<div style={emptyStyle}>No technician repair notes were recorded.</div>}</div>
-                <div style={panelStyle}><div style={subheadStyle}>Labor entries</div>{item.laborEntries.length?item.laborEntries.map((entry)=><div key={`${entry.repairId}-${entry.id}`} style={{display:"grid",gridTemplateColumns:"95px 130px 65px 75px 90px 1fr",gap:7,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11}}><span>{entry.laborDate}</span><strong>{entry.technician}</strong><span>{entry.hours} hr</span><span>{money(entry.rate)}/hr</span><strong>{money(entry.amount)}</strong><span style={{color:"#64748b"}}>{entry.notes||entry.repairIssue}</span></div>):<div style={emptyStyle}>No labor entries recorded.</div>}</div>
-              </div>
-
-              <div style={{marginTop:12,display:"grid",gridTemplateColumns:"minmax(460px,2fr) minmax(280px,1fr)",gap:12}}>
-                <div style={panelStyle}><div style={subheadStyle}>Parts applied</div>{item.usedParts.length?item.usedParts.map((part,index)=><div key={`${part.repairId}-${part.partId}-${index}`} style={{display:"grid",gridTemplateColumns:"105px 1fr 60px 120px 100px",gap:8,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11}}><strong>{part.partNumber}</strong><span>{part.description}<small style={{display:"block",color:"#7a858d"}}>{part.repairIssue}</small></span><span>× {part.quantity}</span><span>{part.costRecorded?`${money(part.unitCost)} ea.`:"Cost not recorded"}</span><strong>{part.costRecorded?money(part.lineCost):"—"}</strong></div>):<div style={emptyStyle}>No parts applied.</div>}</div>
-                <div style={panelStyle}><div style={subheadStyle}>Cost summary</div><Cost label="Labor" value={item.laborCost}/><Cost label="Parts recorded" value={item.partCost}/><Cost label="Outside" value={item.outsideCost}/><Cost label={item.missingPartCostLines?"RECORDED TOTAL":"TOTAL"} value={item.totalCost} strong/>{item.missingPartCostLines>0&&<div style={{padding:10,borderTop:"1px solid #f2c66d",background:"#fff8e6",fontSize:10,color:"#8a5a00"}}>{item.missingPartCostLines} legacy part line{item.missingPartCostLines===1?" has":"s have"} no captured historical unit cost and are excluded from the recorded total.</div>}</div>
-              </div>
-
-              {item.reviewed?<div style={{marginTop:12,padding:10,border:"1px solid #b9d8c8",background:"#f1faf5",fontSize:11}}><strong>Reviewed by {item.reviewedBy||"manager"}</strong> · {dateTime(item.reviewedAt)}{item.reviewNote&&<div style={{marginTop:4}}>{item.reviewNote}</div>}</div>:<div style={{marginTop:12,padding:12,border:"1px solid #e0c47a",background:"#fffaf0"}}><strong style={{fontSize:11}}>MANAGER / ADMIN REVIEW</strong><textarea value={reviewNotes[item.id]??""} onChange={(event)=>setReviewNotes((current)=>({...current,[item.id]:event.target.value}))} placeholder="Optional review note" maxLength={1000} style={{...inputStyle,width:"100%",minHeight:60,marginTop:7,resize:"vertical"}}/>{data?.canApprove?<button type="button" disabled={saving===item.id} onClick={()=>void approve(item)} style={{...buttonStyle,marginTop:7,fontWeight:900}}>{saving===item.id?"Saving...":"APPROVE WORK ORDER"}</button>:<div style={{marginTop:7,fontSize:11,color:"#7a858d"}}>Manager or administrator access is required to approve.</div>}</div>}
+              {!item.reviewed&&<div style={{marginTop:12,padding:12,border:"1px solid #e0c47a",background:"#fffaf0"}}><strong style={{fontSize:11}}>MANAGER / ADMIN REVIEW</strong><textarea value={reviewNotes[item.id]??""} onChange={(event)=>setReviewNotes((current)=>({...current,[item.id]:event.target.value}))} placeholder="Optional review note" maxLength={1000} style={{...inputStyle,width:"100%",minHeight:60,marginTop:7,resize:"vertical"}}/>{data?.canApprove?<button type="button" disabled={saving===item.id} onClick={()=>void approve(item)} style={{...buttonStyle,marginTop:7,fontWeight:900}}>{saving===item.id?"Saving...":"APPROVE WORK ORDER"}</button>:<div style={{marginTop:7,fontSize:11,color:"#7a858d"}}>Manager or administrator access is required to approve.</div>}</div>}
             </td></tr>}
           </Fragment>;
         })}</tbody>
@@ -209,7 +212,6 @@ export default function WorkOrdersPage(){
 
 function Metric({label,value,last=false}:{label:string;value:string;last?:boolean}){return <article style={{minHeight:64,padding:"10px 12px",borderRight:last?0:"1px solid #dce2e7"}}><span style={{display:"block",color:"#6f7b84",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>{label}</span><strong style={{display:"block",marginTop:4,color:"#0d1b2b",fontSize:21}}>{value}</strong></article>;}
 function Detail({label,value}:{label:string;value:string}){return <div><span style={{display:"block",color:"#74808a",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</span><strong style={{display:"block",marginTop:2,fontSize:11,color:"#263746"}}>{value}</strong></div>;}
-function Cost({label,value,strong=false}:{label:string;value:number;strong?:boolean}){return <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderTop:"1px solid #edf0f2",fontSize:11,fontWeight:strong?900:500}}><span>{label}</span><span>{money(value)}</span></div>;}
 
 const inputStyle={minHeight:34,padding:"6px 8px",border:"1px solid #c7ced3",borderRadius:4,background:"white",color:"#263746"} as const;
 const buttonStyle={minHeight:30,padding:"0 9px",border:"1px solid #bcc5cb",borderRadius:4,background:"white",color:"#263746",fontSize:10,fontWeight:900} as const;
@@ -217,6 +219,4 @@ const linkButtonStyle={...buttonStyle,display:"inline-flex",alignItems:"center",
 const headRowStyle={background:"#eef1f2",color:"#5b6770",fontSize:9,letterSpacing:".05em",textTransform:"uppercase" as const,textAlign:"left" as const};
 const thStyle={padding:"7px 8px",borderRight:"1px solid #d7dde1"} as const;
 const tdStyle={padding:"8px",fontSize:11,verticalAlign:"middle"} as const;
-const subheadStyle={padding:"7px 9px",background:"#eef1f2",color:"#59656e",fontSize:9,fontWeight:900,textTransform:"uppercase" as const,letterSpacing:".04em"};
-const panelStyle={border:"1px solid #e0e5e8",background:"white"} as const;
 const emptyStyle={padding:10,borderTop:"1px solid #edf0f2",color:"#7a858d",fontSize:11} as const;
