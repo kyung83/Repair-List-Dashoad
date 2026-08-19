@@ -2,6 +2,7 @@
 
 import {useEffect,useState} from "react";
 import s from "./repair-board.module.css";
+import RepairCorrectionControls from "./repair-correction-controls";
 
 type Props={repairId:string;source:string;dvirDefectId:string};
 type Preview={url:string;label:string};
@@ -34,7 +35,9 @@ export default function RepairPhotoPreview({repairId,source,dvirDefectId}:Props)
   void load();
   return()=>{cancelled=true};
  },[repairId,source,dvirDefectId]);
- if(!photos.length)return null;
  const shown=photos.slice(0,4);
- return <div className={s.photoPreviewBlock}><div className={s.photoPreviewHead}><strong>ATTACHED PHOTOS</strong><span>{photos.length} photo{photos.length===1?"":"s"}</span></div><div className={s.photoPreviewStrip}>{shown.map((photo,i)=><a key={`${photo.url}-${i}`} href={photo.url} target="_blank" rel="noreferrer" className={s.photoThumb} title={photo.label}><img src={photo.url} alt={photo.label} loading="lazy"/></a>)}{photos.length>shown.length&&<div className={s.photoMore}>+{photos.length-shown.length}<span>more</span></div>}</div></div>;
+ return <>
+  {photos.length>0&&<div className={s.photoPreviewBlock}><div className={s.photoPreviewHead}><strong>ATTACHED PHOTOS</strong><span>{photos.length} photo{photos.length===1?"":"s"}</span></div><div className={s.photoPreviewStrip}>{shown.map((photo,i)=><a key={`${photo.url}-${i}`} href={photo.url} target="_blank" rel="noreferrer" className={s.photoThumb} title={photo.label}><img src={photo.url} alt={photo.label} loading="lazy"/></a>)}{photos.length>shown.length&&<div className={s.photoMore}>+{photos.length-shown.length}<span>more</span></div>}</div></div>}
+  <RepairCorrectionControls repairId={repairId} source={source}/>
+ </>;
 }
