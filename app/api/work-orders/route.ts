@@ -2,6 +2,8 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { removePartFromRepair, usePartOnRepair } from '@/lib/inventory-db';
 import { getWorkOrderData, handleWorkOrderAction } from '@/lib/work-orders';
+import { handleReviewCorrection } from './review-corrections';
+import { addReviewPart } from './review-part-correction';
 
 function repairNumber(value: unknown) {
   const match = String(value ?? '').match(/^repair-(\d+)$/);
@@ -113,6 +115,9 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     await enforceTechnicianScope(request, body);
     const action = String(body.action ?? '');
+    if (action === 'reviewAddPart') return Response.json(await addReviewPart(request, body));
+    const correction = await handleReviewCorrection(request, body);
+    if (correction) return Response.json(correction);
     if (action === 'approveWorkOrder') return Response.json(await approveWorkOrder(request, body));
     if (action === 'usePart') {
       const result = await usePartOnRepair(env.DB, body);
