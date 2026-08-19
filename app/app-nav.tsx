@@ -17,6 +17,7 @@ const managerPrimary: Link[] = [
 
 const mechanicPrimary: Link[] = [
   { href:"/shop", label:"My Jobs" },
+  { href:"/repair-board", label:"Repair Board" },
   { href:"/unit", label:"Find Unit" },
   { href:"/annual-inspections", label:"Forms" },
 ];

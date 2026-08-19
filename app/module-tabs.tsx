@@ -8,12 +8,13 @@ type ModuleName = "shop" | "units" | "parts" | "reports";
 type Tab = { href: string; label: string; exact?: boolean; roles: Role[] };
 
 const managerRoles: Role[] = ["manager", "admin"];
+const workingRoles: Role[] = ["mechanic", "manager", "admin"];
 const officeRoles: Role[] = ["viewer", "manager", "admin"];
 const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
   shop: {
     label: "Shop Board",
     tabs: [
-      { href: "/repair-board", label: "Open Work", roles: managerRoles },
+      { href: "/repair-board", label: "Open Work", roles: workingRoles },
       { href: "/work-orders", label: "Completed Work", roles: officeRoles },
     ],
   },
