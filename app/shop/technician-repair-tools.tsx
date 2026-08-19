@@ -8,6 +8,7 @@ type AppliedPart={partId:number;partNumber:string;description:string;quantity:nu
 type ShopPayload={parts?:Part[];repairs?:Array<{id:string;usedParts?:AppliedPart[]}>;error?:string};
 type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
 type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string};
+type RemoveResult={ok?:boolean;error?:string;partNumber?:string;quantity?:number};
 type UnmatchedResult={ok?:boolean;error?:string;requestedText?:string;requestedQuantity?:number;warehouseCode?:string;unmatchedPart?:boolean};
 type SpeechResultLike={length:number;isFinal:boolean;[index:number]:{transcript:string}|undefined};
 type SpeechEventLike={results:ArrayLike<SpeechResultLike>};
@@ -129,6 +130,21 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
     finally{setPartBusy(false)}
   }
 
+  async function removeAppliedPart(part:AppliedPart){
+    if(!canWork||partBusy)return;
+    const confirmed=window.confirm(`Remove ${part.partNumber} × ${qty(part.quantity)} from this repair?\n\nThe part will be returned to inventory and any remaining request for this same part on this repair will be cancelled.`);
+    if(!confirmed)return;
+    setPartBusy(true);setPartMessage("");
+    try{
+      const response=await fetch("/api/shop/remove-applied-part",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({repairId,partId:part.partId})});
+      const result=await response.json() as RemoveResult;
+      if(!response.ok||!result.ok)throw new Error(result.error||"Applied part could not be removed.");
+      setPartMessage(`${qty(result.quantity||part.quantity)} × ${result.partNumber||part.partNumber} removed and returned to inventory.`);
+      await loadParts();
+    }catch(error){setPartMessage(error instanceof Error?error.message:"Applied part could not be removed.")}
+    finally{setPartBusy(false)}
+  }
+
   return <section style={toolsPanel}>
     <div style={toolCard}>
       <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>Type it or tap TALK. Notes stay on this repair with technician and time.</span></div>
@@ -146,8 +162,8 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
       {search.trim()&&matches.length===0&&!selectedPart&&<div style={unmatchedBox}><div><strong>No catalog match.</strong><div style={small}>Request exactly: “{search.trim()}” · Qty {qty(quantity)}</div></div><button type="button" onClick={()=>void requestTypedPart()} style={requestButton} disabled={partBusy||!canWork}>{partBusy?"Sending…":"REQUEST THIS PART"}</button></div>}
       {partMessage&&<div style={messageStyle}>{partMessage}</div>}
       <div style={appliedBox}>
-        <div><strong style={appliedHeading}>PARTS APPLIED TO THIS REPAIR</strong><span style={appliedHelp}>This list stays visible so you can review every part and quantity before finishing the repair.</span></div>
-        {appliedParts.length>0?<div style={appliedList}>{appliedParts.map(part=><div key={part.partId} style={appliedRow}><div><strong>{part.partNumber}</strong><span style={appliedDescription}>{part.description}</span></div><strong style={appliedQty}>× {qty(part.quantity)}</strong></div>)}</div>:<div style={emptyApplied}>No parts applied yet.</div>}
+        <div><strong style={appliedHeading}>PARTS APPLIED TO THIS REPAIR</strong><span style={appliedHelp}>Review every part and quantity before finishing. Tap the X to undo a mistaken part, return it to inventory, and cancel any remaining request for that same part.</span></div>
+        {appliedParts.length>0?<div style={appliedList}>{appliedParts.map(part=><div key={part.partId} style={appliedRow}><div><strong>{part.partNumber}</strong><span style={appliedDescription}>{part.description}</span></div><div style={appliedActions}><strong style={appliedQty}>× {qty(part.quantity)}</strong><button type="button" aria-label={`Remove ${part.partNumber}`} title="Remove mistaken applied part" onClick={()=>void removeAppliedPart(part)} style={removeAppliedButton} disabled={partBusy||!canWork}>✕</button></div></div>)}</div>:<div style={emptyApplied}>No parts applied yet.</div>}
       </div>
     </div>
   </section>;
@@ -183,5 +199,7 @@ const appliedHelp={display:"block",marginTop:2,fontSize:10,color:"#687783"} as c
 const appliedList={display:"grid",gap:6} as const;
 const appliedRow={display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"8px 9px",border:"1px solid #d7e0e8",borderRadius:8,background:"#f8fbfd"} as const;
 const appliedDescription={display:"block",marginTop:2,fontSize:10,color:"#6c7882"} as const;
+const appliedActions={display:"flex",alignItems:"center",gap:8} as const;
 const appliedQty={fontSize:15,color:"#173a5d",whiteSpace:"nowrap" as const} as const;
+const removeAppliedButton={width:28,height:28,border:"1px solid #e4a2a2",borderRadius:7,background:"#fff2f2",color:"#9f2929",fontWeight:950,fontSize:14,cursor:"pointer",lineHeight:1} as const;
 const emptyApplied={fontSize:12,color:"#7a8791",padding:"4px 0"} as const;
