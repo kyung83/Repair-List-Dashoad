@@ -4,7 +4,8 @@ import {useEffect,useMemo,useRef,useState} from "react";
 
 type RepairNote={id:number;detail:string;technician:string;createdAt:string};
 type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string};
-type ShopPayload={parts?:Part[];error?:string};
+type AppliedPart={partId:number;partNumber:string;description:string;quantity:number};
+type ShopPayload={parts?:Part[];repairs?:Array<{id:string;usedParts?:AppliedPart[]}>;error?:string};
 type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
 type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string};
 type UnmatchedResult={ok?:boolean;error?:string;requestedText?:string;requestedQuantity?:number;warehouseCode?:string;unmatchedPart?:boolean};
@@ -34,7 +35,7 @@ function partActionLabel(part:Part,quantity:number){
 
 export default function TechnicianRepairTools({repairId,canWork}:Props){
   const[note,setNote]=useState(""),[notes,setNotes]=useState<RepairNote[]>([]),[noteBusy,setNoteBusy]=useState(false),[noteMessage,setNoteMessage]=useState(""),[listening,setListening]=useState(false);
-  const[parts,setParts]=useState<Part[]>([]),[search,setSearch]=useState(""),[selectedPart,setSelectedPart]=useState<Part|null>(null),[quantity,setQuantity]=useState(1),[partBusy,setPartBusy]=useState(false),[partMessage,setPartMessage]=useState("");
+  const[parts,setParts]=useState<Part[]>([]),[appliedParts,setAppliedParts]=useState<AppliedPart[]>([]),[search,setSearch]=useState(""),[selectedPart,setSelectedPart]=useState<Part|null>(null),[quantity,setQuantity]=useState(1),[partBusy,setPartBusy]=useState(false),[partMessage,setPartMessage]=useState("");
   const recognitionRef=useRef<RecognitionLike|null>(null);
 
   async function loadNotes(){
@@ -49,10 +50,11 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
     const result=await response.json() as ShopPayload;
     if(!response.ok)throw new Error(result.error||"Parts could not be loaded.");
     setParts(result.parts??[]);
+    setAppliedParts(result.repairs?.find(repair=>repair.id===repairId)?.usedParts??[]);
   }
 
   useEffect(()=>{
-    setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setQuantity(1);setPartMessage("");
+    setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setQuantity(1);setPartMessage("");setAppliedParts([]);
     void loadNotes().catch(error=>setNoteMessage(error instanceof Error?error.message:"Repair notes could not be loaded."));
     void loadParts().catch(error=>setPartMessage(error instanceof Error?error.message:"Parts could not be loaded."));
     return()=>{try{recognitionRef.current?.stop()}catch{}recognitionRef.current=null};
@@ -143,6 +145,10 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
       {selectedPart&&<button type="button" onClick={()=>void useOrRequestPart()} style={partButton} disabled={partBusy||!canWork}>{partBusy?"Saving…":partActionLabel(selectedPart,quantity)}</button>}
       {search.trim()&&matches.length===0&&!selectedPart&&<div style={unmatchedBox}><div><strong>No catalog match.</strong><div style={small}>Request exactly: “{search.trim()}” · Qty {qty(quantity)}</div></div><button type="button" onClick={()=>void requestTypedPart()} style={requestButton} disabled={partBusy||!canWork}>{partBusy?"Sending…":"REQUEST THIS PART"}</button></div>}
       {partMessage&&<div style={messageStyle}>{partMessage}</div>}
+      <div style={appliedBox}>
+        <div><strong style={appliedHeading}>PARTS APPLIED TO THIS REPAIR</strong><span style={appliedHelp}>This list stays visible so you can review every part and quantity before finishing the repair.</span></div>
+        {appliedParts.length>0?<div style={appliedList}>{appliedParts.map(part=><div key={part.partId} style={appliedRow}><div><strong>{part.partNumber}</strong><span style={appliedDescription}>{part.description}</span></div><strong style={appliedQty}>× {qty(part.quantity)}</strong></div>)}</div>:<div style={emptyApplied}>No parts applied yet.</div>}
+      </div>
     </div>
   </section>;
 }
@@ -171,3 +177,11 @@ const partButton={border:0,borderRadius:9,padding:"11px 12px",background:"#173a5
 const unmatchedBox={display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap" as const,padding:11,border:"2px solid #e1b256",borderRadius:9,background:"#fff9ed"} as const;
 const requestButton={border:0,borderRadius:9,padding:"10px 12px",background:"#f0ad2d",color:"#2c261b",fontWeight:950,cursor:"pointer"} as const;
 const messageStyle={fontSize:12,fontWeight:800,color:"#5b6670"} as const;
+const appliedBox={marginTop:4,border:"2px solid #7f9fb9",borderRadius:10,background:"white",padding:11,display:"grid",gap:8} as const;
+const appliedHeading={display:"block",fontSize:12,color:"#173a5d",letterSpacing:".04em"} as const;
+const appliedHelp={display:"block",marginTop:2,fontSize:10,color:"#687783"} as const;
+const appliedList={display:"grid",gap:6} as const;
+const appliedRow={display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,padding:"8px 9px",border:"1px solid #d7e0e8",borderRadius:8,background:"#f8fbfd"} as const;
+const appliedDescription={display:"block",marginTop:2,fontSize:10,color:"#6c7882"} as const;
+const appliedQty={fontSize:15,color:"#173a5d",whiteSpace:"nowrap" as const} as const;
+const emptyApplied={fontSize:12,color:"#7a8791",padding:"4px 0"} as const;
