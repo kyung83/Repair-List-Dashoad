@@ -58,6 +58,8 @@ const TECHNICIAN_REPAIR_BOARD_ACTIONS = new Set([
 const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/found-repair',
   '/api/shop/unmatched-part',
+  '/api/shop/remove-applied-part',
+  '/api/shop/repair-review',
 ]);
 
 function isStaticAsset(pathname: string) {
