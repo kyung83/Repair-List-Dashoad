@@ -112,6 +112,7 @@ type MaintenanceHistory = {
 type ReportingData = {
   years: number[];
   selectedYear: number;
+  requestedUnitId?: number | null;
   summary: Summary;
   unitCosts: UnitCost[];
   categoryCosts: Array<{ category: string; units: number; repairCost: number; expenseCost: number; purchaseCost: number; operatingCost: number; totalCost: number }>;
@@ -204,10 +205,12 @@ export default function ReportsPage() {
   const [repairId, setRepairId] = useState("");
   const [repairCost, setRepairCost] = useState({ laborHours: "", laborRate: "", outsideCost: "" });
 
-  async function load(requestedYear = year) {
+  async function load(requestedYear = year, requestedUnitId = unitId) {
     setLoading(true);
     try {
-      const response = await fetch(`/api/reports?year=${encodeURIComponent(requestedYear)}`, { cache: "no-store" });
+      const params = new URLSearchParams({ year: requestedYear });
+      if (requestedUnitId !== "all") params.set("unit", requestedUnitId);
+      const response = await fetch(`/api/reports?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json() as ReportingData & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Reports could not be loaded.");
       setData(payload);
@@ -221,7 +224,7 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
-    void load(String(currentYear));
+    void load(String(currentYear), "all");
     void fetch("/api/auth/me", { cache: "no-store" })
       .then(async (response) => response.ok ? (await response.json() as { user: User }).user : null)
       .then(setUser)
@@ -266,7 +269,7 @@ export default function ReportsPage() {
       const response = await fetch("/api/reports", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json() as { error?: string };
       if (!response.ok) throw new Error(result.error || "The report data could not be updated.");
-      await load(year);
+      await load(year, unitId);
       setMessage(success);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The report data could not be updated.");
@@ -312,19 +315,19 @@ export default function ReportsPage() {
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Reporting & Cost Analysis</h1>
           <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 820 }}>Repair history, parts and labor cost, unit-by-unit yearly and lifetime cost, ownership expenses, PM/annual history, common failures, technician workload, and CSV exports.</p>
         </div>
-        <button style={buttonStyle} onClick={() => void load(year)} disabled={loading}>{loading ? "Refreshing…" : "Refresh reports"}</button>
+        <button style={buttonStyle} onClick={() => void load(year, unitId)} disabled={loading}>{loading ? "Refreshing…" : "Refresh reports"}</button>
       </header>
 
       {message && <div style={{ marginTop: 16, padding: 12, border: "1px solid #f2c66d", background: "#fff8e6", borderRadius: 10 }}>{message}</div>}
 
       <section style={{ ...panel, marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12 }}>
         <label style={{ display: "grid", gap: 5, fontWeight: 750 }}>Report year
-          <select value={year} onChange={(event) => { const next = event.target.value; setYear(next); void load(next); }} style={inputStyle}>
+          <select value={year} onChange={(event) => { const next = event.target.value; setYear(next); void load(next, unitId); }} style={inputStyle}>
             {data.years.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </label>
         <label style={{ display: "grid", gap: 5, fontWeight: 750 }}>Unit
-          <select value={unitId} onChange={(event) => setUnitId(event.target.value)} style={inputStyle}>
+          <select value={unitId} onChange={(event) => { const next = event.target.value; setUnitId(next); setRepairId(""); void load(year, next); }} style={inputStyle}>
             <option value="all">All units</option>
             {[...data.unitCosts].sort((a, b) => a.unit.localeCompare(b.unit, undefined, { numeric: true })).map((unit) => <option key={unit.equipmentId} value={unit.equipmentId}>{unit.unit} — {unit.category}</option>)}
           </select>

@@ -1,12 +1,13 @@
 import { env } from 'cloudflare:workers';
-import { getReportingData, handleReportingAction } from '@/lib/reports';
-import { mergeHistoricalReportingData } from '@/lib/reports-history-merge';
+import { handleReportingAction } from '@/lib/reports';
+import { getReportingDataOptimized } from '@/lib/reports-optimized';
+import { mergeHistoricalReportingDataOptimized } from '@/lib/reports-history-merge-optimized';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const base = await getReportingData(env.DB, url.searchParams.get('year'));
-    return Response.json(await mergeHistoricalReportingData(env.DB, base), {
+    const base = await getReportingDataOptimized(env.DB, url.searchParams.get('year'), url.searchParams.get('unit'));
+    return Response.json(await mergeHistoricalReportingDataOptimized(env.DB, base), {
       headers: { 'cache-control': 'no-store' },
     });
   } catch (error) {
