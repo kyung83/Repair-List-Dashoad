@@ -108,12 +108,24 @@ async function invoiceLinesFromRepair(db: D1Database, repairId: number) {
   const [repair, parts, labor] = await Promise.all([
     db.prepare(`SELECT r.id, r.equipment_id, r.title, COALESCE(e.unit,'') AS unit, COALESCE(r.outside_cost,0) AS outside_cost FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.id=?`).bind(repairId).first<any>(),
     db.prepare(`SELECT p.part_number, p.description, rp.quantity, COALESCE(rp.unit_cost,p.unit_cost,0) AS unit_cost FROM repair_parts rp JOIN parts p ON p.id=rp.part_id WHERE rp.repair_id=? ORDER BY rp.id`).bind(repairId).all<any>(),
-    db.prepare(`SELECT l.hours, l.rate, l.notes, COALESCE(t.name,'Shop labor') AS technician FROM repair_labor_entries l LEFT JOIN technicians t ON t.id=l.technician_id WHERE l.repair_id=? ORDER BY l.labor_date,l.id`).bind(repairId).all<any>(),
+    db.prepare(`SELECT l.technician_id, l.labor_date, l.hours, l.rate, COALESCE(t.name,'Shop labor') AS technician FROM repair_labor_entries l LEFT JOIN technicians t ON t.id=l.technician_id WHERE l.repair_id=? ORDER BY l.labor_date,l.id`).bind(repairId).all<any>(),
   ]);
   if (!repair) throw new Error('Repair was not found.');
   const lines: Array<{ type: string; description: string; quantity: number; unitPrice: number }> = [];
   for (const row of parts.results) lines.push({ type: 'part', description: `${row.part_number} — ${row.description}`, quantity: Number(row.quantity), unitPrice: Number(row.unit_cost) });
-  for (const row of labor.results) lines.push({ type: 'labor', description: `${row.technician}${row.notes ? ` — ${row.notes}` : ''}`, quantity: Number(row.hours), unitPrice: Number(row.rate) });
+
+  const groupedLabor = new Map<string,{technician:string;laborDate:string;hours:number;rate:number}>();
+  for (const row of labor.results) {
+    const technicianKey = row.technician_id == null ? String(row.technician) : `tech-${row.technician_id}`;
+    const rate = Number(row.rate);
+    const key = `${technicianKey}|${row.labor_date}|${rate.toFixed(4)}`;
+    const current = groupedLabor.get(key);
+    if (current) current.hours += Number(row.hours);
+    else groupedLabor.set(key,{technician:String(row.technician),laborDate:String(row.labor_date),hours:Number(row.hours),rate});
+  }
+  for (const row of groupedLabor.values()) {
+    lines.push({ type: 'labor', description: `${row.technician} — ${repair.title} — ${row.laborDate}`, quantity: Math.round(row.hours * 100) / 100, unitPrice: row.rate });
+  }
   if (Number(repair.outside_cost) > 0) lines.push({ type: 'outside', description: 'Outside / vendor repair charge', quantity: 1, unitPrice: Number(repair.outside_cost) });
   return { repair, lines };
 }
