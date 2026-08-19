@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 type AttentionRow = {
   equipmentId:number;
@@ -105,5 +105,5 @@ export default function GeotabHealthPanel(){
 function Metric({label,value,warn=false}:{label:string;value:string|number;warn?:boolean}){
   return <div style={{padding:'10px 11px',borderRadius:9,background:warn?'#fff6e8':'#f7f9fa',border:`1px solid ${warn?'#eccb8e':'#e3e8ec'}`}}><div style={{fontSize:11,fontWeight:800,color:'#72808e',textTransform:'uppercase',letterSpacing:'.04em'}}>{label}</div><div style={{fontSize:20,fontWeight:900,marginTop:3,color:warn?'#8a5a05':'#19324a'}}>{value}</div></div>;
 }
-const th:React.CSSProperties={textAlign:'left',padding:'8px 9px',fontSize:11,textTransform:'uppercase',letterSpacing:'.04em',color:'#6c7a87',background:'#f7f9fa'};
-const td:React.CSSProperties={padding:'9px',verticalAlign:'top'};
+const th:CSSProperties={textAlign:'left',padding:'8px 9px',fontSize:11,textTransform:'uppercase',letterSpacing:'.04em',color:'#6c7a87',background:'#f7f9fa'};
+const td:CSSProperties={padding:'9px',verticalAlign:'top'};
