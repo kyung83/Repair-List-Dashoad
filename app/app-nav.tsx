@@ -9,6 +9,7 @@ type Link = { href:string; label:string; exact?:boolean; activeFor?:string[] };
 const managerPrimary: Link[] = [
   { href:"/shop", label:"My Jobs" },
   { href:"/repair-board", label:"Shop Board", activeFor:["/work-orders"] },
+  { href:"/repair-corrections", label:"Repair Corrections" },
   { href:"/unit", label:"Units", activeFor:["/equipment"] },
   { href:"/pm-schedules", label:"Maintenance", activeFor:["/pm-kits","/annual-schedules","/annual-inspections","/next-pm-repairs"] },
   { href:"/parts-desk", label:"Parts", activeFor:["/inventory","/invoices"] },
