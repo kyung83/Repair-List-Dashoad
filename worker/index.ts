@@ -50,6 +50,11 @@ const TECHNICIAN_SHOP_ACTIONS = new Set([
   'repairOutcome',
   'doneUnit',
 ]);
+const TECHNICIAN_REPAIR_BOARD_ACTIONS = new Set([
+  'assignToMe',
+  'createRepairForMe',
+  'setUnitOos',
+]);
 const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/found-repair',
   '/api/shop/unmatched-part',
@@ -90,7 +95,7 @@ async function mechanicCanWrite(request: Request, pathname: string) {
     return false;
   }
   if (pathname === '/api/shop') return TECHNICIAN_SHOP_ACTIONS.has(action);
-  if (pathname === '/api/repair-board') return action === 'assignToMe';
+  if (pathname === '/api/repair-board') return TECHNICIAN_REPAIR_BOARD_ACTIONS.has(action);
   if (pathname === '/api/pm-followups') return action === 'addNextPmRepair' || action === 'completeNextPmRepair' || action === 'deferNextPmRepair' || action === 'cancelNextPmRepair';
   if (pathname === '/api/repairs') return action === 'saveRepair' || action === 'completeRepair' || action === 'markRepaired';
   return action === 'completeRepair' || action === 'usePart' || action === 'addLabor';
