@@ -4,6 +4,7 @@ import {useEffect,useMemo,useState} from "react";
 
 type PartOption={id:number;partNumber:string;description:string;quantityOnHand:number;unitCost:number|null;location:string};
 type LaborEntry={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string};
+type LaborSummary={key:string;repairId:string;repairIssue:string;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;segments:number};
 type UsedPart={usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean};
 type TechnicianNote={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;detail:string;createdAt:string};
 type Repair={id:string;issue:string;status:string;technicianId:number|null;outsideCost:number;laborRate:number;reviewedAt:string};
@@ -23,6 +24,22 @@ type PartDraft={quantity:string;unitCost:string};
 function money(value:number){return Number(value||0).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});}
 function dateTime(value:string){if(!value)return "—";const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";const parsed=new Date(normalized);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();}
 function partLabel(part:PartOption){return `${part.partNumber} — ${part.description}`;}
+function summarizeLabor(entries:LaborEntry[]){
+  const grouped=new Map<string,LaborSummary>();
+  for(const entry of entries){
+    const technicianKey=entry.technicianId===null?entry.technician:`tech-${entry.technicianId}`;
+    const key=`${entry.repairId}|${technicianKey}|${entry.laborDate}|${Number(entry.rate).toFixed(4)}`;
+    const current=grouped.get(key);
+    if(current){
+      current.hours+=Number(entry.hours||0);
+      current.amount+=Number(entry.amount||0);
+      current.segments+=1;
+    }else{
+      grouped.set(key,{key,repairId:entry.repairId,repairIssue:entry.repairIssue,technicianId:entry.technicianId,technician:entry.technician,laborDate:entry.laborDate,hours:Number(entry.hours||0),rate:Number(entry.rate||0),amount:Number(entry.amount||0),segments:1});
+    }
+  }
+  return [...grouped.values()].sort((a,b)=>a.laborDate.localeCompare(b.laborDate)||a.repairIssue.localeCompare(b.repairIssue)||a.technician.localeCompare(b.technician));
+}
 
 export default function InlineWorkOrderReviewEditor({item,canManage,defaultLaborRate,parts,onChanged}:Props){
   const editable=canManage&&!item.reviewed;
@@ -75,6 +92,7 @@ export default function InlineWorkOrderReviewEditor({item,canManage,defaultLabor
   }
 
   const selectedLaborRepair=useMemo(()=>item.repairs.find(repair=>repair.id===newLaborRepair)??item.repairs[0]??null,[item.repairs,newLaborRepair]);
+  const laborSummaries=useMemo(()=>summarizeLabor(item.laborEntries),[item.laborEntries]);
   const datalistId=`wo-review-parts-${item.id.replace(/[^a-z0-9_-]/gi,"-")}`;
 
   return <>
@@ -99,28 +117,36 @@ export default function InlineWorkOrderReviewEditor({item,canManage,defaultLabor
       </div>
 
       <div style={panelStyle}>
-        <div style={subheadStyle}><span>Labor entries</span>{editable&&<span style={editHintStyle}>EDIT HOURS / RATE / NOTE</span>}</div>
-        {item.laborEntries.length?item.laborEntries.map(entry=>{
-          const draft=laborDrafts[entry.id]??{hours:String(entry.hours),rate:String(entry.rate),notes:entry.notes||entry.repairIssue};
-          const amount=Number(draft.hours||0)*Number(draft.rate||0);
-          const changed=Number(draft.hours)!==Number(entry.hours)||Number(draft.rate)!==Number(entry.rate)||draft.notes!==(entry.notes||entry.repairIssue);
-          return <div key={`${entry.repairId}-${entry.id}`} style={{display:"grid",gridTemplateColumns:editable?"92px 125px 72px 88px 92px minmax(150px,1fr) 116px":"95px 130px 65px 75px 90px 1fr",gap:7,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
-            <span>{entry.laborDate}</span><strong>{entry.technician}</strong>
-            {editable?<input type="number" min="0.01" max="24" step="0.01" value={draft.hours} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,hours:event.target.value}}))} style={compactInputStyle}/>:<span>{entry.hours} hr</span>}
-            {editable?<input type="number" min="0" step="0.01" value={draft.rate} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,rate:event.target.value}}))} style={compactInputStyle}/>:<span>{money(entry.rate)}/hr</span>}
-            <strong>{money(amount)}</strong>
-            {editable?<input value={draft.notes} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,notes:event.target.value}}))} style={compactInputStyle}/>:<span style={{color:"#64748b"}}>{entry.notes||entry.repairIssue}</span>}
-            {editable&&<div style={{display:"flex",gap:4}}><button type="button" disabled={Boolean(busy)||!changed} onClick={()=>void post(`labor-${entry.id}`,"reviewUpdateLabor",{entryId:entry.id,hours:Number(draft.hours),rate:Number(draft.rate),notes:draft.notes},"Labor entry updated.")} style={saveMiniStyle}>SAVE</button><button type="button" disabled={Boolean(busy)} onClick={()=>{if(confirm(`Remove ${entry.hours} hr labor entry for ${entry.technician}?`))void post(`labor-delete-${entry.id}`,"reviewDeleteLabor",{entryId:entry.id},"Labor entry removed.");}} style={dangerMiniStyle}>REMOVE</button></div>}
-          </div>;
-        }):<div style={emptyStyle}>No labor entries recorded.</div>}
+        <div style={subheadStyle}><span>Labor by repair</span>{editable&&<span style={editHintStyle}>TIMER SEGMENTS KEPT BELOW FOR AUDIT / EDITING</span>}</div>
+        {laborSummaries.length?laborSummaries.map(summary=><div key={summary.key} style={{display:"grid",gridTemplateColumns:"minmax(170px,1.4fr) 125px 92px 76px 88px 92px",gap:7,padding:"8px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
+          <span><strong>{summary.repairIssue}</strong><small style={{display:"block",marginTop:2,color:"#7a858d"}}>{summary.repairId}{summary.segments>1?` · ${summary.segments} timer segments combined`:""}</small></span>
+          <strong>{summary.technician}</strong><span>{summary.laborDate}</span><span>{summary.hours.toFixed(2)} hr</span><span>{money(summary.rate)}/hr</span><strong>{money(summary.amount)}</strong>
+        </div>):<div style={emptyStyle}>No labor entries recorded.</div>}
 
-        {editable&&<div style={addRowStyle}>
-          <select value={newLaborRepair} onChange={event=>{setNewLaborRepair(event.target.value);const repair=item.repairs.find(row=>row.id===event.target.value);setNewLaborRate(String(Number(repair?.laborRate||defaultLaborRate||0)));}} style={inputStyle}>{item.repairs.map(repair=><option key={repair.id} value={repair.id}>{repair.id}</option>)}</select>
-          <input type="number" min="0.01" max="24" step="0.01" value={newLaborHours} onChange={event=>setNewLaborHours(event.target.value)} placeholder="Hours" style={inputStyle}/>
-          <input type="number" min="0" step="0.01" value={newLaborRate} onChange={event=>setNewLaborRate(event.target.value)} placeholder="Rate/hr" style={inputStyle}/>
-          <input value={newLaborNotes} onChange={event=>setNewLaborNotes(event.target.value)} placeholder="Forgotten labor / manager note" style={inputStyle}/>
-          <button type="button" disabled={Boolean(busy)||!selectedLaborRepair} onClick={()=>void post("add-labor","reviewAddLabor",{repairId:newLaborRepair,technicianId:selectedLaborRepair?.technicianId,hours:Number(newLaborHours),rate:Number(newLaborRate),notes:newLaborNotes.trim()},"Labor entry added.")} style={addButtonStyle}>+ ADD LABOR</button>
-        </div>}
+        {editable&&<>
+          <div style={{...subheadStyle,borderTop:"1px solid #d8dee3"}}><span>Timer segments / audit detail</span><span style={editHintStyle}>EDIT HOURS / RATE / NOTE</span></div>
+          {item.laborEntries.length?item.laborEntries.map(entry=>{
+            const draft=laborDrafts[entry.id]??{hours:String(entry.hours),rate:String(entry.rate),notes:entry.notes||entry.repairIssue};
+            const amount=Number(draft.hours||0)*Number(draft.rate||0);
+            const changed=Number(draft.hours)!==Number(entry.hours)||Number(draft.rate)!==Number(entry.rate)||draft.notes!==(entry.notes||entry.repairIssue);
+            return <div key={`${entry.repairId}-${entry.id}`} style={{display:"grid",gridTemplateColumns:"92px 125px 72px 88px 92px minmax(150px,1fr) 116px",gap:7,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
+              <span>{entry.laborDate}</span><strong>{entry.technician}</strong>
+              <input type="number" min="0.01" max="24" step="0.01" value={draft.hours} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,hours:event.target.value}}))} style={compactInputStyle}/>
+              <input type="number" min="0" step="0.01" value={draft.rate} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,rate:event.target.value}}))} style={compactInputStyle}/>
+              <strong>{money(amount)}</strong>
+              <input value={draft.notes} onChange={event=>setLaborDrafts(current=>({...current,[entry.id]:{...draft,notes:event.target.value}}))} style={compactInputStyle}/>
+              <div style={{display:"flex",gap:4}}><button type="button" disabled={Boolean(busy)||!changed} onClick={()=>void post(`labor-${entry.id}`,"reviewUpdateLabor",{entryId:entry.id,hours:Number(draft.hours),rate:Number(draft.rate),notes:draft.notes},"Labor entry updated.")} style={saveMiniStyle}>SAVE</button><button type="button" disabled={Boolean(busy)} onClick={()=>{if(confirm(`Remove ${entry.hours} hr labor entry for ${entry.technician}?`))void post(`labor-delete-${entry.id}`,"reviewDeleteLabor",{entryId:entry.id},"Labor entry removed.");}} style={dangerMiniStyle}>REMOVE</button></div>
+            </div>;
+          }):<div style={emptyStyle}>No timer segments recorded.</div>}
+
+          <div style={addRowStyle}>
+            <select value={newLaborRepair} onChange={event=>{setNewLaborRepair(event.target.value);const repair=item.repairs.find(row=>row.id===event.target.value);setNewLaborRate(String(Number(repair?.laborRate||defaultLaborRate||0)));}} style={inputStyle}>{item.repairs.map(repair=><option key={repair.id} value={repair.id}>{repair.id} — {repair.issue}</option>)}</select>
+            <input type="number" min="0.01" max="24" step="0.01" value={newLaborHours} onChange={event=>setNewLaborHours(event.target.value)} placeholder="Hours" style={inputStyle}/>
+            <input type="number" min="0" step="0.01" value={newLaborRate} onChange={event=>setNewLaborRate(event.target.value)} placeholder="Rate/hr" style={inputStyle}/>
+            <input value={newLaborNotes} onChange={event=>setNewLaborNotes(event.target.value)} placeholder="Forgotten labor / manager note" style={inputStyle}/>
+            <button type="button" disabled={Boolean(busy)||!selectedLaborRepair} onClick={()=>void post("add-labor","reviewAddLabor",{repairId:newLaborRepair,technicianId:selectedLaborRepair?.technicianId,hours:Number(newLaborHours),rate:Number(newLaborRate),notes:newLaborNotes.trim()},"Labor entry added.")} style={addButtonStyle}>+ ADD LABOR</button>
+          </div>
+        </>}
       </div>
     </div>
 
@@ -181,6 +207,6 @@ const subheadStyle={padding:"7px 9px",background:"#eef1f2",color:"#59656e",fontS
 const editHintStyle={fontSize:8,color:"#176440"} as const;
 const panelStyle={border:"1px solid #e0e5e8",background:"white"} as const;
 const emptyStyle={padding:10,borderTop:"1px solid #edf0f2",color:"#7a858d",fontSize:11} as const;
-const addRowStyle={display:"grid",gridTemplateColumns:"110px 85px 95px minmax(180px,1fr) 120px",gap:7,alignItems:"end",padding:"9px",borderTop:"1px solid #d9e5dc",background:"#f5faf7"} as const;
+const addRowStyle={display:"grid",gridTemplateColumns:"minmax(180px,1.35fr) 85px 95px minmax(180px,1fr) 120px",gap:7,alignItems:"end",padding:"9px",borderTop:"1px solid #d9e5dc",background:"#f5faf7"} as const;
 const noticeStyle={marginTop:10,padding:"8px 10px",border:"1px solid #e0c47a",background:"#fffaf0",fontSize:11} as const;
 const reviewedStyle={marginTop:12,padding:10,border:"1px solid #b9d8c8",background:"#f1faf5",fontSize:11,display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"} as const;
