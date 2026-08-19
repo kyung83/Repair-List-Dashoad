@@ -15,7 +15,8 @@ const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
     label: "Shop Board",
     tabs: [
       { href: "/repair-board", label: "Open Work", roles: workingRoles },
-      { href: "/work-orders", label: "Completed Work", roles: officeRoles },
+      { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
+      { href: "/work-orders/print", label: "Print Work Orders", roles: officeRoles },
     ],
   },
   units: {
