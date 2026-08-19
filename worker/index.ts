@@ -5,6 +5,7 @@ import { appUserCount, authenticateUser, createSession, getSessionUser, sessionC
 import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 import { syncGeotabYardPresence } from '../lib/geotab-yard';
+import { syncGeotabGpsShadow } from '../lib/geotab-gps-shadow';
 
 interface Env {
   ASSETS: Fetcher;
@@ -170,12 +171,18 @@ const worker = {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     if (controller.cron === '*/10 * * * *') {
       let yard: unknown = null;
+      let shadow: unknown = null;
       try {
         yard = await syncGeotabYardPresence(env);
       } catch (error) {
         console.error(JSON.stringify({ event: 'geotab_yard_sync_failed', error: String(error) }));
       }
-      console.log(JSON.stringify({ event: 'geotab_yard_scheduled_sync', yard }));
+      try {
+        shadow = await syncGeotabGpsShadow(env);
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'geotab_gps_shadow_schedule_failed', error: String(error) }));
+      }
+      console.log(JSON.stringify({ event: 'geotab_yard_scheduled_sync', yard, shadow }));
       return;
     }
     const fleet = await syncGeotabFleetMaster(env);
