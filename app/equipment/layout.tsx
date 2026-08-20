@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import BulkArchiveEnhancer from './bulk-archive-enhancer';
 import GeotabTrackingEnhancer from './geotab-tracking-enhancer';
 
 export default function EquipmentLayout({ children }: { children: ReactNode }) {
@@ -6,6 +7,7 @@ export default function EquipmentLayout({ children }: { children: ReactNode }) {
     <>
       {children}
       <GeotabTrackingEnhancer />
+      <BulkArchiveEnhancer />
     </>
   );
 }
