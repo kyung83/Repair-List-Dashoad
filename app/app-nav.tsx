@@ -2,54 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { adminMoreLinks, primaryLinksForRole, type NavLink, type Role } from "./navigation-config";
 
-type User = { id:number; username:string; email:string; displayName:string; role:"viewer"|"mechanic"|"manager"|"admin" };
-type Link = { href:string; label:string; exact?:boolean; activeFor?:string[] };
+type User = { id:number; username:string; email:string; displayName:string; role:Role };
 type GeotabHealth = {
   status:"healthy"|"attention"|string;
   mode:string;
   summary:{ expected:number; structured:number; live:number; recent:number; stale:number; noData:number; offline:number; identityErrors:number; regression:number };
 };
 
-const managerPrimary: Link[] = [
-  { href:"/shop", label:"My Jobs" },
-  { href:"/repair-board", label:"Shop Board", activeFor:["/work-orders"] },
-  { href:"/unit", label:"Units", activeFor:["/equipment"] },
-  { href:"/pm-schedules", label:"Maintenance", activeFor:["/pm-kits","/annual-schedules","/annual-inspections","/next-pm-repairs"] },
-  { href:"/parts-desk", label:"Parts", activeFor:["/inventory"] },
-  { href:"/invoices", label:"Invoicing" },
-  { href:"/reports", label:"Reports" },
-];
-
-const adminPrimary: Link[] = [
-  ...managerPrimary,
-  { href:"/admin/geotab-review", label:"Diagnostics", activeFor:["/admin/equipment-merge"] },
-];
-
-const mechanicPrimary: Link[] = [
-  { href:"/shop", label:"My Jobs" },
-  { href:"/repair-board", label:"Repair Board" },
-  { href:"/unit", label:"Find Unit" },
-  { href:"/annual-inspections", label:"Forms" },
-];
-
-const viewerPrimary: Link[] = [
-  { href:"/unit", label:"Units", activeFor:["/equipment"] },
-  { href:"/work-orders", label:"Completed Work" },
-  { href:"/annual-inspections", label:"Annual Forms" },
-  { href:"/reports", label:"Reports" },
-];
-
-function isActive(pathname:string, link:Link){
-  if(link.exact)return pathname===link.href;
-  return [link.href,...(link.activeFor??[])].some(path=>pathname===path||pathname.startsWith(`${path}/`));
+function pathOnly(href:string){return href.split("?")[0].split("#")[0];}
+function isActive(pathname:string,link:NavLink){
+  const href=pathOnly(link.href);
+  if(link.exact)return pathname===href;
+  return [href,...(link.activeFor??[])].some(path=>pathname===path||pathname.startsWith(`${path}/`));
 }
 
 export default function AppNav(){
   const pathname=usePathname();
   const [user,setUser]=useState<User|null>(null);
   const [health,setHealth]=useState<GeotabHealth|null>(null);
-  const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print");
+  const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print")||pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print");
 
   useEffect(()=>{
     if(hidden)return;
@@ -82,11 +55,8 @@ export default function AppNav(){
   }
 
   if(hidden)return null;
-  const primary=user?.role==='mechanic'?mechanicPrimary:user?.role==='viewer'?viewerPrimary:user?.role==='admin'?adminPrimary:managerPrimary;
-  const more:Link[] = user?.role==='admin' ? [
-    { href:"/admin/users", label:"Users & Access" },
-    { href:"/admin/history-import", label:"History Import" },
-  ] : [];
+  const primary=primaryLinksForRole(user?.role??null);
+  const more=user?.role==='admin'?adminMoreLinks:[];
   const healthTitle=health
     ? `Geotab ${health.status}. Structured results ${health.summary.structured}/${health.summary.expected}. Live ${health.summary.live}, recent ${health.summary.recent}, stale ${health.summary.stale}, no data ${health.summary.noData}, offline ${health.summary.offline}, identity issues ${health.summary.identityErrors}. GPS reliability pilot is in shadow mode.`
     : '';
@@ -106,7 +76,7 @@ export default function AppNav(){
       </details>}
     </nav>
     {user&&<div className="app-user-area">
-      {healthPill&&(user.role==='admin'?<a href="/admin/geotab-review" style={{textDecoration:'none'}} aria-label="Open Geotab diagnostics">{healthPill}</a>:healthPill)}
+      {healthPill&&(user.role==='admin'?<a href="/admin/geotab-review/health" style={{textDecoration:'none'}} aria-label="Open Geotab diagnostics">{healthPill}</a>:healthPill)}
       <span className="app-user-name" title={user.username||user.email}>{user.displayName}<small className="easy-role">{user.role}</small></span>
       <button type="button" onClick={()=>void signOut()}>Sign out</button>
     </div>}

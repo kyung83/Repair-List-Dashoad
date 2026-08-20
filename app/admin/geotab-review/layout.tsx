@@ -1,18 +1,10 @@
 import type { ReactNode } from 'react';
 import DiagnosticsTabs from '../diagnostics-tabs';
-import GeotabConnectionPanel from './connection-panel';
-import GeotabAssignmentRepairPanel from './assignment-repair-panel';
-import GeotabHealthPanel from './health-panel';
 
-// Shadow mode is intentionally diagnostic only; legacy yard routing remains authoritative until cutover review.
+// Each diagnostic concern now has its own page instead of stacking every repair tool on one screen.
 export default function GeotabReviewLayout({ children }: { children: ReactNode }) {
-  return (
-    <>
-      <DiagnosticsTabs />
-      <GeotabConnectionPanel />
-      <GeotabAssignmentRepairPanel />
-      <GeotabHealthPanel />
-      <div id="geotab-review-detail">{children}</div>
-    </>
-  );
+  return <>
+    <DiagnosticsTabs />
+    {children}
+  </>;
 }

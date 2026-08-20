@@ -2,83 +2,46 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { moduleConfig, type ModuleName, type ModuleTab, type Role } from "./navigation-config";
 
-type Role = "viewer" | "mechanic" | "manager" | "admin";
-type ModuleName = "shop" | "units" | "parts" | "reports" | "diagnostics";
-type Tab = { href: string; label: string; exact?: boolean; roles: Role[] };
-
-const adminRoles: Role[] = ["admin"];
-const managerRoles: Role[] = ["manager", "admin"];
-const workingRoles: Role[] = ["mechanic", "manager", "admin"];
-const officeRoles: Role[] = ["viewer", "manager", "admin"];
-const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
-  shop: {
-    label: "Shop Board",
-    tabs: [
-      { href: "/repair-board", label: "Open Work", roles: workingRoles },
-      { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
-      { href: "/work-orders/print", label: "Print Work Orders", roles: officeRoles },
-    ],
-  },
-  units: {
-    label: "Units",
-    tabs: [
-      { href: "/unit", label: "Find Unit", roles: ["viewer", "mechanic", "manager", "admin"] },
-      { href: "/equipment", label: "Equipment List", roles: officeRoles },
-    ],
-  },
-  parts: {
-    label: "Parts",
-    tabs: [
-      { href: "/parts-desk", label: "Parts Desk", roles: managerRoles },
-      { href: "/inventory", label: "Inventory", roles: managerRoles },
-    ],
-  },
-  reports: {
-    label: "Reports",
-    tabs: [
-      { href: "/reports", label: "Reports", exact: true, roles: officeRoles },
-      { href: "/reports/history", label: "Repair History", roles: officeRoles },
-    ],
-  },
-  diagnostics: {
-    label: "Diagnostics",
-    tabs: [
-      { href: "/admin/geotab-review", label: "Geotab Review", roles: adminRoles },
-      { href: "/admin/equipment-merge", label: "Equipment Forks", roles: adminRoles },
-    ],
-  },
-};
-
-function isActive(pathname: string, tab: Tab) {
-  return tab.exact ? pathname === tab.href : pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+function tabPath(tab:ModuleTab){return tab.href.split("?")[0].split("#")[0];}
+function isActive(pathname:string,currentView:string,tab:ModuleTab){
+  const path=tabPath(tab);
+  if(tab.view)return pathname===path&&currentView===tab.view;
+  return tab.exact?pathname===path:pathname===path||pathname.startsWith(`${path}/`);
 }
 
 export default function ModuleTabs({ module }: { module: ModuleName }) {
-  const pathname = usePathname();
-  const [role, setRole] = useState<Role | null>(null);
-  const config = moduleConfig[module];
+  const pathname=usePathname();
+  const [role,setRole]=useState<Role|null>(null);
+  const [currentView,setCurrentView]=useState("invoices");
+  const resolvedModule:ModuleName=module==="parts"&&pathname.startsWith("/invoices")?"billing":module;
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/auth/me", { cache: "no-store" })
-      .then(async (response) => response.ok ? await response.json() as { user?: { role: Role } } : {})
-      .then((payload) => {
-        if (!cancelled) setRole(payload.user?.role ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setRole(null);
-      });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(()=>{
+    let cancelled=false;
+    void fetch("/api/auth/me",{cache:"no-store"})
+      .then(async response=>response.ok?await response.json() as{user?:{role:Role}}:{})
+      .then(payload=>{if(!cancelled)setRole(payload.user?.role??null);})
+      .catch(()=>{if(!cancelled)setRole(null);});
+    return()=>{cancelled=true;};
+  },[]);
 
-  if (module === "parts" && pathname.startsWith("/invoices")) return null;
-  const tabs = role ? config.tabs.filter((tab) => tab.roles.includes(role)) : [];
-  if (tabs.length < 2) return null;
+  useEffect(()=>{
+    if(resolvedModule!=="billing"){setCurrentView("");return;}
+    const value=new URLSearchParams(window.location.search).get("view");
+    setCurrentView(value==="ready"||value==="settings"?value:"invoices");
+  },[pathname,resolvedModule]);
 
-  return (
-    <nav className="module-tabs-shell" aria-label={config.label}>
-      {tabs.map((tab) => <a key={tab.href} href={tab.href} className={isActive(pathname, tab) ? "active" : ""} aria-current={isActive(pathname, tab) ? "page" : undefined}>{tab.label}</a>)}
-    </nav>
-  );
+  if(pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print")||pathname.startsWith("/annual-inspections/print"))return null;
+
+  const config=moduleConfig[resolvedModule];
+  const tabs=role?config.tabs.filter(tab=>tab.roles.includes(role)):[];
+  if(tabs.length<2)return null;
+
+  return <nav className="module-tabs-shell" aria-label={config.label}>
+    {tabs.map(tab=>{
+      const active=isActive(pathname,currentView,tab);
+      return <a key={tab.href} href={tab.href} className={active?"active":""} aria-current={active?"page":undefined}>{tab.label}</a>;
+    })}
+  </nav>;
 }
