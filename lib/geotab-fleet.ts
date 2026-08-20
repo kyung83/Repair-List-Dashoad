@@ -1,4 +1,5 @@
 import { geotabProtectedConfig } from './geotab-protected-config';
+import { recoverAssignedOdometers } from './geotab-odometer-recovery';
 import { refreshMissingVinMetadata } from './vin-decoder';
 import type { GeotabEnv } from './geotab';
 
@@ -29,10 +30,6 @@ let loginPromise: Promise<Login> | undefined;
 
 function record(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
-}
-
-function array(value: unknown) {
-  return Array.isArray(value) ? value.map(record) : [];
 }
 
 function text(value: unknown) {
@@ -166,30 +163,6 @@ async function call<T>(auth: Auth, method: string, params: JsonRecord) {
   return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
 }
 
-async function currentOdometers(auth: Auth) {
-  const milesByDevice = new Map<string, number>();
-  try {
-    const statuses = await call<JsonRecord[]>(auth, 'Get', {
-      typeName: 'DeviceStatusInfo',
-      search: { diagnostics: [{ id: 'DiagnosticOdometerId' }] },
-    });
-    for (const status of statuses) {
-      const deviceId = objectId(get(status, 'device', 'Device')) || objectId(status);
-      if (!deviceId) continue;
-      for (const item of array(get(status, 'statusData', 'StatusData'))) {
-        const diagnosticId = objectId(get(item, 'diagnostic', 'Diagnostic'));
-        if (diagnosticId && diagnosticId !== 'DiagnosticOdometerId') continue;
-        const meters = Number(get(item, 'data', 'Data'));
-        if (Number.isFinite(meters) && meters >= 0) milesByDevice.set(deviceId, Math.round(meters / 1609.344));
-      }
-    }
-    return { milesByDevice, available: true };
-  } catch (error) {
-    console.error(JSON.stringify({ event: 'geotab_odometer_sync_failed', error: String(error) }));
-    return { milesByDevice, available: false };
-  }
-}
-
 async function runBatches(db: D1Database, statements: D1PreparedStatement[], size = 60) {
   for (let index = 0; index < statements.length; index += size) {
     await db.batch(statements.slice(index, index + size));
@@ -198,26 +171,30 @@ async function runBatches(db: D1Database, statements: D1PreparedStatement[], siz
 
 export async function syncGeotabFleetMaster(env: GeotabEnv) {
   const auth = await authenticate(env);
-  const [devices, odometerResult, assignmentResult] = await Promise.all([
+  const assignmentResult = await env.DB.prepare(`
+    SELECT a.equipment_id, a.geotab_device_id, a.mileage_offset,
+           e.unit, e.equipment_type, e.current_mileage, e.mileage_updated_at,
+           e.vin, e.active, e.archived_at
+    FROM equipment_geotab_devices a
+    JOIN equipment e ON e.id = a.equipment_id
+    WHERE a.current = 1
+      AND e.active = 1
+      AND e.archived_at IS NULL
+  `).all<AssignmentRow>();
+  const assignments = assignmentResult.results;
+  const mileageDeviceIds = assignments
+    .filter((assignment) => assignment.equipment_type !== 'trailer')
+    .map((assignment) => assignment.geotab_device_id);
+
+  const [devices, odometerResult] = await Promise.all([
     call<JsonRecord[]>(auth, 'Get', { typeName: 'Device' }),
-    currentOdometers(auth),
-    env.DB.prepare(`
-      SELECT a.equipment_id, a.geotab_device_id, a.mileage_offset,
-             e.unit, e.equipment_type, e.current_mileage, e.mileage_updated_at,
-             e.vin, e.active, e.archived_at
-      FROM equipment_geotab_devices a
-      JOIN equipment e ON e.id = a.equipment_id
-      WHERE a.current = 1
-        AND e.active = 1
-        AND e.archived_at IS NULL
-    `).all<AssignmentRow>(),
+    recoverAssignedOdometers(env, mileageDeviceIds),
   ]);
 
   if (!devices.length) throw new Error('Geotab returned no devices; refusing to update tracked mileage.');
 
   const activeDevices = devices.filter((device) => isCurrentlyActiveDevice(device));
   const activeById = new Map(activeDevices.map((device) => [objectId(device), device]));
-  const assignments = assignmentResult.results;
   const visibleAssignments = assignments.filter((assignment) => activeById.has(assignment.geotab_device_id));
 
   if (assignments.length > 0 && visibleAssignments.length === 0) {
@@ -248,7 +225,9 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     const vin = validVin(get(device, 'vehicleIdentificationNumber', 'VehicleIdentificationNumber'));
     const plate = text(get(device, 'licensePlate', 'LicensePlate')).trim() || null;
     const plateState = text(get(device, 'licenseState', 'LicenseState')).trim() || null;
-    const rawMileage = odometerResult.milesByDevice.get(deviceId) ?? null;
+    const rawMileage = assignment.equipment_type === 'trailer'
+      ? null
+      : odometerResult.milesByDevice.get(deviceId) ?? null;
     const adjustedMileage = rawMileage == null ? null : rawMileage + Number(assignment.mileage_offset ?? 0);
     if (rawMileage != null) mileageReceived += 1;
 
@@ -350,13 +329,18 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
 
   await runBatches(env.DB, statements);
 
-  if (!odometerResult.available || mileageAnomalies > 0 || missingAssignedDevices > 0) {
+  if (!odometerResult.available || mileageAnomalies > 0 || missingAssignedDevices > 0 || odometerResult.stillMissing > 0) {
     console.warn(JSON.stringify({
       event: 'geotab_fleet_sync_attention',
       odometerAvailable: odometerResult.available,
       assignedDevices: assignments.length,
       visibleAssignedDevices: visibleAssignments.length,
       missingAssignedDevices,
+      mileageRequested: odometerResult.requested,
+      mileageFirstPassReceived: odometerResult.firstPassReceived,
+      mileageRetried: odometerResult.retried,
+      mileageBroadFallbackRecovered: odometerResult.broadFallbackRecovered,
+      mileageStillMissing: odometerResult.stillMissing,
       mileageAnomalies,
     }));
   }
@@ -382,6 +366,12 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     identityMatches: { assignment: visibleAssignments.length, device_id: 0, vin: 0, unit: 0 },
     identityQuarantined: 0,
     odometerAvailable: odometerResult.available,
+    odometerRequested: odometerResult.requested,
+    odometerFirstPassReceived: odometerResult.firstPassReceived,
+    odometerRetried: odometerResult.retried,
+    odometerTargetedRecovered: odometerResult.targetedRecovered,
+    odometerBroadFallbackRecovered: odometerResult.broadFallbackRecovered,
+    odometerStillMissing: odometerResult.stillMissing,
     mileageReceived,
     mileageUpdates,
     mileageAnomalies,
