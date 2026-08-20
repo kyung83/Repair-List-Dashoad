@@ -5,6 +5,8 @@ type MaintenanceRow = {
   unit: string;
   equipment_type: string;
   current_mileage: number | null;
+  mileage_updated_at: string | null;
+  geotab_tracked: number;
   driver: string | null;
   location: string | null;
   profile_name: string | null;
@@ -40,6 +42,7 @@ type MaintenanceRepair = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const GEOTAB_MILEAGE_STALE_HOURS = 6;
 
 function daysUntil(date: string | null, intervalDays: number | null) {
   if (!date || !intervalDays) return null;
@@ -47,6 +50,27 @@ function daysUntil(date: string | null, intervalDays: number | null) {
   if (Number.isNaN(start)) return null;
   const due = start + intervalDays * DAY_MS;
   return Math.ceil((due - Date.now()) / DAY_MS);
+}
+
+function timestampMs(value: string | null) {
+  if (!value) return null;
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mileageAgeHours(value: string | null) {
+  const updated = timestampMs(value);
+  if (updated == null) return null;
+  return Math.max(0, (Date.now() - updated) / 3_600_000);
+}
+
+function staleMileageDescription(updatedAt: string | null) {
+  const hours = mileageAgeHours(updatedAt);
+  if (hours == null) return 'Geotab mileage has never been verified';
+  if (hours < 1) return 'Geotab mileage is less than an hour old';
+  if (hours < 24) return `Geotab mileage was last verified ${Math.floor(hours)} hour(s) ago`;
+  return `Geotab mileage was last verified ${Math.floor(hours / 24)} day(s) ago`;
 }
 
 function parseSequence(value: string) {
@@ -76,7 +100,12 @@ async function recordMaintenanceEvent(
 
 export async function getMaintenanceBoardItems(db: D1Database) {
   const result = await db.prepare(`
-    SELECT e.id, e.unit, e.equipment_type, e.current_mileage, e.driver, e.location,
+    SELECT e.id, e.unit, e.equipment_type, e.current_mileage, e.mileage_updated_at,
+           EXISTS(
+             SELECT 1 FROM equipment_geotab_devices d
+             WHERE d.equipment_id = e.id AND d.current = 1
+           ) AS geotab_tracked,
+           e.driver, e.location,
            p.name AS profile_name, s.mileage_interval, s.time_interval_days,
            ps.pm_type, ps.last_mileage, COALESCE(ps.service_date, e.service_date) AS service_date,
            a.interval_days AS annual_interval_days, a.active AS annual_active,
@@ -97,24 +126,41 @@ export async function getMaintenanceBoardItems(db: D1Database) {
       const mileageDue = row.mileage_interval != null && row.last_mileage != null
         ? Number(row.last_mileage) + Number(row.mileage_interval)
         : null;
-      const milesRemaining = mileageDue != null && row.current_mileage != null
+      const ageHours = mileageAgeHours(row.mileage_updated_at);
+      const mileageStale = row.geotab_tracked === 1
+        && mileageDue != null
+        && (ageHours == null || ageHours > GEOTAB_MILEAGE_STALE_HOURS);
+      const milesRemaining = !mileageStale && mileageDue != null && row.current_mileage != null
         ? mileageDue - Number(row.current_mileage)
         : null;
       const timeRemaining = daysUntil(row.service_date, row.time_interval_days == null ? null : Number(row.time_interval_days));
       const overdue = (milesRemaining != null && milesRemaining <= 0) || (timeRemaining != null && timeRemaining <= 0);
       const dueSoon = (milesRemaining != null && milesRemaining <= 1000) || (timeRemaining != null && timeRemaining <= 30);
 
-      if (overdue || dueSoon) {
+      if (mileageStale || overdue || dueSoon) {
         const nextType = row.pm_type || (row.profile_name.includes('40') ? '40' : 'Service');
         const dueBits: string[] = [];
-        if (mileageDue != null) dueBits.push(`${mileageDue.toLocaleString()} mi`);
+        if (mileageDue != null && !mileageStale) dueBits.push(`${mileageDue.toLocaleString()} mi`);
         if (timeRemaining != null) dueBits.push(timeRemaining <= 0 ? `${Math.abs(timeRemaining)} day(s) overdue` : `in ${timeRemaining} day(s)`);
+
+        let issue = `${nextType} PM due${dueBits.length ? ` — ${dueBits.join(' or ')}` : ''}`;
+        let status = overdue ? 'PM Overdue' : 'PM Due Soon';
+        if (mileageStale) {
+          const lastMileage = row.current_mileage == null ? 'unknown' : Number(row.current_mileage).toLocaleString();
+          const nextMileage = mileageDue == null ? 'unknown' : mileageDue.toLocaleString();
+          issue = `MILEAGE STALE — PM STATUS CANNOT BE VERIFIED — ${staleMileageDescription(row.mileage_updated_at)}. Last trusted mileage: ${lastMileage}. Next mileage PM: ${nextMileage}.`;
+          if (timeRemaining != null) {
+            issue += ` Time schedule is ${timeRemaining <= 0 ? `${Math.abs(timeRemaining)} day(s) overdue` : `due in ${timeRemaining} day(s)`}.`;
+          }
+          if (!overdue && !dueSoon) status = 'PM Mileage Stale';
+        }
+
         repairs.push({
           id: `pm-${row.id}`,
           unit: row.unit,
-          issue: `${nextType} PM due${dueBits.length ? ` — ${dueBits.join(' or ')}` : ''}`,
+          issue,
           parts: '',
-          status: overdue ? 'PM Overdue' : 'PM Due Soon',
+          status,
           driver: row.driver ?? '',
           location: row.location ?? '',
           equipmentType: row.equipment_type,
