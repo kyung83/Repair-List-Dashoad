@@ -28,6 +28,7 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
     tabs: [
       { href: "/shop", label: "My Jobs", roles: workingRoles },
       { href: "/repair-board", label: "Shop Board", roles: workingRoles },
+      { href: "/outside-work", label: "Outside Work", exact: true, roles: managerRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
     ],
   },
@@ -59,7 +60,7 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
     label: "Billing",
     tabs: [
       { href: "/invoices?view=invoices", label: "Invoices", roles: managerRoles, view: "invoices" },
-      { href: "/invoices?view=ready", label: "Ready to Bill", roles: managerRoles, view: "ready" },
+      { href: "/invoices?view=ready", label: "Create Invoice", roles: managerRoles, view: "ready" },
       { href: "/invoices?view=settings", label: "Customers & Rates", roles: managerRoles, view: "settings" },
     ],
   },
@@ -84,7 +85,7 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
 
 const managerPrimary: NavLink[] = [
   { href: "/", label: "Today", exact: true },
-  { href: "/repair-board", label: "Shop", activeFor: ["/shop", "/work-orders"] },
+  { href: "/repair-board", label: "Shop", activeFor: ["/shop", "/outside-work", "/work-orders"] },
   { href: "/unit", label: "Units", activeFor: ["/equipment"] },
   { href: "/pm-schedules", label: "Maintenance", activeFor: ["/pm-kits", "/annual-schedules", "/annual-inspections", "/next-pm-repairs"] },
   { href: "/parts-desk", label: "Parts", activeFor: ["/inventory"] },
