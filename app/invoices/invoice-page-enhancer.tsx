@@ -4,6 +4,14 @@ import { useEffect } from "react";
 
 const invoicePattern=/^INV-\d{4}-\d+$/i;
 const baseButton="border:0;border-radius:8px;padding:10px 12px;font-weight:800;cursor:pointer;font-size:11px;";
+const paymentTerms=[
+  {value:"manual",label:"Set exact due date",days:null},
+  {value:"receipt",label:"Due on receipt",days:0},
+  {value:"net15",label:"Net 15",days:15},
+  {value:"net30",label:"Net 30",days:30},
+  {value:"net60",label:"Net 60",days:60},
+  {value:"net90",label:"Net 90",days:90},
+] as const;
 
 function professionalPrintUrl(invoiceNumber:string){
   return `/invoices/print?number=${encodeURIComponent(invoiceNumber)}`;
@@ -22,13 +30,131 @@ function makeButton(label:string,background:string){
   return button;
 }
 
+function addDays(dateValue:string,days:number){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dateValue))return "";
+  const date=new Date(`${dateValue}T12:00:00Z`);
+  if(Number.isNaN(date.getTime()))return "";
+  date.setUTCDate(date.getUTCDate()+days);
+  return date.toISOString().slice(0,10);
+}
+
+function daysBetween(start:string,end:string){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end))return null;
+  const startDate=new Date(`${start}T00:00:00Z`);
+  const endDate=new Date(`${end}T00:00:00Z`);
+  if(Number.isNaN(startDate.getTime())||Number.isNaN(endDate.getTime()))return null;
+  return Math.round((endDate.getTime()-startDate.getTime())/86400000);
+}
+
+function inferPaymentTerm(invoiceDate:string,dueDate:string){
+  if(!dueDate)return "manual";
+  const difference=daysBetween(invoiceDate,dueDate);
+  if(difference===0)return "receipt";
+  if(difference===15)return "net15";
+  if(difference===30)return "net30";
+  if(difference===60)return "net60";
+  if(difference===90)return "net90";
+  return "manual";
+}
+
+function setReactInputValue(input:HTMLInputElement,value:string){
+  const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
+  if(setter)setter.call(input,value);else input.value=value;
+  input.dispatchEvent(new Event("input",{bubbles:true}));
+  input.dispatchEvent(new Event("change",{bubbles:true}));
+}
+
+function fieldLabel(labelText:string){
+  return Array.from(document.querySelectorAll<HTMLLabelElement>("label")).find(label=>{
+    const firstSpan=label.querySelector("span");
+    return (firstSpan?.textContent||"").trim()===labelText;
+  })||null;
+}
+
 export default function InvoicePageEnhancer(){
   useEffect(()=>{
     if(window.location.pathname!=="/invoices")return;
     let stopped=false;
+    let selectedPaymentTerm="manual";
+    let paymentTermInitialized=false;
 
     function openPrint(invoiceNumber:string){
       window.open(professionalPrintUrl(invoiceNumber),"_blank","noopener,noreferrer");
+    }
+
+    function wirePaymentTerms(){
+      const invoiceDateLabel=fieldLabel("Invoice date");
+      const dueDateLabel=fieldLabel("Due date");
+      const invoiceDateInput=invoiceDateLabel?.querySelector<HTMLInputElement>('input[type="date"]')||null;
+      const dueDateInput=dueDateLabel?.querySelector<HTMLInputElement>('input[type="date"]')||null;
+      const parent=dueDateLabel?.parentElement||null;
+      if(!invoiceDateInput||!dueDateInput||!dueDateLabel||!parent)return;
+
+      if(!paymentTermInitialized){
+        selectedPaymentTerm=inferPaymentTerm(invoiceDateInput.value,dueDateInput.value);
+        paymentTermInitialized=true;
+      }
+
+      let select=document.querySelector<HTMLSelectElement>('select[data-payment-terms-select="1"]');
+      if(!select){
+        const wrapper=document.createElement("label");
+        wrapper.setAttribute("data-payment-terms-field","1");
+        wrapper.setAttribute("style","display:grid;gap:5px;font-size:10px;font-weight:900;color:#475a6c;letter-spacing:.02em");
+        const title=document.createElement("span");
+        title.textContent="Payment terms";
+        select=document.createElement("select");
+        select.setAttribute("data-payment-terms-select","1");
+        select.setAttribute("style","padding:10px 11px;border:1px solid #cbd5e1;border-radius:8px;background:white;box-sizing:border-box;width:100%");
+        for(const term of paymentTerms){
+          const option=document.createElement("option");
+          option.value=term.value;
+          option.textContent=term.label;
+          select.appendChild(option);
+        }
+        const help=document.createElement("span");
+        help.textContent="Choose a Net term to calculate the due date automatically, or Set exact due date to pick the date yourself.";
+        help.setAttribute("style","font-size:9px;font-weight:500;color:#74818c;line-height:1.35");
+        wrapper.append(title,select,help);
+        parent.insertBefore(wrapper,dueDateLabel);
+
+        select.addEventListener("change",()=>{
+          selectedPaymentTerm=select?.value||"manual";
+          const term=paymentTerms.find(item=>item.value===selectedPaymentTerm);
+          if(!term||term.days===null)return;
+          const nextDate=addDays(invoiceDateInput.value,term.days);
+          if(!nextDate)return;
+          dueDateInput.dataset.paymentTermsAuto="1";
+          setReactInputValue(dueDateInput,nextDate);
+          delete dueDateInput.dataset.paymentTermsAuto;
+        });
+      }
+      select.value=selectedPaymentTerm;
+
+      if(invoiceDateInput.dataset.paymentTermsWired!=="1"){
+        invoiceDateInput.dataset.paymentTermsWired="1";
+        invoiceDateInput.addEventListener("change",()=>{
+          const active=document.querySelector<HTMLSelectElement>('select[data-payment-terms-select="1"]');
+          const term=paymentTerms.find(item=>item.value===(active?.value||selectedPaymentTerm));
+          if(!term||term.days===null)return;
+          const currentDue=fieldLabel("Due date")?.querySelector<HTMLInputElement>('input[type="date"]');
+          if(!currentDue)return;
+          const nextDate=addDays(invoiceDateInput.value,term.days);
+          if(!nextDate)return;
+          currentDue.dataset.paymentTermsAuto="1";
+          setReactInputValue(currentDue,nextDate);
+          delete currentDue.dataset.paymentTermsAuto;
+        });
+      }
+
+      if(dueDateInput.dataset.paymentTermsWired!=="1"){
+        dueDateInput.dataset.paymentTermsWired="1";
+        dueDateInput.addEventListener("change",()=>{
+          if(dueDateInput.dataset.paymentTermsAuto==="1")return;
+          selectedPaymentTerm="manual";
+          const active=document.querySelector<HTMLSelectElement>('select[data-payment-terms-select="1"]');
+          if(active)active.value="manual";
+        });
+      }
     }
 
     function wireDetailPrint(){
@@ -106,6 +232,7 @@ export default function InvoicePageEnhancer(){
 
     function wire(){
       if(stopped)return;
+      wirePaymentTerms();
       wireDetailPrint();
       wireInvoiceRows();
     }
