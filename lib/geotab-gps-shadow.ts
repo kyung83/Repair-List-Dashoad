@@ -255,15 +255,26 @@ async function identityErrorCount(db: D1Database) {
 
 async function loadStates(db: D1Database, equipmentIds: number[]) {
   if (!equipmentIds.length) return new Map<number, StateRow>();
-  const placeholders = equipmentIds.map(() => '?').join(',');
   const result = await db.prepare(`
-    SELECT equipment_id, geotab_device_id, latitude, longitude, gps_observed_at, gps_received_at,
-           gps_source, communicating, communication_observed_at, yard, yard_zone_id,
-           yard_zone_name, yard_confirmed_at
-    FROM geotab_unit_state
-    WHERE equipment_id IN (${placeholders})
-  `).bind(...equipmentIds).all<StateRow>();
-  return new Map(result.results.map((row) => [Number(row.equipment_id), row]));
+    SELECT s.equipment_id, s.geotab_device_id, s.latitude, s.longitude,
+           s.gps_observed_at, s.gps_received_at, s.gps_source, s.communicating,
+           s.communication_observed_at, s.yard, s.yard_zone_id,
+           s.yard_zone_name, s.yard_confirmed_at
+    FROM geotab_unit_state s
+    JOIN equipment_geotab_devices d
+      ON d.equipment_id = s.equipment_id
+     AND d.current = 1
+    JOIN equipment e ON e.id = s.equipment_id
+    WHERE e.active = 1
+      AND e.archived_at IS NULL
+      AND e.merged_into_equipment_id IS NULL
+  `).all<StateRow>();
+  const expectedIds = new Set(equipmentIds.map(Number));
+  return new Map(
+    result.results
+      .filter((row) => expectedIds.has(Number(row.equipment_id)))
+      .map((row) => [Number(row.equipment_id), row]),
+  );
 }
 
 function legacySeed(row: ExpectedRow): EffectiveState {
