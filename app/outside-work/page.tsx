@@ -1,1 +1,1 @@
-export { default } from "./intake-switcher";
+export { default } from "./file-intake";
