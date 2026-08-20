@@ -16,8 +16,14 @@ const managerPrimary: Link[] = [
   { href:"/repair-board", label:"Shop Board", activeFor:["/work-orders"] },
   { href:"/unit", label:"Units", activeFor:["/equipment"] },
   { href:"/pm-schedules", label:"Maintenance", activeFor:["/pm-kits","/annual-schedules","/annual-inspections","/next-pm-repairs"] },
-  { href:"/parts-desk", label:"Parts", activeFor:["/inventory","/invoices"] },
+  { href:"/parts-desk", label:"Parts", activeFor:["/inventory"] },
+  { href:"/invoices", label:"Invoicing" },
   { href:"/reports", label:"Reports" },
+];
+
+const adminPrimary: Link[] = [
+  ...managerPrimary,
+  { href:"/admin/geotab-review", label:"Diagnostics", activeFor:["/admin/equipment-merge"] },
 ];
 
 const mechanicPrimary: Link[] = [
@@ -76,11 +82,9 @@ export default function AppNav(){
   }
 
   if(hidden)return null;
-  const primary=user?.role==='mechanic'?mechanicPrimary:user?.role==='viewer'?viewerPrimary:managerPrimary;
+  const primary=user?.role==='mechanic'?mechanicPrimary:user?.role==='viewer'?viewerPrimary:user?.role==='admin'?adminPrimary:managerPrimary;
   const more:Link[] = user?.role==='admin' ? [
     { href:"/admin/users", label:"Users & Access" },
-    { href:"/admin/geotab-review", label:"Geotab Review" },
-    { href:"/admin/equipment-merge", label:"Equipment Fork Merge" },
     { href:"/admin/history-import", label:"History Import" },
   ] : [];
   const healthTitle=health
@@ -95,14 +99,14 @@ export default function AppNav(){
     <nav className="easy-nav-main" aria-label="Main navigation">
       {primary.map(link=><a key={link.href} href={link.href} className={`easy-nav-link ${isActive(pathname,link)?'active':''}`}>{link.label}</a>)}
       {more.length>0&&<details className="easy-more">
-        <summary className="easy-nav-link">More ▾</summary>
+        <summary className="easy-nav-link">Admin ▾</summary>
         <div className="easy-more-menu">
           {more.map(link=><a key={link.href} href={link.href}>{link.label}</a>)}
         </div>
       </details>}
     </nav>
     {user&&<div className="app-user-area">
-      {healthPill&&(user.role==='admin'?<a href="/admin/geotab-review" style={{textDecoration:'none'}} aria-label="Open Geotab reliability review">{healthPill}</a>:healthPill)}
+      {healthPill&&(user.role==='admin'?<a href="/admin/geotab-review" style={{textDecoration:'none'}} aria-label="Open Geotab diagnostics">{healthPill}</a>:healthPill)}
       <span className="app-user-name" title={user.username||user.email}>{user.displayName}<small className="easy-role">{user.role}</small></span>
       <button type="button" onClick={()=>void signOut()}>Sign out</button>
     </div>}
