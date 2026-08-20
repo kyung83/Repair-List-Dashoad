@@ -1,7 +1,8 @@
 export type ChecklistPhoto={id:number;fileName:string;contentType:string;createdAt:string;url:string};
 export type CorrectiveRepair={id:string;status:string};
 export type ChecklistItem={id:number|null;number:number;section:string;text:string;result:'pending'|'pass'|'fail'|'na';notes:string;photos:ChecklistPhoto[];correctiveRepair?:CorrectiveRepair|null};
-export type ChecklistData={repairId:string;equipmentId:number;unit:string;eventType:'pm'|'annual';started:boolean;status:'not_started'|'in_progress'|'ready'|'completed';currentMileage:number|null;mileageSource:'Geotab'|'Manual';mileageUpdatedAt:string|null;mileageAtStart?:number|null;mileageAtCompletion?:number|null;pendingCount?:number;failedCount?:number;items:ChecklistItem[];error?:string};
+export type MileageSource='Geotab'|'Geotab Stale'|'Manual'|'Verified Manual'|'Unavailable';
+export type ChecklistData={repairId:string;equipmentId:number;unit:string;eventType:'pm'|'annual';started:boolean;status:'not_started'|'in_progress'|'ready'|'completed';currentMileage:number|null;mileageSource:MileageSource;mileageUpdatedAt:string|null;mileageEntryAllowed?:boolean;mileageStale?:boolean;mileageAtStart?:number|null;mileageAtCompletion?:number|null;pendingCount?:number;failedCount?:number;items:ChecklistItem[];error?:string};
 export type Part={id:number;partNumber:string;description:string;quantityOnHand:number;location:string};
 export type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number};
 export type ActionItem={id:number;repairId:string;description:string;queueStatus:string;repairStatus:string;targetEventType:'pm'|'annual';disposition:'now'|'next';taggedAt:string;plannedParts:PlannedPart[]};
