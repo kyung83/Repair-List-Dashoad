@@ -30,6 +30,7 @@ export default function TodayPage(){
       repairs:rows.filter(row=>workIsRepair(row.source)).length,
       maintenance:rows.filter(row=>maintenance(row.source)).length,
       overdue:rows.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('overdue')).length,
+      stale:rows.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('stale')).length,
       unassigned:rows.filter(row=>row.technicianId===null).length,
       active:rows.filter(row=>row.activeTimer!==null).length,
     };
@@ -40,6 +41,7 @@ export default function TodayPage(){
     const rows:{key:string;unit:string;title:string;detail:string;tone:'red'|'orange'}[]=[];
     for(const item of data.oosUnits)rows.push({key:`oos-${item.equipmentId}`,unit:item.unit,title:'OUT OF SERVICE',detail:item.reason||'Unit is marked out of service.',tone:'red'});
     for(const item of data.repairs.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('overdue')))rows.push({key:`due-${item.id}`,unit:item.unit,title:'MAINTENANCE OVERDUE',detail:item.issue,tone:'red'});
+    for(const item of data.repairs.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('stale')))rows.push({key:`stale-${item.id}`,unit:item.unit,title:'MILEAGE STALE',detail:item.issue,tone:'orange'});
     for(const item of data.repairs.filter(row=>row.technicianId===null&&!maintenance(row.source)).slice(0,8))rows.push({key:`un-${item.id}`,unit:item.unit,title:'NEEDS ASSIGNMENT',detail:item.issue,tone:'orange'});
     return rows.slice(0,12);
   },[data]);
@@ -70,7 +72,7 @@ export default function TodayPage(){
 
     <section className="easy-grid" aria-label="Today's fleet summary">
       <a className="easy-card easy-metric" href="/repair-board"><span>Repairs waiting</span><strong>{counts.repairs}</strong><small>Open repair and DVIR work</small></a>
-      <a className="easy-card easy-metric" href="/repair-board"><span>PM / Annual due</span><strong>{counts.maintenance}</strong><small>{counts.overdue?`${counts.overdue} overdue`:'No overdue maintenance'}</small></a>
+      <a className="easy-card easy-metric" href="/repair-board"><span>PM / Annual attention</span><strong>{counts.maintenance}</strong><small>{counts.overdue?`${counts.overdue} overdue`:counts.stale?`${counts.stale} mileage stale`:'No overdue maintenance'}</small></a>
       <a className="easy-card easy-metric" href="/repair-board"><span>Out of service</span><strong>{data?.oosUnits.length??0}</strong><small>Units that should not be dispatched</small></a>
       <a className="easy-card easy-metric" href="/repair-board"><span>Being worked now</span><strong>{counts.active}</strong><small>{counts.unassigned} open items still unassigned</small></a>
     </section>
@@ -86,7 +88,7 @@ export default function TodayPage(){
     <section className="easy-attention">
       <div className="easy-card easy-card-body">
         <h2 className="easy-section-title">Needs attention</h2>
-        <p className="easy-section-copy">Out-of-service, overdue, and unassigned work is brought here automatically.</p>
+        <p className="easy-section-copy">Out-of-service, overdue, stale mileage, and unassigned work is brought here automatically.</p>
         <div className="easy-list">
           {attention.map(item=><a key={item.key} className="easy-row" href={`/unit?unit=${encodeURIComponent(item.unit)}`} style={{textDecoration:'none'}}>
             <div className="easy-row-main"><strong>Unit {item.unit} — {item.detail}</strong><span>Open the unit to see everything tied to it.</span></div>
