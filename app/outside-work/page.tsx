@@ -1,1 +1,1 @@
-export { default } from "./camera-intake";
+export { default } from "./intake-switcher";
