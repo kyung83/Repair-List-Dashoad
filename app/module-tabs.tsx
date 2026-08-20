@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 type Role = "viewer" | "mechanic" | "manager" | "admin";
-type ModuleName = "shop" | "units" | "parts" | "reports";
+type ModuleName = "shop" | "units" | "parts" | "reports" | "diagnostics";
 type Tab = { href: string; label: string; exact?: boolean; roles: Role[] };
 
+const adminRoles: Role[] = ["admin"];
 const managerRoles: Role[] = ["manager", "admin"];
 const workingRoles: Role[] = ["mechanic", "manager", "admin"];
 const officeRoles: Role[] = ["viewer", "manager", "admin"];
@@ -16,7 +17,6 @@ const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
     tabs: [
       { href: "/repair-board", label: "Open Work", roles: workingRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
-      // Printing is a separate full-sheet view so review/edit screens stay compact.
       { href: "/work-orders/print", label: "Print Work Orders", roles: officeRoles },
     ],
   },
@@ -32,7 +32,6 @@ const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
     tabs: [
       { href: "/parts-desk", label: "Parts Desk", roles: managerRoles },
       { href: "/inventory", label: "Inventory", roles: managerRoles },
-      { href: "/invoices", label: "Invoices", roles: managerRoles },
     ],
   },
   reports: {
@@ -40,6 +39,13 @@ const moduleConfig: Record<ModuleName, { label: string; tabs: Tab[] }> = {
     tabs: [
       { href: "/reports", label: "Reports", exact: true, roles: officeRoles },
       { href: "/reports/history", label: "Repair History", roles: officeRoles },
+    ],
+  },
+  diagnostics: {
+    label: "Diagnostics",
+    tabs: [
+      { href: "/admin/geotab-review", label: "Geotab Review", roles: adminRoles },
+      { href: "/admin/equipment-merge", label: "Equipment Forks", roles: adminRoles },
     ],
   },
 };
@@ -66,6 +72,7 @@ export default function ModuleTabs({ module }: { module: ModuleName }) {
     return () => { cancelled = true; };
   }, []);
 
+  if (module === "parts" && pathname.startsWith("/invoices")) return null;
   const tabs = role ? config.tabs.filter((tab) => tab.roles.includes(role)) : [];
   if (tabs.length < 2) return null;
 
