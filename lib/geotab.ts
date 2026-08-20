@@ -18,10 +18,14 @@ type ProtectedGeotabConfig = {
   serviceUsername: string;
   servicePassword: string;
 };
-
 type GeotabPayload<T> = {
   result?: T;
   error?: { message?: string; name?: string };
+};
+type DeviceAssignmentRow = {
+  geotab_device_id: string;
+  equipment_id: number;
+  unit: string;
 };
 
 let protectedLoginPromise: Promise<GeotabLogin> | undefined;
@@ -44,18 +48,16 @@ function text(value: unknown) {
 }
 
 function get(source: JsonRecord, ...names: string[]) {
-  for (const name of names) {
-    if (name in source) return source[name];
-  }
+  for (const name of names) if (name in source) return source[name];
   return undefined;
 }
 
 function objectId(value: unknown) {
-  return text(get(record(value), 'id', 'Id'));
+  return text(get(record(value), 'id', 'Id')).trim();
 }
 
 function objectName(value: unknown) {
-  return text(get(record(value), 'name', 'Name'));
+  return text(get(record(value), 'name', 'Name')).trim();
 }
 
 function dateValue(value: unknown) {
@@ -66,7 +68,7 @@ function dateValue(value: unknown) {
 }
 
 function isCurrentlyActiveDevice(device: JsonRecord, now = Date.now()) {
-  const id = objectId(device).trim();
+  const id = objectId(device);
   if (!id || id.toLowerCase() === 'nodeviceid') return false;
   const activeFrom = dateValue(get(device, 'activeFrom', 'ActiveFrom'));
   const activeTo = dateValue(get(device, 'activeTo', 'ActiveTo'));
@@ -156,7 +158,7 @@ async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Pro
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'accept': 'application/json',
+      accept: 'application/json',
     },
     body: JSON.stringify({ method, params }),
   });
@@ -178,9 +180,7 @@ async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Pro
 function endpointFromPath(pathValue: unknown) {
   const path = text(pathValue).trim();
   if (!path || path.toLowerCase() === 'thisserver') return 'https://my.geotab.com/apiv1';
-  const host = path
-    .replace(/^https?:\/\//i, '')
-    .replace(/\/.*$/, '');
+  const host = path.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
   if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Geotab returned an invalid API path');
   return `https://${host}/apiv1`;
 }
@@ -280,9 +280,7 @@ function locationText(log: JsonRecord) {
   const location = get(log, 'location', 'Location');
   if (typeof location === 'string') return location;
   const value = record(location);
-  return text(
-    get(value, 'formattedAddress', 'FormattedAddress', 'city', 'City', 'address', 'Address'),
-  );
+  return text(get(value, 'formattedAddress', 'FormattedAddress', 'city', 'City', 'address', 'Address'));
 }
 
 function resolveDefectName(defect: JsonRecord, translations: Map<string, string>) {
@@ -302,6 +300,40 @@ async function runInChunks(db: D1Database, statements: D1PreparedStatement[], ch
   }
 }
 
+export async function getGeotabDeviceOptions(env: GeotabEnv) {
+  if (!isGeotabConfigured(env)) return { configured: false, devices: [] as never[] };
+  const auth = await authenticate(env);
+  const [devices, assignmentsResult] = await Promise.all([
+    call<JsonRecord[]>(auth, 'Get', { typeName: 'Device' }),
+    env.DB.prepare(`
+      SELECT a.geotab_device_id, a.equipment_id, e.unit
+      FROM equipment_geotab_devices a
+      JOIN equipment e ON e.id = a.equipment_id
+      WHERE a.current = 1
+    `).all<DeviceAssignmentRow>(),
+  ]);
+  const assignments = new Map(assignmentsResult.results.map((row) => [row.geotab_device_id, row]));
+
+  const options = devices
+    .filter((device) => isCurrentlyActiveDevice(device))
+    .map((device) => {
+      const id = objectId(device);
+      const assigned = assignments.get(id);
+      return {
+        id,
+        name: objectName(device) || id,
+        serialNumber: text(get(device, 'serialNumber', 'SerialNumber')).trim(),
+        vin: text(get(device, 'vehicleIdentificationNumber', 'VehicleIdentificationNumber')).trim().toUpperCase(),
+        assignedEquipmentId: assigned?.equipment_id ?? null,
+        assignedUnit: assigned?.unit ?? '',
+      };
+    })
+    .filter((device) => Boolean(device.id))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  return { configured: true, devices: options };
+}
+
 export async function syncGeotabDvir(env: GeotabEnv) {
   if (!isGeotabConfigured(env)) return { ok: true, skipped: true, reason: 'not-configured' };
   const auth = await authenticate(env);
@@ -310,7 +342,6 @@ export async function syncGeotabDvir(env: GeotabEnv) {
     const toDate = new Date().toISOString();
     const fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    // Match the proven Apps Script: a date-bounded DVIRLog Get with no resultsLimit.
     const logs = await call<JsonRecord[]>(auth, 'Get', {
       typeName: 'DVIRLog',
       search: { fromDate, toDate },
@@ -326,64 +357,13 @@ export async function syncGeotabDvir(env: GeotabEnv) {
       safeGetAll(auth, 'DefectListPart'),
     ]);
 
+    // Master Equipment is authoritative. Device/Trailer catalogs are used only
+    // to resolve DVIR display names here; this sync never creates, renames,
+    // reclassifies, or reactivates equipment records.
     const deviceNames = lookupById(devices);
     const trailerNames = lookupById(trailers);
     const userNames = lookupById(users);
     const translations = lookupById([...defects, ...defectLists, ...defectParts, ...defectListParts]);
-
-    const [existingDevices, existingTrailers] = await Promise.all([
-      env.DB.prepare(`SELECT id, geotab_device_id FROM equipment WHERE geotab_device_id IS NOT NULL`).all(),
-      env.DB.prepare(`SELECT id, geotab_trailer_id FROM equipment WHERE geotab_trailer_id IS NOT NULL`).all(),
-    ]);
-    const deviceRowByGeotabId = new Map(
-      (existingDevices.results as { id: number; geotab_device_id: string }[]).map((row) => [String(row.geotab_device_id), row.id]),
-    );
-    const trailerRowByGeotabId = new Map(
-      (existingTrailers.results as { id: number; geotab_trailer_id: string }[]).map((row) => [String(row.geotab_trailer_id), row.id]),
-    );
-
-    const equipmentStatements: D1PreparedStatement[] = [];
-    for (const device of devices.filter((candidate) => isCurrentlyActiveDevice(candidate))) {
-      const id = objectId(device);
-      const unit = objectName(device);
-      const serial = typeof device.serialNumber === 'string' ? device.serialNumber : null;
-      if (!id || !unit) continue;
-      const existingId = deviceRowByGeotabId.get(id);
-      if (existingId) {
-        equipmentStatements.push(env.DB.prepare(`
-          UPDATE equipment SET unit = ?, equipment_type = 'truck', active = 1,
-            geotab_serial = COALESCE(?, geotab_serial), updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).bind(unit, serial, existingId));
-      } else {
-        equipmentStatements.push(env.DB.prepare(`
-          INSERT INTO equipment (unit, category, equipment_type, geotab_device_id, geotab_serial, updated_at)
-          VALUES (?, 'fleet', 'truck', ?, ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(unit) DO UPDATE SET equipment_type = 'truck', geotab_device_id = excluded.geotab_device_id,
-            active = 1, updated_at = CURRENT_TIMESTAMP
-        `).bind(unit, id, serial));
-      }
-    }
-    for (const trailer of trailers) {
-      const id = objectId(trailer);
-      const unit = objectName(trailer);
-      if (!id || !unit) continue;
-      const existingId = trailerRowByGeotabId.get(id);
-      if (existingId) {
-        equipmentStatements.push(env.DB.prepare(`
-          UPDATE equipment SET unit = ?, equipment_type = 'trailer', active = 1, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).bind(unit, existingId));
-      } else {
-        equipmentStatements.push(env.DB.prepare(`
-          INSERT INTO equipment (unit, category, equipment_type, geotab_trailer_id, updated_at)
-          VALUES (?, 'fleet', 'trailer', ?, CURRENT_TIMESTAMP)
-          ON CONFLICT(unit) DO UPDATE SET equipment_type = 'trailer', geotab_trailer_id = excluded.geotab_trailer_id,
-            active = 1, updated_at = CURRENT_TIMESTAMP
-        `).bind(unit, id));
-      }
-    }
-    await runInChunks(env.DB, equipmentStatements);
 
     const statements: D1PreparedStatement[] = [];
     let defectCount = 0;
@@ -419,10 +399,15 @@ export async function syncGeotabDvir(env: GeotabEnv) {
             photos_url, repaired, repair_date, raw_json, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
           ON CONFLICT(geotab_defect_id) DO UPDATE SET
-            geotab_log_id = excluded.geotab_log_id, asset_unit = excluded.asset_unit,
-            driver = excluded.driver, defect = excluded.defect, comments = excluded.comments,
-            photos_url = excluded.photos_url, repaired = excluded.repaired,
-            repair_date = excluded.repair_date, raw_json = excluded.raw_json,
+            geotab_log_id = excluded.geotab_log_id,
+            asset_unit = excluded.asset_unit,
+            driver = excluded.driver,
+            defect = excluded.defect,
+            comments = excluded.comments,
+            photos_url = excluded.photos_url,
+            repaired = excluded.repaired,
+            repair_date = excluded.repair_date,
+            raw_json = excluded.raw_json,
             updated_at = CURRENT_TIMESTAMP
         `).bind(
           logId,
@@ -430,7 +415,11 @@ export async function syncGeotabDvir(env: GeotabEnv) {
           unit,
           driver,
           defectName,
-          [commentText, location ? `Location: ${location}` : '', safeReviewed ? 'Inspection reviewed and safe' : ''].filter(Boolean).join(' | '),
+          [
+            commentText,
+            location ? `Location: ${location}` : '',
+            safeReviewed ? 'Inspection reviewed and safe' : '',
+          ].filter(Boolean).join(' | '),
           photos.length ? `geotab-media:${photos.join(',')}` : '',
           repaired ? 1 : 0,
           repairDate,
@@ -443,8 +432,10 @@ export async function syncGeotabDvir(env: GeotabEnv) {
     await env.DB.prepare(`
       INSERT INTO sync_state (feed_name, version_token, last_success_at, last_error)
       VALUES ('geotab_dvir', NULL, ?, NULL)
-      ON CONFLICT(feed_name) DO UPDATE SET version_token = NULL,
-        last_success_at = excluded.last_success_at, last_error = NULL
+      ON CONFLICT(feed_name) DO UPDATE SET
+        version_token = NULL,
+        last_success_at = excluded.last_success_at,
+        last_error = NULL
     `).bind(toDate).run();
 
     return { ok: true, skipped: false, logs: logs.length, defects: defectCount, fromDate, toDate };
@@ -462,8 +453,6 @@ export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, de
   if (!logId || !defectId) throw new Error('Geotab log ID and defect ID are required');
   const auth = await authenticate(env);
 
-  // Match the Apps Script repair flow: fetch the exact DVIRLog, fetch the
-  // current Geotab user, mutate the nested defect, then Set the full DVIRLog.
   const logs = await call<JsonRecord[]>(auth, 'Get', {
     typeName: 'DVIRLog',
     search: { id: logId },
