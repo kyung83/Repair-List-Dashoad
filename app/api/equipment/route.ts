@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { bulkArchiveEquipmentMasterItems } from '@/lib/equipment-bulk-archive';
 import {
   archiveEquipmentMasterItem,
   getEquipmentMaster,
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     const action = String(body.action ?? 'save');
     if (action === 'save') return Response.json(await saveEquipmentMasterItem(env.DB, body));
     if (action === 'archive') return Response.json(await archiveEquipmentMasterItem(env.DB, body));
+    if (action === 'bulkArchive') return Response.json(await bulkArchiveEquipmentMasterItems(env.DB, body));
     if (action === 'restore') return Response.json(await restoreEquipmentMasterItem(env.DB, body));
     return Response.json({ error: 'Unknown equipment action.' }, { status: 400 });
   } catch (error) {
