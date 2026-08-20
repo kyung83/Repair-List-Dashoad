@@ -20,6 +20,17 @@ function lineType(type:string){
   if(type==="outside")return "OUTSIDE";
   return "OTHER";
 }
+function paymentTermsLabel(invoiceDate:string,dueDate:string){
+  if(!dueDate)return "Not set";
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate)||!/^\d{4}-\d{2}-\d{2}$/.test(dueDate))return "Set date";
+  const start=new Date(`${invoiceDate}T00:00:00Z`);
+  const due=new Date(`${dueDate}T00:00:00Z`);
+  if(Number.isNaN(start.getTime())||Number.isNaN(due.getTime()))return "Set date";
+  const days=Math.round((due.getTime()-start.getTime())/86400000);
+  if(days===0)return "Due on receipt";
+  if([15,30,60,90].includes(days))return `Net ${days}`;
+  return "Set date";
+}
 
 export default function InvoicePrintPage(){
   const[data,setData]=useState<InvoiceDetail|null>(null);
@@ -89,6 +100,7 @@ function InvoiceSheet({detail}:{detail:InvoiceDetail}){
       </div>
       <div className="meta-box">
         <Meta label="Invoice date" value={invoice.invoiceDate||"—"}/>
+        <Meta label="Payment terms" value={paymentTermsLabel(invoice.invoiceDate,invoice.dueDate)}/>
         <Meta label="Due date" value={invoice.dueDate||"—"}/>
         <Meta label="Status" value={invoice.status||"—"} strong={isVoid}/>
         <Meta label="Unit" value={invoice.unit||"—"}/>
