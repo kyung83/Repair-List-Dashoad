@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import ModuleTabs from "../module-tabs";
 
 type Equipment = { id:number; unit:string; vin:string; equipmentType:string; currentMileage:number|null };
@@ -12,18 +12,27 @@ type OutsideRecord = {
 type Payload = { equipment:Equipment[]; records:OutsideRecord[]; error?:string };
 type FormState = { equipmentId:string; vendorName:string; invoiceNumber:string; invoiceDate:string; mileage:string; totalAmount:string; serviceSummary:string };
 type Detected = Partial<FormState> & { equipment?:Equipment };
-
 type TesseractStatus = { status?:string; progress?:number };
 type TesseractWorker = { recognize:(source:unknown)=>Promise<{data:{text:string}}>; terminate:()=>Promise<void> };
+type TesseractOptions = {
+  logger?:(status:TesseractStatus)=>void;
+  workerPath?:string;
+  corePath?:string;
+  langPath?:string;
+};
 type BrowserTools = Window & {
-  Tesseract?: { createWorker:(language?:string,oem?:number,options?:{logger?:(status:TesseractStatus)=>void})=>Promise<TesseractWorker> };
+  Tesseract?: { createWorker:(language?:string,oem?:number,options?:TesseractOptions)=>Promise<TesseractWorker> };
   pdfjsLib?: { GlobalWorkerOptions:{workerSrc:string}; getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>} };
 };
 
 const emptyForm:FormState={equipmentId:"",vendorName:"",invoiceNumber:"",invoiceDate:"",mileage:"",totalAmount:"0",serviceSummary:""};
-const TESSERACT_SCRIPT="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-const PDF_SCRIPT="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-const PDF_WORKER="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const READER_BASE="/api/outside-work-reader";
+const TESSERACT_SCRIPT=`${READER_BASE}/tesseract.min.js`;
+const TESSERACT_WORKER=`${READER_BASE}/tesseract-worker.min.js`;
+const TESSERACT_CORE=`${READER_BASE}/core`;
+const TESSERACT_LANG=`${READER_BASE}/lang`;
+const PDF_SCRIPT=`${READER_BASE}/pdf.min.js`;
+const PDF_WORKER=`${READER_BASE}/pdf.worker.min.js`;
 
 function normalizeUnit(value:string){return value.toUpperCase().replace(/[^A-Z0-9]/g,"");}
 function normalizeVin(value:string){return value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g,"");}
@@ -145,18 +154,29 @@ function detectDocument(text:string,equipment:Equipment[]):Detected{
 
 function loadScript(id:string,src:string){
   return new Promise<void>((resolve,reject)=>{
-    const existing=document.getElementById(id) as HTMLScriptElement|null;
-    if(existing){
-      if(existing.dataset.ready==='1'){resolve();return;}
-      existing.addEventListener('load',()=>resolve(),{once:true});
-      existing.addEventListener('error',()=>reject(new Error('Document-reading library could not be loaded.')), {once:true});
-      return;
+    let script=document.getElementById(id) as HTMLScriptElement|null;
+    if(script?.dataset.ready==='1'){resolve();return;}
+    if(script?.dataset.failed==='1'){script.remove();script=null;}
+    if(!script){
+      script=document.createElement('script');
+      script.id=id;script.src=src;script.async=true;script.crossOrigin='anonymous';
+      document.head.appendChild(script);
     }
-    const script=document.createElement('script');
-    script.id=id;script.src=src;script.async=true;
-    script.addEventListener('load',()=>{script.dataset.ready='1';resolve();},{once:true});
-    script.addEventListener('error',()=>reject(new Error('Document-reading library could not be loaded.')), {once:true});
-    document.head.appendChild(script);
+    const target=script;
+    let settled=false;
+    const finish=(error?:Error)=>{
+      if(settled)return;
+      settled=true;
+      window.clearTimeout(timer);
+      target.removeEventListener('load',loaded);
+      target.removeEventListener('error',failed);
+      if(error){target.dataset.failed='1';reject(error);}else{target.dataset.ready='1';resolve();}
+    };
+    const loaded=()=>finish();
+    const failed=()=>finish(new Error('Document reader could not load. Please try Read Again.'));
+    const timer=window.setTimeout(()=>finish(new Error('Document reader timed out while loading. Please try Read Again.')),20000);
+    target.addEventListener('load',loaded,{once:true});
+    target.addEventListener('error',failed,{once:true});
   });
 }
 
@@ -171,6 +191,7 @@ export default function OutsideWorkPage(){
   const[progress,setProgress]=useState("");
   const[busy,setBusy]=useState(false);
   const[reading,setReading]=useState(false);
+  const fileInputRef=useRef<HTMLInputElement|null>(null);
 
   async function load(){
     const response=await fetch('/api/outside-work',{cache:'no-store'});
@@ -198,8 +219,9 @@ export default function OutsideWorkPage(){
   }
 
   function chooseFile(next:File|null){
-    if(previewUrl)URL.revokeObjectURL(previewUrl);
-    setFile(next);setPreviewUrl(next?URL.createObjectURL(next):"");setRawText("");setProgress("");setMessage("");
+    setFile(next);
+    setPreviewUrl(next?URL.createObjectURL(next):"");
+    setRawText("");setProgress("");setMessage(next?`Selected ${next.name}. Starting document reader...`:"");
     const requested=new URLSearchParams(window.location.search).get('unit')||'';
     const preselected=data.equipment.find(row=>normalizeUnit(row.unit)===normalizeUnit(requested));
     setUnitInput(preselected?.unit||"");
@@ -221,17 +243,23 @@ export default function OutsideWorkPage(){
     }));
     if(detected.equipment)setUnitInput(detected.equipment.unit);
     const found=[detected.equipment?'unit':'',detected.vendorName?'vendor':'',detected.invoiceNumber?'invoice':'',detected.invoiceDate?'date':'',detected.mileage?'mileage':'',detected.totalAmount?'total':'',detected.serviceSummary?'work lines':''].filter(Boolean);
-    setMessage(found.length?`Rules found: ${found.join(', ')}. Review everything before saving.`:'No reliable labeled fields were found. Enter the information manually and save the original document.');
+    setMessage(found.length?`Reader finished. Found: ${found.join(', ')}. Review everything before saving.`:'Reader finished, but no reliable labeled fields were found. Enter or correct the information manually and save the original document.');
   }
 
   async function createOcrWorker(){
+    setProgress('Loading OCR engine...');
     await loadScript('outside-work-tesseract',TESSERACT_SCRIPT);
     const api=(window as BrowserTools).Tesseract;
     if(!api)throw new Error('Browser OCR did not initialize.');
-    return api.createWorker('eng',1,{logger:status=>{
-      const pct=typeof status.progress==='number'?` ${Math.round(status.progress*100)}%`:'';
-      setProgress(`${status.status||'Reading scan'}${pct}`);
-    }});
+    return api.createWorker('eng',1,{
+      workerPath:TESSERACT_WORKER,
+      corePath:TESSERACT_CORE,
+      langPath:TESSERACT_LANG,
+      logger:status=>{
+        const pct=typeof status.progress==='number'?` ${Math.round(status.progress*100)}%`:'';
+        setProgress(`${status.status||'Reading scan'}${pct}`);
+      },
+    });
   }
 
   async function readImage(target:File){
@@ -240,6 +268,7 @@ export default function OutsideWorkPage(){
   }
 
   async function readPdf(target:File){
+    setProgress('Loading PDF reader...');
     await loadScript('outside-work-pdfjs',PDF_SCRIPT);
     const pdfjs=(window as BrowserTools).pdfjsLib;
     if(!pdfjs)throw new Error('PDF reader did not initialize.');
@@ -258,11 +287,11 @@ export default function OutsideWorkPage(){
       }
       const directText=direct.join('\n').trim();
       if(directText.replace(/\s/g,'').length>=120){
-        setProgress(Number(pdf.numPages)>pageCount?`Read text from first ${pageCount} pages`:'PDF text read directly');
+        if(Number(pdf.numPages)>pageCount)setMessage(`This PDF has ${pdf.numPages} pages. The reader checked the first ${pageCount}; review the original before saving.`);
         return directText;
       }
 
-      setProgress('Scanned PDF detected - starting browser OCR');
+      setProgress('Scanned PDF detected - starting OCR...');
       const worker=await createOcrWorker();
       try{
         const pages:string[]=[];
@@ -278,24 +307,36 @@ export default function OutsideWorkPage(){
           pages.push((await worker.recognize(canvas)).data.text||'');
           canvas.width=1;canvas.height=1;
         }
-        if(Number(pdf.numPages)>pageCount)setMessage(`This PDF has ${pdf.numPages} pages. Version 1 read the first ${pageCount}; review the original before saving.`);
+        if(Number(pdf.numPages)>pageCount)setMessage(`This PDF has ${pdf.numPages} pages. The reader checked the first ${pageCount}; review the original before saving.`);
         return pages.join('\n');
       }finally{await worker.terminate();}
     }finally{if(typeof pdf.destroy==='function')await pdf.destroy();}
   }
 
-  async function readDocument(){
-    if(!file){setMessage('Choose a PDF or photo first.');return;}
-    setReading(true);setMessage('');setProgress('Starting document reader...');
+  async function readDocument(target:File|null=file){
+    if(!target){
+      setMessage('Choose a PDF or photo. The reader will start automatically after you choose it.');
+      fileInputRef.current?.click();
+      return;
+    }
+    if(reading||busy)return;
+    setReading(true);setMessage(`Reading ${target.name}...`);setProgress('Starting document reader...');
+    await new Promise<void>(resolve=>window.requestAnimationFrame(()=>resolve()));
     try{
-      const isPdf=file.type==='application/pdf'||file.name.toLowerCase().endsWith('.pdf');
-      const text=isPdf?await readPdf(file):await readImage(file);
-      setRawText(text.trim());
-      if(!text.trim())setMessage('No readable text was found. Enter the fields manually and keep the original attached.');
-      else applyRules(text);
+      const isPdf=target.type==='application/pdf'||target.name.toLowerCase().endsWith('.pdf');
+      const text=isPdf?await readPdf(target):await readImage(target);
+      const trimmed=text.trim();
+      setRawText(trimmed);
+      if(!trimmed)setMessage('Reader finished but no readable text was found. Enter the fields manually and keep the original attached.');
+      else applyRules(trimmed);
     }catch(error){
-      setMessage(`${error instanceof Error?error.message:'Document could not be read.'} You can still enter the fields manually and upload the original.`);
+      setMessage(`${error instanceof Error?error.message:'Document could not be read.'} You can press Read Again, or enter the fields manually and still save the original.`);
     }finally{setReading(false);setProgress('');}
+  }
+
+  function onFileChanged(next:File|null){
+    chooseFile(next);
+    if(next)void readDocument(next);
   }
 
   async function submit(event:FormEvent){
@@ -322,7 +363,7 @@ export default function OutsideWorkPage(){
     <header style={{marginTop:24}}>
       <p style={eyebrow}>SHOP · OUTSIDE WORK</p>
       <h1 style={title}>Scan outside work into unit history</h1>
-      <p style={subtitle}>Upload a vendor PDF or take a photo. Digital PDFs are read directly; photos and scanned PDFs use ordinary browser OCR. No generative AI decides what gets recorded. You review every field before a repair record is created.</p>
+      <p style={subtitle}>Upload a vendor PDF or take a photo. The reader starts automatically after you choose the file, and you can press Read Again anytime. You review every field before a repair record is created.</p>
     </header>
 
     {message&&<div style={notice}>{message}</div>}
@@ -331,10 +372,11 @@ export default function OutsideWorkPage(){
       <div style={sectionHead}><div><h2 style={h2}>1. Original vendor document</h2><p style={copy}>PDF, phone photo, or scan · maximum 15 MB. The original is stored with the repair record.</p></div></div>
       <div style={{display:'grid',gridTemplateColumns:'minmax(280px,.75fr) minmax(340px,1.25fr)',gap:16,alignItems:'start'}}>
         <div style={{display:'grid',gap:10}}>
-          <input type="file" accept="image/*,application/pdf" capture="environment" onChange={event=>chooseFile(event.target.files?.[0]||null)} />
-          <button type="button" style={primary} disabled={!file||reading||busy} onClick={()=>void readDocument()}>{reading?'Reading document...':'READ DOCUMENT'}</button>
+          <input ref={fileInputRef} type="file" accept="image/*,application/pdf" capture="environment" disabled={reading||busy} onChange={event=>onFileChanged(event.target.files?.[0]||null)} />
+          <button type="button" style={{...primary,opacity:reading||busy?.6:1}} disabled={reading||busy} onClick={()=>void readDocument()}>{reading?'READING DOCUMENT...':file?'READ AGAIN':'CHOOSE & READ DOCUMENT'}</button>
+          {file&&<div style={selectedFile}><strong>Selected:</strong> {file.name}</div>}
           {progress&&<div style={progressBox}>{progress}</div>}
-          <div style={small}><strong>Without OCR:</strong> you can skip Read Document, enter the fields yourself, and still save the original invoice. OCR only reads characters; it does not create the maintenance record.</div>
+          <div style={small}>If automatic reading cannot handle a vendor scan, you can still type the fields manually and save the original invoice. The scan never updates Geotab mileage.</div>
         </div>
         <div style={previewBox}>
           {!previewUrl?<div style={empty}>Choose a document to preview it here.</div>:file?.type.startsWith('image/')?<img src={previewUrl} alt="Outside work document preview" style={{maxWidth:'100%',maxHeight:430,objectFit:'contain'}}/>:<iframe src={previewUrl} title="Outside work PDF preview" style={{width:'100%',height:430,border:0}}/>}
@@ -351,7 +393,7 @@ export default function OutsideWorkPage(){
     <form onSubmit={submit} style={{...panel,marginTop:16}}>
       <div style={sectionHead}><div><h2 style={h2}>2. Review what will be recorded</h2><p style={copy}>Nothing is created until you press Create Outside Repair Record.</p></div>{selectedEquipment&&<span style={pill}>UNIT {selectedEquipment.unit}</span>}</div>
       <div style={formGrid}>
-        <Field label="Master Equipment unit" help="Required. OCR only selects when the unit or VIN is an exact match."><input list="outside-work-units" required value={unitInput} onChange={event=>setChosenUnit(event.target.value)} placeholder="Unit number" style={input}/><datalist id="outside-work-units">{data.equipment.map(row=><option key={row.id} value={row.unit}>{row.vin?`VIN ${row.vin}`:row.equipmentType}</option>)}</datalist></Field>
+        <Field label="Master Equipment unit" help="Required. The reader only selects when the unit or VIN is an exact match."><input list="outside-work-units" required value={unitInput} onChange={event=>setChosenUnit(event.target.value)} placeholder="Unit number" style={input}/><datalist id="outside-work-units">{data.equipment.map(row=><option key={row.id} value={row.unit}>{row.vin?`VIN ${row.vin}`:row.equipmentType}</option>)}</datalist></Field>
         <Field label="Outside vendor"><input value={form.vendorName} onChange={event=>setForm({...form,vendorName:event.target.value})} placeholder="Dealer / repair shop" style={input}/></Field>
         <Field label="Invoice / RO number"><input value={form.invoiceNumber} onChange={event=>setForm({...form,invoiceNumber:event.target.value})} placeholder="Vendor invoice or repair order" style={input}/></Field>
         <Field label="Service date"><input type="date" value={form.invoiceDate} onChange={event=>setForm({...form,invoiceDate:event.target.value})} style={input}/></Field>
@@ -360,7 +402,7 @@ export default function OutsideWorkPage(){
         <div style={{gridColumn:'1/-1'}}><Field label="Work performed" help="Required. Keep the actual vendor wording or edit it into useful repair-history lines."><textarea required value={form.serviceSummary} onChange={event=>setForm({...form,serviceSummary:event.target.value})} placeholder={'Example:\nReplace water pump\nReplace serpentine belt\nCooling system service'} style={{...input,minHeight:150}}/></Field></div>
       </div>
       {selectedEquipment&&<div style={equipmentCheck}><strong>Matched Master Equipment: {selectedEquipment.unit}</strong><span>{selectedEquipment.vin?`VIN ${selectedEquipment.vin} · `:''}{selectedEquipment.currentMileage==null?'Current dashboard mileage unavailable':`Dashboard mileage ${selectedEquipment.currentMileage.toLocaleString()} mi`}</span><small>Invoice mileage above is stored separately and does not overwrite this value.</small></div>}
-      <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap',marginTop:14}}><span style={small}>Creates one completed repair with source <strong>Outside Work</strong>, the vendor total, and the original document attached.</span><button type="submit" style={{...primary,minHeight:44}} disabled={busy}>{busy?'SAVING...':'CREATE OUTSIDE REPAIR RECORD'}</button></div>
+      <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'center',flexWrap:'wrap',marginTop:14}}><span style={small}>Creates one completed repair with source <strong>Outside Work</strong>, the vendor total, and the original document attached.</span><button type="submit" style={{...primary,minHeight:44,opacity:busy?.6:1}} disabled={busy}>{busy?'SAVING...':'CREATE OUTSIDE REPAIR RECORD'}</button></div>
     </form>
 
     <section style={{...panel,marginTop:16}}>
@@ -388,6 +430,7 @@ const small:CSSProperties={fontSize:11,color:'#6c7a86',lineHeight:1.45};
 const mini:CSSProperties={fontSize:10,color:'#7c8993',marginTop:3};
 const notice:CSSProperties={marginTop:16,padding:'11px 13px',border:'1px solid #e2c278',borderRadius:9,background:'#fff9e8',lineHeight:1.45};
 const progressBox:CSSProperties={padding:'9px 10px',borderRadius:8,background:'#eef5f8',border:'1px solid #cddde6',fontSize:12,fontWeight:800,color:'#35556b'};
+const selectedFile:CSSProperties={padding:'8px 10px',borderRadius:8,background:'#f8fafb',border:'1px solid #dbe2e7',fontSize:12,color:'#435869',overflowWrap:'anywhere'};
 const previewBox:CSSProperties={minHeight:250,display:'grid',placeItems:'center',border:'1px solid #dbe2e7',borderRadius:10,background:'#f8fafb',overflow:'hidden'};
 const empty:CSSProperties={padding:24,color:'#7a8791',textAlign:'center'};
 const input:CSSProperties={width:'100%',boxSizing:'border-box',padding:'10px 11px',border:'1px solid #cbd5dd',borderRadius:8,background:'white',color:'#172536',fontSize:13};
