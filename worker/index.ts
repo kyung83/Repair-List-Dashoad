@@ -6,6 +6,7 @@ import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 import { syncGeotabYardPresence } from '../lib/geotab-yard';
 import { syncGeotabGpsShadow } from '../lib/geotab-gps-shadow';
+import { recoverStaleGeotabGps } from '../lib/geotab-gps-stale-recovery';
 
 interface Env {
   ASSETS: Fetcher;
@@ -168,23 +169,36 @@ const worker = {
     if (denied) return denied;
     return handler.fetch(request, env, ctx);
   },
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (controller.cron === '*/5 * * * *') {
+      let shadow: unknown = null;
+      let recovery: unknown = null;
+      try {
+        shadow = await syncGeotabGpsShadow(env);
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'geotab_gps_shadow_schedule_failed', error: String(error) }));
+      }
+      try {
+        const minute = new Date(controller.scheduledTime).getUTCMinutes();
+        const trailerBucket = minute % 15 === 0 ? (Math.floor(minute / 15) % 2) as 0 | 1 : null;
+        recovery = await recoverStaleGeotabGps(env, { trailerBucket });
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'geotab_targeted_gps_recovery_failed', error: String(error) }));
+      }
+      console.log(JSON.stringify({ event: 'geotab_five_minute_gps_sync', shadow, recovery }));
+      return;
+    }
+
     let yard: unknown = null;
-    let shadow: unknown = null;
     try {
       yard = await syncGeotabYardPresence(env);
     } catch (error) {
       console.error(JSON.stringify({ event: 'geotab_yard_sync_failed', error: String(error) }));
     }
-    try {
-      shadow = await syncGeotabGpsShadow(env);
-    } catch (error) {
-      console.error(JSON.stringify({ event: 'geotab_gps_shadow_schedule_failed', error: String(error) }));
-    }
     const fleet = await syncGeotabFleetMaster(env);
     const dvir = await syncGeotabDvir(env);
     await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
-    console.log(JSON.stringify({ event: 'geotab_two_hour_sync', yard, shadow, dvir, fleet }));
+    console.log(JSON.stringify({ event: 'geotab_two_hour_sync', yard, dvir, fleet }));
   },
 };
 export default worker;
