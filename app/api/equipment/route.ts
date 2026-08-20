@@ -4,7 +4,7 @@ import {
   getEquipmentMaster,
   restoreEquipmentMasterItem,
   saveEquipmentMasterItem,
-} from '@/lib/equipment-master';
+} from '@/lib/equipment-master-tracking';
 
 export async function GET() {
   try {
