@@ -5,6 +5,7 @@ PRAGMA foreign_keys = ON;
 -- historical Geotab names differ only by spaces/case, and archive obsolete
 -- numeric truck records that still carry a Geotab identity. Company vehicles
 -- and obvious van/plow/rental names are intentionally left alone.
+DROP TABLE IF EXISTS _semi_roster_0084;
 CREATE TABLE _semi_roster_0084 (
   canonical_unit TEXT PRIMARY KEY,
   numeric_unit INTEGER NOT NULL
