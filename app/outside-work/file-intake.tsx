@@ -87,7 +87,31 @@ function detectInvoiceNumber(lines:string[]){const labels=[/\bINVOICE\s*(?:NUMBE
 function detectDate(lines:string[]){const labels=[/\bSERVICE\s*DATE\b/i,/\bINVOICE\s*DATE\b/i,/\bREPAIR\s*DATE\b/i,/\bCLOSED\s*DATE\b/i,/\bCOMPLETED\s*DATE\b/i,/\bDATE\b/i];for(const label of labels){for(let i=0;i<Math.min(lines.length,80);i++){if(!label.test(lines[i]))continue;const same=dateTokens(valueAfterLabel(lines[i],label));if(same[0])return same[0];const next=dateTokens(lines[i+1]||"");if(next[0])return next[0];}}return"";}
 function detectMileage(lines:string[]){const label=/\b(?:ODOMETER|ODOM|ODO|MILEAGE|MILES|METER)(?:\s*(?:IN|OUT|ENDING|END))?\b/i;for(let i=0;i<lines.length;i++){if(!label.test(lines[i]))continue;const source=[lines[i],lines[i+1]||""].join(" ");const after=valueAfterLabel(source,label);const values=(after.match(/\b\d[\d,]{2,9}\b/g)||[]).map(value=>Number(value.replace(/,/g,""))).filter(value=>Number.isInteger(value)&&value>=0&&value<=10_000_000);if(!values.length)continue;if(/\bOUT\b/i.test(source)||values.length>1)return String(Math.max(...values));return String(values[0]);}return"";}
 function detectTotal(lines:string[]){const labels=[/\bAMOUNT\s*DUE\b/i,/\bBALANCE\s*DUE\b/i,/\bINVOICE\s*TOTAL\b/i,/\bGRAND\s*TOTAL\b/i,/\bTOTAL\s*DUE\b/i,/\bNET\s*DUE\b/i,/\bTOTAL\b/i];for(const label of labels){for(let i=lines.length-1;i>=0;i--){if(!label.test(lines[i])||/\bSUB\s*TOTAL\b|\bSUBTOTAL\b|\bTAX\s*TOTAL\b/i.test(lines[i]))continue;const values=amountValues(valueAfterLabel(lines[i],label));if(values.length)return values.at(-1)!.toFixed(2);const next=amountValues(lines[i+1]||"");if(next.length)return next.at(-1)!.toFixed(2);}}return"";}
-function detectVendor(lines:string[]){let best="";let bestScore=-999;for(let i=0;i<Math.min(lines.length,22);i++){const line=lines[i];if(line.length<3||line.length>110||!/[A-Z]/i.test(line))continue;if(/NORTHERN\s+LOGISTICS|NORLOWORLD|INVOICE|REPAIR\s+ORDER|WORK\s+ORDER|BILL\s+TO|SHIP\s+TO|CUSTOMER|ACCOUNT|PAGE\s+\d|\bDATE\b|PHONE|FAX|WWW\.|HTTPS?:|@|TERMS|SALESPERSON|PO\s*#|PURCHASE\s+ORDER/i.test(line))continue;if(/^\d+\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|ZIP)\b/i.test(line))continue;const letters=(line.match(/[A-Z]/gi)||[]).length;const digits=(line.match(/\d/g)||[]).length;if(letters<3||digits>letters)continue;let score=30-i;if(/\b(?:TRUCK|DIESEL|TIRE|SERVICE|REPAIR|MOTOR|FLEET|AUTO|AUTOMOTIVE|CENTER|CENTRE|DEALER|INC\.?|LLC|LTD|CORP|COMPANY|CO\.)\b/i.test(line))score+=40;if(line===line.toUpperCase())score+=8;if(line.length>=8&&line.length<=55)score+=8;if(score>bestScore){bestScore=score;best=line;}}return bestScore>=25?best:"";}
+function detectVendor(lines:string[]){
+  const reject=/NORTHERN\s+LOGISTICS|NORLOWORLD|INVOICE|REPAIR\s+ORDER|WORK\s+ORDER|BILL\s+TO|SHIP\s+TO|CUSTOMER|ACCOUNT|ACCT\b|FLEET\s+CHARGE|FLEET\s+CARD|CARD\s*(?:NO|NUMBER|#)?|CHARGE\b|AUTH(?:ORIZATION)?\b|APPROVAL\b|TRANSACTION\b|REFERENCE\b|REF\s*(?:NO|NUMBER|#)\b|PAYMENT|AMOUNT|BALANCE|PAGE\s+\d|\bDATE\b|PHONE|FAX|WWW\.|HTTPS?:|@|TERMS|SALESPERSON|PO\s*#|PURCHASE\s+ORDER|\bUNIT\b|\bTRUCK\b\s*(?:NO|NUMBER|#|UNIT)?|\bTRACTOR\b\s*(?:NO|NUMBER|#|UNIT)?|\bTRAILER\b\s*(?:NO|NUMBER|#|UNIT)?|\bVEHICLE\b\s*(?:NO|NUMBER|#|UNIT)?|\bEQUIPMENT\b\s*(?:NO|NUMBER|#|UNIT)?|\bASSET\b\s*(?:NO|NUMBER|#|UNIT)?|\bSTOCK\b\s*(?:NO|NUMBER|#)?/i;
+  const business=/\b(?:DIESEL|TIRE|SERVICE|REPAIR|MOTOR|AUTO|AUTOMOTIVE|CENTER|CENTRE|DEALER|GARAGE|SHOP|TRUCKING|BODY\s+SHOP|COLLISION|TOWING|INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i;
+  const knownBrand=/\b(?:KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK|INTERNATIONAL|CUMMINS|DETROIT|GOODYEAR|BRIDGESTONE|MICHELIN|LOVE'?S|TA\s+PETRO)\b/i;
+  let best="";let bestScore=-999;
+  for(let i=0;i<Math.min(lines.length,28);i++){
+    const line=lines[i];
+    if(line.length<3||line.length>110||!/[A-Z]/i.test(line))continue;
+    if(reject.test(line))continue;
+    if(/[Xx*#•]{2,}\s*\d{2,8}\b/.test(line))continue;
+    if(/^[A-Z][A-Z\s./-]{1,24}:\s*[Xx*#•\d -]{2,}$/i.test(line))continue;
+    if(/^\d+\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|ZIP)\b/i.test(line))continue;
+    const letters=(line.match(/[A-Z]/gi)||[]).length;const digits=(line.match(/\d/g)||[]).length;
+    if(letters<3||digits>letters)continue;
+    let score=36-i;
+    if(business.test(line))score+=45;
+    if(knownBrand.test(line))score+=45;
+    if(line===line.toUpperCase())score+=6;
+    if(line.length>=6&&line.length<=60)score+=8;
+    if(/:/.test(line))score-=18;
+    score-=Math.min(18,digits*3);
+    if(score>bestScore){bestScore=score;best=line;}
+  }
+  return bestScore>=42?best:"";
+}
 function detectServiceLines(lines:string[]){
   const metadata=/\b(?:INVOICE|REPAIR\s*ORDER|WORK\s*ORDER|CUSTOMER|BILL\s+TO|SHIP\s+TO|PHONE|FAX|TERMS|SALESPERSON|PAYMENT|AMOUNT\s+DUE|BALANCE\s+DUE|GRAND\s+TOTAL|INVOICE\s+TOTAL|SUB\s*TOTAL|SUBTOTAL|SALES\s+TAX|TAX\b|PART\s+NUMBER|PART\s*#|QTY|QUANTITY|UNIT\s+PRICE|EXTENDED|PAGE\s+\d)\b/i;
   const stop=/\b(?:AMOUNT\s+DUE|BALANCE\s+DUE|GRAND\s+TOTAL|INVOICE\s+TOTAL|SUB\s*TOTAL|SUBTOTAL|PAYMENT\s+METHOD|TERMS|SIGNATURE)\b/i;
