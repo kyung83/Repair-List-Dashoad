@@ -3,6 +3,7 @@ import { getSessionUser, type AppUser } from '@/lib/auth';
 import { checklistFor } from '@/lib/maintenance-checklists';
 
 type EventType = 'pm' | 'annual';
+type MileageSource = 'Geotab' | 'Geotab Stale' | 'Manual' | 'Verified Manual' | 'Unavailable';
 type RepairRow = {
   id: number;
   equipment_id: number | null;
@@ -54,6 +55,8 @@ type MutableItemRow = {
   result: 'pending' | 'pass' | 'fail' | 'na';
 };
 
+const GEOTAB_MILEAGE_STALE_HOURS = 6;
+
 function repairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   const id = match ? Number(match[1]) : 0;
@@ -69,6 +72,30 @@ function eventType(source: string): EventType {
 
 function canManage(user: AppUser) {
   return user.role === 'manager' || user.role === 'admin';
+}
+
+function timestampMs(value: string | null) {
+  if (!value) return null;
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function geotabMileageFresh(repair: RepairRow) {
+  if (!repair.geotab_device_id || repair.current_mileage == null) return false;
+  const updated = timestampMs(repair.mileage_updated_at);
+  if (updated == null) return false;
+  return (Date.now() - updated) / 3_600_000 <= GEOTAB_MILEAGE_STALE_HOURS;
+}
+
+function liveMileageSource(repair: RepairRow): MileageSource {
+  if (!repair.geotab_device_id) return repair.current_mileage == null ? 'Unavailable' : 'Manual';
+  return geotabMileageFresh(repair) ? 'Geotab' : repair.current_mileage == null ? 'Unavailable' : 'Geotab Stale';
+}
+
+function storedMileageSource(value: string | null, fallback: MileageSource): MileageSource {
+  if (value === 'Geotab' || value === 'Geotab Stale' || value === 'Manual' || value === 'Verified Manual' || value === 'Unavailable') return value;
+  return fallback;
 }
 
 async function requireUser(request: Request) {
@@ -116,7 +143,7 @@ async function ensureRun(user: AppUser, repair: RepairRow) {
   requireWorkAccess(user, repair);
   if (String(repair.status).toLowerCase().includes('complete')) throw new Error('That maintenance work order is already completed.');
   const kind = eventType(repair.source);
-  const source = repair.geotab_device_id ? 'Geotab' : 'Manual';
+  const source = liveMileageSource(repair);
   await env.DB.prepare(`
     INSERT OR IGNORE INTO maintenance_checklist_runs (
       repair_id, equipment_id, event_type, mileage_at_start, mileage_source,
@@ -251,6 +278,10 @@ async function syncCorrectiveRepair(
 async function payloadFor(repair: RepairRow) {
   const run = await loadRun(repair.id);
   const kind = eventType(repair.source);
+  const fresh = geotabMileageFresh(repair);
+  const liveSource = liveMileageSource(repair);
+  const mileageStale = Boolean(repair.geotab_device_id) && !fresh;
+  const mileageEntryAllowed = !repair.geotab_device_id || mileageStale;
   if (!run) {
     return {
       repairId: `repair-${repair.id}`,
@@ -260,8 +291,10 @@ async function payloadFor(repair: RepairRow) {
       started: false,
       status: 'not_started',
       currentMileage: repair.current_mileage,
-      mileageSource: repair.geotab_device_id ? 'Geotab' : 'Manual',
+      mileageSource: liveSource,
       mileageUpdatedAt: repair.mileage_updated_at,
+      mileageEntryAllowed,
+      mileageStale,
       items: checklistFor(kind).map((item) => ({ ...item, id: null, result: 'pending', notes: '', photos: [], correctiveRepair: null })),
     };
   }
@@ -290,6 +323,8 @@ async function payloadFor(repair: RepairRow) {
   }
   const pending = items.results.filter((item) => item.result === 'pending').length;
   const failed = items.results.filter((item) => item.result === 'fail').length;
+  const locked = run.status === 'ready' || run.status === 'completed';
+  const displaySource = locked ? storedMileageSource(run.mileage_source, liveSource) : liveSource;
   return {
     repairId: `repair-${repair.id}`,
     equipmentId: repair.equipment_id,
@@ -298,9 +333,11 @@ async function payloadFor(repair: RepairRow) {
     started: true,
     runId: run.id,
     status: run.status,
-    currentMileage: repair.current_mileage,
-    mileageSource: repair.geotab_device_id ? 'Geotab' : 'Manual',
-    mileageUpdatedAt: repair.mileage_updated_at,
+    currentMileage: locked ? run.mileage_at_completion : repair.current_mileage,
+    mileageSource: displaySource,
+    mileageUpdatedAt: locked ? run.mileage_updated_at : repair.mileage_updated_at,
+    mileageEntryAllowed: !locked && mileageEntryAllowed,
+    mileageStale,
     mileageAtStart: run.mileage_at_start,
     mileageAtCompletion: run.mileage_at_completion,
     startedAt: run.started_at,
@@ -455,32 +492,70 @@ export async function POST(request: Request) {
       if (Number(counts?.pending ?? 0) > 0) throw new Error('Finish every checklist item before completing this maintenance job.');
       if (Number(counts?.failed ?? 0) > 0) throw new Error('Failed checklist items must be corrected and changed to Pass before this maintenance job can be completed.');
 
-      let mileage = repair.current_mileage;
-      let source = repair.geotab_device_id ? 'Geotab' : 'Manual';
-      let mileageUpdatedAt = repair.mileage_updated_at;
-      if (!repair.geotab_device_id && body.mileage != null && String(body.mileage).trim() !== '') {
-        const supplied = Number(body.mileage);
+      const suppliedText = body.mileage == null ? '' : String(body.mileage).trim();
+      let suppliedMileage: number | null = null;
+      if (suppliedText) {
+        const supplied = Number(suppliedText);
         if (!Number.isInteger(supplied) || supplied < 0) throw new Error('Enter a valid current mileage.');
-        mileage = supplied;
+        suppliedMileage = supplied;
+      }
+
+      const tracked = Boolean(repair.geotab_device_id);
+      const fresh = geotabMileageFresh(repair);
+      let mileage = repair.current_mileage;
+      let source: MileageSource = liveMileageSource(repair);
+      let mileageUpdatedAt = repair.mileage_updated_at;
+
+      if (tracked) {
+        if (fresh && repair.current_mileage != null) {
+          source = 'Geotab';
+        } else if (suppliedMileage != null) {
+          mileage = suppliedMileage;
+          source = 'Verified Manual';
+          mileageUpdatedAt = new Date().toISOString();
+        } else if (repair.current_mileage != null) {
+          source = 'Geotab Stale';
+        } else {
+          mileage = null;
+          source = 'Unavailable';
+          mileageUpdatedAt = null;
+        }
+      } else if (suppliedMileage != null) {
+        mileage = suppliedMileage;
         source = 'Manual';
         mileageUpdatedAt = new Date().toISOString();
-        await env.DB.prepare(`
+      } else if (repair.current_mileage == null) {
+        source = 'Unavailable';
+        mileageUpdatedAt = null;
+      }
+
+      const statements: D1PreparedStatement[] = [];
+      if (!tracked && suppliedMileage != null) {
+        statements.push(env.DB.prepare(`
           UPDATE equipment
           SET current_mileage = ?, mileage_updated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND active = 1 AND geotab_device_id IS NULL
-        `).bind(supplied, repair.equipment_id).run();
+        `).bind(suppliedMileage, repair.equipment_id));
       }
-      if (eventType(repair.source) === 'pm' && repair.mileage_interval != null && mileage == null) {
-        throw new Error(repair.geotab_device_id
-          ? 'Geotab has not supplied a current odometer yet. Wait for mileage to sync before completing this PM.'
-          : 'Enter the current mileage before completing this PM.');
-      }
-      await env.DB.prepare(`
+      statements.push(env.DB.prepare(`
         UPDATE maintenance_checklist_runs
         SET status = 'ready', mileage_at_completion = ?, mileage_source = ?, mileage_updated_at = ?,
             ready_by_user_id = ?, ready_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).bind(mileage, source, mileageUpdatedAt, user.id, run.id).run();
+      `).bind(mileage, source, mileageUpdatedAt, user.id, run.id));
+      if (tracked && !fresh && suppliedMileage != null) {
+        const previous = repair.current_mileage == null ? 'none' : `${Number(repair.current_mileage).toLocaleString()} mi`;
+        statements.push(env.DB.prepare(`
+          INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+          VALUES (?, ?, ?, 'verified_manual_mileage', ?)
+        `).bind(
+          id,
+          user.id,
+          user.technicianId ?? null,
+          `${user.displayName} verified ${suppliedMileage.toLocaleString()} mi from the vehicle odometer because Geotab mileage was stale or unavailable. Last stored Geotab mileage: ${previous}.`.slice(0, 500),
+        ));
+      }
+      await env.DB.batch(statements);
       return Response.json({ ok: true, ready: true, ...(await payloadFor(await loadRepair(id))) });
     }
 
