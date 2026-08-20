@@ -1,10 +1,19 @@
 import { geotabProtectedConfig } from './geotab-protected-config';
+import { loadGeotabRuntimeCredentials } from './geotab-runtime-credentials';
 
 export type GeotabClientEnv = {
+  DB?: D1Database;
   GEOTAB_DATABASE?: string;
   GEOTAB_USERNAME?: string;
   GEOTAB_PASSWORD?: string;
   GEOTAB_CONFIG_PRIVATE_KEY?: string;
+  AUTH_BOOTSTRAP_TOKEN?: string;
+};
+
+export type GeotabCredentialInput = {
+  database: string;
+  username: string;
+  password: string;
 };
 
 export type GeotabJsonRecord = Record<string, unknown>;
@@ -59,10 +68,7 @@ function decodePem(value: string) {
   return decodeBase64(base64);
 }
 
-async function protectedLogin(env: GeotabClientEnv): Promise<Login> {
-  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
-    return { database: env.GEOTAB_DATABASE, userName: env.GEOTAB_USERNAME, password: env.GEOTAB_PASSWORD };
-  }
+async function protectedFallbackLogin(env: GeotabClientEnv): Promise<Login> {
   if (!env.GEOTAB_CONFIG_PRIVATE_KEY) throw new Error('Geotab configuration is missing');
 
   if (!protectedLoginPromise) {
@@ -93,6 +99,19 @@ async function protectedLogin(env: GeotabClientEnv): Promise<Login> {
     })();
   }
   return protectedLoginPromise;
+}
+
+async function configuredLogin(env: GeotabClientEnv): Promise<Login> {
+  // An administrator-saved replacement must take priority immediately. Do not cache this lookup:
+  // Diagnostics needs a newly saved account to start working without waiting for an isolate recycle.
+  if (env.DB) {
+    const runtime = await loadGeotabRuntimeCredentials(env.DB, env);
+    if (runtime) return { database: runtime.database, userName: runtime.username, password: runtime.password };
+  }
+  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
+    return { database: env.GEOTAB_DATABASE, userName: env.GEOTAB_USERNAME, password: env.GEOTAB_PASSWORD };
+  }
+  return protectedFallbackLogin(env);
 }
 
 function endpointFromPath(pathValue: unknown) {
@@ -148,14 +167,26 @@ async function rpc<T>(endpoint: string, method: string, params: GeotabJsonRecord
   throw lastError instanceof Error ? lastError : new Error(`Geotab ${method} failed after retries.`);
 }
 
-async function authenticate(env: GeotabClientEnv): Promise<Auth> {
-  const login = await protectedLogin(env);
+async function authenticateLogin(login: Login): Promise<Auth> {
   const result = await rpc<{ credentials: Credentials; path?: string }>('https://my.geotab.com/apiv1', 'Authenticate', {
     database: login.database,
     userName: login.userName,
     password: login.password,
   });
   return { endpoint: endpointFromPath(result.path), credentials: result.credentials };
+}
+
+async function authenticate(env: GeotabClientEnv): Promise<Auth> {
+  return authenticateLogin(await configuredLogin(env));
+}
+
+export async function testGeotabCredentials(input: GeotabCredentialInput) {
+  const database = String(input.database || '').trim();
+  const username = String(input.username || '').trim();
+  const password = String(input.password || '');
+  if (!database || !username || !password) throw new Error('Database, username, and password are required.');
+  await authenticateLogin({ database, userName: username, password });
+  return { ok: true } as const;
 }
 
 export async function createGeotabClient(env: GeotabClientEnv) {
