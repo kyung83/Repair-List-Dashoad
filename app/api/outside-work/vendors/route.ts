@@ -84,10 +84,10 @@ export async function POST(request:Request){
     const phone=String(body.phone??'').trim().slice(0,80);
     const email=String(body.email??'').trim().slice(0,180);
     const address=String(body.address??'').replace(/\s+/g,' ').trim().slice(0,300);
-    const notes='Created from Outside Work invoice intake.';
+    const notes='Created from Outside Work invoice intake. May be a one-time over-the-road repair vendor.';
     const inserted=await env.DB.prepare(`
-      INSERT INTO vendors (name,phone,email,address,notes,active)
-      VALUES (?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,1)
+      INSERT INTO vendors (name,phone,email,address,notes,supplier_type,active)
+      VALUES (?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,'Outside Work / Road Repair',1)
     `).bind(name,phone,email,address,notes).run();
     const id=Number(inserted.meta.last_row_id??0);
     if(!id)throw new Error('Vendor could not be created.');
