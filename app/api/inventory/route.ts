@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
-import { adjustStock, getInventoryData, savePart, savePartSettings } from '@/lib/inventory-db';
+import { getInventoryData, savePart, savePartSettings } from '@/lib/inventory-db';
 import { decorateInventoryDataDerived } from '@/lib/derived-reservations';
 import { recordPhysicalCount, resolvePhysicalCountIssue, saveNormalizedVendor } from '@/lib/inventory-operations';
 
@@ -41,10 +41,7 @@ export async function POST(request: Request) {
     }
 
     if (action === 'adjustStock') {
-      const delta = Number(body.delta ?? 0);
-      if (!Number.isFinite(delta) || delta === 0) throw new Error('Enter a non-zero stock adjustment.');
-      if (delta < 0) throw new Error('Negative manual stock adjustments are disabled. Record a physical count so the discrepancy is reviewed and auditable.');
-      return Response.json(await adjustStock(env.DB,body));
+      throw new Error('Manual +/− stock adjustments are disabled. Use Physical Count so any discrepancy is stale-checked, reviewed, and auditable.');
     }
     return Response.json({error:'Unknown inventory action.'},{status:400});
   } catch (error) {
