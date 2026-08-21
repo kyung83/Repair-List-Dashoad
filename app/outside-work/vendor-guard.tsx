@@ -7,7 +7,7 @@ import {
   suspiciousInvoiceNumber,
   suspiciousServiceSummary,
   suspiciousVendor,
-} from "./invoice-parser-v2";
+} from "./invoice-parser-v3";
 
 type Candidate={value:string;confidence:number;source:string};
 type ParsedInvoice={
