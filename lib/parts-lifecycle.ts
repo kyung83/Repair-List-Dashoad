@@ -19,7 +19,10 @@ export const getRepairPartRequests = getDerivedRepairPartRequests;
 export const decorateShopParts = decorateShopPartsDerived;
 export const decorateInventoryData = decorateInventoryDataDerived;
 export const getPartsDeskData = getPartsDeskDataDerived;
-export const releaseRepairPartRequests = releaseDerivedRepairRequests;
+
+export async function releaseRepairPartRequests(db:D1Database,repairId:number,_userId:number|null=null) {
+  return releaseDerivedRepairRequests(db,repairId);
+}
 
 export async function allocateWaitingForPart(
   _db: D1Database,
@@ -44,13 +47,14 @@ export async function requestPartForRepair(
   },
 ) {
   const warehouseCode = String(input.warehouseCode ?? input.fallbackYard ?? '').trim().toUpperCase();
-  return requestPartDerived(db,{
+  const result = await requestPartDerived(db,{
     repairId:input.repairId,
     partId:input.partId,
     quantity:input.quantity,
     warehouseCode,
     userId:input.userId ?? null,
   });
+  return {...result,usedImmediately:0};
 }
 
 export async function consumeReservedPart(
