@@ -14,9 +14,7 @@ type OutsideWorkRow = {
   equipment_id:number;
   repair_id:number;
   unit:string;
-  vendor_id:number|null;
-  saved_vendor_name:string;
-  resolved_vendor_name:string|null;
+  vendor_name:string;
   invoice_number:string;
   invoice_date:string|null;
   mileage:number|null;
@@ -27,8 +25,6 @@ type OutsideWorkRow = {
   created_at:string;
   uploaded_by:string;
 };
-
-type VendorRow={id:number;name:string};
 
 const SAFE_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp','image/gif','image/bmp','image/tiff','image/heic','image/heif']);
 
@@ -70,34 +66,6 @@ function safeText(value:FormDataEntryValue|null,max:number){
   return String(value??'').trim().slice(0,max);
 }
 
-function normalizeVendor(value:string){
-  let normalized=value
-    .toUpperCase()
-    .replace(/&/g,' AND ')
-    .replace(/[^A-Z0-9]+/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-  normalized=normalized
-    .replace(/\s+(?:INCORPORATED|INC|LLC|LTD|CORPORATION|CORP|COMPANY|CO)$/,'')
-    .replace(/\s+(?:TRUCKS|TRUCK|TRACTORS|TRACTOR)$/,'')
-    .trim();
-  return normalized;
-}
-
-async function resolveVendor(value:string){
-  const key=normalizeVendor(value);
-  if(!key)throw new Error('Select an existing vendor or create the new vendor before saving Outside Work.');
-  const result=await env.DB.prepare(`
-    SELECT id,name FROM vendors WHERE COALESCE(active,1)=1 ORDER BY name,id
-  `).all<VendorRow>();
-  const matches=result.results.filter(row=>normalizeVendor(row.name)===key);
-  if(matches.length!==1){
-    if(matches.length>1)throw new Error('That vendor name matches more than one vendor. Choose the exact vendor before saving Outside Work.');
-    throw new Error('Vendor is not resolved to the vendor master. Select an existing vendor or create the new vendor before saving Outside Work.');
-  }
-  return {id:Number(matches[0].id),name:matches[0].name};
-}
-
 async function sha256Hex(bytes:ArrayBuffer){
   const digest=await crypto.subtle.digest('SHA-256',bytes);
   return Array.from(new Uint8Array(digest)).map(byte=>byte.toString(16).padStart(2,'0')).join('');
@@ -135,14 +103,11 @@ export async function GET(request:Request){
         ORDER BY unit
       `).all<EquipmentRow>(),
       env.DB.prepare(`
-        SELECT d.id,d.equipment_id,d.repair_id,e.unit,d.vendor_id,
-               d.vendor_name AS saved_vendor_name,v.name AS resolved_vendor_name,
-               d.invoice_number,d.invoice_date,d.mileage,d.total_amount,d.original_file_name,
-               d.content_type,d.service_summary,d.created_at,
+        SELECT d.id,d.equipment_id,d.repair_id,e.unit,d.vendor_name,d.invoice_number,d.invoice_date,
+               d.mileage,d.total_amount,d.original_file_name,d.content_type,d.service_summary,d.created_at,
                COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'') AS uploaded_by
         FROM outside_work_documents d
         JOIN equipment e ON e.id=d.equipment_id
-        LEFT JOIN vendors v ON v.id=d.vendor_id
         LEFT JOIN app_users u ON u.id=d.uploaded_by_user_id
         ORDER BY d.created_at DESC,d.id DESC
         LIMIT 100
@@ -155,11 +120,10 @@ export async function GET(request:Request){
       })),
       records:documentsResult.results.map(row=>({
         id:row.id,equipmentId:row.equipment_id,repairId:`repair-${row.repair_id}`,unit:row.unit,
-        vendorId:row.vendor_id,vendorName:row.resolved_vendor_name??'',vendorResolved:Boolean(row.vendor_id&&row.resolved_vendor_name),
-        legacyVendorName:row.vendor_id?'' : row.saved_vendor_name,
-        invoiceNumber:row.invoice_number,invoiceDate:row.invoice_date??'',mileage:row.mileage,
-        totalAmount:Number(row.total_amount||0),fileName:row.original_file_name,contentType:row.content_type,
-        serviceSummary:row.service_summary,createdAt:row.created_at,uploadedBy:row.uploaded_by,originalUrl:originalUrl(row.id),
+        vendorName:row.vendor_name,invoiceNumber:row.invoice_number,invoiceDate:row.invoice_date??'',
+        mileage:row.mileage,totalAmount:Number(row.total_amount||0),fileName:row.original_file_name,
+        contentType:row.content_type,serviceSummary:row.service_summary,createdAt:row.created_at,
+        uploadedBy:row.uploaded_by,originalUrl:originalUrl(row.id),
       })),
     },{headers:{'cache-control':'no-store'}});
   }catch(error){
@@ -195,9 +159,7 @@ export async function POST(request:Request){
     `).bind(equipmentId).first<{id:number;unit:string}>();
     if(!equipment)throw new Error('The selected Master Equipment unit is not active or no longer exists.');
 
-    const submittedVendorName=safeText(form.get('vendorName'),180);
-    const vendor=await resolveVendor(submittedVendorName);
-    const vendorName=vendor.name;
+    const vendorName=safeText(form.get('vendorName'),180);
     const invoiceNumber=safeText(form.get('invoiceNumber'),100);
     const date=invoiceDate(form.get('invoiceDate'));
     const mileage=optionalMileage(form.get('mileage'));
@@ -211,10 +173,10 @@ export async function POST(request:Request){
     const bytes=await file.arrayBuffer();
     const fileHash=await sha256Hex(bytes);
     const duplicate=await env.DB.prepare(`
-      SELECT d.id,e.unit,d.invoice_number
+      SELECT d.id,e.unit,d.vendor_name,d.invoice_number
       FROM outside_work_documents d JOIN equipment e ON e.id=d.equipment_id
       WHERE d.file_sha256=? LIMIT 1
-    `).bind(fileHash).first<{id:number;unit:string;invoice_number:string}>();
+    `).bind(fileHash).first<{id:number;unit:string;vendor_name:string;invoice_number:string}>();
     if(duplicate){
       return Response.json({
         error:`This exact file was already recorded for unit ${duplicate.unit}${duplicate.invoice_number?` as invoice ${duplicate.invoice_number}`:''}.`,
@@ -227,11 +189,11 @@ export async function POST(request:Request){
     await env.FILES.put(objectKey,bytes,{httpMetadata:{contentType}});
 
     const firstLine=serviceSummary.split(/\r?\n/).map(line=>line.trim()).find(Boolean)||'Vendor service';
-    const title=`Outside work - ${vendorName}: ${firstLine}`.slice(0,500);
+    const title=`Outside work${vendorName?` - ${vendorName}`:''}: ${firstLine}`.slice(0,500);
     const provenance=[
       serviceSummary,
       '',
-      `Outside vendor: ${vendorName} (vendor #${vendor.id})`,
+      vendorName?`Outside vendor: ${vendorName}`:'Outside vendor: not entered',
       invoiceNumber?`Vendor invoice / RO: ${invoiceNumber}`:'Vendor invoice / RO: not entered',
       date?`Service date: ${date}`:'Service date: not entered',
       mileage==null?'Vendor invoice mileage: not entered':`Vendor invoice mileage: ${mileage.toLocaleString()} mi (invoice record only; not Geotab mileage)`,
@@ -249,11 +211,11 @@ export async function POST(request:Request){
     const batch=await env.DB.batch([
       env.DB.prepare(`
         INSERT INTO outside_work_documents (
-          equipment_id,repair_id,vendor_id,vendor_name,invoice_number,invoice_date,mileage,total_amount,
+          equipment_id,repair_id,vendor_name,invoice_number,invoice_date,mileage,total_amount,
           original_file_name,content_type,object_key,file_sha256,ocr_text,service_summary,uploaded_by_user_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
-        equipment.id,repairId,vendor.id,vendorName,invoiceNumber,date,mileage,totalAmount,
+        equipment.id,repairId,vendorName,invoiceNumber,date,mileage,totalAmount,
         originalName,contentType,objectKey,fileHash,ocrText,serviceSummary,user.id,
       ),
       env.DB.prepare(`
@@ -265,12 +227,12 @@ export async function POST(request:Request){
         VALUES (?, ?, ?, 'outside_work_imported', ?)
       `).bind(
         repairId,user.id,user.technicianId,
-        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit} from ${vendorName} (vendor #${vendor.id})${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
+        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit}${vendorName?` from ${vendorName}`:''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
       ),
     ]);
     const documentId=Number(batch[0]?.meta.last_row_id??0);
 
-    return Response.json({ok:true,documentId,repairId:`repair-${repairId}`,unit:equipment.unit,vendorId:vendor.id,vendorName});
+    return Response.json({ok:true,documentId,repairId:`repair-${repairId}`,unit:equipment.unit});
   }catch(error){
     if(repairId){try{await env.DB.prepare('DELETE FROM repairs WHERE id=?').bind(repairId).run();}catch{}}
     if(objectKey){try{await env.FILES.delete(objectKey);}catch{}}
