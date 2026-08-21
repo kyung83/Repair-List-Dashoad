@@ -20,7 +20,8 @@ node --test \
   "${project_root}/tests/outside-work-mixed-invoices.test.mjs" \
   "${project_root}/tests/outside-work-handwritten-ocr.test.mjs" \
   "${project_root}/tests/outside-work-validation.test.mjs" \
-  "${project_root}/tests/outside-work-correction-memory.test.mjs"
+  "${project_root}/tests/outside-work-correction-memory.test.mjs" \
+  "${project_root}/tests/outside-work-vendor-separation.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
