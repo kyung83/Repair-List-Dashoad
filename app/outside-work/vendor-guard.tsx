@@ -8,6 +8,7 @@ import {
   suspiciousServiceSummary,
   suspiciousVendor,
 } from "./invoice-parser-v3";
+import { detectVendorPhone, normalizePhone, validateSimpleInvoiceArithmetic } from "./invoice-validation.js";
 
 type Candidate={value:string;confidence:number;source:string};
 type ParsedInvoice={
@@ -31,6 +32,8 @@ type VisionFields={
   workPerformed:{value:string[];confidence:number};
 };
 type VisionResponse={ok?:boolean;fields?:VisionFields;normalizedText?:string;error?:string;detail?:string};
+type VendorMaster={id:number;name:string;phone:string};
+type VendorMasterResponse={vendors?:VendorMaster[];error?:string};
 type PdfTools=Window&{pdfjsLib?:{GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}}};
 
 const PDF_WORKER="/api/outside-work-reader/pdf.worker.min.js";
@@ -139,6 +142,19 @@ function InvoiceIntelligenceGuard(){
     let visionBusy=false;
     let visionDoneKey="";
     let visionFailedKey="";
+    let vendorMaster:VendorMaster[]=[];
+    let vendorLoadStarted=false;
+
+    const loadVendorMaster=async()=>{
+      if(vendorLoadStarted)return;
+      vendorLoadStarted=true;
+      try{
+        const response=await fetch("/api/outside-work/vendors",{cache:"no-store"});
+        const result=await response.json() as VendorMasterResponse;
+        if(response.ok&&Array.isArray(result.vendors))vendorMaster=result.vendors;
+      }catch{}
+    };
+    void loadVendorMaster();
 
     const applyVision=async(file:File)=>{
       const key=fileKey(file);if(visionBusy||visionDoneKey===key||visionFailedKey===key)return;
@@ -149,7 +165,12 @@ function InvoiceIntelligenceGuard(){
         const ocrHint=findOcrTextarea()?.value.trim()||"";if(ocrHint)body.append("ocrText",ocrHint);
         const response=await fetch("/api/outside-work-vision",{method:"POST",body});
         const result=await response.json() as VisionResponse;
-        if(!response.ok||!result.ok||!result.fields||!result.normalizedText){visionFailedKey=key;setVisionStatus(`Handwriting reader did not complete: ${result.error||result.detail||`HTTP ${response.status}`}. Bad OCR header text will not be trusted.`,"error");return;}
+        if(!response.ok||!result.ok||!result.fields||!result.normalizedText){
+          visionFailedKey=key;
+          const reason=[result.error,result.detail].filter(Boolean).join(" ")||`HTTP ${response.status}`;
+          setVisionStatus(`Handwriting reader did not complete: ${reason}. Bad OCR header text will not be trusted.`,"error");
+          return;
+        }
         if(!activeFile||fileKey(activeFile)!==key)return;
         const fields=result.fields;
         const vendor=findInput("Outside vendor");const invoice=findInput("Invoice / RO number");const date=findInput("Service date");
@@ -191,7 +212,23 @@ function InvoiceIntelligenceGuard(){
         clearSuspiciousInput(vendor,suspiciousVendor,forceWindow);
         clearSuspiciousInput(invoice,suspiciousInvoiceNumber,forceWindow);
         clearSuspiciousTextarea(work,suspiciousServiceSummary,forceWindow);
-        if(vendor)vendor.title=parsed.payee?.value?`Service vendor detected from the invoice. Remit/payee: ${parsed.payee.value}`:(parsed.vendor.source||"");
+
+        const phone=detectVendorPhone(text);
+        if(phone.digits&&vendorMaster.length&&vendor){
+          const matches=vendorMaster.filter(row=>normalizePhone(row.phone)===phone.digits);
+          if(matches.length===1){
+            const current=vendor.value.trim();
+            if(canTouch(vendor)&&(!current||suspiciousVendor(current)))setReactInputValue(vendor,matches[0].name);
+            vendor.title=`Vendor master matched by printed phone ${phone.raw}: ${matches[0].name}`;
+          }else if(matches.length===0&&!vendor.value.trim())vendor.title=`Printed vendor phone ${phone.raw} is not in the vendor master yet. Enter the company name once; it will be saved with this phone for future invoices.`;
+        }else if(vendor)vendor.title=parsed.payee?.value?`Service vendor detected from the invoice. Remit/payee: ${parsed.payee.value}`:(parsed.vendor.source||"");
+
+        if(total){
+          const arithmetic=validateSimpleInvoiceArithmetic(text,Number(total.value||0));
+          if(arithmetic.status==="balanced")total.title=`Verified: simple component charges balance to $${Number(arithmetic.sum).toFixed(2)}.`;
+          else if(arithmetic.status==="mismatch")total.title=`Review required: simple component charges add to $${Number(arithmetic.sum).toFixed(2)}, not $${Number(total.value||0).toFixed(2)}.`;
+        }
+
         if(work){
           if(parsed.documentKind==="payment_receipt"){
             work.placeholder="Payment receipt detected. Enter the actual work performed or use the underlying repair invoice; the system will not invent repairs from payment data.";
