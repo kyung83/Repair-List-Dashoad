@@ -129,7 +129,7 @@ function validateVendorName(value:string){
 
 async function resolveOrCreateVendor(value:string,detectedPhone:string){
   const result=await env.DB.prepare(`
-    SELECT id,name,phone FROM vendors WHERE COALESCE(active,1)=1 ORDER BY name,id
+    SELECT id,name,phone FROM outside_work_vendors WHERE COALESCE(active,1)=1 ORDER BY name,id
   `).all<VendorRow>();
 
   const phone=normalizePhone(detectedPhone);
@@ -139,25 +139,25 @@ async function resolveOrCreateVendor(value:string,detectedPhone:string){
   const exact=key?result.results.filter(row=>normalizeVendor(row.name)===key):[];
   const phoneMatches=phone?result.results.filter(row=>normalizePhone(row.phone??'')===phone):[];
 
-  if(phoneMatches.length>1)throw new Error('More than one active vendor has the same phone number. Correct the vendor master before saving this Outside Work record.');
+  if(phoneMatches.length>1)throw new Error('More than one active Outside Work vendor has the same phone number. Correct the Outside Work vendor list before saving this record.');
   if(phoneMatches.length===1){
     const matched=phoneMatches[0];
     if(exact.length===1&&Number(exact[0].id)!==Number(matched.id)){
-      throw new Error(`Vendor phone matches ${matched.name}, but the reviewed vendor name matches ${exact[0].name}. Resolve the vendor before saving.`);
+      throw new Error(`Vendor phone matches ${matched.name}, but the reviewed vendor name matches ${exact[0].name}. Resolve the Outside Work vendor before saving.`);
     }
     return{id:Number(matched.id),name:matched.name,created:false,matchedBy:'phone' as const};
   }
 
-  if(!submitted)throw new Error('Review the Outside vendor field before saving. The printed phone did not match an existing vendor, so enter the company name once and it will be saved with that phone for future invoices.');
+  if(!submitted)throw new Error('Review the Outside vendor field before saving. The printed phone did not match an existing Outside Work vendor, so enter the company name once and it will be saved with that phone for future invoices.');
   if(key.length<2)throw new Error('Review the Outside vendor field before saving.');
   if(exact.length===1){
     const matched=exact[0];
     if(phone&&!normalizePhone(matched.phone??'')){
-      await env.DB.prepare(`UPDATE vendors SET phone=? WHERE id=? AND (phone IS NULL OR TRIM(phone)='')`).bind(detectVendorPhone(detectedPhone).raw||detectedPhone,matched.id).run();
+      await env.DB.prepare(`UPDATE outside_work_vendors SET phone=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND (phone IS NULL OR TRIM(phone)='')`).bind(detectVendorPhone(detectedPhone).raw||detectedPhone,matched.id).run();
     }
     return{id:Number(matched.id),name:matched.name,created:false,matchedBy:'name' as const};
   }
-  if(exact.length>1)throw new Error('More than one active vendor has that name. Correct the vendor master before saving this Outside Work record.');
+  if(exact.length>1)throw new Error('More than one active Outside Work vendor has that name. Correct the Outside Work vendor list before saving this record.');
 
   const similar=result.results
     .map(row=>({row,score:vendorSimilarity(submitted,row.name)}))
@@ -165,13 +165,13 @@ async function resolveOrCreateVendor(value:string,detectedPhone:string){
     .sort((a,b)=>b.score-a.score)
     .slice(0,3);
   if(similar.length){
-    throw new Error(`Outside vendor is similar to an existing vendor: ${similar.map(item=>item.row.name).join(', ')}. Use the existing vendor name if it is the same company; otherwise keep a clearly different company name for the new road vendor.`);
+    throw new Error(`Outside vendor is similar to an existing Outside Work vendor: ${similar.map(item=>item.row.name).join(', ')}. Use the existing vendor name if it is the same company; otherwise keep a clearly different company name.`);
   }
 
   const phoneDisplay=phone?`(${phone.slice(0,3)}) ${phone.slice(3,6)}-${phone.slice(6)}`:'';
   const inserted=await env.DB.prepare(`
-    INSERT INTO vendors (name,phone,notes,supplier_type,active)
-    VALUES (?,NULLIF(?,''),?,'Outside Work / Road Repair',1)
+    INSERT INTO outside_work_vendors (name,phone,notes,active)
+    VALUES (?,NULLIF(?,''),?,1)
   `).bind(submitted,phoneDisplay,'Created from a reviewed Outside Work invoice. May be a one-time over-the-road repair vendor.').run();
   const id=Number(inserted.meta.last_row_id??0);
   if(!id)throw new Error('The new Outside Work vendor could not be created.');
@@ -317,7 +317,7 @@ export async function POST(request:Request){
     const provenance=[
       serviceSummary,
       '',
-      `Outside vendor: ${vendorName} (vendor #${vendor.id}${vendor.matchedBy==='phone'?', matched by printed phone':''})`,
+      `Outside vendor: ${vendorName} (outside vendor #${vendor.id}${vendor.matchedBy==='phone'?', matched by printed phone':''})`,
       detectedPhone.digits?`Vendor phone detected: ${detectedPhone.raw}`:'Vendor phone detected: not available',
       invoiceNumber?`Vendor invoice / RO: ${invoiceNumber}`:'Vendor invoice / RO: not entered',
       date?`Service date: ${date}`:'Service date: not entered',
@@ -337,7 +337,7 @@ export async function POST(request:Request){
     const batch=await env.DB.batch([
       env.DB.prepare(`
         INSERT INTO outside_work_documents (
-          equipment_id,repair_id,vendor_id,vendor_name,invoice_number,invoice_date,mileage,total_amount,
+          equipment_id,repair_id,outside_vendor_id,vendor_name,invoice_number,invoice_date,mileage,total_amount,
           original_file_name,content_type,object_key,file_sha256,ocr_text,service_summary,uploaded_by_user_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
@@ -353,7 +353,7 @@ export async function POST(request:Request){
         VALUES (?, ?, ?, 'outside_work_imported', ?)
       `).bind(
         repairId,user.id,user.technicianId,
-        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit} from ${vendorName} (vendor #${vendor.id}, ${vendor.matchedBy})${vendor.created?' [new road vendor]':''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
+        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit} from ${vendorName} (outside vendor #${vendor.id}, ${vendor.matchedBy})${vendor.created?' [new road vendor]':''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
       ),
     ]);
     const documentId=Number(batch[0]?.meta.last_row_id??0);
