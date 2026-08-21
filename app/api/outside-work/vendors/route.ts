@@ -33,7 +33,7 @@ function normalizeVendor(value:string){
 async function activeVendors(){
   const result=await env.DB.prepare(`
     SELECT id,name,phone,email,address
-    FROM vendors
+    FROM outside_work_vendors
     WHERE COALESCE(active,1)=1
     ORDER BY name,id
   `).all<VendorRow>();
@@ -57,7 +57,7 @@ export async function GET(request:Request){
       })),
     },{headers:{'cache-control':'no-store'}});
   }catch(error){
-    const message=error instanceof Error?error.message:'Vendors could not be loaded.';
+    const message=error instanceof Error?error.message:'Outside Work vendors could not be loaded.';
     return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});
   }
 }
@@ -79,21 +79,21 @@ export async function POST(request:Request){
       const existing=matches[0];
       return Response.json({ok:true,created:false,vendor:{id:Number(existing.id),name:existing.name,phone:existing.phone??'',email:existing.email??'',address:existing.address??'',lookupKey:key}},{headers:{'cache-control':'no-store'}});
     }
-    if(matches.length>1)throw new Error('More than one existing vendor matches this name. Choose the correct existing vendor instead of creating another.');
+    if(matches.length>1)throw new Error('More than one existing Outside Work vendor matches this name. Choose the correct existing vendor instead of creating another.');
 
     const phone=String(body.phone??'').trim().slice(0,80);
     const email=String(body.email??'').trim().slice(0,180);
     const address=String(body.address??'').replace(/\s+/g,' ').trim().slice(0,300);
     const notes='Created from Outside Work invoice intake. May be a one-time over-the-road repair vendor.';
     const inserted=await env.DB.prepare(`
-      INSERT INTO vendors (name,phone,email,address,notes,supplier_type,active)
-      VALUES (?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,'Outside Work / Road Repair',1)
+      INSERT INTO outside_work_vendors (name,phone,email,address,notes,active)
+      VALUES (?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,1)
     `).bind(name,phone,email,address,notes).run();
     const id=Number(inserted.meta.last_row_id??0);
-    if(!id)throw new Error('Vendor could not be created.');
+    if(!id)throw new Error('Outside Work vendor could not be created.');
     return Response.json({ok:true,created:true,vendor:{id,name,phone,email,address,lookupKey:key}},{headers:{'cache-control':'no-store'}});
   }catch(error){
-    const message=error instanceof Error?error.message:'Vendor could not be saved.';
+    const message=error instanceof Error?error.message:'Outside Work vendor could not be saved.';
     return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});
   }
 }
