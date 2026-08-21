@@ -1,5 +1,0 @@
-Regression source: production handwritten invoice diagnostic on 2026-08-21.
-Moondream outer keys observed: result, usage.
-Cloudflare Moondream query output stores answer under result.answer.
-Qwen fallback outer keys observed: choices and OpenAI-compatible completion metadata.
-The automated test in outside-work-vision-response.test.mjs covers both response envelope families.
