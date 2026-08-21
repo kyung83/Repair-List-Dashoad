@@ -8,15 +8,28 @@ const FIELD_SCHEMA={
   additionalProperties:false,
 };
 
+const CHARGE_SCHEMA={
+  type:'object',
+  properties:{
+    label:{type:'string'},
+    amount:{type:'string'},
+    confidence:{type:'number',minimum:0,maximum:1},
+  },
+  required:['label','amount','confidence'],
+  additionalProperties:false,
+};
+
 const VISION_SCHEMA={
   type:'object',
   properties:{
     vendorName:FIELD_SCHEMA,
+    vendorPhone:FIELD_SCHEMA,
     invoiceNumber:FIELD_SCHEMA,
     serviceDate:FIELD_SCHEMA,
     unitNumber:FIELD_SCHEMA,
     mileage:FIELD_SCHEMA,
     totalAmount:FIELD_SCHEMA,
+    charges:{type:'array',items:CHARGE_SCHEMA,maxItems:12},
     workPerformed:{
       type:'object',
       properties:{
@@ -27,7 +40,7 @@ const VISION_SCHEMA={
       additionalProperties:false,
     },
   },
-  required:['vendorName','invoiceNumber','serviceDate','unitNumber','mileage','totalAmount','workPerformed'],
+  required:['vendorName','vendorPhone','invoiceNumber','serviceDate','unitNumber','mileage','totalAmount','charges','workPerformed'],
   additionalProperties:false,
 };
 
