@@ -19,11 +19,12 @@ function samePositions(left:string[],right:string[]){
 
 export default function FoundRepairControl({repairId,unit,onAdded}:Props){
   const[open,setOpen]=useState(false),[issue,setIssue]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
-  const[tire,setTire]=useState<TireStatus|null>(null),[selectedPositions,setSelectedPositions]=useState<string[]>([]),[tireMessage,setTireMessage]=useState("");
-  const tireBoxRef=useRef<HTMLDivElement|null>(null);
+  const[tire,setTire]=useState<TireStatus|null>(null),[selectedPositions,setSelectedPositions]=useState<string[]>([]),[tireMessage,setTireMessage]=useState(""),[tireLoaded,setTireLoaded]=useState(false);
+  const controlRef=useRef<HTMLDivElement|null>(null);
 
   useEffect(()=>{
     let cancelled=false;
+    setTireLoaded(false);
     async function loadRepairDetails(){
       try{
         const response=await fetch(`/api/shop/found-repair?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});
@@ -34,8 +35,9 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
         setTire(next);
         setSelectedPositions(next?.positions??[]);
         setTireMessage("");
+        setTireLoaded(true);
       }catch(error){
-        if(!cancelled)setTireMessage(error instanceof Error?error.message:"Repair details could not be loaded.");
+        if(!cancelled){setTireLoaded(false);setTireMessage(error instanceof Error?error.message:"Repair details could not be loaded.")}
       }
     }
     void loadRepairDetails();
@@ -46,20 +48,21 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
   const tireReady=Boolean(tire?.required&&savedPositions.length>0&&samePositions(savedPositions,selectedPositions));
 
   useEffect(()=>{
-    if(!tire?.required)return;
-    const parent=tireBoxRef.current?.parentElement;
+    const parent=controlRef.current?.parentElement;
     if(!parent)return;
-    const blockUnsavedTireRepair=(event:Event)=>{
+    const blockIncompleteTireRepair=(event:Event)=>{
       const target=event.target instanceof Element?event.target.closest("button"):null;
-      if(!target||!target.textContent?.trim().startsWith("REPAIRED")||tireReady)return;
+      if(!target||!target.textContent?.trim().startsWith("REPAIRED"))return;
+      if(tireLoaded&&(!tire?.required||tireReady))return;
       event.preventDefault();
       event.stopPropagation();
-      if("stopImmediatePropagation" in event)event.stopImmediatePropagation();
+      event.stopImmediatePropagation();
+      if(!tireLoaded){setTireMessage("Tire-position check is not ready yet. Do not close this repair until the position panel loads.");return}
       setTireMessage(selectedPositions.length?"Save the selected tire position changes before pressing REPAIRED.":"Choose and save the tire position before pressing REPAIRED.");
     };
-    parent.addEventListener("click",blockUnsavedTireRepair,true);
-    return()=>parent.removeEventListener("click",blockUnsavedTireRepair,true);
-  },[tire?.required,tireReady,selectedPositions]);
+    parent.addEventListener("click",blockIncompleteTireRepair,true);
+    return()=>parent.removeEventListener("click",blockIncompleteTireRepair,true);
+  },[tireLoaded,tire?.required,tireReady,selectedPositions]);
 
   function togglePosition(code:string){
     setSelectedPositions(current=>current.includes(code)?current.filter(item=>item!==code):[...current,code]);
@@ -77,7 +80,7 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
       });
       const result=await response.json() as Result;
       if(!response.ok||!result.ok)throw new Error(result.error||"Tire positions could not be saved.");
-      if(result.tirePosition){setTire(result.tirePosition);setSelectedPositions(result.tirePosition.positions)}
+      if(result.tirePosition){setTire(result.tirePosition);setSelectedPositions(result.tirePosition.positions);setTireLoaded(true)}
       setTireMessage(`Saved ${result.tirePosition?.positions.join(", ")||selectedPositions.join(", ")}. You can now mark the repair REPAIRED.`);
     }catch(error){setTireMessage(error instanceof Error?error.message:"Tire positions could not be saved.")}
     finally{setBusy(false)}
@@ -98,14 +101,14 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
   }
 
   return <>
-    {tire?.required&&<div ref={tireBoxRef} style={tireBox}>
+    {tire?.required&&<div style={tireBox}>
       <div><strong style={{fontSize:17,color:"#7c2d12"}}>TIRE POSITION REQUIRED</strong><div style={tireHelp}>Tap every tire repaired or replaced, then save the positions before pressing REPAIRED.</div><div style={legend}>L = left · R = right · I = inner · O = outer</div></div>
       <div style={{display:"grid",gap:10}}>{tire.axles.map(axle=><div key={axle.axle} style={axleBox}><strong style={{fontSize:13}}>{axle.label}</strong><div style={positionGrid}>{axle.positions.map(position=>{const selected=selectedPositions.includes(position.code);return <button key={position.code} type="button" aria-pressed={selected} disabled={busy} onClick={()=>togglePosition(position.code)} style={{...positionButton,...(selected?selectedPositionButton:{})}}><span style={{fontSize:16,fontWeight:950}}>{position.code}</span><span style={{fontSize:10,fontWeight:750}}>{position.label}</span></button>})}</div></div>)}</div>
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}><button type="button" disabled={busy||!selectedPositions.length} onClick={()=>void saveTirePositions()} style={saveTireButton}>{busy?"Saving…":"SAVE TIRE POSITION"}</button><strong style={{fontSize:12,color:tireReady?"#176440":selectedPositions.length?"#8a5a05":"#9a3b2a"}}>{tireReady?`Saved: ${savedPositions.join(", ")}`:selectedPositions.length?`Unsaved: ${selectedPositions.join(", ")}`:"No position selected"}</strong></div>
       {tireMessage&&<div style={{fontSize:12,fontWeight:850,color:tireMessage.startsWith("Saved")?"#176440":"#8a3a2e"}}>{tireMessage}</div>}
     </div>}
 
-    <div style={{display:"grid",gap:8}}>
+    <div ref={controlRef} style={{display:"grid",gap:8}}>
       <button disabled={busy} onClick={()=>{setOpen(current=>!current);setMessage("")}} style={foundButton}>FOUND SOMETHING ELSE<span style={foundHelp}>Add another Open repair to this unit · keep working</span></button>
       {open&&<div style={formBox}><input value={issue} onChange={event=>setIssue(event.target.value)} placeholder="What else did you find?" style={inputStyle} autoFocus disabled={busy}/><div style={{display:"flex",gap:7}}><button type="button" onClick={()=>{setOpen(false);setIssue("");setMessage("")}} style={cancelButton} disabled={busy}>Cancel</button><button type="button" onClick={()=>void save()} style={saveButton} disabled={busy}>{busy?"Adding…":"Add repair"}</button></div></div>}
       {message&&<div style={{fontSize:12,fontWeight:800,color:message.startsWith("Added")?"#176440":"#8a3a2e"}}>{message}</div>}
