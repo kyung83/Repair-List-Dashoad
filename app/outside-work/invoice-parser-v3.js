@@ -29,11 +29,29 @@ function detectExplicitInvoiceDate(text){
   return out();
 }
 
+function detectVisionWork(text){
+  const source=String(text||"");
+  if(!/\bVISION-VERIFIED\s+SCANNED\s+INVOICE\b/i.test(source))return out();
+  const ls=lines(source);
+  const start=ls.findIndex(line=>/^WORK\s+PERFORMED\s*:?\s*$/i.test(line));
+  if(start<0)return out();
+  const structured=/^(?:SERVICE\s+VENDOR|INVOICE\s+NUMBER|SERVICE\s+DATE|UNIT|ODOMETER|INVOICE\s+TOTAL)\s*:/i;
+  const work=[];
+  for(let i=start+1;i<ls.length;i++){
+    if(structured.test(ls[i])||/^VISION-VERIFIED\b/i.test(ls[i]))break;
+    const line=clean(ls[i]).replace(/^[-*•]\s*/,"").trim();
+    if(line&&line.length<=300&&!work.some(item=>item.toLowerCase()===line.toLowerCase()))work.push(line);
+  }
+  return work.length?out(work.slice(0,16).join("\n"),.999,"vision-verified work block"):out();
+}
+
 export function parseOutsideWorkInvoice(text){
   const parsed=parseV2(text);
   const explicitDate=detectExplicitInvoiceDate(text);
+  const visionWork=detectVisionWork(text);
   return {
     ...parsed,
     invoiceDate:explicitDate.confidence>parsed.invoiceDate.confidence?explicitDate:parsed.invoiceDate,
+    serviceSummary:visionWork.confidence>parsed.serviceSummary.confidence?visionWork:parsed.serviceSummary,
   };
 }
