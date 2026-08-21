@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOutsideWorkInvoice } from '../app/outside-work/invoice-parser-v2.js';
+import { parseOutsideWorkInvoice } from '../app/outside-work/invoice-parser-v3.js';
 
 const ats = `
 INVOICE #
