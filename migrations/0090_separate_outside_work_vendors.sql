@@ -95,7 +95,9 @@ SET vendor_id=NULL
 WHERE outside_vendor_id IS NOT NULL;
 
 -- Rebuild correction memory so its vendor IDs belong to the Outside Work
--- vendor master rather than the inventory supplier master.
+-- vendor master rather than the inventory supplier master. If duplicate legacy
+-- vendor rows collapse onto one Outside Work vendor, merge identical correction
+-- rules and add their confirmation counts instead of creating an index conflict.
 DROP TABLE IF EXISTS outside_work_correction_memory_new;
 CREATE TABLE outside_work_correction_memory_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,16 +115,17 @@ CREATE TABLE outside_work_correction_memory_new (
 );
 
 INSERT INTO outside_work_correction_memory_new (
-  id,vendor_id,field_name,detected_value,detected_key,corrected_value,corrected_key,
+  vendor_id,field_name,detected_value,detected_key,corrected_value,corrected_key,
   confirmations,first_seen_at,last_seen_at,last_used_at
 )
-SELECT cm.id,ov.id,cm.field_name,cm.detected_value,cm.detected_key,
-       cm.corrected_value,cm.corrected_key,cm.confirmations,
-       cm.first_seen_at,cm.last_seen_at,cm.last_used_at
+SELECT ov.id,cm.field_name,MIN(cm.detected_value),cm.detected_key,
+       MIN(cm.corrected_value),cm.corrected_key,SUM(cm.confirmations),
+       MIN(cm.first_seen_at),MAX(cm.last_seen_at),MAX(cm.last_used_at)
 FROM outside_work_correction_memory cm
 JOIN vendors v ON v.id=cm.vendor_id
 JOIN outside_work_vendors ov
-  ON UPPER(TRIM(ov.name))=UPPER(TRIM(v.name));
+  ON UPPER(TRIM(ov.name))=UPPER(TRIM(v.name))
+GROUP BY ov.id,cm.field_name,cm.detected_key,cm.corrected_key;
 
 DROP TABLE outside_work_correction_memory;
 ALTER TABLE outside_work_correction_memory_new RENAME TO outside_work_correction_memory;
