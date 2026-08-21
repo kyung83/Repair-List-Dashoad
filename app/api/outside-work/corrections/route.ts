@@ -18,7 +18,7 @@ async function requireManager(request:Request){
 }
 
 async function resolveVendor(name:string,phone:string){
-  const result=await env.DB.prepare(`SELECT id,name,phone FROM vendors WHERE COALESCE(active,1)=1 ORDER BY id`).all<VendorRow>();
+  const result=await env.DB.prepare(`SELECT id,name,phone FROM outside_work_vendors WHERE COALESCE(active,1)=1 ORDER BY id`).all<VendorRow>();
   const digits=normalizePhone(phone);
   if(digits){
     const matches=result.results.filter(row=>normalizePhone(row.phone??'')===digits);
@@ -67,7 +67,7 @@ export async function POST(request:Request){
     const detected=(body.detected&&typeof body.detected==='object'?body.detected:{}) as Record<string,unknown>;
     const reviewed=(body.reviewed&&typeof body.reviewed==='object'?body.reviewed:{}) as Record<string,unknown>;
     const vendor=await resolveVendor(vendorName,vendorPhone);
-    if(!vendor)return Response.json({ok:true,learned:0,reason:'Vendor could not be resolved uniquely; no correction rule was learned.'},{headers:{'cache-control':'no-store'}});
+    if(!vendor)return Response.json({ok:true,learned:0,reason:'Outside Work vendor could not be resolved uniquely; no correction rule was learned.'},{headers:{'cache-control':'no-store'}});
 
     let learned=0;
     for(const fieldName of LEARNABLE_FIELDS){
