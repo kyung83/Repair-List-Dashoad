@@ -120,7 +120,7 @@ function validateVendorName(value:string){
   const words=name.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
   const capitalizedWords=words.length>0&&words.every(word=>/^[A-Z]/.test(word));
   const conciseCompanyName=words.length<=5&&(name===name.toUpperCase()||capitalizedWords);
-  if(words.length>10||sentenceBoundaries(name).length>0||/[.!?].*[.!?]/.test(name)||BAD_VENDOR_TEXT.test(name)||FINANCIAL_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)||(!COMPANY_EVIDENCE.test(name)&&!conciseCompanyName)){
+  if(words.length>10||sentenceBoundaries(name).length>0||BAD_VENDOR_TEXT.test(name)||FINANCIAL_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)||(!COMPANY_EVIDENCE.test(name)&&!conciseCompanyName)){
     throw new Error('Outside vendor looks like invoice text instead of a company name. Correct the vendor field before saving.');
   }
   return name;
