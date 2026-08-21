@@ -15,7 +15,9 @@ if [[ ! -x "${vinext}" ]]; then
 fi
 
 echo "Running outside-work invoice parser regression tests..."
-node --test "${project_root}/tests/outside-work-invoice-parser.test.mjs"
+node --test \
+  "${project_root}/tests/outside-work-invoice-parser.test.mjs" \
+  "${project_root}/tests/outside-work-mixed-invoices.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
