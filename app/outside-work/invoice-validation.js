@@ -41,26 +41,27 @@ function moneyValues(line=''){
 }
 
 function labeledAmount(lines,label){
+  const candidates=[];
   for(let i=0;i<lines.length;i++){
     const line=lines[i];
     if(!label.test(line)||/\b(?:SUBTOTAL|SUB\s+TOTAL|GRAND\s+TOTAL|TOTAL\s+DUE|AMOUNT\s+DUE)\b/i.test(line))continue;
     const values=moneyValues(line);
-    if(values.length)return values.at(-1);
+    if(values.length){candidates.push(values.at(-1));continue;}
     if(i+1<lines.length){
       const next=moneyValues(lines[i+1]);
-      if(next.length&&lines[i+1].length<40)return next.at(-1);
+      if(next.length&&lines[i+1].length<40)candidates.push(next.at(-1));
     }
   }
-  return null;
+  return candidates.length===1?candidates[0]:null;
 }
 
 export function simpleChargeBreakdown(text=''){
   const lines=String(text||'').split(/\r?\n/).map(line=>line.replace(/\s+/g,' ').trim()).filter(Boolean);
   return{
-    serviceCall:labeledAmount(lines,/\b(?:SERVICE\s*CALL|ROAD\s*CALL|MOBILE\s*SERVICE|CALL\s*OUT)\b/i),
-    labor:labeledAmount(lines,/\bLAB(?:O|OU)R\b/i),
-    parts:labeledAmount(lines,/\bPARTS?\b/i),
-    tax:labeledAmount(lines,/\b(?:SALES\s+)?TAX\b/i),
+    serviceCall:labeledAmount(lines,/^(?:SERVICE\s*CALL|ROAD\s*CALL|MOBILE\s*SERVICE|CALL\s*OUT)\b/i),
+    labor:labeledAmount(lines,/^LAB(?:O|OU)R\b/i),
+    parts:labeledAmount(lines,/^PARTS?\b/i),
+    tax:labeledAmount(lines,/^(?:SALES\s+)?TAX\b/i),
   };
 }
 
