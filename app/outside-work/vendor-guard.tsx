@@ -16,6 +16,7 @@ const contact=/\b(?:PHONE|TEL|FAX)\b|\(\d{3}\)\s*\d{3}[- ]\d{4}|\b\d{3}[-.]\d{3}
 const address=/^\d{1,6}\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|LANE|LN|WAY|ROUTE|RT|PKWY|PARKWAY|PO\s+BOX)\b|\b[A-Z .'-]+,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/i;
 const business=/\b(?:TRUCK|TRUCKS|TRACTOR|TRACTORS|DIESEL|TIRE|TIRES|SERVICE|SERVICES|REPAIR|REPAIRS|MOTOR|MOTORS|AUTO|AUTOMOTIVE|CENTER|CENTRE|DEALER|GARAGE|SHOP|TRUCKING|FLEET|BODY\s+SHOP|COLLISION|TOWING|SPRING|TRANSMISSION|RADIATOR|ALIGNMENT|INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i;
 const knownBrand=/\b(?:KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK|INTERNATIONAL|CUMMINS|DETROIT|GOODYEAR|BRIDGESTONE|MICHELIN|LOVE'?S|TA\s+PETRO|IDEALEASE)\b/i;
+const companySuffixWord=/^(?:INC|INCORPORATED|CORP|CORPORATION|LTD|LLC|COMPANY)$/i;
 const narrativeAction=/\b(?:PULLED|CHECKED|FOUND|REPLACED|PERFORMED|RAN|ROAD\s+TESTED|REMOVED|INSTALLED|DIAGNOSED|INSPECTED|REPAIRED|SERVICED|ADJUSTED|REBUILT|CHANGED|MOUNTED|BALANCED|ALIGNED|RESET|REGEN|FAILED|BAD|FAULT|CODES?)\b/gi;
 
 function looksLikeNarrative(value:string){
@@ -26,14 +27,41 @@ function looksLikeNarrative(value:string){
   return actions>=2||(line.length>=70&&actions>=1)||(/[.!?]/.test(line)&&line.length>=85);
 }
 
-function companyCandidate(value:string,anchored=false){
+function hasCompanyEvidence(value:string){
+  return business.test(value)||knownBrand.test(value)||/\b(?:INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i.test(value);
+}
+
+function proseBoundaries(value:string){
+  const boundary=/\b([A-Za-z]{3,})[.!?;]\s+/g;
+  return Array.from(value.matchAll(boundary)).filter(match=>!companySuffixWord.test(match[1]||""));
+}
+
+function trimMergedProsePrefix(value:string){
   const line=cleanLine(value).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+  if(!line)return"";
+
+  const matches=proseBoundaries(line);
+  for(let i=matches.length-1;i>=0;i--){
+    const start=(matches[i].index??0)+matches[i][0].length;
+    const tail=line.slice(start).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+    if(tail&&tail.length<=90&&hasCompanyEvidence(tail))return tail;
+  }
+
+  const uppercaseTail=line.match(/([A-Z][A-Z0-9&'./-]*(?:\s+[A-Z][A-Z0-9&'./-]*){1,7})$/);
+  if(uppercaseTail?.[1]&&hasCompanyEvidence(uppercaseTail[1]))return uppercaseTail[1].trim();
+  return line;
+}
+
+function companyCandidate(value:string,anchored=false){
+  const line=trimMergedProsePrefix(value);
   if(line.length<2||line.length>90||!/[A-Za-z]{2}/.test(line))return"";
   if(customerHeading.test(line)||excludedHeading.test(line)||customer.test(line)||financial.test(line)||legal.test(line)||metadata.test(line)||contact.test(line)||address.test(line)||looksLikeNarrative(line))return"";
   if(/\$\s*\d|^[0-9]/.test(line)||/[Xx*#]{2,}\s*\d{2,8}\b/.test(line))return"";
   const words=line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
   if(words.length>10)return"";
-  if(!anchored&&!business.test(line)&&!knownBrand.test(line))return"";
+  const capitalizedWords=words.length>0&&words.every(word=>/^[A-Z]/.test(word));
+  const conciseAnchoredName=anchored&&words.length<=5&&!/[;!?]/.test(line)&&proseBoundaries(line).length===0&&(line===line.toUpperCase()||capitalizedWords);
+  if(!hasCompanyEvidence(line)&&!conciseAnchoredName)return"";
   return line;
 }
 
@@ -83,6 +111,8 @@ function suspiciousVendor(value:string){
   if(!line)return false;
   if(customerHeading.test(line)||excludedHeading.test(line)||customer.test(line)||financial.test(line)||legal.test(line)||metadata.test(line)||looksLikeNarrative(line))return true;
   if(line.length>90||(line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[]).length>10)return true;
+  const normalized=line.replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+  if(trimMergedProsePrefix(line)!==normalized)return true;
   if(/^(?:SOLD\s+OPERATIONS|JOB\s*#|QTY\b|ITEM\b|DESCRIPTION\b)/i.test(line))return true;
   return false;
 }
