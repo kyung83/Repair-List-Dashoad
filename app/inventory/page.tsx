@@ -62,6 +62,18 @@ type VendorForm = { id: number; name: string; phone: string; email: string; note
 type SortMode = "description" | "negative-first" | "qty-asc" | "qty-desc" | "part-number";
 type StockFilter = "all" | "negative" | "below-minimum";
 
+type CountSnapshot = {
+  ok?: boolean;
+  error?: string;
+  partId: number;
+  partNumber: string;
+  description: string;
+  warehouseCode: string;
+  warehouseName: string;
+  expectedQuantity: number;
+  stockVersion: string;
+};
+
 const blankPart: PartForm = {
   id: 0,
   partNumber: "",
@@ -228,14 +240,48 @@ export default function InventoryPage() {
     await load();
   }
 
-  async function adjustStock(id: number, delta: number) {
+  async function physicalCount(item: Part) {
+    setMessage("");
+    if (warehouseCode === "ALL") {
+      setMessage("Choose a specific warehouse before recording a physical count.");
+      return;
+    }
+    const snapshotResponse = await fetch(`/api/inventory/count-snapshot?partId=${item.id}&warehouseCode=${encodeURIComponent(warehouseCode)}`, { cache: "no-store" });
+    const snapshot = (await snapshotResponse.json()) as CountSnapshot;
+    if (!snapshotResponse.ok || !snapshot.ok) {
+      setMessage(snapshot.error || "Physical count could not be started.");
+      return;
+    }
+    const entered = window.prompt(
+      `${snapshot.partNumber} — ${snapshot.description}\n${snapshot.warehouseName}\nSystem quantity: ${snapshot.expectedQuantity}\n\nEnter the quantity you physically counted:`,
+      String(snapshot.expectedQuantity),
+    );
+    if (entered == null) return;
+    const countedQuantity = Number(entered);
+    if (!Number.isFinite(countedQuantity) || countedQuantity < 0) {
+      setMessage("Physical count must be zero or greater.");
+      return;
+    }
     const response = await fetch("/api/inventory", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "adjustStock", id, delta, warehouseCode: warehouseCode === "ALL" ? "" : warehouseCode }),
+      body: JSON.stringify({
+        action: "recordPhysicalCount",
+        partId: item.id,
+        warehouseCode,
+        countedQuantity,
+        stockVersion: snapshot.stockVersion,
+        reason: `Physical count entered from Inventory for ${snapshot.partNumber} at ${snapshot.warehouseName}.`,
+      }),
     });
-    const result = (await response.json()) as { error?: string };
-    if (!response.ok) return setMessage(result.error || "Stock could not be adjusted");
+    const result = (await response.json()) as { matched?: boolean; issueId?: number; error?: string };
+    if (!response.ok) {
+      setMessage(result.error || "Physical count could not be recorded.");
+      return;
+    }
+    setMessage(result.matched
+      ? `Count confirmed: ${snapshot.partNumber} matches the system quantity.`
+      : `Count discrepancy recorded for review${result.issueId ? ` as issue #${result.issueId}` : ""}. Stock was not silently changed.`);
     await load();
   }
 
@@ -294,7 +340,7 @@ export default function InventoryPage() {
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 800, letterSpacing: ".16em" }}>PARTS OPERATIONS</p>
           <h1 style={{ margin: "8px 0 0", color: "#0d1b2b", fontSize: 34 }}>Inventory</h1>
-          <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Warehouse stock, minimums, vendors, equipment compatibility, and repair usage.</p>
+          <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Warehouse stock, minimums, vendors, equipment compatibility, repair usage, and controlled physical counts.</p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button onClick={() => { setVendor(blankVendor); setShowVendorForm(true); }} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800 }}>+ Add vendor</button>
@@ -374,8 +420,7 @@ export default function InventoryPage() {
                     <td style={{ padding: 13, maxWidth: 260 }}>{equipment.length ? `${equipment.slice(0, 5).map((entry) => entry.unit).join(", ")}${equipment.length > 5 ? ` +${equipment.length - 5}` : ""}` : "—"}</td>
                     <td style={{ padding: 13 }}>{stock.unitCost == null ? "—" : stock.unitCost.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
                     <td style={{ padding: 13, whiteSpace: "nowrap" }}>
-                      <button onClick={() => void adjustStock(item.id, 1)} style={{ marginRight: 6 }}>+1</button>
-                      <button onClick={() => void adjustStock(item.id, -1)} style={{ marginRight: 6 }}>−1</button>
+                      <button onClick={() => void physicalCount(item)} style={{ marginRight: 6 }} disabled={warehouseCode === "ALL"}>Physical Count</button>
                       <button onClick={() => editPart(item)}>Edit</button>
                     </td>
                   </tr>
