@@ -1,189 +1,263 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import OutsideWorkIntake from "./file-intake";
 
+type Vendor={id:number;name:string;phone:string;email:string;address:string;lookupKey:string};
+type VendorPayload={vendors?:Vendor[];error?:string};
+type VendorSavePayload={ok?:boolean;created?:boolean;vendor?:Vendor;error?:string};
+type ExtractedVendor={name:string;source:"remit"|"letterhead"|"";email:string;address:string};
+
 function cleanLine(value:string){return value.replace(/[|]+/g," ").replace(/\s+/g," ").trim();}
+function linesFrom(text:string){return text.split(/\r?\n/).map(cleanLine).filter(Boolean);}
+function normalizeVendor(value:string){
+  let normalized=value.toUpperCase().replace(/&/g," AND ").replace(/[^A-Z0-9]+/g," ").replace(/\s+/g," ").trim();
+  normalized=normalized
+    .replace(/\s+(?:INCORPORATED|INC|LLC|LTD|CORPORATION|CORP|COMPANY|CO)$/,"" )
+    .replace(/\s+(?:TRUCKS|TRUCK|TRACTORS|TRACTOR)$/,"" )
+    .trim();
+  return normalized;
+}
 
-const metadata=/NORTHERN\s+LOGISTICS|NORLOWORLD|\bINVOICE\b|REPAIR\s+ORDER|WORK\s+ORDER|BILL\s+TO|SHIP\s+TO|\bCUSTOMER\b|\bACCOUNT\b|\bACCT\b|FLEET\s+CHARGE|FLEET\s+CARD|CARD\s*(?:NO|NUMBER|#)|\bAUTH(?:ORIZATION)?\b|\bAPPROVAL\b|\bTRANSACTION\b|\bREFERENCE\b|\bPAYMENT\b|AMOUNT\s+DUE|BALANCE\s+DUE|GRAND\s+TOTAL|\bTERMS\b|SALESPERSON|PURCHASE\s+ORDER|\bPO\s*#|PAGE\s+\d|\bDATE\b|TAG\s+NUMBER|LICENSE\s+PLATE|YEAR\s+MAKE\s+MODEL|ENGINE\s+HOURS|ODOMETER|CUSTOMER\s+UNIT/i;
-const equipmentField=/^(?:UNIT|TRUCK|TRACTOR|TRAILER|VEHICLE|EQUIPMENT|ASSET|STOCK)(?:\s*(?:NO|NUMBER|#|UNIT))?\s*[:#=.-]*\s*[A-Z0-9-]{1,20}\s*$/i;
+const remitAnchor=/\b(?:PLEASE\s+REMIT\s+PAYMENT\s+TO|REMIT\s+PAYMENT\s+TO|REMIT\s+TO|PAY\s+TO)\b\s*[:#=.-]*/i;
+const hardHeading=/^(?:BILL\s+TO|DELIVER\s+TO|SHIP\s+TO|AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|TERMS|CONDITIONS|SIGNATURE\s+OF\s+PERSON\s+RESPONSIBLE|COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|SERVICE\s+DESCRIPTION|DESCRIPTION\s+OF\s+WORK|REPAIR\s+DESCRIPTION|TECHNICIAN\s+COMMENTS|RECOMMENDATIONS)\b/i;
+const financial=/\b(?:SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE|ESTIMATED|BILLED)\b/i;
+const legal=/\b(?:WARRANTY|WARRANTIES|HEREBY|UNDERSIGNED|PURCHASER|MERCHANTABILITY|PARTICULAR\s+PURPOSE|CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|PARTS\s+AND\/OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|PERMISSION\s+TO\s+OPERATE|UNAVAILABILITY\s+OF\s+PARTS|PARTS\s+SHIPMENTS)\b/i;
+const customer=/\b(?:NORTHERN\s+LOGISTICS|NORLOWORLD)\b/i;
+const metadata=/\b(?:INVOICE|REPAIR\s+ORDER|WORK\s+ORDER|CUSTOMER|ACCOUNT|ACCT|UNIT|TRUCK\s*(?:NO|NUMBER|#)|TRACTOR\s*(?:NO|NUMBER|#)|TRAILER\s*(?:NO|NUMBER|#)|VEHICLE\s*(?:NO|NUMBER|#)|EQUIPMENT\s*(?:NO|NUMBER|#)|ODOMETER|MILEAGE|DATE|PAGE\s+\d)\b/i;
+const contact=/\b(?:PHONE|TEL|FAX)\b|\(\d{3}\)\s*\d{3}[- ]\d{4}|\b\d{3}[-.]\d{3}[-.]\d{4}\b|https?:|www\.|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const address=/^\d{1,6}\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|LANE|LN|WAY|ROUTE|RT|PKWY|PARKWAY|PO\s+BOX)\b|\b[A-Z .'-]+,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/i;
 const business=/\b(?:TRUCK|TRUCKS|TRACTOR|TRACTORS|DIESEL|TIRE|TIRES|SERVICE|SERVICES|REPAIR|REPAIRS|MOTOR|MOTORS|AUTO|AUTOMOTIVE|CENTER|CENTRE|DEALER|GARAGE|SHOP|TRUCKING|FLEET|BODY\s+SHOP|COLLISION|TOWING|SPRING|TRANSMISSION|RADIATOR|ALIGNMENT|INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i;
-const knownBrand=/\b(?:KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK|INTERNATIONAL|CUMMINS|DETROIT|GOODYEAR|BRIDGESTONE|MICHELIN|LOVE'?S|TA\s+PETRO)\b/i;
-const contact=/\b(?:PHONE|TEL|FAX)\b|\(\d{3}\)\s*\d{3}[- ]\d{4}|\b\d{3}[-.]\d{3}[-.]\d{4}\b|www\.|https?:|@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-const address=/^\d{1,6}\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|LANE|LN|WAY|ROUTE|RT|PKWY|PARKWAY|PO\s+BOX)\b/i;
-const vendorLabel=/(?:^|\b)(?:VENDOR|SUPPLIER|MERCHANT|DEALER|SERVICE\s+PROVIDER|REMIT\s+TO|PAY\s+TO|PLEASE\s+REMIT\s+PAYMENT\s+TO)\b\s*[:#=.-]*\s*(.*)$/i;
-const financialLine=/^(?:ESTIMATED(?:\s+BILLED)?|BILLED|PREPAY|SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|MISC|LABOR|LABOUR|PARTS|SUBLET|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE)(?:\b|\s*[:$])/i;
-const financialAmount=/\b(?:SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL)\b[^\n]{0,40}\$?\s*\d[\d,.]*/i;
-const narrativeHeading=/^(?:COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|SERVICE\s+DESCRIPTION|DESCRIPTION\s+OF\s+WORK|REPAIR\s+DESCRIPTION|LABOR\s+DETAIL|LABOUR\s+DETAIL|JOB\s+DESCRIPTION|TECHNICIAN\s+COMMENTS|RECOMMENDATIONS)\b/i;
-const narrativeEnd=/^(?:QTY\b|ITEM\b|PART\s+NUMBER|PART\s*#|DESCRIPTION\b|UNIT\s+PRICE|EXTD\s+PRICE|EXTENDED\b|PREPAY\b|SOLD\s+OPERATIONS\s+TOTALS|SUB\s*TOTAL|SUBTOTAL|AMOUNT\s+DUE|BALANCE\s+DUE|GRAND\s+TOTAL|TOTAL\b)/i;
-const narrativeAction=/\b(?:PULLED|CHECKED|FOUND|REPLACED|PERFORMED|RAN|ROAD\s+TESTED|REMOVED|INSTALLED|DIAGNOSED|INSPECTED|REPAIRED|SERVICED|ADJUSTED|REBUILT|CHANGED|MOUNTED|BALANCED|ALIGNED|RESET|REGEN|FAILED|BAD|FAULT|CODES?)\b/gi;
-const vehicleLine=/\b[A-HJ-NPR-Z0-9]{17}\b|^\s*(?:19|20)\d{2}\s+[A-Z][A-Z0-9&'. -]+\s+[A-Z0-9-]{1,20}\b/i;
-const legalHeading=/^(?:AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|WARRANTY|WARRANTIES|SIGNATURE\s+OF\s+PERSON)/i;
-const legalBoilerplate=/\b(?:HEREBY\s+AUTHORIZE|HEREBY\s+GRANT|UNDERSIGNED\s+PURCHASER|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|NO\s+WARRANTIES|DISCLAIMS?\s+ALL\s+WARRANTIES|MERCHANTABILITY|FITNESS\s+FOR\s+A\s+PARTICULAR\s+PURPOSE|INCIDENTAL\s+OR\s+CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|PARTS\s+AND\/OR\s+ACCESSORIES|PARTS\s+OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|DEALER\s+MAKES?\s+NO\s+WARRANTIES|MANUFACTURER|PERMISSION\s+TO\s+OPERATE|LOSS\s+OR\s+DAMAGE\s+TO\s+VEHICLE|UNAVAILABILITY\s+OF\s+PARTS|PARTS\s+SHIPMENTS|SUPPLIER\s+OR\s+TRANSPORTER)\b/i;
-const commonProse=/\b(?:THE|AND|OR|TO|FOR|OF|THAT|WITH|ARE|IS|BE|BEEN|THIS|SUCH|ANY|FROM|BY|ON|IN|AS|THESE|THOSE|WILL|SHALL|UNDERSTANDS?|AGREES?|PURCHASED|SOLD|MADE|MAKES?)\b/gi;
+const knownBrand=/\b(?:KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK|INTERNATIONAL|CUMMINS|DETROIT|GOODYEAR|BRIDGESTONE|MICHELIN|LOVE'?S|TA\s+PETRO|IDEALEASE)\b/i;
 
-function looksLikeNarrative(value:string){
-  const line=cleanLine(value);
-  if(!line)return false;
-  if(narrativeHeading.test(line))return true;
-  const actions=line.match(narrativeAction)?.length||0;
-  return actions>=2||(line.length>=70&&actions>=1)||(/[.!?]/.test(line)&&line.length>=85);
-}
-
-function looksLikeLegalOrProse(value:string){
-  const line=cleanLine(value);
-  if(!line)return false;
-  if(legalHeading.test(line)||legalBoilerplate.test(line))return true;
-  const words=line.match(/[A-Za-z][A-Za-z'/-]*/g)||[];
-  const proseWords=line.match(commonProse)?.length||0;
-  if(words.length>=7&&proseWords>=3)return true;
-  if(words.length>=10&&!business.test(line)&&!knownBrand.test(line))return true;
-  return false;
-}
-
-function cleanVendorCandidate(value:string){
+function companyCandidate(value:string,anchored=false){
   const line=cleanLine(value).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
   if(line.length<2||line.length>90||!/[A-Za-z]{2}/.test(line))return"";
-  if(metadata.test(line)||financialLine.test(line)||financialAmount.test(line)||equipmentField.test(line)||contact.test(line)||address.test(line)||vehicleLine.test(line)||looksLikeNarrative(line)||looksLikeLegalOrProse(line))return"";
-  if(/[Xx*#]{2,}\s*\d{2,8}\b/.test(line)||/^\$?\s*\d[\d,. ]*$/.test(line))return"";
-  const letters=(line.match(/[A-Za-z]/g)||[]).length;
-  const digits=(line.match(/\d/g)||[]).length;
-  if(letters<2||digits>Math.max(3,Math.floor(letters/2)))return"";
+  if(hardHeading.test(line)||financial.test(line)||legal.test(line)||customer.test(line)||metadata.test(line)||contact.test(line)||address.test(line))return"";
+  if(/\$\s*\d|^[0-9]/.test(line))return"";
+  const words=line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
+  if(words.length>10)return"";
+  if(!anchored&&!business.test(line)&&!knownBrand.test(line))return"";
   return line;
 }
 
-function narrativeMask(lines:string[]){
-  const blocked=new Array<boolean>(lines.length).fill(false);
-  let inside=false;
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-    if(narrativeHeading.test(line)){inside=true;blocked[i]=true;continue;}
-    if(inside&&narrativeEnd.test(line)){inside=false;continue;}
-    if(inside)blocked[i]=true;
-  }
-  return blocked;
+function findEmail(text:string){
+  const emails=text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)||[];
+  const preferred=emails.find(value=>/^(?:ar|accounts?|billing|service|parts)@/i.test(value));
+  return preferred||emails[0]||"";
 }
 
-function explicitLabelValue(line:string){
-  const match=line.match(vendorLabel);
-  if(!match)return"";
-  return cleanVendorCandidate(match[1]||"");
-}
-
-function detectExplicitVendor(lines:string[]){
+function remitVendor(lines:string[]){
   for(let i=0;i<lines.length;i++){
-    if(!vendorLabel.test(lines[i]))continue;
-    const same=explicitLabelValue(lines[i]);
-    if(same)return same;
-    for(let offset=1;offset<=6;offset++){
+    const match=lines[i].match(remitAnchor);
+    if(!match||match.index===undefined)continue;
+    const same=companyCandidate(lines[i].slice(match.index+match[0].length),true);
+    if(same)return{name:same,index:i};
+    for(let offset=1;offset<=8;offset++){
       const raw=lines[i+offset]||"";
       if(!raw)continue;
-      if(financialLine.test(raw)||legalHeading.test(raw)||legalBoilerplate.test(raw))continue;
-      const next=cleanVendorCandidate(raw);
-      if(next&&(business.test(next)||knownBrand.test(next)||/\b(?:INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i.test(next)))return next;
+      if(hardHeading.test(raw)||financial.test(raw)||legal.test(raw))break;
+      const candidate=companyCandidate(raw,true);
+      if(candidate)return{name:candidate,index:i+offset};
     }
   }
-  return"";
+  return null;
 }
 
-function detectVendorNearContact(lines:string[]){
-  for(let i=0;i<lines.length;i++){
-    if(!contact.test(lines[i]))continue;
-    for(let offset=1;offset<=4;offset++){
-      const candidate=cleanVendorCandidate(lines[i-offset]||"");
-      if(candidate&&(business.test(candidate)||knownBrand.test(candidate)))return candidate;
-    }
-  }
-  return"";
-}
-
-function detectReliableVendor(text:string){
-  const lines=text.split(/\r?\n/).map(cleanLine).filter(Boolean);
-  const explicit=detectExplicitVendor(lines);
-  if(explicit)return explicit;
-
-  const nearContact=detectVendorNearContact(lines);
-  const blocked=narrativeMask(lines);
-  let best=nearContact;
-  let bestScore=nearContact?84:-999;
-  const limit=Math.min(lines.length,220);
-
+function letterheadVendor(lines:string[]){
+  const billIndex=lines.findIndex(line=>/^(?:BILL\s+TO|DELIVER\s+TO|SHIP\s+TO)\b/i.test(line));
+  const limit=Math.min(billIndex>=0?billIndex:35,35);
+  let best="";let bestScore=-1;
   for(let i=0;i<limit;i++){
-    const line=cleanVendorCandidate(lines[i]);
-    if(!line||blocked[i])continue;
-
-    const letters=(line.match(/[A-Za-z]/g)||[]).length;
-    const digits=(line.match(/\d/g)||[]).length;
-    const hasBusiness=business.test(line);
-    const hasBrand=knownBrand.test(line);
-    const nearby=[lines[i-2]||"",lines[i-1]||"",lines[i+1]||"",lines[i+2]||"",lines[i+3]||""].join(" ");
-    const hasContact=contact.test(nearby);
-    const hasAddress=[lines[i+1]||"",lines[i+2]||"",lines[i+3]||""].some(item=>address.test(item));
-
-    if(!hasBusiness&&!hasBrand)continue;
-
-    let score=24-Math.min(i,20);
-    if(hasBusiness)score+=54;
-    if(hasBrand)score+=18;
-    if(hasContact)score+=22;
-    if(hasAddress)score+=22;
-    if(line===line.toUpperCase()&&letters>=5)score+=8;
-    if(line.length>=4&&line.length<=58)score+=7;
-    if(/^[A-Z][A-Za-z0-9&'. -]+$/.test(line))score+=4;
-    if(/:/.test(line))score-=18;
-    score-=Math.min(18,digits*4);
-
-    if(hasBrand&&!hasBusiness&&!hasContact&&!hasAddress)score-=50;
-    if(score>bestScore){bestScore=score;best=line;}
+    const candidate=companyCandidate(lines[i]);
+    if(!candidate)continue;
+    let score=0;
+    if(business.test(candidate))score+=4;
+    if(knownBrand.test(candidate))score+=2;
+    const nearby=[lines[i+1]||"",lines[i+2]||"",lines[i+3]||""].join(" ");
+    if(address.test(nearby))score+=3;
+    if(contact.test(nearby))score+=3;
+    if(score>bestScore){bestScore=score;best=candidate;}
   }
-  return bestScore>=72?best:"";
+  return bestScore>=5?best:"";
 }
 
-function suspiciousVendor(value:string){
-  const line=cleanLine(value);
-  if(!line)return false;
-  if(metadata.test(line)||financialLine.test(line)||financialAmount.test(line)||equipmentField.test(line)||vehicleLine.test(line)||looksLikeNarrative(line)||looksLikeLegalOrProse(line))return true;
-  if(/^(?:SOLD\s+OPERATIONS|JOB\s*#|COMPLAINT|CAUSE|CORRECTION|QTY\b|ITEM\b|DESCRIPTION\b)/i.test(line))return true;
-  if(/^(?:INTERNATIONAL|KENWORTH|PETERBILT|FREIGHTLINER|VOLVO|MACK|CUMMINS|DETROIT)$/i.test(line))return true;
-  return false;
+function nearbyAddress(lines:string[],index:number){
+  const found:string[]=[];
+  for(let offset=1;offset<=5;offset++){
+    const line=lines[index+offset]||"";
+    if(!line||hardHeading.test(line)||financial.test(line)||legal.test(line))break;
+    if(contact.test(line))continue;
+    if(address.test(line)||(/^\d/.test(line)&&line.length<100))found.push(line);
+  }
+  return found.join(", ").slice(0,300);
+}
+
+function extractVendor(text:string):ExtractedVendor{
+  const lines=linesFrom(text);
+  const email=findEmail(text);
+  const remit=remitVendor(lines);
+  if(remit)return{name:remit.name,source:"remit",email,address:nearbyAddress(lines,remit.index)};
+  const letterhead=letterheadVendor(lines);
+  if(letterhead)return{name:letterhead,source:"letterhead",email,address:""};
+  return{name:"",source:"",email,address:""};
+}
+
+function tokenSimilarity(a:string,b:string){
+  const left=new Set(normalizeVendor(a).split(" ").filter(Boolean));
+  const right=new Set(normalizeVendor(b).split(" ").filter(Boolean));
+  if(!left.size||!right.size)return 0;
+  let common=0;for(const token of left)if(right.has(token))common++;
+  return (2*common)/(left.size+right.size);
 }
 
 function setReactInputValue(input:HTMLInputElement,value:string){
   const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
   if(setter)setter.call(input,value);else input.value=value;
   input.dispatchEvent(new Event("input",{bubbles:true}));
+  input.dispatchEvent(new Event("change",{bubbles:true}));
 }
 
-function VendorGuard(){
+function VendorMasterResolver(){
+  const[vendorLabel,setVendorLabel]=useState<HTMLLabelElement|null>(null);
+  const[vendors,setVendors]=useState<Vendor[]>([]);
+  const[loadError,setLoadError]=useState("");
+  const[ocrText,setOcrText]=useState("");
+  const[selectedId,setSelectedId]=useState(0);
+  const[newName,setNewName]=useState("");
+  const[busy,setBusy]=useState(false);
+  const[actionError,setActionError]=useState("");
+  const vendorInputRef=useRef<HTMLInputElement|null>(null);
+  const lastTextRef=useRef("");
+
   useEffect(()=>{
-    let activeText="";
-    let seededForText=false;
+    let cancelled=false;
+    fetch("/api/outside-work/vendors",{cache:"no-store"})
+      .then(async response=>{const payload=await response.json() as VendorPayload;if(!response.ok)throw new Error(payload.error||"Vendors could not be loaded.");return payload;})
+      .then(payload=>{if(!cancelled)setVendors(payload.vendors||[]);})
+      .catch(error=>{if(!cancelled)setLoadError(error instanceof Error?error.message:"Vendors could not be loaded.");});
+    return()=>{cancelled=true;};
+  },[]);
+
+  useEffect(()=>{
     const timer=window.setInterval(()=>{
       const textarea=Array.from(document.querySelectorAll<HTMLTextAreaElement>("textarea")).find(item=>item.placeholder.includes("OCR or extracted PDF text"));
-      const vendorLabelElement=Array.from(document.querySelectorAll<HTMLLabelElement>("label")).find(label=>(label.textContent||"").trim().startsWith("Outside vendor"));
-      const vendorInput=vendorLabelElement?.querySelector<HTMLInputElement>("input")||null;
-      if(!textarea||!vendorInput)return;
-
-      const text=textarea.value.trim();
-      if(!text)return;
-      if(text!==activeText){activeText=text;seededForText=false;}
-
-      const candidate=detectReliableVendor(text);
-      const current=vendorInput.value.trim();
-      const suspicious=suspiciousVendor(current);
-
-      if(candidate&&(!seededForText||!current||suspicious)){
-        if(candidate!==current)setReactInputValue(vendorInput,candidate);
-        seededForText=true;
-        return;
+      const label=Array.from(document.querySelectorAll<HTMLLabelElement>("label")).find(item=>(item.textContent||"").trim().startsWith("Outside vendor"))||null;
+      const input=label?.querySelector<HTMLInputElement>("input")||null;
+      if(label&&label!==vendorLabel)setVendorLabel(label);
+      if(input){
+        vendorInputRef.current=input;
+        input.readOnly=true;
+        input.placeholder="Choose or create a vendor below";
+        input.setAttribute("aria-readonly","true");
       }
-      if(!candidate&&suspicious){setReactInputValue(vendorInput,"");seededForText=true;}
+      const text=textarea?.value.trim()||"";
+      if(text!==lastTextRef.current){
+        lastTextRef.current=text;
+        setOcrText(text);
+        setSelectedId(0);
+        setActionError("");
+      }
     },250);
     return()=>window.clearInterval(timer);
-  },[]);
-  return null;
+  },[vendorLabel]);
+
+  const extracted=useMemo(()=>extractVendor(ocrText),[ocrText]);
+  const exact=useMemo(()=>{
+    const key=normalizeVendor(extracted.name);
+    if(!key)return null;
+    const matches=vendors.filter(vendor=>vendor.lookupKey===key||normalizeVendor(vendor.name)===key);
+    return matches.length===1?matches[0]:null;
+  },[extracted.name,vendors]);
+  const suggestions=useMemo(()=>{
+    if(!extracted.name||exact)return[];
+    return vendors
+      .map(vendor=>({vendor,score:tokenSimilarity(extracted.name,vendor.name)}))
+      .filter(item=>item.score>=0.72)
+      .sort((a,b)=>b.score-a.score)
+      .slice(0,3);
+  },[extracted.name,exact,vendors]);
+
+  useEffect(()=>{
+    const input=vendorInputRef.current;
+    if(!input)return;
+    if(exact){
+      setReactInputValue(input,exact.name);
+      setSelectedId(exact.id);
+      setNewName("");
+      return;
+    }
+    if(selectedId>0)return;
+    if(input.value)setReactInputValue(input,"");
+    if(extracted.name)setNewName(extracted.name);
+  },[exact,extracted.name,selectedId]);
+
+  function useVendor(vendor:Vendor){
+    const input=vendorInputRef.current;if(!input)return;
+    setReactInputValue(input,vendor.name);
+    setSelectedId(vendor.id);
+    setNewName("");
+    setActionError("");
+  }
+
+  async function createVendor(name:string){
+    const clean=cleanLine(name);
+    if(!clean){setActionError("Enter the vendor company name.");return;}
+    setBusy(true);setActionError("");
+    try{
+      const response=await fetch("/api/outside-work/vendors",{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({name:clean,email:extracted.email,address:extracted.address}),
+      });
+      const payload=await response.json() as VendorSavePayload;
+      if(!response.ok||!payload.vendor)throw new Error(payload.error||"Vendor could not be created.");
+      const vendor=payload.vendor;
+      setVendors(current=>[...current.filter(item=>item.id!==vendor.id),vendor].sort((a,b)=>a.name.localeCompare(b.name)));
+      useVendor(vendor);
+    }catch(error){setActionError(error instanceof Error?error.message:"Vendor could not be created.");}
+    finally{setBusy(false);}
+  }
+
+  if(!vendorLabel)return null;
+  const status=selectedId
+    ?`Resolved to vendor master #${selectedId}.`
+    :extracted.name
+      ?`${extracted.source==="remit"?"Remit-to vendor detected":"Invoice letterhead vendor detected"}: ${extracted.name}`
+      :"No confident vendor was detected. Choose an existing vendor or create the road-repair vendor.";
+
+  return createPortal(
+    <div data-vendor-master-resolver="true" style={{display:"grid",gap:8,marginTop:8,padding:10,border:"1px solid #d1d5db",borderRadius:8,background:"#f9fafb"}}>
+      <div style={{fontSize:12,fontWeight:700,color:selectedId?"#166534":"#374151"}}>{status}</div>
+      <select
+        value={selectedId||""}
+        onChange={event=>{const id=Number(event.target.value||0);const vendor=vendors.find(item=>item.id===id);if(vendor)useVendor(vendor);else{setSelectedId(0);const input=vendorInputRef.current;if(input)setReactInputValue(input,"");}}}
+        style={{width:"100%",minHeight:38,border:"1px solid #cbd5e1",borderRadius:6,padding:"6px 8px",background:"white"}}
+      >
+        <option value="">Select existing vendor…</option>
+        {vendors.map(vendor=><option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+      </select>
+
+      {!selectedId&&suggestions.length>0&&<div style={{display:"grid",gap:6}}>
+        <div style={{fontSize:12,color:"#475569"}}>Possible existing match — confirm one:</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {suggestions.map(item=><button key={item.vendor.id} type="button" onClick={()=>useVendor(item.vendor)} style={{border:"1px solid #94a3b8",borderRadius:6,padding:"6px 9px",background:"white",cursor:"pointer"}}>Use {item.vendor.name}</button>)}
+        </div>
+      </div>}
+
+      {!selectedId&&<div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:6}}>
+        <input value={newName} onChange={event=>setNewName(event.target.value)} placeholder="New one-off / road-repair vendor name" style={{minHeight:38,border:"1px solid #cbd5e1",borderRadius:6,padding:"6px 8px"}}/>
+        <button type="button" disabled={busy||!newName.trim()} onClick={()=>void createVendor(newName)} style={{border:"1px solid #0f172a",borderRadius:6,padding:"6px 10px",background:"#0f172a",color:"white",fontWeight:700,cursor:busy?"wait":"pointer",opacity:busy?0.6:1}}>{busy?"Creating…":"Create & use"}</button>
+      </div>}
+
+      {extracted.email&&<div style={{fontSize:11,color:"#64748b"}}>Invoice contact signal: {extracted.email}</div>}
+      {loadError&&<div style={{fontSize:12,color:"#b91c1c"}}>{loadError}</div>}
+      {actionError&&<div style={{fontSize:12,color:"#b91c1c"}}>{actionError}</div>}
+    </div>,
+    vendorLabel,
+  );
 }
 
 export default function OutsideWorkVendorSafe(){
-  return <><OutsideWorkIntake/><VendorGuard/></>;
+  return <><OutsideWorkIntake/><VendorMasterResolver/></>;
 }
