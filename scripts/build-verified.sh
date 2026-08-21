@@ -23,7 +23,8 @@ node --test \
   "${project_root}/tests/outside-work-correction-memory.test.mjs" \
   "${project_root}/tests/outside-work-vendor-separation.test.mjs" \
   "${project_root}/tests/geotab-location-state.test.mjs" \
-  "${project_root}/tests/tire-position-repair.test.mjs"
+  "${project_root}/tests/tire-position-repair.test.mjs" \
+  "${project_root}/tests/parts-inventory-v2-contract.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
