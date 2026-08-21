@@ -81,7 +81,7 @@ function normalizedText(payload:VisionPayload){
   return lines.join('\n');
 }
 
-const SYSTEM=`You read fleet repair invoices from photographs and scanned PDFs, including difficult handwriting. Extract only what is visibly supported by the page. Never guess. The customer may be Northern Logistics or Norloworld; that is not the repair vendor. Distinguish the company that performed the service from remit-to/payee/payment-processor names. For handwritten forms, use the printed labels and spatial layout to interpret the handwritten value next to each label. Return concise repair-history actions, not legal boilerplate, prices, authorization text, headers, or footer terms. If a field is unclear, return an empty value and low confidence.`;
+const SYSTEM=`You read fleet repair invoices from photographs and scanned PDFs, including difficult handwriting. Extract only what is visibly supported by the page. Never guess. The customer may be Northern Logistics or Norloworld; that is not the repair vendor. Distinguish the company that performed the service from remit-to/payee/payment-processor names. For handwritten forms, use the printed labels and spatial layout to interpret the handwritten value next to each label. Return concise repair-history actions, not legal boilerplate, prices, authorization text, headers, slogans, or footer terms. If a field is unclear, return an empty value and low confidence.`;
 
 const USER=`Return only JSON with this exact shape:
 {
@@ -93,7 +93,15 @@ const USER=`Return only JSON with this exact shape:
   "totalAmount":{"value":"decimal amount without $ or commas, or empty","confidence":0},
   "workPerformed":{"value":["short repair action"],"confidence":0}
 }
-Confidence is 0 to 1. Read handwriting carefully. Do not infer missing values. Do not use phone numbers, invoice numbers, PO numbers, dates, labor hours, or totals as the unit or mileage. For Work Performed, include only actual service/repair actions that are legible enough to trust.`;
+Confidence is 0 to 1. Read handwriting carefully and use page layout, not just word proximity.
+- vendorName is the servicing shop/company shown by the business letterhead; never use the customer, slogan, phone/address, or payment processor.
+- invoiceNumber is the document's invoice/receipt/repair-order serial. On old paper forms this may be a printed "No." near the top business header.
+- unitNumber is the customer's fleet unit/vehicle number. A separate handwritten "NO.", "UNIT", "TRUCK", or vehicle field in the customer/service area may be the unit. Never reuse the invoice number as the unit.
+- serviceDate comes from the service/invoice/date field, never a due date.
+- mileage must come only from a speedometer/odometer/mileage field. If that field is blank or unclear, return empty.
+- totalAmount is the final invoice total, not labor, parts, tax, service-call, or subtotal amounts.
+- workPerformed contains only actual repair/service actions that are legible enough to trust. Do not copy the vendor header, "24 hour service", "since 1991", authorization text, totals, or legal language.
+Do not infer missing values.`;
 
 export async function POST(request:Request){
   try{
@@ -108,14 +116,16 @@ export async function POST(request:Request){
     if(!(image instanceof File))return Response.json({error:'Invoice image is required.'},{status:400});
     if(image.size<=0||image.size>MAX_IMAGE_BYTES)return Response.json({error:'Invoice image must be between 1 byte and 4.5 MB.'},{status:400});
     if(!/^image\/(?:jpeg|png|webp)$/i.test(image.type))return Response.json({error:'Vision reader accepts JPEG, PNG, or WebP images.'},{status:400});
+    const ocrHint=String(body.get('ocrText')??'').trim().slice(0,12_000);
 
     const bytes=new Uint8Array(await image.arrayBuffer());
     const dataUri=`data:${image.type};base64,${bytesToBase64(bytes)}`;
+    const hint=ocrHint?`${USER}\n\nThe browser produced the following noisy OCR hint. It can help locate printed labels/numbers, but it may badly misread handwriting or logos. The image is authoritative; ignore OCR text that conflicts with the page image:\n--- OCR HINT ---\n${ocrHint}\n--- END OCR HINT ---`:USER;
     const result=await ai.run(MODEL,{
       messages:[
         {role:'system',content:SYSTEM},
         {role:'user',content:[
-          {type:'text',text:USER},
+          {type:'text',text:hint},
           {type:'image_url',image_url:{url:dataUri}},
         ]},
       ],
