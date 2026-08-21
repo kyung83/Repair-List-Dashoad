@@ -1,0 +1,1 @@
+Temporary validation marker for the post-merge Parts & Inventory v2 verified build.
