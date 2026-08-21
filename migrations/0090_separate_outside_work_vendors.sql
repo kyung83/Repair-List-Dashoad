@@ -20,31 +20,50 @@ ON outside_work_vendors(phone);
 
 -- Preserve vendors that Outside Work previously used from the shared vendor
 -- table, plus vendors that had explicitly been created as road-repair vendors.
-INSERT INTO outside_work_vendors (name,phone,email,address,notes,active)
-SELECT v.name,v.phone,v.email,v.address,
-       COALESCE(NULLIF(v.notes,''),'Migrated from the legacy shared vendor master.'),
-       COALESCE(v.active,1)
-FROM vendors v
-WHERE (
-    v.id IN (SELECT DISTINCT vendor_id FROM outside_work_documents WHERE vendor_id IS NOT NULL)
-    OR COALESCE(v.supplier_type,'')='Outside Work / Road Repair'
+-- If the old shared table contains duplicate spellings that are identical after
+-- case/whitespace normalization, keep one deterministic source row.
+WITH legacy_candidates AS (
+  SELECT v.id,v.name,v.phone,v.email,v.address,v.notes,v.active
+  FROM vendors v
+  WHERE (
+      v.id IN (SELECT DISTINCT vendor_id FROM outside_work_documents WHERE vendor_id IS NOT NULL)
+      OR COALESCE(v.supplier_type,'')='Outside Work / Road Repair'
+    )
+    AND TRIM(COALESCE(v.name,''))<>''
+), legacy_unique AS (
+  SELECT lc.*
+  FROM legacy_candidates lc
+  WHERE lc.id=(
+    SELECT MIN(lc2.id)
+    FROM legacy_candidates lc2
+    WHERE UPPER(TRIM(lc2.name))=UPPER(TRIM(lc.name))
   )
-  AND TRIM(COALESCE(v.name,''))<>''
-  AND NOT EXISTS (
-    SELECT 1 FROM outside_work_vendors ov
-    WHERE UPPER(TRIM(ov.name))=UPPER(TRIM(v.name))
-  );
+)
+INSERT INTO outside_work_vendors (name,phone,email,address,notes,active)
+SELECT lu.name,lu.phone,lu.email,lu.address,
+       COALESCE(NULLIF(lu.notes,''),'Migrated from the legacy shared vendor master.'),
+       COALESCE(lu.active,1)
+FROM legacy_unique lu
+WHERE NOT EXISTS (
+  SELECT 1 FROM outside_work_vendors ov
+  WHERE UPPER(TRIM(ov.name))=UPPER(TRIM(lu.name))
+);
 
 -- Preserve any historical Outside Work vendor text that did not have a shared
--- vendor-master link.
+-- vendor-master link. Group case variants so the new master starts clean.
+WITH history_names AS (
+  SELECT UPPER(TRIM(vendor_name)) AS name_key,MIN(TRIM(vendor_name)) AS name
+  FROM outside_work_documents
+  WHERE TRIM(COALESCE(vendor_name,''))<>''
+  GROUP BY UPPER(TRIM(vendor_name))
+)
 INSERT INTO outside_work_vendors (name,notes,active)
-SELECT DISTINCT d.vendor_name,'Migrated from existing Outside Work history.',1
-FROM outside_work_documents d
-WHERE TRIM(COALESCE(d.vendor_name,''))<>''
-  AND NOT EXISTS (
-    SELECT 1 FROM outside_work_vendors ov
-    WHERE UPPER(TRIM(ov.name))=UPPER(TRIM(d.vendor_name))
-  );
+SELECT hn.name,'Migrated from existing Outside Work history.',1
+FROM history_names hn
+WHERE NOT EXISTS (
+  SELECT 1 FROM outside_work_vendors ov
+  WHERE UPPER(TRIM(ov.name))=hn.name_key
+);
 
 ALTER TABLE outside_work_documents
 ADD COLUMN outside_vendor_id INTEGER REFERENCES outside_work_vendors(id);
