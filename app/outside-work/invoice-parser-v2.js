@@ -90,11 +90,11 @@ function parseHumanDate(value){
   return"";
 }
 
-function detectGeneratedDate(text){
+function detectAdditionalDate(text){
   for(const line of lines(text)){
-    if(!/^GENERATED\b/i.test(line))continue;
+    if(!/^GENERATED\b|^DATE\b/i.test(line))continue;
     const value=parseHumanDate(line);
-    if(value)return out(value,.94,"generated receipt date");
+    if(value)return out(value,/^GENERATED\b/i.test(line)?.94:.9,/^GENERATED\b/i.test(line)?"generated receipt date":"printed form date");
   }
   return out();
 }
@@ -149,15 +149,16 @@ export function parseOutsideWorkInvoice(text){
   const base=parseBase(text);
   const serviceProvider=detectServiceProvider(text);
   const extraInvoice=detectAdditionalInvoiceNumber(text);
-  const generatedDate=detectGeneratedDate(text);
+  const extraDate=detectAdditionalDate(text);
   const speedometer=detectSpeedometer(text);
   const itemized=detectItemizedRepairs(text);
   const paymentReceipt=isPaymentWrapper(text);
 
   const vendor=serviceProvider.confidence>=.98?serviceProvider:base.vendor;
-  const payee=serviceProvider.value&&base.vendor.value&&serviceProvider.value.toUpperCase()!==base.vendor.value.toUpperCase()?base.vendor:out();
+  const cleanPayee=normalizeName(base.vendor.value);
+  const payee=serviceProvider.value&&cleanPayee&&serviceProvider.value.toUpperCase()!==cleanPayee.toUpperCase()?out(cleanPayee,base.vendor.confidence,base.vendor.source):out();
   const invoiceNumber=extraInvoice.confidence>base.invoiceNumber.confidence?extraInvoice:base.invoiceNumber;
-  const invoiceDate=generatedDate.confidence>base.invoiceDate.confidence?generatedDate:base.invoiceDate;
+  const invoiceDate=extraDate.confidence>base.invoiceDate.confidence?extraDate:base.invoiceDate;
   const mileage=speedometer.confidence>base.mileage.confidence?speedometer:base.mileage;
   const serviceSummary=paymentReceipt?out("",0,"payment receipt only"):itemized.confidence>base.serviceSummary.confidence?itemized:base.serviceSummary;
 
