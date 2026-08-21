@@ -26,14 +26,36 @@ function looksLikeNarrative(value:string){
   return actions>=2||(line.length>=70&&actions>=1)||(/[.!?]/.test(line)&&line.length>=85);
 }
 
-function companyCandidate(value:string,anchored=false){
+function hasCompanyEvidence(value:string){
+  return business.test(value)||knownBrand.test(value)||/\b(?:INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i.test(value);
+}
+
+function trimMergedProsePrefix(value:string){
   const line=cleanLine(value).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+  if(!line)return"";
+
+  const sentenceParts=line.split(/[.!?;]\s+/).map(cleanLine).filter(Boolean);
+  if(sentenceParts.length>1){
+    for(let i=sentenceParts.length-1;i>=0;i--){
+      const part=sentenceParts[i].replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+      if(part&&part.length<=90&&hasCompanyEvidence(part))return part;
+    }
+  }
+
+  const uppercaseTail=line.match(/([A-Z][A-Z0-9&'./-]*(?:\s+[A-Z][A-Z0-9&'./-]*){1,7})$/);
+  if(uppercaseTail?.[1]&&hasCompanyEvidence(uppercaseTail[1]))return uppercaseTail[1].trim();
+  return line;
+}
+
+function companyCandidate(value:string,anchored=false){
+  const line=trimMergedProsePrefix(value);
   if(line.length<2||line.length>90||!/[A-Za-z]{2}/.test(line))return"";
   if(customerHeading.test(line)||excludedHeading.test(line)||customer.test(line)||financial.test(line)||legal.test(line)||metadata.test(line)||contact.test(line)||address.test(line)||looksLikeNarrative(line))return"";
   if(/\$\s*\d|^[0-9]/.test(line)||/[Xx*#]{2,}\s*\d{2,8}\b/.test(line))return"";
   const words=line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
   if(words.length>10)return"";
-  if(!anchored&&!business.test(line)&&!knownBrand.test(line))return"";
+  const conciseAnchoredName=anchored&&words.length<=5&&!/[,;!?]/.test(line)&&!/[.!?;]\s+\S/.test(line);
+  if(!hasCompanyEvidence(line)&&!conciseAnchoredName)return"";
   return line;
 }
 
@@ -83,6 +105,7 @@ function suspiciousVendor(value:string){
   if(!line)return false;
   if(customerHeading.test(line)||excludedHeading.test(line)||customer.test(line)||financial.test(line)||legal.test(line)||metadata.test(line)||looksLikeNarrative(line))return true;
   if(line.length>90||(line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[]).length>10)return true;
+  if(/[.!?;]\s+[A-Z]/.test(line))return true;
   if(/^(?:SOLD\s+OPERATIONS|JOB\s*#|QTY\b|ITEM\b|DESCRIPTION\b)/i.test(line))return true;
   return false;
 }
