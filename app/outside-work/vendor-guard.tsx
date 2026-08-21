@@ -34,7 +34,7 @@ type VisionResponse={ok?:boolean;fields?:VisionFields;normalizedText?:string;err
 type PdfTools=Window&{pdfjsLib?:{GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}}};
 
 const PDF_WORKER="/api/outside-work-reader/pdf.worker.min.js";
-const ACTION_WORD=/\b(?:REPLAC|REPAIR|INSTALL|PROGRAM|REASSEMB|TEST|VERIFY|SERVICE|CHANGE|MOUNT|BALANC|ALIGN|TOW|PICK(?:ED)?\s+UP|REMOVE|ADJUST|DIAGNOS|WELD|REBUILD|RESET|REGEN|INSPECT)\w*\b/i;
+const ACTION_WORD=/\b(?:REPLAC(?:E|ED)|REPAIR(?:ED)?|INSTALL(?:ED)?|PROGRAM(?:MED)?|REASSEMBL(?:E|ED)|TEST(?:ED)?|VERIF(?:Y|IED)|SERVIC(?:ED|ING)|CHANG(?:E|ED)|MOUNT(?:ED)?|BALANC(?:E|ED)|ALIGN(?:ED)?|TOW(?:ED|ING)|PICK(?:ED)?\s+UP|REMOV(?:E|ED)|ADJUST(?:ED)?|DIAGNOS(?:E|ED|IS)|WELD(?:ED)?|REBUILD|REBUILT|RESET|REGEN(?:ERAT(?:E|ED|ION))?|INSPECT(?:ED)?)\b/i;
 
 function findFieldLabel(prefix:string){return Array.from(document.querySelectorAll<HTMLLabelElement>("label")).find(label=>(label.textContent||"").trim().startsWith(prefix))||null;}
 function findInput(prefix:string){return findFieldLabel(prefix)?.querySelector<HTMLInputElement>("input")||null;}
@@ -49,6 +49,16 @@ function clearSuspiciousInput(element:HTMLInputElement|null,test:(value:string)=
 function clearSuspiciousTextarea(element:HTMLTextAreaElement|null,test:(value:string)=>boolean,forceWindow:boolean){if(!forceWindow||!element||!canTouch(element))return;const current=element.value.trim();if(current&&test(current))setReactTextAreaValue(element,"");}
 function fileKey(file:File){return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;}
 function isPdf(file:File){return file.type==="application/pdf"||file.name.toLowerCase().endsWith(".pdf");}
+function headerOnlyWork(value:string,vendor:string){
+  const text=value.trim();if(!text)return false;
+  const normalized=(v:string)=>v.toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
+  const vendorWords=new Set(normalized(vendor).split(" ").filter(word=>word.length>2));
+  const workWords=normalized(text).split(" ").filter(word=>word.length>2);
+  const overlap=workWords.filter(word=>vendorWords.has(word)).length;
+  const marketing=/\b(?:24\s+HOUR\s+SERVICE|SINCE\s+19\d\d|SERVICE,?\s+INC|REPAIR\s+SERVICE,?\s+INC)\b/i.test(text);
+  if(text.length<180&&(overlap>=2||marketing))return true;
+  return false;
+}
 function trustworthyFieldCount(parsed:ParsedInvoice|null){
   if(!parsed)return 0;
   let score=0;
@@ -56,7 +66,7 @@ function trustworthyFieldCount(parsed:ParsedInvoice|null){
   if(parsed.invoiceNumber.confidence>=.85&&parsed.invoiceNumber.value&&!suspiciousInvoiceNumber(parsed.invoiceNumber.value))score++;
   if(parsed.invoiceDate.confidence>=.84&&parsed.invoiceDate.value)score++;
   if(parsed.totalAmount.confidence>=.87&&parsed.totalAmount.value&&Number(parsed.totalAmount.value)>0)score++;
-  if(parsed.serviceSummary.confidence>=.78&&parsed.serviceSummary.value&&!suspiciousServiceSummary(parsed.serviceSummary.value)&&ACTION_WORD.test(parsed.serviceSummary.value))score++;
+  if(parsed.serviceSummary.confidence>=.78&&parsed.serviceSummary.value&&!suspiciousServiceSummary(parsed.serviceSummary.value)&&!headerOnlyWork(parsed.serviceSummary.value,parsed.vendor.value)&&ACTION_WORD.test(parsed.serviceSummary.value))score++;
   return score;
 }
 function shouldUseVision(file:File|null,parsed:ParsedInvoice|null,text:string,selectedAt:number){
@@ -107,15 +117,6 @@ function resolveMasterUnit(value:string){
   const exact=options.filter(option=>normalize(option.value)===normalize(raw));if(exact.length===1)return exact[0].value;
   const number=(raw.match(/\d{2,6}/)||[])[0]||"";if(!number)return"";
   const numeric=options.filter(option=>(option.value.match(/\d{2,6}/)||[])[0]===number);return numeric.length===1?numeric[0].value:"";
-}
-function headerOnlyWork(value:string,vendor:string){
-  const text=value.trim();if(!text)return false;
-  if(ACTION_WORD.test(text))return false;
-  const normalized=(v:string)=>v.toUpperCase().replace(/[^A-Z0-9]+/g," ").trim();
-  const vendorWords=new Set(normalized(vendor).split(" ").filter(word=>word.length>2));
-  const workWords=normalized(text).split(" ").filter(word=>word.length>2);
-  const overlap=workWords.filter(word=>vendorWords.has(word)).length;
-  return text.length<180&&(overlap>=2||/\b(?:24\s+HOUR\s+SERVICE|SINCE\s+19\d\d|SERVICE,?\s+INC)\b/i.test(text));
 }
 
 function InvoiceIntelligenceGuard(){
