@@ -129,6 +129,11 @@ function VendorMasterResolver(){
   const[actionError,setActionError]=useState("");
   const vendorInputRef=useRef<HTMLInputElement|null>(null);
   const lastTextRef=useRef("");
+  const selectedIdRef=useRef(0);
+  const vendorsRef=useRef<Vendor[]>([]);
+
+  useEffect(()=>{selectedIdRef.current=selectedId;},[selectedId]);
+  useEffect(()=>{vendorsRef.current=vendors;},[vendors]);
 
   useEffect(()=>{
     let cancelled=false;
@@ -169,10 +174,14 @@ function VendorMasterResolver(){
         input.readOnly=true;
         input.placeholder="Resolved from vendor master below";
         input.setAttribute("aria-readonly","true");
+        const selected=vendorsRef.current.find(vendor=>vendor.id===selectedIdRef.current);
+        if(selected&&input.value!==selected.name)setReactInputValue(input,selected.name);
+        if(!selected&&input.value)setReactInputValue(input,"");
       }
       const text=textarea?.value.trim()||"";
       if(text!==lastTextRef.current){
         if(!text&&lastTextRef.current){
+          selectedIdRef.current=0;
           setSelectedId(0);
           setNewName("");
           setActionError("");
@@ -189,6 +198,7 @@ function VendorMasterResolver(){
     const input=vendorInputRef.current;
     if(!input)return;
     if(exact&&selectedId===0){
+      selectedIdRef.current=exact.id;
       setSelectedId(exact.id);
       setNewName("");
       if(input.value!==exact.name)setReactInputValue(input,exact.name);
@@ -200,14 +210,8 @@ function VendorMasterResolver(){
     }
   },[exact,extracted.name,selectedId]);
 
-  useEffect(()=>{
-    if(!selectedId)return;
-    const selected=vendors.find(vendor=>vendor.id===selectedId);
-    const input=vendorInputRef.current;
-    if(selected&&input&&input.value!==selected.name)setReactInputValue(input,selected.name);
-  },[selectedId,vendors,ocrText]);
-
   function useVendor(vendor:Vendor){
+    selectedIdRef.current=vendor.id;
     const input=vendorInputRef.current;
     if(input)setReactInputValue(input,vendor.name);
     setSelectedId(vendor.id);
@@ -216,6 +220,7 @@ function VendorMasterResolver(){
   }
 
   function clearVendor(){
+    selectedIdRef.current=0;
     const input=vendorInputRef.current;
     if(input)setReactInputValue(input,"");
     setSelectedId(0);
