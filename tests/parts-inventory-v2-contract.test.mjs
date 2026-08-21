@@ -60,4 +60,4 @@ check('44 closing a repair releases demand by closing requests',derived,/SET sta
 check('45 lifecycle compatibility layer disables reservation allocation mutation',lifecycle,/v2 reservations are derived[\s\S]*return \[\] as/);
 
 check('inventory API exposes controlled physical-count recording',inventory,/recordPhysicalCount/);
-check('inventory API blocks negative direct adjustment',inventory,/Negative manual stock adjustments are disabled/);
+check('inventory API blocks all direct manual stock adjustments',inventory,/Manual \+\/− stock adjustments are disabled/);
