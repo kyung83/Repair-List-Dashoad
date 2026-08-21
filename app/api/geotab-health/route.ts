@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
-import { getGeotabGpsHealth } from '@/lib/geotab-gps-shadow';
+import { getGeotabLocationHealth } from '@/lib/geotab-location-health';
 import { retryGeotabGpsForEquipment } from '@/lib/geotab-gps-manual-retry';
+import { syncGeotabLocationMirror } from '@/lib/geotab-gps-feed';
 
 export async function GET(request: Request) {
   try {
@@ -10,7 +11,7 @@ export async function GET(request: Request) {
     if (user.role !== 'manager' && user.role !== 'admin') {
       return Response.json({ error: 'Manager or administrator access is required.' }, { status: 403 });
     }
-    const health = await getGeotabGpsHealth(env.DB);
+    const health = await getGeotabLocationHealth(env.DB);
     return Response.json(health, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'geotab_health_load_failed', error: String(error) }));
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
     const equipmentId = Number(body.equipmentId);
     if (!Number.isInteger(equipmentId) || equipmentId <= 0) return Response.json({ error: 'A valid equipment ID is required.' }, { status: 400 });
     const result = await retryGeotabGpsForEquipment(env, equipmentId);
+    await syncGeotabLocationMirror(env.DB);
     return Response.json(result, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'geotab_health_action_failed', error: String(error) }));
