@@ -69,7 +69,7 @@ export function validateSimpleInvoiceArithmetic(text='',enteredTotal=0){
   const components=simpleChargeBreakdown(text);
   const present=Object.entries(components).filter(([,value])=>typeof value==='number'&&Number.isFinite(value));
   const meaningful=present.filter(([key])=>key!=='tax');
-  if(meaningful.length<2)return{status:'insufficient',components,sum:null,total:Number(enteredTotal)||0,difference:null};
+  if(meaningful.length<3)return{status:'insufficient',components,sum:null,total:Number(enteredTotal)||0,difference:null};
   const sum=present.reduce((total,[,value])=>total+Number(value||0),0);
   const total=Number(enteredTotal)||0;
   const difference=Math.round((sum-total)*100)/100;
