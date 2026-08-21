@@ -12,6 +12,8 @@ const knownBrand=/\b(?:KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK
 const contact=/\b(?:PHONE|TEL|FAX)\b|\(\d{3}\)\s*\d{3}[- ]\d{4}|\b\d{3}[-.]\d{3}[-.]\d{4}\b|www\.|https?:|@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const address=/^\d{1,6}\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|LANE|LN|WAY|ROUTE|RT|PKWY|PARKWAY)\b/i;
 const vendorLabel=/^(?:VENDOR|SUPPLIER|MERCHANT|DEALER|SERVICE\s+PROVIDER|REMIT\s+TO|PAY\s+TO|PLEASE\s+REMIT\s+PAYMENT\s+TO)\b\s*[:#=.-]*\s*(.*)$/i;
+const financialLine=/^(?:ESTIMATED(?:\s+BILLED)?|BILLED|PREPAY|SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|MISC|LABOR|LABOUR|PARTS|SUBLET|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE)(?:\b|\s*[:$])/i;
+const financialAmount=/\b(?:SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL)\b[^\n]{0,40}\$?\s*\d[\d,.]*/i;
 const narrativeHeading=/^(?:COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|SERVICE\s+DESCRIPTION|DESCRIPTION\s+OF\s+WORK|REPAIR\s+DESCRIPTION|LABOR\s+DETAIL|LABOUR\s+DETAIL|JOB\s+DESCRIPTION|TECHNICIAN\s+COMMENTS|RECOMMENDATIONS)\b/i;
 const narrativeEnd=/^(?:QTY\b|ITEM\b|PART\s+NUMBER|PART\s*#|DESCRIPTION\b|UNIT\s+PRICE|EXTD\s+PRICE|EXTENDED\b|PREPAY\b|SOLD\s+OPERATIONS\s+TOTALS|SUB\s*TOTAL|SUBTOTAL|AMOUNT\s+DUE|BALANCE\s+DUE|GRAND\s+TOTAL|TOTAL\b)/i;
 const narrativeAction=/\b(?:PULLED|CHECKED|FOUND|REPLACED|PERFORMED|RAN|ROAD\s+TESTED|REMOVED|INSTALLED|DIAGNOSED|INSPECTED|REPAIRED|SERVICED|ADJUSTED|REBUILT|CHANGED|MOUNTED|BALANCED|ALIGNED|RESET|REGEN|FAILED|BAD|FAULT|CODES?)\b/gi;
@@ -28,7 +30,7 @@ function looksLikeNarrative(value:string){
 function cleanVendorCandidate(value:string){
   const line=cleanLine(value).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
   if(line.length<2||line.length>90||!/[A-Za-z]{2}/.test(line))return"";
-  if(metadata.test(line)||equipmentField.test(line)||contact.test(line)||address.test(line)||vehicleLine.test(line)||looksLikeNarrative(line))return"";
+  if(metadata.test(line)||financialLine.test(line)||financialAmount.test(line)||equipmentField.test(line)||contact.test(line)||address.test(line)||vehicleLine.test(line)||looksLikeNarrative(line))return"";
   if(/[Xx*#]{2,}\s*\d{2,8}\b/.test(line)||/^\$?\s*\d[\d,. ]*$/.test(line))return"";
   const letters=(line.match(/[A-Za-z]/g)||[]).length;
   const digits=(line.match(/\d/g)||[]).length;
@@ -54,7 +56,7 @@ function detectExplicitVendor(lines:string[]){
     if(!match)continue;
     const same=cleanVendorCandidate(match[1]||"");
     if(same)return same;
-    for(let offset=1;offset<=3;offset++){
+    for(let offset=1;offset<=4;offset++){
       const next=cleanVendorCandidate(lines[i+offset]||"");
       if(next)return next;
     }
@@ -70,7 +72,7 @@ function detectReliableVendor(text:string){
   const blocked=narrativeMask(lines);
   let best="";
   let bestScore=-999;
-  const limit=Math.min(lines.length,60);
+  const limit=Math.min(lines.length,180);
 
   for(let i=0;i<limit;i++){
     const line=cleanVendorCandidate(lines[i]);
@@ -108,7 +110,7 @@ function contextHasContact(value:string){return contact.test(value);}
 function suspiciousVendor(value:string){
   const line=cleanLine(value);
   if(!line)return false;
-  if(metadata.test(line)||equipmentField.test(line)||vehicleLine.test(line)||looksLikeNarrative(line))return true;
+  if(metadata.test(line)||financialLine.test(line)||financialAmount.test(line)||equipmentField.test(line)||vehicleLine.test(line)||looksLikeNarrative(line))return true;
   if(/^(?:SOLD\s+OPERATIONS|JOB\s*#|COMPLAINT|CAUSE|CORRECTION|QTY\b|ITEM\b|DESCRIPTION\b)/i.test(line))return true;
   if(/^(?:INTERNATIONAL|KENWORTH|PETERBILT|FREIGHTLINER|VOLVO|MACK|CUMMINS|DETROIT)$/i.test(line))return true;
   return false;
