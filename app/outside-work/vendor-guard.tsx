@@ -16,6 +16,7 @@ const contact=/\b(?:PHONE|TEL|FAX)\b|\(\d{3}\)\s*\d{3}[- ]\d{4}|\b\d{3}[-.]\d{3}
 const address=/^\d{1,6}\s+\S+|\b(?:ST|STREET|RD|ROAD|AVE|AVENUE|BLVD|BOULEVARD|DRIVE|DR|HWY|HIGHWAY|LANE|LN|WAY|ROUTE|RT|PKWY|PARKWAY|PO\s+BOX)\b|\b[A-Z .'-]+,?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/i;
 const business=/\b(?:TRUCK|TRUCKS|TRACTOR|TRACTORS|DIESEL|TIRE|TIRES|SERVICE|SERVICES|REPAIR|REPAIRS|MOTOR|MOTORS|AUTO|AUTOMOTIVE|CENTER|CENTRE|DEALER|GARAGE|SHOP|TRUCKING|FLEET|BODY\s+SHOP|COLLISION|TOWING|SPRING|TRANSMISSION|RADIATOR|ALIGNMENT|INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i;
 const knownBrand=/\b(?:KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK|INTERNATIONAL|CUMMINS|DETROIT|GOODYEAR|BRIDGESTONE|MICHELIN|LOVE'?S|TA\s+PETRO|IDEALEASE)\b/i;
+const companySuffixWord=/^(?:INC|INCORPORATED|CORP|CORPORATION|LTD|LLC|COMPANY)$/i;
 const narrativeAction=/\b(?:PULLED|CHECKED|FOUND|REPLACED|PERFORMED|RAN|ROAD\s+TESTED|REMOVED|INSTALLED|DIAGNOSED|INSPECTED|REPAIRED|SERVICED|ADJUSTED|REBUILT|CHANGED|MOUNTED|BALANCED|ALIGNED|RESET|REGEN|FAILED|BAD|FAULT|CODES?)\b/gi;
 
 function looksLikeNarrative(value:string){
@@ -30,15 +31,17 @@ function hasCompanyEvidence(value:string){
   return business.test(value)||knownBrand.test(value)||/\b(?:INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i.test(value);
 }
 
+function proseBoundaries(value:string){
+  const boundary=/\b([A-Za-z]{3,})[.!?;]\s+/g;
+  return Array.from(value.matchAll(boundary)).filter(match=>!companySuffixWord.test(match[1]||""));
+}
+
 function trimMergedProsePrefix(value:string){
   const line=cleanLine(value).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
   if(!line)return"";
 
-  const boundary=/\b([A-Za-z]{3,})[.!?;]\s+/g;
-  const matches=Array.from(line.matchAll(boundary));
+  const matches=proseBoundaries(line);
   for(let i=matches.length-1;i>=0;i--){
-    const word=matches[i][1]||"";
-    if(/^(?:INC|CORP|CORPORATION|LTD|LLC|COMPANY)$/i.test(word))continue;
     const start=(matches[i].index??0)+matches[i][0].length;
     const tail=line.slice(start).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
     if(tail&&tail.length<=90&&hasCompanyEvidence(tail))return tail;
@@ -56,7 +59,8 @@ function companyCandidate(value:string,anchored=false){
   if(/\$\s*\d|^[0-9]/.test(line)||/[Xx*#]{2,}\s*\d{2,8}\b/.test(line))return"";
   const words=line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
   if(words.length>10)return"";
-  const conciseAnchoredName=anchored&&words.length<=5&&!/[,;!?]/.test(line)&&!/[.!?;]\s+\S/.test(line);
+  const capitalizedWords=words.length>0&&words.every(word=>/^[A-Z]/.test(word));
+  const conciseAnchoredName=anchored&&words.length<=5&&!/[;!?]/.test(line)&&proseBoundaries(line).length===0&&(line===line.toUpperCase()||capitalizedWords);
   if(!hasCompanyEvidence(line)&&!conciseAnchoredName)return"";
   return line;
 }
