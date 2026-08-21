@@ -34,12 +34,14 @@ function trimMergedProsePrefix(value:string){
   const line=cleanLine(value).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
   if(!line)return"";
 
-  const sentenceParts=line.split(/[.!?;]\s+/).map(cleanLine).filter(Boolean);
-  if(sentenceParts.length>1){
-    for(let i=sentenceParts.length-1;i>=0;i--){
-      const part=sentenceParts[i].replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
-      if(part&&part.length<=90&&hasCompanyEvidence(part))return part;
-    }
+  const boundary=/\b([A-Za-z]{3,})[.!?;]\s+/g;
+  const matches=Array.from(line.matchAll(boundary));
+  for(let i=matches.length-1;i>=0;i--){
+    const word=matches[i][1]||"";
+    if(/^(?:INC|CORP|CORPORATION|LTD|LLC|COMPANY)$/i.test(word))continue;
+    const start=(matches[i].index??0)+matches[i][0].length;
+    const tail=line.slice(start).replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+    if(tail&&tail.length<=90&&hasCompanyEvidence(tail))return tail;
   }
 
   const uppercaseTail=line.match(/([A-Z][A-Z0-9&'./-]*(?:\s+[A-Z][A-Z0-9&'./-]*){1,7})$/);
@@ -105,7 +107,8 @@ function suspiciousVendor(value:string){
   if(!line)return false;
   if(customerHeading.test(line)||excludedHeading.test(line)||customer.test(line)||financial.test(line)||legal.test(line)||metadata.test(line)||looksLikeNarrative(line))return true;
   if(line.length>90||(line.match(/[A-Za-z][A-Za-z'&.-]*/g)||[]).length>10)return true;
-  if(/[.!?;]\s+[A-Z]/.test(line))return true;
+  const normalized=line.replace(/^[\s:#=.-]+/,"").replace(/[,:;.-]+$/," ").trim();
+  if(trimMergedProsePrefix(line)!==normalized)return true;
   if(/^(?:SOLD\s+OPERATIONS|JOB\s*#|QTY\b|ITEM\b|DESCRIPTION\b)/i.test(line))return true;
   return false;
 }
