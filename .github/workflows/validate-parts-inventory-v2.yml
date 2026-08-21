@@ -1,0 +1,30 @@
+name: Validate Parts Inventory v2
+
+on:
+  push:
+    branches:
+      - agent/parts-inventory-v2
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: TypeScript check
+        run: npx tsc --noEmit
+      - name: Inventory v2 source assertions
+        run: |
+          grep -q "inventory_operation_commits" migrations/0092_parts_inventory_v2_operations.sql
+          grep -q "derived_repair_part_reservations" migrations/0092_parts_inventory_v2_operations.sql
+          grep -q "applyPartToRepair" lib/inventory-operations.ts
+          grep -q "getDerivedPartAvailability" lib/derived-reservations.ts
+          grep -q "undoInventoryOperation" lib/inventory-operations.ts
