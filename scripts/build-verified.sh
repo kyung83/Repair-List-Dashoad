@@ -17,7 +17,8 @@ fi
 echo "Running outside-work invoice parser regression tests..."
 node --test \
   "${project_root}/tests/outside-work-invoice-parser.test.mjs" \
-  "${project_root}/tests/outside-work-mixed-invoices.test.mjs"
+  "${project_root}/tests/outside-work-mixed-invoices.test.mjs" \
+  "${project_root}/tests/outside-work-vision-normalized.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
@@ -29,16 +30,16 @@ timeout \
 worker="${project_root}/dist/server/index.js"
 output_config="${project_root}/dist/server/wrangler.json"
 
-[[ -s "${worker}" ]] || {
+[[ -s "$worker" ]] || {
   echo "Missing or empty Cloudflare Worker bundle: dist/server/index.js" >&2
   exit 66
 }
-[[ -s "${output_config}" ]] || {
+[[ -s "$output_config" ]] || {
   echo "Missing Cloudflare output config: dist/server/wrangler.json" >&2
   exit 66
 }
 
-node --input-type=module - "${output_config}" <<'NODE'
+node --input-type=module - "$output_config" <<'NODE'
 import { readFile } from "node:fs/promises";
 
 const config = JSON.parse(await readFile(process.argv[2], "utf8"));
