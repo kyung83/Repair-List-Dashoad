@@ -29,7 +29,8 @@ type OutsideWorkRow = {
 type VendorRow={id:number;name:string};
 
 const SAFE_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp','image/gif','image/bmp','image/tiff','image/heic','image/heif']);
-const BAD_VENDOR_TEXT=/\b(?:NORTHERN\s+LOGISTICS|NORLOWORLD|SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE|ESTIMATED|BILLED|NET\s+SALE|AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|WARRANTY|WARRANTIES|HEREBY|UNDERSIGNED|PURCHASER|MERCHANTABILITY|PARTICULAR\s+PURPOSE|CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|PARTS\s+AND\/OR\s+ACCESSORIES|PARTS\s+OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|PERMISSION\s+TO\s+OPERATE|UNAVAILABILITY\s+OF\s+PARTS|COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|TECHNICIAN\s+COMMENTS)\b/i;
+const BAD_VENDOR_TEXT=/\b(?:NORTHERN\s+LOGISTICS|NORLOWORLD|AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|WARRANTY|WARRANTIES|HEREBY|UNDERSIGNED|PURCHASER|MERCHANTABILITY|PARTICULAR\s+PURPOSE|CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|PARTS\s+AND\/OR\s+ACCESSORIES|PARTS\s+OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|PERMISSION\s+TO\s+OPERATE|UNAVAILABILITY\s+OF\s+PARTS|COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|TECHNICIAN\s+COMMENTS)\b/i;
+const FINANCIAL_VENDOR_TEXT=/^(?:SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE|ESTIMATED(?:\s+BILLED)?|BILLED|NET\s+SALE)(?:\s*[:$]|\s+\$?\d|$)/i;
 
 async function requireManager(request:Request):Promise<AppUser>{
   const user=await getSessionUser(env.DB,request);
@@ -94,7 +95,7 @@ function validateVendorName(value:string){
   if(name.length<2)throw new Error('Review the Outside vendor field before saving.');
   if(name.length>180)throw new Error('Outside vendor name is too long.');
   const words=name.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
-  if(words.length>10||/[.!?].*[.!?]/.test(name)||BAD_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)){
+  if(words.length>10||/[.!?].*[.!?]/.test(name)||BAD_VENDOR_TEXT.test(name)||FINANCIAL_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)){
     throw new Error('Outside vendor looks like invoice text instead of a company name. Correct the vendor field before saving.');
   }
   return name;
@@ -118,7 +119,7 @@ async function resolveOrCreateVendor(value:string){
     .sort((a,b)=>b.score-a.score)
     .slice(0,3);
   if(similar.length){
-    throw new Error(`Outside vendor is similar to an existing vendor: ${similar.map(item=>item.row.name).join(', ')}. Use the existing vendor name if it is the same company; otherwise change the name enough to identify the new road vendor.`);
+    throw new Error(`Outside vendor is similar to an existing vendor: ${similar.map(item=>item.row.name).join(', ')}. Use the existing vendor name if it is the same company; otherwise keep a clearly different company name for the new road vendor.`);
   }
 
   const inserted=await env.DB.prepare(`
@@ -223,8 +224,8 @@ export async function POST(request:Request){
     `).bind(equipmentId).first<{id:number;unit:string}>();
     if(!equipment)throw new Error('The selected Master Equipment unit is not active or no longer exists.');
 
-    const vendor=await resolveOrCreateVendor(safeText(form.get('vendorName'),180));
-    const vendorName=vendor.name;
+    const submittedVendorName=safeText(form.get('vendorName'),180);
+    validateVendorName(submittedVendorName);
     const invoiceNumber=safeText(form.get('invoiceNumber'),100);
     const date=invoiceDate(form.get('invoiceDate'));
     const mileage=optionalMileage(form.get('mileage'));
@@ -248,6 +249,9 @@ export async function POST(request:Request){
         duplicateId:duplicate.id,
       },{status:409,headers:{'cache-control':'no-store'}});
     }
+
+    const vendor=await resolveOrCreateVendor(submittedVendorName);
+    const vendorName=vendor.name;
 
     const year=(date||new Date().toISOString().slice(0,10)).slice(0,4);
     objectKey=`outside-work/${year}/${equipment.id}/${crypto.randomUUID()}-${originalName}`;
