@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = OFF;
-
 -- Outside Work has its own vendor master. Inventory/parts suppliers remain in
 -- the existing vendors table and are no longer read or written by Outside Work.
 CREATE TABLE IF NOT EXISTS outside_work_vendors (
@@ -79,6 +77,7 @@ WHERE outside_vendor_id IS NOT NULL;
 
 -- Rebuild correction memory so its vendor IDs belong to the Outside Work
 -- vendor master rather than the inventory supplier master.
+DROP TABLE IF EXISTS outside_work_correction_memory_new;
 CREATE TABLE outside_work_correction_memory_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   vendor_id INTEGER NOT NULL,
@@ -122,5 +121,3 @@ SET active=0
 WHERE COALESCE(supplier_type,'')='Outside Work / Road Repair'
   AND NOT EXISTS (SELECT 1 FROM parts p WHERE p.preferred_vendor_id=vendors.id)
   AND NOT EXISTS (SELECT 1 FROM part_vendors pv WHERE pv.vendor_id=vendors.id);
-
-PRAGMA foreign_keys = ON;
