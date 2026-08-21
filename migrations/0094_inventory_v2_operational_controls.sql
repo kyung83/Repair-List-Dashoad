@@ -36,6 +36,8 @@ BEGIN
   WHERE o.id = NEW.operation_id;
 END;
 
+ALTER TABLE recovered_used_tires ADD COLUMN disposition_repair_id INTEGER;
+
 -- Keep recovered tire source records uniquely attributable to one repair/position
 -- while allowing multiple positions on the same repair.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recovered_tire_source_position
