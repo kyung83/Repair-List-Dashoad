@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
+import { detectVendorPhone, normalizePhone, validateSimpleInvoiceArithmetic } from '@/app/outside-work/invoice-validation.js';
 
 type EquipmentRow = {
   id:number;
@@ -26,7 +27,7 @@ type OutsideWorkRow = {
   uploaded_by:string;
 };
 
-type VendorRow={id:number;name:string};
+type VendorRow={id:number;name:string;phone:string|null};
 
 const SAFE_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp','image/gif','image/bmp','image/tiff','image/heic','image/heif']);
 const BAD_VENDOR_TEXT=/\b(?:NORTHERN\s+LOGISTICS|NORLOWORLD|AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|WARRANTY|WARRANTIES|HEREBY|UNDERSIGNED|PURCHASER|MERCHANTABILITY|PARTICULAR\s+PURPOSE|CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|PARTS\s+AND\/OR\s+ACCESSORIES|PARTS\s+OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|PERMISSION\s+TO\s+OPERATE|UNAVAILABILITY\s+OF\s+PARTS|COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|TECHNICIAN\s+COMMENTS)\b/i;
@@ -126,16 +127,36 @@ function validateVendorName(value:string){
   return name;
 }
 
-async function resolveOrCreateVendor(value:string){
-  const submitted=validateVendorName(value);
-  const key=normalizeVendor(submitted);
-  if(key.length<2)throw new Error('Review the Outside vendor field before saving.');
-
+async function resolveOrCreateVendor(value:string,detectedPhone:string){
   const result=await env.DB.prepare(`
-    SELECT id,name FROM vendors WHERE COALESCE(active,1)=1 ORDER BY name,id
+    SELECT id,name,phone FROM vendors WHERE COALESCE(active,1)=1 ORDER BY name,id
   `).all<VendorRow>();
-  const exact=result.results.filter(row=>normalizeVendor(row.name)===key);
-  if(exact.length===1)return{id:Number(exact[0].id),name:exact[0].name,created:false};
+
+  const phone=normalizePhone(detectedPhone);
+  let submitted='';
+  try{submitted=validateVendorName(value);}catch{}
+  const key=submitted?normalizeVendor(submitted):'';
+  const exact=key?result.results.filter(row=>normalizeVendor(row.name)===key):[];
+  const phoneMatches=phone?result.results.filter(row=>normalizePhone(row.phone??'')===phone):[];
+
+  if(phoneMatches.length>1)throw new Error('More than one active vendor has the same phone number. Correct the vendor master before saving this Outside Work record.');
+  if(phoneMatches.length===1){
+    const matched=phoneMatches[0];
+    if(exact.length===1&&Number(exact[0].id)!==Number(matched.id)){
+      throw new Error(`Vendor phone matches ${matched.name}, but the reviewed vendor name matches ${exact[0].name}. Resolve the vendor before saving.`);
+    }
+    return{id:Number(matched.id),name:matched.name,created:false,matchedBy:'phone' as const};
+  }
+
+  if(!submitted)throw new Error('Review the Outside vendor field before saving. The printed phone did not match an existing vendor, so enter the company name once and it will be saved with that phone for future invoices.');
+  if(key.length<2)throw new Error('Review the Outside vendor field before saving.');
+  if(exact.length===1){
+    const matched=exact[0];
+    if(phone&&!normalizePhone(matched.phone??'')){
+      await env.DB.prepare(`UPDATE vendors SET phone=? WHERE id=? AND (phone IS NULL OR TRIM(phone)='')`).bind(detectVendorPhone(detectedPhone).raw||detectedPhone,matched.id).run();
+    }
+    return{id:Number(matched.id),name:matched.name,created:false,matchedBy:'name' as const};
+  }
   if(exact.length>1)throw new Error('More than one active vendor has that name. Correct the vendor master before saving this Outside Work record.');
 
   const similar=result.results
@@ -147,13 +168,14 @@ async function resolveOrCreateVendor(value:string){
     throw new Error(`Outside vendor is similar to an existing vendor: ${similar.map(item=>item.row.name).join(', ')}. Use the existing vendor name if it is the same company; otherwise keep a clearly different company name for the new road vendor.`);
   }
 
+  const phoneDisplay=phone?`(${phone.slice(0,3)}) ${phone.slice(3,6)}-${phone.slice(6)}`:'';
   const inserted=await env.DB.prepare(`
-    INSERT INTO vendors (name,notes,supplier_type,active)
-    VALUES (?,?,'Outside Work / Road Repair',1)
-  `).bind(submitted,'Created from a reviewed Outside Work invoice. May be a one-time over-the-road repair vendor.').run();
+    INSERT INTO vendors (name,phone,notes,supplier_type,active)
+    VALUES (?,NULLIF(?,''),?,'Outside Work / Road Repair',1)
+  `).bind(submitted,phoneDisplay,'Created from a reviewed Outside Work invoice. May be a one-time over-the-road repair vendor.').run();
   const id=Number(inserted.meta.last_row_id??0);
   if(!id)throw new Error('The new Outside Work vendor could not be created.');
-  return{id,name:submitted,created:true};
+  return{id,name:submitted,created:true,matchedBy:'new' as const};
 }
 
 async function sha256Hex(bytes:ArrayBuffer){
@@ -250,7 +272,6 @@ export async function POST(request:Request){
     if(!equipment)throw new Error('The selected Master Equipment unit is not active or no longer exists.');
 
     const submittedVendorName=safeText(form.get('vendorName'),180);
-    validateVendorName(submittedVendorName);
     const invoiceNumber=safeText(form.get('invoiceNumber'),100);
     const date=invoiceDate(form.get('invoiceDate'));
     const mileage=optionalMileage(form.get('mileage'));
@@ -260,6 +281,15 @@ export async function POST(request:Request){
     const serviceSummary=safeText(form.get('serviceSummary'),8000);
     if(!serviceSummary)throw new Error('Enter the work performed before creating the repair record.');
     const ocrText=safeText(form.get('ocrText'),60000);
+    const detectedPhone=detectVendorPhone(ocrText);
+    const arithmetic=validateSimpleInvoiceArithmetic(ocrText,totalAmount);
+    if(arithmetic.status==='mismatch'){
+      const componentText=Object.entries(arithmetic.components)
+        .filter(([,value])=>typeof value==='number')
+        .map(([key,value])=>`${key} $${Number(value).toFixed(2)}`)
+        .join(', ');
+      throw new Error(`Invoice amounts do not balance: ${componentText} add to $${Number(arithmetic.sum).toFixed(2)}, but the reviewed invoice total is $${totalAmount.toFixed(2)}. Recheck the handwritten amounts before saving.`);
+    }
 
     const bytes=await file.arrayBuffer();
     const fileHash=await sha256Hex(bytes);
@@ -275,7 +305,7 @@ export async function POST(request:Request){
       },{status:409,headers:{'cache-control':'no-store'}});
     }
 
-    const vendor=await resolveOrCreateVendor(submittedVendorName);
+    const vendor=await resolveOrCreateVendor(submittedVendorName,detectedPhone.digits);
     const vendorName=vendor.name;
 
     const year=(date||new Date().toISOString().slice(0,10)).slice(0,4);
@@ -287,11 +317,13 @@ export async function POST(request:Request){
     const provenance=[
       serviceSummary,
       '',
-      `Outside vendor: ${vendorName} (vendor #${vendor.id})`,
+      `Outside vendor: ${vendorName} (vendor #${vendor.id}${vendor.matchedBy==='phone'?', matched by printed phone':''})`,
+      detectedPhone.digits?`Vendor phone detected: ${detectedPhone.raw}`:'Vendor phone detected: not available',
       invoiceNumber?`Vendor invoice / RO: ${invoiceNumber}`:'Vendor invoice / RO: not entered',
       date?`Service date: ${date}`:'Service date: not entered',
       mileage==null?'Vendor invoice mileage: not entered':`Vendor invoice mileage: ${mileage.toLocaleString()} mi (invoice record only; not Geotab mileage)`,
       `Outside invoice total: $${totalAmount.toFixed(2)}`,
+      arithmetic.status==='balanced'&&arithmetic.sum!=null?`Invoice arithmetic verified: component charges balance to $${Number(arithmetic.sum).toFixed(2)}`:'Invoice arithmetic verification: not applicable',
     ].join('\n');
     const completedAt=date?`${date} 12:00:00`:null;
     const inserted=await env.DB.prepare(`
@@ -321,12 +353,12 @@ export async function POST(request:Request){
         VALUES (?, ?, ?, 'outside_work_imported', ?)
       `).bind(
         repairId,user.id,user.technicianId,
-        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit} from ${vendorName} (vendor #${vendor.id})${vendor.created?' [new road vendor]':''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
+        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit} from ${vendorName} (vendor #${vendor.id}, ${vendor.matchedBy})${vendor.created?' [new road vendor]':''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
       ),
     ]);
     const documentId=Number(batch[0]?.meta.last_row_id??0);
 
-    return Response.json({ok:true,documentId,repairId:`repair-${repairId}`,unit:equipment.unit,vendorId:vendor.id,vendorName,vendorCreated:vendor.created});
+    return Response.json({ok:true,documentId,repairId:`repair-${repairId}`,unit:equipment.unit,vendorId:vendor.id,vendorName,vendorCreated:vendor.created,vendorMatchedBy:vendor.matchedBy,arithmeticStatus:arithmetic.status});
   }catch(error){
     if(repairId){try{await env.DB.prepare('DELETE FROM repairs WHERE id=?').bind(repairId).run();}catch{}}
     if(objectKey){try{await env.FILES.delete(objectKey);}catch{}}
