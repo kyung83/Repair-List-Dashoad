@@ -26,7 +26,10 @@ type OutsideWorkRow = {
   uploaded_by:string;
 };
 
+type VendorRow={id:number;name:string};
+
 const SAFE_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp','image/gif','image/bmp','image/tiff','image/heic','image/heif']);
+const BAD_VENDOR_TEXT=/\b(?:NORTHERN\s+LOGISTICS|NORLOWORLD|SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE|ESTIMATED|BILLED|NET\s+SALE|AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|WARRANTY|WARRANTIES|HEREBY|UNDERSIGNED|PURCHASER|MERCHANTABILITY|PARTICULAR\s+PURPOSE|CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|PARTS\s+AND\/OR\s+ACCESSORIES|PARTS\s+OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|PERMISSION\s+TO\s+OPERATE|UNAVAILABILITY\s+OF\s+PARTS|COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|TECHNICIAN\s+COMMENTS)\b/i;
 
 async function requireManager(request:Request):Promise<AppUser>{
   const user=await getSessionUser(env.DB,request);
@@ -64,6 +67,67 @@ function cleanFileName(value:string){
 
 function safeText(value:FormDataEntryValue|null,max:number){
   return String(value??'').trim().slice(0,max);
+}
+
+function normalizeVendor(value:string){
+  return value
+    .toUpperCase()
+    .replace(/&/g,' AND ')
+    .replace(/[^A-Z0-9]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+    .replace(/\s+(?:INCORPORATED|INC|LLC|LTD|CORPORATION|CORP|COMPANY|CO)$/,'')
+    .trim();
+}
+
+function vendorSimilarity(left:string,right:string){
+  const a=new Set(normalizeVendor(left).split(' ').filter(Boolean));
+  const b=new Set(normalizeVendor(right).split(' ').filter(Boolean));
+  if(!a.size||!b.size)return 0;
+  let common=0;
+  for(const token of a)if(b.has(token))common++;
+  return (2*common)/(a.size+b.size);
+}
+
+function validateVendorName(value:string){
+  const name=value.replace(/\s+/g,' ').trim();
+  if(name.length<2)throw new Error('Review the Outside vendor field before saving.');
+  if(name.length>180)throw new Error('Outside vendor name is too long.');
+  const words=name.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
+  if(words.length>10||/[.!?].*[.!?]/.test(name)||BAD_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)){
+    throw new Error('Outside vendor looks like invoice text instead of a company name. Correct the vendor field before saving.');
+  }
+  return name;
+}
+
+async function resolveOrCreateVendor(value:string){
+  const submitted=validateVendorName(value);
+  const key=normalizeVendor(submitted);
+  if(key.length<2)throw new Error('Review the Outside vendor field before saving.');
+
+  const result=await env.DB.prepare(`
+    SELECT id,name FROM vendors WHERE COALESCE(active,1)=1 ORDER BY name,id
+  `).all<VendorRow>();
+  const exact=result.results.filter(row=>normalizeVendor(row.name)===key);
+  if(exact.length===1)return{id:Number(exact[0].id),name:exact[0].name,created:false};
+  if(exact.length>1)throw new Error('More than one active vendor has that name. Correct the vendor master before saving this Outside Work record.');
+
+  const similar=result.results
+    .map(row=>({row,score:vendorSimilarity(submitted,row.name)}))
+    .filter(item=>item.score>=0.72)
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,3);
+  if(similar.length){
+    throw new Error(`Outside vendor is similar to an existing vendor: ${similar.map(item=>item.row.name).join(', ')}. Use the existing vendor name if it is the same company; otherwise change the name enough to identify the new road vendor.`);
+  }
+
+  const inserted=await env.DB.prepare(`
+    INSERT INTO vendors (name,notes,supplier_type,active)
+    VALUES (?,?,'Outside Work / Road Repair',1)
+  `).bind(submitted,'Created from a reviewed Outside Work invoice. May be a one-time over-the-road repair vendor.').run();
+  const id=Number(inserted.meta.last_row_id??0);
+  if(!id)throw new Error('The new Outside Work vendor could not be created.');
+  return{id,name:submitted,created:true};
 }
 
 async function sha256Hex(bytes:ArrayBuffer){
@@ -159,7 +223,8 @@ export async function POST(request:Request){
     `).bind(equipmentId).first<{id:number;unit:string}>();
     if(!equipment)throw new Error('The selected Master Equipment unit is not active or no longer exists.');
 
-    const vendorName=safeText(form.get('vendorName'),180);
+    const vendor=await resolveOrCreateVendor(safeText(form.get('vendorName'),180));
+    const vendorName=vendor.name;
     const invoiceNumber=safeText(form.get('invoiceNumber'),100);
     const date=invoiceDate(form.get('invoiceDate'));
     const mileage=optionalMileage(form.get('mileage'));
@@ -173,10 +238,10 @@ export async function POST(request:Request){
     const bytes=await file.arrayBuffer();
     const fileHash=await sha256Hex(bytes);
     const duplicate=await env.DB.prepare(`
-      SELECT d.id,e.unit,d.vendor_name,d.invoice_number
+      SELECT d.id,e.unit,d.invoice_number
       FROM outside_work_documents d JOIN equipment e ON e.id=d.equipment_id
       WHERE d.file_sha256=? LIMIT 1
-    `).bind(fileHash).first<{id:number;unit:string;vendor_name:string;invoice_number:string}>();
+    `).bind(fileHash).first<{id:number;unit:string;invoice_number:string}>();
     if(duplicate){
       return Response.json({
         error:`This exact file was already recorded for unit ${duplicate.unit}${duplicate.invoice_number?` as invoice ${duplicate.invoice_number}`:''}.`,
@@ -189,11 +254,11 @@ export async function POST(request:Request){
     await env.FILES.put(objectKey,bytes,{httpMetadata:{contentType}});
 
     const firstLine=serviceSummary.split(/\r?\n/).map(line=>line.trim()).find(Boolean)||'Vendor service';
-    const title=`Outside work${vendorName?` - ${vendorName}`:''}: ${firstLine}`.slice(0,500);
+    const title=`Outside work - ${vendorName}: ${firstLine}`.slice(0,500);
     const provenance=[
       serviceSummary,
       '',
-      vendorName?`Outside vendor: ${vendorName}`:'Outside vendor: not entered',
+      `Outside vendor: ${vendorName} (vendor #${vendor.id})`,
       invoiceNumber?`Vendor invoice / RO: ${invoiceNumber}`:'Vendor invoice / RO: not entered',
       date?`Service date: ${date}`:'Service date: not entered',
       mileage==null?'Vendor invoice mileage: not entered':`Vendor invoice mileage: ${mileage.toLocaleString()} mi (invoice record only; not Geotab mileage)`,
@@ -211,11 +276,11 @@ export async function POST(request:Request){
     const batch=await env.DB.batch([
       env.DB.prepare(`
         INSERT INTO outside_work_documents (
-          equipment_id,repair_id,vendor_name,invoice_number,invoice_date,mileage,total_amount,
+          equipment_id,repair_id,vendor_id,vendor_name,invoice_number,invoice_date,mileage,total_amount,
           original_file_name,content_type,object_key,file_sha256,ocr_text,service_summary,uploaded_by_user_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
-        equipment.id,repairId,vendorName,invoiceNumber,date,mileage,totalAmount,
+        equipment.id,repairId,vendor.id,vendorName,invoiceNumber,date,mileage,totalAmount,
         originalName,contentType,objectKey,fileHash,ocrText,serviceSummary,user.id,
       ),
       env.DB.prepare(`
@@ -227,12 +292,12 @@ export async function POST(request:Request){
         VALUES (?, ?, ?, 'outside_work_imported', ?)
       `).bind(
         repairId,user.id,user.technicianId,
-        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit}${vendorName?` from ${vendorName}`:''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
+        `${user.displayName||user.username} recorded outside work for unit ${equipment.unit} from ${vendorName} (vendor #${vendor.id})${vendor.created?' [new road vendor]':''}${invoiceNumber?` invoice ${invoiceNumber}`:''}; total $${totalAmount.toFixed(2)}.`.slice(0,500),
       ),
     ]);
     const documentId=Number(batch[0]?.meta.last_row_id??0);
 
-    return Response.json({ok:true,documentId,repairId:`repair-${repairId}`,unit:equipment.unit});
+    return Response.json({ok:true,documentId,repairId:`repair-${repairId}`,unit:equipment.unit,vendorId:vendor.id,vendorName,vendorCreated:vendor.created});
   }catch(error){
     if(repairId){try{await env.DB.prepare('DELETE FROM repairs WHERE id=?').bind(repairId).run();}catch{}}
     if(objectKey){try{await env.FILES.delete(objectKey);}catch{}}
