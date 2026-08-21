@@ -1,16 +1,27 @@
 import {
   parseOutsideWorkInvoice as parseV2,
   suspiciousInvoiceNumber,
-  suspiciousServiceSummary,
-  suspiciousVendor,
+  suspiciousServiceSummary as suspiciousServiceSummaryV2,
+  suspiciousVendor as suspiciousVendorV2,
 } from "./invoice-parser-v2.js";
 import { parseDateToken } from "./invoice-parser.js";
 
-export { suspiciousInvoiceNumber, suspiciousServiceSummary, suspiciousVendor };
+export { suspiciousInvoiceNumber };
 
 const out=(value="",confidence=0,source="")=>({value,confidence,source});
 const clean=value=>String(value||"").replace(/[|]+/g," ").replace(/\s+/g," ").trim();
 const lines=text=>String(text||"").split(/\r?\n/).map(clean).filter(Boolean);
+const LETTERHEAD_MARKETING=/\b(?:24\s+HOUR\s+SERVICE|SINCE\s+19\d\d|THE\s+ORIGINAL\b.*\bSERVICE|REPAIR\s+SERVICE,?\s+INC|SERVICE,?\s+INC\.?\s*$)\b/i;
+
+export function suspiciousVendor(value){
+  const text=clean(value);
+  return suspiciousVendorV2(value)||LETTERHEAD_MARKETING.test(text);
+}
+
+export function suspiciousServiceSummary(value){
+  const text=clean(value);
+  return suspiciousServiceSummaryV2(value)||LETTERHEAD_MARKETING.test(text);
+}
 
 function parseFirstDate(value){
   const candidates=clean(value).toUpperCase().match(/\b(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{1,2}[- ]?(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[- ]?\d{2,4}|(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[ -]\d{1,2},?[ -]\d{2,4})\b/g)||[];
@@ -25,6 +36,17 @@ function detectExplicitInvoiceDate(text){
     if(!match||match.index===undefined)continue;
     const value=parseFirstDate(line.slice(match.index+match[0].length));
     if(value)return out(value,.999,"explicit invoice/service date");
+  }
+  return out();
+}
+
+function detectPrintedFormNumber(text){
+  const ls=lines(text).slice(0,45);
+  const label=/^(?:NO|NE|N0|N[°º])\.?\s*[:#=-]?\s*(\d{4,10})\b/i;
+  for(const line of ls){
+    if(/\b(?:PHONE|FAX|ZIP|DATE|LICENSE|LICENCE|PARTS|LABOR|LABOUR|TOTAL)\b/i.test(line))continue;
+    const match=line.match(label);
+    if(match?.[1])return out(match[1],.94,"printed service-form number");
   }
   return out();
 }
@@ -48,9 +70,11 @@ function detectVisionWork(text){
 export function parseOutsideWorkInvoice(text){
   const parsed=parseV2(text);
   const explicitDate=detectExplicitInvoiceDate(text);
+  const printedFormNumber=detectPrintedFormNumber(text);
   const visionWork=detectVisionWork(text);
   return {
     ...parsed,
+    invoiceNumber:printedFormNumber.confidence>parsed.invoiceNumber.confidence?printedFormNumber:parsed.invoiceNumber,
     invoiceDate:explicitDate.confidence>parsed.invoiceDate.confidence?explicitDate:parsed.invoiceDate,
     serviceSummary:visionWork.confidence>parsed.serviceSummary.confidence?visionWork:parsed.serviceSummary,
   };

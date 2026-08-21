@@ -18,7 +18,9 @@ echo "Running outside-work invoice parser regression tests..."
 node --test \
   "${project_root}/tests/outside-work-invoice-parser.test.mjs" \
   "${project_root}/tests/outside-work-mixed-invoices.test.mjs" \
-  "${project_root}/tests/outside-work-vision-normalized.test.mjs"
+  "${project_root}/tests/outside-work-vision-normalized.test.mjs" \
+  "${project_root}/tests/outside-work-handwritten-ocr.test.mjs" \
+  "${project_root}/tests/outside-work-vision-request.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \

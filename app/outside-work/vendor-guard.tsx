@@ -30,7 +30,7 @@ type VisionFields={
   totalAmount:VisionField;
   workPerformed:{value:string[];confidence:number};
 };
-type VisionResponse={ok?:boolean;fields?:VisionFields;normalizedText?:string;error?:string};
+type VisionResponse={ok?:boolean;fields?:VisionFields;normalizedText?:string;error?:string;detail?:string};
 type PdfTools=Window&{pdfjsLib?:{GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}}};
 
 const PDF_WORKER="/api/outside-work-reader/pdf.worker.min.js";
@@ -43,8 +43,8 @@ function findOcrTextarea(){return Array.from(document.querySelectorAll<HTMLTextA
 function setReactInputValue(input:HTMLInputElement,value:string){const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;if(setter)setter.call(input,value);else input.value=value;input.dispatchEvent(new Event("input",{bubbles:true}));}
 function setReactTextAreaValue(textarea:HTMLTextAreaElement,value:string){const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")?.set;if(setter)setter.call(textarea,value);else textarea.value=value;textarea.dispatchEvent(new Event("input",{bubbles:true}));}
 function canTouch(element:HTMLElement|null){return Boolean(element&&document.activeElement!==element);}
-function applyInput(element:HTMLInputElement|null,candidate:Candidate,threshold:number,forceWindow:boolean,suspicious?:(value:string)=>boolean){if(!element||candidate.confidence<threshold||!candidate.value||!canTouch(element))return;const current=element.value.trim();if(current===candidate.value)return;if(forceWindow||!current||suspicious?.(current))setReactInputValue(element,candidate.value);}
-function applyTextarea(element:HTMLTextAreaElement|null,candidate:Candidate,threshold:number,forceWindow:boolean,suspicious?:(value:string)=>boolean){if(!element||candidate.confidence<threshold||!candidate.value||!canTouch(element))return;const current=element.value.trim();if(current===candidate.value)return;if(forceWindow||!current||suspicious?.(current))setReactTextAreaValue(element,candidate.value);}
+function applyInput(element:HTMLInputElement|null,candidate:Candidate,threshold:number,forceWindow:boolean,suspicious?:(value:string)=>boolean){if(!element||candidate.confidence<threshold||!candidate.value||!canTouch(element)||suspicious?.(candidate.value))return;const current=element.value.trim();if(current===candidate.value)return;if(forceWindow||!current||suspicious?.(current))setReactInputValue(element,candidate.value);}
+function applyTextarea(element:HTMLTextAreaElement|null,candidate:Candidate,threshold:number,forceWindow:boolean,suspicious?:(value:string)=>boolean){if(!element||candidate.confidence<threshold||!candidate.value||!canTouch(element)||suspicious?.(candidate.value))return;const current=element.value.trim();if(current===candidate.value)return;if(forceWindow||!current||suspicious?.(current))setReactTextAreaValue(element,candidate.value);}
 function clearSuspiciousInput(element:HTMLInputElement|null,test:(value:string)=>boolean,forceWindow:boolean){if(!forceWindow||!element||!canTouch(element))return;const current=element.value.trim();if(current&&test(current))setReactInputValue(element,"");}
 function clearSuspiciousTextarea(element:HTMLTextAreaElement|null,test:(value:string)=>boolean,forceWindow:boolean){if(!forceWindow||!element||!canTouch(element))return;const current=element.value.trim();if(current&&test(current))setReactTextAreaValue(element,"");}
 function fileKey(file:File){return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;}
@@ -118,6 +118,15 @@ function resolveMasterUnit(value:string){
   const number=(raw.match(/\d{2,6}/)||[])[0]||"";if(!number)return"";
   const numeric=options.filter(option=>(option.value.match(/\d{2,6}/)||[])[0]===number);return numeric.length===1?numeric[0].value:"";
 }
+function setVisionStatus(message:string,tone:"working"|"success"|"error"){
+  const ocr=findOcrTextarea();const anchor=ocr?.closest("details");if(!anchor)return;
+  let box=document.getElementById("outside-work-vision-status") as HTMLDivElement|null;
+  if(!box){box=document.createElement("div");box.id="outside-work-vision-status";box.style.marginTop="12px";box.style.padding="10px 12px";box.style.borderRadius="8px";box.style.fontSize="12px";box.style.fontWeight="800";anchor.insertAdjacentElement("beforebegin",box);}
+  box.textContent=message;
+  box.style.border=tone==="success"?"1px solid #b8d9c1":tone==="error"?"1px solid #e2b7b7":"1px solid #cddde6";
+  box.style.background=tone==="success"?"#f2fbf4":tone==="error"?"#fff4f4":"#eef5f8";
+  box.style.color=tone==="success"?"#2d5b38":tone==="error"?"#7d3030":"#35556b";
+}
 
 function InvoiceIntelligenceGuard(){
   useEffect(()=>{
@@ -133,13 +142,14 @@ function InvoiceIntelligenceGuard(){
 
     const applyVision=async(file:File)=>{
       const key=fileKey(file);if(visionBusy||visionDoneKey===key||visionFailedKey===key)return;
-      visionBusy=true;
+      visionBusy=true;setVisionStatus("Reading handwriting from the actual page image...","working");
       try{
         const image=await prepareVisionBlob(file);
         const body=new FormData();body.append("image",image,"outside-work-vision.jpg");
+        const ocrHint=findOcrTextarea()?.value.trim()||"";if(ocrHint)body.append("ocrText",ocrHint);
         const response=await fetch("/api/outside-work-vision",{method:"POST",body});
         const result=await response.json() as VisionResponse;
-        if(!response.ok||!result.ok||!result.fields||!result.normalizedText){visionFailedKey=key;return;}
+        if(!response.ok||!result.ok||!result.fields||!result.normalizedText){visionFailedKey=key;setVisionStatus(`Handwriting reader did not complete: ${result.error||result.detail||`HTTP ${response.status}`}. Bad OCR header text will not be trusted.`,"error");return;}
         if(!activeFile||fileKey(activeFile)!==key)return;
         const fields=result.fields;
         const vendor=findInput("Outside vendor");const invoice=findInput("Invoice / RO number");const date=findInput("Service date");
@@ -152,13 +162,14 @@ function InvoiceIntelligenceGuard(){
         else if(total&&canTouch(total)&&Number(total.value||0)===0)setReactInputValue(total,"");
         if(fields.unitNumber.confidence>=.72&&unit&&canTouch(unit)){const resolved=resolveMasterUnit(fields.unitNumber.value);if(resolved)setReactInputValue(unit,resolved);}
         const workText=fields.workPerformed.value.join("\n").trim();
-        if(fields.workPerformed.confidence>=.68&&workText&&work&&canTouch(work))setReactTextAreaValue(work,workText);
-        else if(work&&canTouch(work)&&headerOnlyWork(work.value,fields.vendorName.value))setReactTextAreaValue(work,"");
+        if(fields.workPerformed.confidence>=.68&&workText&&work&&canTouch(work)&&!suspiciousServiceSummary(workText))setReactTextAreaValue(work,workText);
+        else if(work&&canTouch(work)&&(suspiciousServiceSummary(work.value)||headerOnlyWork(work.value,fields.vendorName.value)))setReactTextAreaValue(work,"");
         if(ocr&&canTouch(ocr))setReactTextAreaValue(ocr,result.normalizedText);
         activeText=result.normalizedText;parsed=parseOutsideWorkInvoice(activeText) as ParsedInvoice;forceUntil=Date.now()+3500;
         visionDoneKey=key;
+        setVisionStatus("Handwriting/page-image reader completed. Review the filled fields against the original before saving.","success");
         if(work)work.title="Scanned/handwritten invoice fields were read from the page image; review them against the original before saving.";
-      }catch{visionFailedKey=key;}
+      }catch(error){visionFailedKey=key;setVisionStatus(`Handwriting reader failed: ${error instanceof Error?error.message:"unknown error"}. Bad OCR header text will not be trusted.`,"error");}
       finally{visionBusy=false;}
     };
 
@@ -177,9 +188,9 @@ function InvoiceIntelligenceGuard(){
         applyInput(mileage,parsed.mileage,0.88,forceWindow);
         applyInput(total,parsed.totalAmount,0.87,forceWindow);
         applyTextarea(work,parsed.serviceSummary,0.78,forceWindow,suspiciousServiceSummary);
-        if(parsed.vendor.confidence<0.85)clearSuspiciousInput(vendor,suspiciousVendor,forceWindow);
-        if(parsed.invoiceNumber.confidence<0.85)clearSuspiciousInput(invoice,suspiciousInvoiceNumber,forceWindow);
-        if(parsed.serviceSummary.confidence<0.78)clearSuspiciousTextarea(work,suspiciousServiceSummary,forceWindow);
+        clearSuspiciousInput(vendor,suspiciousVendor,forceWindow);
+        clearSuspiciousInput(invoice,suspiciousInvoiceNumber,forceWindow);
+        clearSuspiciousTextarea(work,suspiciousServiceSummary,forceWindow);
         if(vendor)vendor.title=parsed.payee?.value?`Service vendor detected from the invoice. Remit/payee: ${parsed.payee.value}`:(parsed.vendor.source||"");
         if(work){
           if(parsed.documentKind==="payment_receipt"){
@@ -196,7 +207,7 @@ function InvoiceIntelligenceGuard(){
       const input=event.target instanceof HTMLInputElement?event.target:null;
       if(!input||input.type!=="file"||!/^outside-work-(?:camera|file)-input$/.test(input.id))return;
       const next=input.files?.[0]||null;if(!next)return;
-      activeFile=next;selectedAt=Date.now();visionDoneKey="";visionFailedKey="";activeText="";parsed=null;forceUntil=Date.now()+3000;
+      activeFile=next;selectedAt=Date.now();visionDoneKey="";visionFailedKey="";activeText="";parsed=null;forceUntil=Date.now()+3000;setVisionStatus("Document selected. Browser OCR is running first; handwriting vision will take over automatically if needed.","working");
     };
     const onClick=(event:MouseEvent)=>{const target=event.target instanceof Element?event.target.closest("button"):null;if(target&&(target.textContent||"").trim().toUpperCase()==="APPLY RULES TO TEXT")forceUntil=Date.now()+3000;};
     document.addEventListener("change",onFileChange,true);document.addEventListener("click",onClick,true);
