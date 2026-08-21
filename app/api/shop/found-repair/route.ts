@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import { getTirePositionStatus, replaceTirePositions } from '@/lib/tire-position-db';
 
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
@@ -25,7 +26,7 @@ async function activeRepairForUser(userId:number, technicianId:number, expectedR
     WHERE rt.user_id = ?
   `).bind(userId).first<ActiveRepair>();
   if (!active || Number(active.repair_id) !== expectedRepairId) {
-    throw new Error('Found Something Else is available for the repair that is WORKING NOW.');
+    throw new Error('This unit-workspace action is available for the repair that is WORKING NOW.');
   }
   if (Number(active.technician_id) !== technicianId) {
     throw new Error('The active labor session does not belong to your technician account.');
@@ -75,13 +76,19 @@ export async function GET(request: Request) {
   try {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
-    if (user.role !== 'mechanic' || !user.technicianId) throw new Error('A technician account is required.');
+    if (!['mechanic','manager','admin'].includes(user.role) || !user.technicianId) throw new Error('A technician account is required.');
     const repairId = numericRepairId(new URL(request.url).searchParams.get('repairId'));
     if (!repairId) throw new Error('The repair was not found.');
     await assignedRepairForTechnician(repairId, Number(user.technicianId));
-    return Response.json({ ok:true, repairId:`repair-${repairId}`, notes:await repairNotes(repairId) }, { headers:{ 'cache-control':'no-store' } });
+    const tirePosition = await getTirePositionStatus(env.DB, repairId);
+    return Response.json({
+      ok:true,
+      repairId:`repair-${repairId}`,
+      notes:await repairNotes(repairId),
+      tirePosition,
+    }, { headers:{ 'cache-control':'no-store' } });
   } catch (error) {
-    return Response.json({ error:error instanceof Error ? error.message : 'Repair notes could not be loaded.' }, { status:400, headers:{ 'cache-control':'no-store' } });
+    return Response.json({ error:error instanceof Error ? error.message : 'Repair details could not be loaded.' }, { status:400, headers:{ 'cache-control':'no-store' } });
   }
 }
 
@@ -89,7 +96,7 @@ export async function POST(request: Request) {
   try {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
-    if (user.role !== 'mechanic' || !user.technicianId) {
+    if (!['mechanic','manager','admin'].includes(user.role) || !user.technicianId) {
       throw new Error('A technician account is required to update the unit workspace.');
     }
 
@@ -99,6 +106,32 @@ export async function POST(request: Request) {
     const technicianId = Number(user.technicianId);
     const technician = await technicianName(technicianId);
     const action = String(body.action ?? 'foundRepair');
+
+    if (action === 'saveTirePositions') {
+      await activeRepairForUser(user.id, technicianId, expectedRepairId);
+      const tirePosition = await replaceTirePositions(env.DB, {
+        repairId: expectedRepairId,
+        rawPositions: body.positions,
+        technicianId: technician.id,
+        userId: user.id,
+      });
+      await env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+        VALUES (?, ?, ?, 'tire_positions_selected', ?)
+      `).bind(
+        expectedRepairId,
+        user.id,
+        technician.id,
+        `Tire position(s): ${tirePosition.positions.join(', ')}`.slice(0, 500),
+      ).run();
+      return Response.json({
+        ok:true,
+        tirePositionsSaved:true,
+        repairId:`repair-${expectedRepairId}`,
+        tirePosition,
+        laborUnchanged:true,
+      });
+    }
 
     if (action === 'note') {
       await assignedRepairForTechnician(expectedRepairId, technicianId);
