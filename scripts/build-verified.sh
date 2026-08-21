@@ -21,7 +21,8 @@ node --test \
   "${project_root}/tests/outside-work-vision-normalized.test.mjs" \
   "${project_root}/tests/outside-work-handwritten-ocr.test.mjs" \
   "${project_root}/tests/outside-work-vision-request.test.mjs" \
-  "${project_root}/tests/outside-work-validation.test.mjs"
+  "${project_root}/tests/outside-work-validation.test.mjs" \
+  "${project_root}/tests/outside-work-vision-response.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
