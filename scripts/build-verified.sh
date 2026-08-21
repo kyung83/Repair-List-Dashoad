@@ -55,12 +55,16 @@ const compatibilityFlags = Array.isArray(config.compatibility_flags)
 console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missing>"}`);
 console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
 console.log(`Generated Worker main=${config.main}`);
+console.log(`Generated Worker AI binding=${config.ai?.binding || "<missing>"}`);
 
 if (!compatibilityDate) {
   throw new Error("Cloudflare output config is missing compatibility_date");
 }
 if (!compatibilityFlags.includes("nodejs_compat")) {
   throw new Error("Cloudflare output config is missing nodejs_compat");
+}
+if (config.ai?.binding !== "AI") {
+  throw new Error("Cloudflare output config is missing the Workers AI binding used for scanned-invoice vision.");
 }
 NODE
 
