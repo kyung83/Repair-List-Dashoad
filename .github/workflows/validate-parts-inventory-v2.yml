@@ -22,8 +22,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: TypeScript check
-        run: npx tsc --noEmit
+      - name: Verified application build
+        run: npm run build
       - name: Inventory v2 source assertions
         run: |
           grep -q "inventory_operation_commits" migrations/0092_parts_inventory_v2_operations.sql
