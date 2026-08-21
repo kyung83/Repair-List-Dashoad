@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { buildVisionInput } from '@/app/outside-work/vision-request.js';
+import {
+  extractResultObject as extractWorkersAiResultObject,
+  responseDiagnostic as workersAiResponseDiagnostic,
+} from '@/app/outside-work/vision-response.js';
 
 type AiBinding={run:(model:string,input:Record<string,unknown>)=>Promise<unknown>};
 type VisionField={value:string;confidence:number};
@@ -61,52 +65,6 @@ function bytesToBase64(bytes:Uint8Array){
   const chunk=0x8000;
   for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(bytes.length,i+chunk)));
   return btoa(binary);
-}
-function parseJsonText(value:unknown):unknown{
-  if(typeof value!=='string')return null;
-  const text=value.trim();
-  if(!text)return null;
-  try{return JSON.parse(text);}catch{}
-  const fenced=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if(fenced?.[1]){try{return JSON.parse(fenced[1].trim());}catch{}}
-  const object=text.match(/\{[\s\S]*\}/);
-  if(object?.[0]){try{return JSON.parse(object[0]);}catch{}}
-  return null;
-}
-function extractResultObject(result:unknown):unknown{
-  if(!result||typeof result!=='object')return null;
-  const row=result as Record<string,unknown>;
-  const answerParsed=parseJsonText(row.answer);
-  if(answerParsed)return answerParsed;
-  if(row.response&&typeof row.response==='object')return row.response;
-  const responseParsed=parseJsonText(row.response);
-  if(responseParsed)return responseParsed;
-  const choices=Array.isArray(row.choices)?row.choices:[];
-  const first=choices[0] as Record<string,unknown>|undefined;
-  const message=first?.message as Record<string,unknown>|undefined;
-  const content=message?.content;
-  if(content&&typeof content==='object')return content;
-  const contentParsed=parseJsonText(content);
-  if(contentParsed)return contentParsed;
-  const parsed=message?.parsed;
-  if(parsed&&typeof parsed==='object')return parsed;
-  return null;
-}
-function responseDiagnostic(result:unknown){
-  if(!result||typeof result!=='object')return`Workers AI returned ${typeof result}.`;
-  const row=result as Record<string,unknown>;
-  const keys=Object.keys(row).slice(0,12).join(',')||'<none>';
-  let payload='';
-  if(typeof row.answer==='string')payload=row.answer;
-  else if(typeof row.response==='string')payload=row.response;
-  else{
-    const choices=Array.isArray(row.choices)?row.choices:[];
-    const first=choices[0] as Record<string,unknown>|undefined;
-    const message=first?.message as Record<string,unknown>|undefined;
-    if(typeof message?.content==='string')payload=message.content;
-  }
-  const preview=clean(payload,320);
-  return`Workers AI response keys: ${keys}.${preview?` Text preview: ${preview}`:' No text payload was returned.'}`;
 }
 function normalizedText(payload:VisionPayload){
   const lines:string[]=['VISION-VERIFIED SCANNED INVOICE'];
@@ -188,12 +146,12 @@ export async function POST(request:Request){
     }catch(error){
       console.warn('outside-work moondream read failed',error instanceof Error?error.message:String(error));
     }
-    let parsed=sanitizePayload(extractResultObject(primaryResult));
+    let parsed=sanitizePayload(extractWorkersAiResultObject(primaryResult));
     let model=OCR_MODEL;
 
     if(usefulFieldCount(parsed)<2){
       fallbackResult=await ai.run(FALLBACK_MODEL,buildVisionInput({system:SYSTEM,user:hint,imageBase64}));
-      const fallbackParsed=sanitizePayload(extractResultObject(fallbackResult));
+      const fallbackParsed=sanitizePayload(extractWorkersAiResultObject(fallbackResult));
       if(usefulFieldCount(fallbackParsed)>usefulFieldCount(parsed)){
         parsed=fallbackParsed;
         model=FALLBACK_MODEL;
@@ -202,7 +160,7 @@ export async function POST(request:Request){
 
     const text=normalizedText(parsed);
     if(text.split('\n').length<=1){
-      const detail=`Moondream: ${responseDiagnostic(primaryResult)} Qwen fallback: ${responseDiagnostic(fallbackResult)}`.slice(0,900);
+      const detail=`Moondream: ${workersAiResponseDiagnostic(primaryResult)} Qwen fallback: ${workersAiResponseDiagnostic(fallbackResult)}`.slice(0,1200);
       console.warn('outside-work vision returned no confident structured fields',detail);
       return Response.json({ok:false,error:'Vision reader could not identify any fields confidently.',detail,fields:parsed},{status:422,headers:{'cache-control':'no-store'}});
     }
