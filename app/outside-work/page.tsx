@@ -1,1 +1,1 @@
-export { default } from "./file-intake";
+export { default } from "./vendor-guard";
