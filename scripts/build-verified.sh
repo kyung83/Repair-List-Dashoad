@@ -17,7 +17,8 @@ fi
 echo "Running outside-work invoice parser regression tests..."
 node --test \
   "${project_root}/tests/outside-work-invoice-parser.test.mjs" \
-  "${project_root}/tests/outside-work-mixed-invoices.test.mjs"
+  "${project_root}/tests/outside-work-mixed-invoices.test.mjs" \
+  "${project_root}/tests/outside-work-vision-normalized.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
@@ -29,16 +30,16 @@ timeout \
 worker="${project_root}/dist/server/index.js"
 output_config="${project_root}/dist/server/wrangler.json"
 
-[[ -s "${worker}" ]] || {
+[[ -s "$worker" ]] || {
   echo "Missing or empty Cloudflare Worker bundle: dist/server/index.js" >&2
   exit 66
 }
-[[ -s "${output_config}" ]] || {
+[[ -s "$output_config" ]] || {
   echo "Missing Cloudflare output config: dist/server/wrangler.json" >&2
   exit 66
 }
 
-node --input-type=module - "${output_config}" <<'NODE'
+node --input-type=module - "$output_config" <<'NODE'
 import { readFile } from "node:fs/promises";
 
 const config = JSON.parse(await readFile(process.argv[2], "utf8"));
@@ -54,12 +55,16 @@ const compatibilityFlags = Array.isArray(config.compatibility_flags)
 console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missing>"}`);
 console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
 console.log(`Generated Worker main=${config.main}`);
+console.log(`Generated Worker AI binding=${config.ai?.binding || "<missing>"}`);
 
 if (!compatibilityDate) {
   throw new Error("Cloudflare output config is missing compatibility_date");
 }
 if (!compatibilityFlags.includes("nodejs_compat")) {
   throw new Error("Cloudflare output config is missing nodejs_compat");
+}
+if (config.ai?.binding !== "AI") {
+  throw new Error("Cloudflare output config is missing the Workers AI binding used for scanned-invoice vision.");
 }
 NODE
 
