@@ -7,10 +7,19 @@ import {
   suspiciousInvoiceNumber,
   suspiciousServiceSummary,
   suspiciousVendor,
-} from "./invoice-parser";
+} from "./invoice-parser-v2";
 
 type Candidate={value:string;confidence:number;source:string};
-type ParsedInvoice={vendor:Candidate;invoiceNumber:Candidate;invoiceDate:Candidate;mileage:Candidate;totalAmount:Candidate;serviceSummary:Candidate};
+type ParsedInvoice={
+  vendor:Candidate;
+  payee?:Candidate;
+  invoiceNumber:Candidate;
+  invoiceDate:Candidate;
+  mileage:Candidate;
+  totalAmount:Candidate;
+  serviceSummary:Candidate;
+  documentKind?:"repair_invoice"|"payment_receipt";
+};
 
 function findFieldLabel(prefix:string){return Array.from(document.querySelectorAll<HTMLLabelElement>("label")).find(label=>(label.textContent||"").trim().startsWith(prefix))||null;}
 function findInput(prefix:string){return findFieldLabel(prefix)?.querySelector<HTMLInputElement>("input")||null;}
@@ -28,6 +37,7 @@ function InvoiceIntelligenceGuard(){
     let activeText="";
     let parsed:ParsedInvoice|null=null;
     let forceUntil=0;
+    let defaultWorkPlaceholder="";
 
     const refresh=()=>{
       const ocr=Array.from(document.querySelectorAll<HTMLTextAreaElement>("textarea")).find(item=>item.placeholder.includes("OCR or extracted PDF text"));
@@ -43,6 +53,7 @@ function InvoiceIntelligenceGuard(){
       const mileage=findInput("Invoice mileage");
       const total=findInput("Invoice total ($)");
       const work=findTextarea("Work performed");
+      if(work&&!defaultWorkPlaceholder)defaultWorkPlaceholder=work.placeholder;
 
       applyInput(vendor,parsed.vendor,0.85,forceWindow,suspiciousVendor);
       applyInput(invoice,parsed.invoiceNumber,0.85,forceWindow,suspiciousInvoiceNumber);
@@ -54,6 +65,20 @@ function InvoiceIntelligenceGuard(){
       if(parsed.vendor.confidence<0.85)clearSuspiciousInput(vendor,suspiciousVendor,forceWindow);
       if(parsed.invoiceNumber.confidence<0.85)clearSuspiciousInput(invoice,suspiciousInvoiceNumber,forceWindow);
       if(parsed.serviceSummary.confidence<0.78)clearSuspiciousTextarea(work,suspiciousServiceSummary,forceWindow);
+
+      if(vendor){
+        vendor.title=parsed.payee?.value?`Service vendor detected from the invoice. Remit/payee: ${parsed.payee.value}`:(parsed.vendor.source||"");
+      }
+      if(work){
+        if(parsed.documentKind==="payment_receipt"){
+          work.placeholder="Payment receipt detected. Enter the actual work performed or use the underlying repair invoice; the system will not invent repairs from payment data.";
+          work.title="Payment receipt only - repair details were not present in this document.";
+          if(forceWindow&&canTouch(work)&&work.value.trim())setReactTextAreaValue(work,"");
+        }else{
+          if(defaultWorkPlaceholder)work.placeholder=defaultWorkPlaceholder;
+          work.title=parsed.serviceSummary.source||"";
+        }
+      }
     };
 
     const onClick=(event:MouseEvent)=>{const target=event.target instanceof Element?event.target.closest("button"):null;if(target&&(target.textContent||"").trim().toUpperCase()==="APPLY RULES TO TEXT")forceUntil=Date.now()+3000;};
