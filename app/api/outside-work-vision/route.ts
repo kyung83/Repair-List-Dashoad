@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import { buildVisionInput } from '@/app/outside-work/vision-request.js';
 
 type AiBinding={run:(model:string,input:Record<string,unknown>)=>Promise<unknown>};
 type VisionField={value:string;confidence:number};
@@ -121,23 +122,14 @@ export async function POST(request:Request){
     const bytes=new Uint8Array(await image.arrayBuffer());
     const dataUri=`data:${image.type};base64,${bytesToBase64(bytes)}`;
     const hint=ocrHint?`${USER}\n\nThe browser produced the following noisy OCR hint. It can help locate printed labels/numbers, but it may badly misread handwriting or logos. The image is authoritative; ignore OCR text that conflicts with the page image:\n--- OCR HINT ---\n${ocrHint}\n--- END OCR HINT ---`:USER;
-    const result=await ai.run(MODEL,{
-      messages:[
-        {role:'system',content:SYSTEM},
-        {role:'user',content:[
-          {type:'text',text:hint},
-          {type:'image_url',image_url:{url:dataUri}},
-        ]},
-      ],
-      temperature:0,
-      max_completion_tokens:1400,
-    });
+    const result=await ai.run(MODEL,buildVisionInput({system:SYSTEM,user:hint,imageDataUri:dataUri}));
     const parsed=sanitizePayload(extractResultObject(result));
     const text=normalizedText(parsed);
     if(text.split('\n').length<=1)return Response.json({ok:false,error:'Vision reader could not identify any fields confidently.',fields:parsed},{status:422});
     return Response.json({ok:true,fields:parsed,normalizedText:text,model:MODEL},{headers:{'cache-control':'no-store'}});
   }catch(error){
-    console.error('outside-work vision extraction failed',error);
-    return Response.json({error:'The handwritten-invoice vision reader could not complete this scan.'},{status:500});
+    const detail=error instanceof Error?error.message:String(error??'');
+    console.error('outside-work vision extraction failed',detail);
+    return Response.json({error:'The handwritten-invoice vision reader could not complete this scan.',detail:detail.slice(0,300)},{status:500});
   }
 }
