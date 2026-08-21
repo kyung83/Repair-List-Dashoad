@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
-import { removePartFromRepair, usePartOnRepair } from '@/lib/inventory-db';
+import { removePartFromRepair } from '@/lib/inventory-db';
+import { applyPartToRepair, undoInventoryOperation } from '@/lib/inventory-operations';
 import { getWorkOrderData, handleWorkOrderAction } from '@/lib/work-orders';
 import { handleReviewCorrection } from './review-corrections';
 import { addReviewPart } from './review-part-correction';
@@ -13,6 +14,10 @@ function repairNumber(value: unknown) {
 
 function deferred(status: unknown) {
   return String(status ?? '').toLowerCase().startsWith('deferred to next');
+}
+
+function operationKey(request: Request, body: Record<string,unknown>, prefix: string) {
+  return String(body.operationKey ?? request.headers.get('idempotency-key') ?? `${prefix}:${crypto.randomUUID()}`);
 }
 
 async function enforceTechnicianScope(request: Request, body: Record<string, unknown>) {
@@ -40,20 +45,6 @@ async function enforceTechnicianScope(request: Request, body: Record<string, unk
   if (String(repair.status ?? '').toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
 }
 
-async function refreshRepairPartsText(repairId: number) {
-  const rows = await env.DB.prepare(`
-    SELECT p.part_number, SUM(rp.quantity) AS quantity
-    FROM repair_parts rp
-    JOIN parts p ON p.id = rp.part_id
-    WHERE rp.repair_id = ?
-    GROUP BY p.id, p.part_number
-    ORDER BY p.part_number
-  `).bind(repairId).all<{ part_number: string; quantity: number }>();
-  const text = rows.results.map((row) => `${row.part_number} x${Number(row.quantity)}`).join(', ');
-  await env.DB.prepare('UPDATE repairs SET parts_text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .bind(text, repairId).run();
-}
-
 async function approveWorkOrder(request: Request, body: Record<string, unknown>) {
   const user = await getSessionUser(env.DB, request);
   if (!user) throw new Error('Authentication required.');
@@ -63,34 +54,19 @@ async function approveWorkOrder(request: Request, body: Record<string, unknown>)
   const ids = [...new Set(rawIds.map((value) => repairNumber(value)))];
   if (!ids.length) throw new Error('Choose a completed work order to approve.');
   if (ids.length > 100) throw new Error('Too many repairs were included in one work order review.');
-
   const placeholders = ids.map(() => '?').join(',');
-  const rows = await env.DB.prepare(`
-    SELECT id, COALESCE(status,'') AS status
-    FROM repairs
-    WHERE id IN (${placeholders})
-  `).bind(...ids).all<{id:number;status:string}>();
+  const rows = await env.DB.prepare(`SELECT id,COALESCE(status,'') AS status FROM repairs WHERE id IN (${placeholders})`).bind(...ids).all<{id:number;status:string}>();
   if (rows.results.length !== ids.length || rows.results.some((row) => !row.status.toLowerCase().includes('complete'))) {
     throw new Error('Only completed repairs can be approved from Work Order Review.');
   }
 
-  const reviewNote = String(body.reviewNote ?? '').trim().slice(0, 1000);
+  const reviewNote = String(body.reviewNote ?? '').trim().slice(0,1000);
   const reviewer = user.displayName || user.username || `User ${user.id}`;
   await env.DB.batch([
-    env.DB.prepare(`
-      UPDATE repairs
-      SET reviewed_at = CURRENT_TIMESTAMP,
-          reviewed_by_user_id = ?,
-          review_note = ?
-      WHERE id IN (${placeholders})
-    `).bind(user.id, reviewNote, ...ids),
-    ...ids.map((id) => env.DB.prepare(`
-      INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
-      SELECT r.id, ?, r.technician_id, 'work_order_reviewed', ?
-      FROM repairs r WHERE r.id = ?
-    `).bind(user.id, `${reviewer} approved the completed work order${reviewNote ? `: ${reviewNote}` : '.'}`.slice(0, 500), id)),
+    env.DB.prepare(`UPDATE repairs SET reviewed_at=CURRENT_TIMESTAMP,reviewed_by_user_id=?,review_note=? WHERE id IN (${placeholders})`).bind(user.id,reviewNote,...ids),
+    ...ids.map((id)=>env.DB.prepare(`INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail) SELECT r.id,?,r.technician_id,'work_order_reviewed',? FROM repairs r WHERE r.id=?`).bind(user.id,`${reviewer} approved the completed work order${reviewNote ? `: ${reviewNote}` : '.'}`.slice(0,500),id)),
   ]);
-  return { ok:true, approved:true, repairIds:ids.map((id) => `repair-${id}`), reviewedBy:reviewer };
+  return {ok:true,approved:true,repairIds:ids.map((id)=>`repair-${id}`),reviewedBy:reviewer};
 }
 
 export async function GET(request: Request) {
@@ -99,14 +75,10 @@ export async function GET(request: Request) {
     if (!user) throw new Error('Authentication required.');
     const data = await getWorkOrderData(env.DB);
     data.repairs = data.repairs.filter((repair) => !deferred(repair.status));
-    return Response.json({
-      ...data,
-      user:{ id:user.id, displayName:user.displayName, role:user.role },
-      canApprove:user.role === 'manager' || user.role === 'admin',
-    }, { headers: { 'cache-control': 'no-store' } });
+    return Response.json({...data,user:{id:user.id,displayName:user.displayName,role:user.role},canApprove:user.role === 'manager' || user.role === 'admin'}, {headers:{'cache-control':'no-store'}});
   } catch (error) {
-    console.error(JSON.stringify({ event: 'work_orders_get_failed', error: String(error) }));
-    return Response.json({ error: error instanceof Error ? error.message : 'Work orders could not be loaded.' }, { status: 500 });
+    console.error(JSON.stringify({event:'work_orders_get_failed',error:String(error)}));
+    return Response.json({error:error instanceof Error ? error.message : 'Work orders could not be loaded.'},{status:500});
   }
 }
 
@@ -120,19 +92,32 @@ export async function POST(request: Request) {
     if (correction) return Response.json(correction);
     if (action === 'approveWorkOrder') return Response.json(await approveWorkOrder(request, body));
     if (action === 'usePart') {
-      const result = await usePartOnRepair(env.DB, body);
-      const match = String(body.repairId ?? '').match(/^repair-(\d+)$/);
-      if (match) await refreshRepairPartsText(Number(match[1]));
-      return Response.json(result);
+      const user = await getSessionUser(env.DB,request);
+      if (!user) throw new Error('Authentication required.');
+      return Response.json(await applyPartToRepair(env.DB,{
+        operationKey:operationKey(request,body,'apply-part'),
+        repairId:body.repairId,
+        partId:body.partId,
+        quantity:body.quantity,
+        warehouseCode:body.warehouseCode,
+        userId:user.id,
+        source:'technician',
+      }));
     }
     if (action === 'removePart') {
-      const result = await removePartFromRepair(env.DB, body);
-      await refreshRepairPartsText(result.repairId);
-      return Response.json(result);
+      const user = await getSessionUser(env.DB,request);
+      if (!user || (user.role !== 'manager' && user.role !== 'admin')) throw new Error('Manager or administrator access is required to undo a posted part.');
+      const usageId = Number(body.usageId ?? body.id ?? 0);
+      const linked = usageId > 0 ? await env.DB.prepare('SELECT inventory_operation_id FROM repair_parts WHERE id = ?').bind(usageId).first<{inventory_operation_id:number|null}>() : null;
+      if (linked?.inventory_operation_id) {
+        return Response.json(await undoInventoryOperation(env.DB,{operationId:linked.inventory_operation_id,operationKey:operationKey(request,body,'undo-part'),userId:user.id,note:String(body.reason ?? '')}));
+      }
+      const result = await removePartFromRepair(env.DB,body);
+      return Response.json({...result,legacy:true});
     }
     return Response.json(await handleWorkOrderAction(env.DB, body));
   } catch (error) {
-    console.error(JSON.stringify({ event: 'work_orders_post_failed', error: String(error) }));
-    return Response.json({ error: error instanceof Error ? error.message : 'Work-order action failed' }, { status: 400 });
+    console.error(JSON.stringify({event:'work_orders_post_failed',error:String(error)}));
+    return Response.json({error:error instanceof Error ? error.message : 'Work-order action failed'},{status:400});
   }
 }
