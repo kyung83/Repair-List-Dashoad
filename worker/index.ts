@@ -4,8 +4,7 @@ import handler from 'vinext/server/app-router-entry';
 import { appUserCount, authenticateUser, createSession, getSessionUser, sessionCookie, type AppUser } from '../lib/auth';
 import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
-import { syncGeotabYardPresence } from '../lib/geotab-yard';
-import { syncGeotabGpsShadow } from '../lib/geotab-gps-shadow';
+import { syncGeotabGpsFeed, syncGeotabLocationMirror } from '../lib/geotab-gps-feed';
 import { recoverStaleGeotabGps } from '../lib/geotab-gps-stale-recovery';
 
 interface Env {
@@ -85,11 +84,7 @@ function accessDenied(url: URL, message = 'Your clearance does not allow this ac
 }
 
 async function mechanicCanWrite(request: Request, pathname: string) {
-  // These routes perform their own assignment/link validation before allowing a
-  // technician to mutate work. Let the assigned technician reach route-level checks
-  // instead of blocking valid Shop and maintenance actions at the Worker layer.
   if (ASSIGNED_MAINTENANCE_WRITE_PATHS.has(pathname) || TECHNICIAN_SHOP_WRITE_PATHS.has(pathname)) return true;
-
   if (pathname !== '/api/work-orders' && pathname !== '/api/repairs' && pathname !== '/api/shop' && pathname !== '/api/pm-followups' && pathname !== '/api/repair-board') return false;
   let action = '';
   try {
@@ -170,35 +165,37 @@ const worker = {
     return handler.fetch(request, env, ctx);
   },
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    if (controller.cron === '*/5 * * * *') {
-      let shadow: unknown = null;
+    if (controller.cron === '* * * * *') {
+      let feed: unknown = null;
       let recovery: unknown = null;
+      let mirror: unknown = null;
       try {
-        shadow = await syncGeotabGpsShadow(env);
+        feed = await syncGeotabGpsFeed(env);
       } catch (error) {
-        console.error(JSON.stringify({ event: 'geotab_gps_shadow_schedule_failed', error: String(error) }));
+        console.error(JSON.stringify({ event: 'geotab_gps_feed_schedule_failed', error: String(error) }));
+      }
+      const minute = new Date(controller.scheduledTime).getUTCMinutes();
+      if (minute % 5 === 0) {
+        try {
+          const trailerBucket = minute % 15 === 0 ? (Math.floor(minute / 15) % 2) as 0 | 1 : null;
+          recovery = await recoverStaleGeotabGps(env, { trailerBucket });
+        } catch (error) {
+          console.error(JSON.stringify({ event: 'geotab_targeted_gps_recovery_failed', error: String(error) }));
+        }
       }
       try {
-        const minute = new Date(controller.scheduledTime).getUTCMinutes();
-        const trailerBucket = minute % 15 === 0 ? (Math.floor(minute / 15) % 2) as 0 | 1 : null;
-        recovery = await recoverStaleGeotabGps(env, { trailerBucket });
+        mirror = await syncGeotabLocationMirror(env.DB);
       } catch (error) {
-        console.error(JSON.stringify({ event: 'geotab_targeted_gps_recovery_failed', error: String(error) }));
+        console.error(JSON.stringify({ event: 'geotab_location_mirror_failed', error: String(error) }));
       }
-      console.log(JSON.stringify({ event: 'geotab_five_minute_gps_sync', shadow, recovery }));
+      console.log(JSON.stringify({ event: 'geotab_minute_location_sync', feed, recovery, mirror }));
       return;
     }
 
-    let yard: unknown = null;
-    try {
-      yard = await syncGeotabYardPresence(env);
-    } catch (error) {
-      console.error(JSON.stringify({ event: 'geotab_yard_sync_failed', error: String(error) }));
-    }
     const fleet = await syncGeotabFleetMaster(env);
     const dvir = await syncGeotabDvir(env);
     await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
-    console.log(JSON.stringify({ event: 'geotab_two_hour_sync', yard, dvir, fleet }));
+    console.log(JSON.stringify({ event: 'geotab_two_hour_sync', dvir, fleet }));
   },
 };
 export default worker;
