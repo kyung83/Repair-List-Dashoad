@@ -1,9 +1,6 @@
 name: Validate Parts Inventory v2
 
 on:
-  push:
-    branches:
-      - agent/parts-inventory-v2
   pull_request:
     branches:
       - main
@@ -22,7 +19,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare production-shaped Wrangler config
+        run: |
+          sed 's/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/00000000-0000-0000-0000-000000000000/g' wrangler.template.jsonc > wrangler.jsonc
+          cp scripts/manual-trailer-date-fix-20260813.sql migrations/0056_apply_manual_trailer_dates.sql
       - name: Verified application build
+        env:
+          CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH: wrangler.jsonc
         run: npm run build
       - name: Inventory v2 source assertions
         run: |
