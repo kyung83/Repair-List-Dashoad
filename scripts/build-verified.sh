@@ -14,15 +14,13 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
-echo "Running outside-work invoice parser regression tests..."
+echo "Running outside-work deterministic reader regression tests..."
 node --test \
   "${project_root}/tests/outside-work-invoice-parser.test.mjs" \
   "${project_root}/tests/outside-work-mixed-invoices.test.mjs" \
-  "${project_root}/tests/outside-work-vision-normalized.test.mjs" \
   "${project_root}/tests/outside-work-handwritten-ocr.test.mjs" \
-  "${project_root}/tests/outside-work-vision-request.test.mjs" \
   "${project_root}/tests/outside-work-validation.test.mjs" \
-  "${project_root}/tests/outside-work-vision-response.test.mjs"
+  "${project_root}/tests/outside-work-correction-memory.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
@@ -59,7 +57,7 @@ const compatibilityFlags = Array.isArray(config.compatibility_flags)
 console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missing>"}`);
 console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
 console.log(`Generated Worker main=${config.main}`);
-console.log(`Generated Worker AI binding=${config.ai?.binding || "<missing>"}`);
+console.log(`Generated Worker AI binding=${config.ai?.binding || "<none>"}`);
 
 if (!compatibilityDate) {
   throw new Error("Cloudflare output config is missing compatibility_date");
@@ -67,9 +65,9 @@ if (!compatibilityDate) {
 if (!compatibilityFlags.includes("nodejs_compat")) {
   throw new Error("Cloudflare output config is missing nodejs_compat");
 }
-if (config.ai?.binding !== "AI") {
-  throw new Error("Cloudflare output config is missing the Workers AI binding used for scanned-invoice vision.");
+if (config.ai?.binding) {
+  throw new Error("Outside Work is intentionally no-AI; generated Worker config must not include an AI binding.");
 }
 NODE
 
-echo "Validated Cloudflare Worker bundle and output configuration."
+echo "Validated Cloudflare Worker bundle and no-AI output configuration."
