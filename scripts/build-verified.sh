@@ -14,14 +14,15 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
-echo "Running outside-work deterministic reader regression tests..."
+echo "Running deterministic regression tests..."
 node --test \
   "${project_root}/tests/outside-work-invoice-parser.test.mjs" \
   "${project_root}/tests/outside-work-mixed-invoices.test.mjs" \
   "${project_root}/tests/outside-work-handwritten-ocr.test.mjs" \
   "${project_root}/tests/outside-work-validation.test.mjs" \
   "${project_root}/tests/outside-work-correction-memory.test.mjs" \
-  "${project_root}/tests/outside-work-vendor-separation.test.mjs"
+  "${project_root}/tests/outside-work-vendor-separation.test.mjs" \
+  "${project_root}/tests/geotab-location-state.test.mjs"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
@@ -54,11 +55,13 @@ const compatibilityDate = String(config.compatibility_date ?? "");
 const compatibilityFlags = Array.isArray(config.compatibility_flags)
   ? config.compatibility_flags.map(String)
   : [];
+const crons = Array.isArray(config.triggers?.crons) ? config.triggers.crons.map(String) : [];
 
 console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missing>"}`);
 console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
 console.log(`Generated Worker main=${config.main}`);
 console.log(`Generated Worker AI binding=${config.ai?.binding || "<none>"}`);
+console.log(`Generated Worker crons=${crons.join(",") || "<none>"}`);
 
 if (!compatibilityDate) {
   throw new Error("Cloudflare output config is missing compatibility_date");
@@ -69,6 +72,9 @@ if (!compatibilityFlags.includes("nodejs_compat")) {
 if (config.ai?.binding) {
   throw new Error("Outside Work is intentionally no-AI; generated Worker config must not include an AI binding.");
 }
+if (!crons.includes("* * * * *")) {
+  throw new Error("Geotab LogRecord feed must run every minute.");
+}
 NODE
 
-echo "Validated Cloudflare Worker bundle and no-AI output configuration."
+echo "Validated Cloudflare Worker bundle, no-AI output, and minute Geotab feed schedule."
