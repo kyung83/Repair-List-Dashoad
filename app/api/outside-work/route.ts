@@ -32,6 +32,7 @@ const SAFE_IMAGE_TYPES=new Set(['image/jpeg','image/png','image/webp','image/gif
 const BAD_VENDOR_TEXT=/\b(?:NORTHERN\s+LOGISTICS|NORLOWORLD|AUTHORIZATION\s+FOR\s+REPAIRS|EXCLUSION\s+OF\s+WARRANTIES|WARRANTY|WARRANTIES|HEREBY|UNDERSIGNED|PURCHASER|MERCHANTABILITY|PARTICULAR\s+PURPOSE|CONSEQUENTIAL\s+DAMAGES|COMMERCIAL\s+LOSSES|MECHANIC'?S\s+LIEN|RESPONSIBLE\s+FOR\s+PAYMENT|PARTS\s+AND\/OR\s+ACCESSORIES|PARTS\s+OR\s+ACCESSORIES|ACCESSORIES\s+PURCHASED|PERMISSION\s+TO\s+OPERATE|UNAVAILABILITY\s+OF\s+PARTS|COMPLAINT|CAUSE|CORRECTION|WORK\s+PERFORMED|TECHNICIAN\s+COMMENTS)\b/i;
 const FINANCIAL_VENDOR_TEXT=/^(?:SHOP\s+SUPPLIES|MISC(?:ELLANEOUS)?\s+SUPPLIES|LABOR|LABOUR|PARTS|SUBLET|PREPAY|SUB\s*TOTAL|SUBTOTAL|TAX|TOTAL|BALANCE|AMOUNT\s+DUE|ESTIMATED(?:\s+BILLED)?|BILLED|NET\s+SALE)(?:\s*[:$]|\s+\$?\d|$)/i;
 const COMPANY_EVIDENCE=/\b(?:TRUCK|TRUCKS|TRACTOR|TRACTORS|DIESEL|TIRE|TIRES|SERVICE|SERVICES|REPAIR|REPAIRS|MOTOR|MOTORS|AUTO|AUTOMOTIVE|CENTER|CENTRE|DEALER|GARAGE|SHOP|TRUCKING|FLEET|BODY\s+SHOP|COLLISION|TOWING|SPRING|TRANSMISSION|RADIATOR|ALIGNMENT|KENWORTH|PETERBILT|FREIGHTLINER|WESTERN\s+STAR|VOLVO|MACK|INTERNATIONAL|CUMMINS|DETROIT|GOODYEAR|BRIDGESTONE|MICHELIN|LOVE'?S|TA\s+PETRO|IDEALEASE|INC\.?|LLC|LTD|CORP|CORPORATION|COMPANY|CO\.)\b/i;
+const COMPANY_SUFFIX_WORD=/^(?:INC|CORP|CORPORATION|LTD|LLC|COMPANY)$/i;
 
 async function requireManager(request:Request):Promise<AppUser>{
   const user=await getSessionUser(env.DB,request);
@@ -91,16 +92,20 @@ function vendorSimilarity(left:string,right:string){
   return (2*common)/(a.size+b.size);
 }
 
+function sentenceBoundaries(value:string){
+  const boundary=/\b([A-Za-z]{3,})[.!?;]\s+/g;
+  return Array.from(value.matchAll(boundary)).filter(match=>!COMPANY_SUFFIX_WORD.test(match[1]||''));
+}
+
 function trimMergedVendorPrefix(value:string){
   const line=value.replace(/\s+/g,' ').trim().replace(/^[\s:#=.-]+/,'').replace(/[,:;.-]+$/,'').trim();
   if(!line)return'';
 
-  const sentenceParts=line.split(/[.!?;]\s+/).map(part=>part.trim()).filter(Boolean);
-  if(sentenceParts.length>1){
-    for(let i=sentenceParts.length-1;i>=0;i--){
-      const part=sentenceParts[i].replace(/^[\s:#=.-]+/,'').replace(/[,:;.-]+$/,'').trim();
-      if(part&&part.length<=90&&COMPANY_EVIDENCE.test(part))return part;
-    }
+  const matches=sentenceBoundaries(line);
+  for(let i=matches.length-1;i>=0;i--){
+    const start=(matches[i].index??0)+matches[i][0].length;
+    const tail=line.slice(start).replace(/^[\s:#=.-]+/,'').replace(/[,:;.-]+$/,'').trim();
+    if(tail&&tail.length<=90&&COMPANY_EVIDENCE.test(tail))return tail;
   }
 
   const uppercaseTail=line.match(/([A-Z][A-Z0-9&'./-]*(?:\s+[A-Z][A-Z0-9&'./-]*){1,7})$/);
@@ -113,7 +118,7 @@ function validateVendorName(value:string){
   if(name.length<2)throw new Error('Review the Outside vendor field before saving.');
   if(name.length>180)throw new Error('Outside vendor name is too long.');
   const words=name.match(/[A-Za-z][A-Za-z'&.-]*/g)||[];
-  if(words.length>10||/[.!?;]\s+\S/.test(name)||/[.!?].*[.!?]/.test(name)||BAD_VENDOR_TEXT.test(name)||FINANCIAL_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)){
+  if(words.length>10||sentenceBoundaries(name).length>0||/[.!?].*[.!?]/.test(name)||BAD_VENDOR_TEXT.test(name)||FINANCIAL_VENDOR_TEXT.test(name)||/\$\s*\d/.test(name)){
     throw new Error('Outside vendor looks like invoice text instead of a company name. Correct the vendor field before saving.');
   }
   return name;
