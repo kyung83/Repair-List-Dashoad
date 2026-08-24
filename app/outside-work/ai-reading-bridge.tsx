@@ -215,10 +215,10 @@ export default function AiReadingBridge(){
       const input=event.target as HTMLInputElement|null;
       if(!input||!(input.id==="outside-work-camera-input"||input.id==="outside-work-file-input"))return;
       const file=input.files?.[0];
-      if(file)void readInvoice(file);
+      if(file)window.setTimeout(()=>void readInvoice(file),0);
     };
-    document.addEventListener("change",handler,true);
-    return()=>document.removeEventListener("change",handler,true);
+    document.addEventListener("change",handler);
+    return()=>document.removeEventListener("change",handler);
   },[]);
 
   const tone=state==="success"?success:state==="error"?failure:state==="reading"?active:ready;
