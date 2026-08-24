@@ -12,13 +12,13 @@ async function sources(){
   ]);
 }
 
-test('Outside Work automatically sends a selected invoice to the AI handwriting reader',async()=>{
+test('Outside Work captures the selected file before native input clearing, then defers AI work',async()=>{
   const [bridge]=await sources();
   assert.match(bridge,/outside-work-camera-input/);
   assert.match(bridge,/outside-work-file-input/);
-  assert.match(bridge,/document\.addEventListener\("change",handler\)/);
-  assert.doesNotMatch(bridge,/document\.addEventListener\("change",handler,true\)/);
+  assert.match(bridge,/const file=input\.files\?\.\[0\]/);
   assert.match(bridge,/window\.setTimeout\(\(\)=>void readInvoice\(file\),0\)/);
+  assert.match(bridge,/document\.addEventListener\("change",handler,true\)/);
   assert.match(bridge,/fetch\("\/api\/outside-work\/ai-read"/);
   assert.match(bridge,/Reading printed text and handwriting automatically/);
   assert.match(bridge,/applyReading\(result\.reading\)/);
