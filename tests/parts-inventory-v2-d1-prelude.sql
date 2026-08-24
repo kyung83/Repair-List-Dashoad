@@ -101,3 +101,6 @@ CREATE TABLE repair_tire_positions (
   FOREIGN KEY (technician_id) REFERENCES technicians(id),
   FOREIGN KEY (recorded_by_user_id) REFERENCES app_users(id)
 );
+
+-- Seed before migration 0093 so the migration's vendor-normalization UPDATE is exercised.
+INSERT INTO vendors (id,name,active) VALUES (1,'ACME-Co.',1);
