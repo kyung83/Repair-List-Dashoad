@@ -1,10 +1,28 @@
 "use client";
 
-import {useEffect,useMemo,useState,type CSSProperties} from "react";
+import {useEffect,useRef,useState,type CSSProperties} from "react";
 import {createPortal} from "react-dom";
-import {AI_READING_PROMPT,parseAiReading} from "./ai-reading-parser.js";
 
-type ParsedReading=ReturnType<typeof parseAiReading>;
+type Reading={
+  vendor:string;
+  invoiceNumber:string;
+  invoiceDate:string;
+  unit:string;
+  mileage:string;
+  totalAmount:string;
+  serviceSummary:string;
+  costs:{serviceCall:string;labor:string;parts:string;tax:string;total:string};
+  uncertain:string[];
+};
+type ApiResult={ok?:boolean;model?:string;reading?:Reading;error?:string};
+type PdfTextItem={str?:string};
+type PdfLib={GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}};
+type BrowserTools=Window&{pdfjsLib?:PdfLib};
+type ReaderState="idle"|"reading"|"success"|"error";
+
+const PDF_SCRIPT="/api/outside-work-reader/pdf.min.js";
+const PDF_WORKER="/api/outside-work-reader/pdf.worker.min.js";
+const MAX_AI_PAGES=3;
 
 function setReactValue(target:HTMLInputElement|HTMLTextAreaElement|null,value:string){
   if(!target||!value)return false;
@@ -32,23 +50,111 @@ function targetFields(){
   };
 }
 
-function summary(parsed:ParsedReading){
+function summary(reading:Reading){
   return[
-    parsed.vendor&&`Vendor ${parsed.vendor}`,
-    parsed.invoiceNumber&&`Invoice ${parsed.invoiceNumber}`,
-    parsed.unit&&`Unit ${parsed.unit}`,
-    parsed.invoiceDate&&`Date ${parsed.invoiceDate}`,
-    parsed.totalAmount&&`Total $${parsed.totalAmount}`,
+    reading.vendor&&`Vendor ${reading.vendor}`,
+    reading.invoiceNumber&&`Invoice ${reading.invoiceNumber}`,
+    reading.unit&&`Unit ${reading.unit}`,
+    reading.invoiceDate&&`Date ${reading.invoiceDate}`,
+    reading.totalAmount&&`Total $${reading.totalAmount}`,
   ].filter(Boolean).join(" · ");
+}
+
+function loadPdfScript(){
+  return new Promise<void>((resolve,reject)=>{
+    const existing=document.getElementById("outside-work-pdfjs") as HTMLScriptElement|null;
+    if((window as BrowserTools).pdfjsLib){resolve();return;}
+    const script=existing||document.createElement("script");
+    if(!existing){script.id="outside-work-pdfjs";script.src=PDF_SCRIPT;script.async=true;script.crossOrigin="anonymous";document.head.appendChild(script);}
+    let settled=false;
+    const finish=(error?:Error)=>{if(settled)return;settled=true;window.clearTimeout(timer);script.removeEventListener("load",loaded);script.removeEventListener("error",failed);error?reject(error):resolve();};
+    const loaded=()=>finish();
+    const failed=()=>finish(new Error("Invoice PDF reader could not load for handwriting recognition."));
+    const timer=window.setTimeout(()=>finish(new Error("Invoice PDF reader timed out.")),20000);
+    script.addEventListener("load",loaded,{once:true});
+    script.addEventListener("error",failed,{once:true});
+  });
+}
+
+function canvasBlob(canvas:HTMLCanvasElement,type="image/jpeg",quality=.9){
+  return new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("Invoice page could not be prepared for handwriting recognition.")),type,quality));
+}
+
+async function imagePage(file:File){
+  try{
+    const bitmap=await createImageBitmap(file);
+    try{
+      const longest=Math.max(bitmap.width,bitmap.height);
+      const scale=Math.min(1,2400/Math.max(1,longest));
+      const canvas=document.createElement("canvas");
+      canvas.width=Math.max(1,Math.round(bitmap.width*scale));
+      canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+      const context=canvas.getContext("2d");
+      if(!context)throw new Error("Invoice image could not be prepared for handwriting recognition.");
+      context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);
+      const blob=await canvasBlob(canvas);canvas.width=1;canvas.height=1;return blob;
+    }finally{bitmap.close();}
+  }catch(error){
+    if(["image/jpeg","image/png","image/webp"].includes(file.type))return file;
+    throw error;
+  }
+}
+
+async function pdfPages(file:File){
+  await loadPdfScript();
+  const pdfjs=(window as BrowserTools).pdfjsLib;
+  if(!pdfjs)throw new Error("Invoice PDF reader did not initialize.");
+  pdfjs.GlobalWorkerOptions.workerSrc=PDF_WORKER;
+  const pdf=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  try{
+    const count=Math.min(Number(pdf.numPages||0),MAX_AI_PAGES);
+    if(!count)throw new Error("Invoice PDF has no readable pages.");
+    const pages:Blob[]=[];
+    for(let pageNumber=1;pageNumber<=count;pageNumber++){
+      const page=await pdf.getPage(pageNumber);
+      const base=page.getViewport({scale:1});
+      const scale=Math.min(2.25,2400/Math.max(1,base.width,base.height));
+      const viewport=page.getViewport({scale:Math.max(1.5,scale)});
+      const canvas=document.createElement("canvas");
+      canvas.width=Math.max(1,Math.round(viewport.width));canvas.height=Math.max(1,Math.round(viewport.height));
+      const context=canvas.getContext("2d");
+      if(!context)throw new Error("Invoice PDF page could not be rendered for handwriting recognition.");
+      context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);
+      await page.render({canvasContext:context,viewport}).promise;
+      pages.push(await canvasBlob(canvas));canvas.width=1;canvas.height=1;
+    }
+    return pages;
+  }finally{if(typeof pdf.destroy==="function")await pdf.destroy();}
+}
+
+async function preparedPages(file:File){
+  const isPdf=file.type==="application/pdf"||file.name.toLowerCase().endsWith(".pdf");
+  return isPdf?pdfPages(file):[await imagePage(file)];
+}
+
+function applyReading(reading:Reading){
+  const fields=targetFields();
+  if(!fields)throw new Error("Outside Work review form is not ready. Reload this page and try again.");
+  let count=0;
+  count+=Number(setReactValue(fields.unit,reading.unit));
+  count+=Number(setReactValue(fields.vendor,reading.vendor));
+  count+=Number(setReactValue(fields.invoice,reading.invoiceNumber));
+  count+=Number(setReactValue(fields.date,reading.invoiceDate));
+  count+=Number(setReactValue(fields.mileage,reading.mileage));
+  count+=Number(setReactValue(fields.total,reading.totalAmount));
+  count+=Number(setReactValue(fields.work,reading.serviceSummary));
+  fields.unit?.blur();
+  if(!count)throw new Error("AI handwriting reader did not find any safe fields to apply.");
+  return{count,form:fields.form};
 }
 
 export default function AiReadingBridge(){
   const[host,setHost]=useState<HTMLElement|null>(null);
-  const[open,setOpen]=useState(true);
-  const[text,setText]=useState("");
-  const[message,setMessage]=useState("");
-  const[copied,setCopied]=useState(false);
-  const parsed=useMemo(()=>text.trim()?parseAiReading(text):null,[text]);
+  const[state,setState]=useState<ReaderState>("idle");
+  const[message,setMessage]=useState("Scan or upload an invoice once. Printed OCR and AI handwriting reading will run automatically.");
+  const[reading,setReading]=useState<Reading|null>(null);
+  const[lastFile,setLastFile]=useState<File|null>(null);
+  const requestId=useRef(0);
 
   useEffect(()=>{
     const form=document.querySelector<HTMLInputElement>('input[placeholder="Unit number"]')?.closest("form");
@@ -56,101 +162,75 @@ export default function AiReadingBridge(){
     if(!form||!parent)return;
     const existing=document.getElementById("outside-work-ai-inline-host");
     const mount=existing||document.createElement("div");
-    mount.id="outside-work-ai-inline-host";
-    mount.setAttribute("data-outside-work-ai-inline","true");
-    mount.style.width="100%";
-    mount.style.marginTop="16px";
+    mount.id="outside-work-ai-inline-host";mount.setAttribute("data-outside-work-ai-inline","true");mount.style.width="100%";mount.style.marginTop="16px";
     if(!existing)parent.insertBefore(mount,form);
     setHost(mount);
     return()=>{if(!existing&&mount.parentElement)mount.remove();};
   },[]);
 
-  async function copyPrompt(){
+  async function readInvoice(file:File){
+    const id=++requestId.current;
+    setLastFile(file);setReading(null);setState("reading");setMessage("Reading printed text and handwriting automatically…");
     try{
-      await navigator.clipboard.writeText(AI_READING_PROMPT);
-      setCopied(true);
-      setMessage("Prompt copied. Upload the same invoice to ChatGPT or Claude, then paste its answer here.");
-      window.setTimeout(()=>setCopied(false),1800);
-    }catch{
-      setMessage("Copy failed. Open the exact prompt below and copy it manually.");
+      const pages=await preparedPages(file);
+      if(id!==requestId.current)return;
+      const body=new FormData();
+      pages.forEach((page,index)=>body.append("image",page,`invoice-page-${index+1}.jpg`));
+      const response=await fetch("/api/outside-work/ai-read",{method:"POST",body,cache:"no-store"});
+      const result=await response.json() as ApiResult;
+      if(!response.ok||!result.ok||!result.reading)throw new Error(result.error||"AI handwriting reader could not read this invoice.");
+      if(id!==requestId.current)return;
+      const applied=applyReading(result.reading);
+      setReading(result.reading);setState("success");
+      const warning=result.reading.uncertain.length?` ${result.reading.uncertain.length} item${result.reading.uncertain.length===1?"":"s"} still need verification from the original.`:"";
+      setMessage(`AI read the invoice and filled ${applied.count} review field${applied.count===1?"":"s"}.${warning}`);
+      window.setTimeout(()=>applied.form.scrollIntoView({behavior:"smooth",block:"start"}),250);
+    }catch(error){
+      if(id!==requestId.current)return;
+      setState("error");setMessage(`${error instanceof Error?error.message:"AI handwriting reader failed."} You can still correct the fields manually and save the original.`);
     }
   }
 
-  function apply(){
-    if(!parsed){setMessage("Paste the ChatGPT or Claude reading first.");return;}
-    const fields=targetFields();
-    if(!fields){setMessage("The Outside Work review form is not ready. Reload this page and try again.");return;}
-    let count=0;
-    count+=Number(setReactValue(fields.unit,parsed.unit));
-    count+=Number(setReactValue(fields.vendor,parsed.vendor));
-    count+=Number(setReactValue(fields.invoice,parsed.invoiceNumber));
-    count+=Number(setReactValue(fields.date,parsed.invoiceDate));
-    count+=Number(setReactValue(fields.mileage,parsed.mileage));
-    count+=Number(setReactValue(fields.total,parsed.totalAmount));
-    count+=Number(setReactValue(fields.work,parsed.serviceSummary));
-    fields.unit?.blur();
-    if(!count){setMessage("No safe labeled values were found. Use the copied prompt in ChatGPT or Claude and paste that answer here.");return;}
-    const warning=parsed.uncertain.length?` Verify from the original: ${parsed.uncertain.slice(0,4).join("; ")}${parsed.uncertain.length>4?"; …":""}`:"";
-    setMessage(`Applied ${count} field${count===1?"":"s"} into Review and correct.${warning}`);
-    window.setTimeout(()=>fields.form.scrollIntoView({behavior:"smooth",block:"start"}),50);
-  }
+  useEffect(()=>{
+    const handler=(event:Event)=>{
+      const input=event.target as HTMLInputElement|null;
+      if(!input||!(input.id==="outside-work-camera-input"||input.id==="outside-work-file-input"))return;
+      const file=input.files?.[0];
+      if(file)void readInvoice(file);
+    };
+    document.addEventListener("change",handler,true);
+    return()=>document.removeEventListener("change",handler,true);
+  },[]);
 
   if(!host)return null;
+  const tone=state==="success"?success:state==="error"?failure:state==="reading"?active:ready;
 
   return createPortal(
-    <section style={card} aria-label="ChatGPT or Claude handwriting helper" data-ai-reading-inline-card="true">
-      <div style={topRow}>
-        <div>
-          <div style={eyebrow}>OPTIONAL · NO API CHARGE</div>
-          <h2 style={title}>Handwritten invoice? Use ChatGPT or Claude</h2>
-          <p style={copy}>The built-in reader above is for printed text. For handwriting, upload the same invoice to ChatGPT or Claude, copy its structured reading, paste it here, then apply it to the fields below.</p>
+    <section style={{...card,...tone}} aria-label="Automatic AI handwriting reader" data-ai-reading-inline-card="true">
+      <div style={row}>
+        <div style={{minWidth:0}}>
+          <div style={eyebrow}>{state==="reading"?"AI READING INVOICE":state==="success"?"AI READING COMPLETE":state==="error"?"AI READER NEEDS ATTENTION":"AUTOMATIC HANDWRITING READER"}</div>
+          <h2 style={title}>{state==="idle"?"Handwriting is read automatically":"Outside Work invoice reader"}</h2>
+          <p style={copy}>{message}</p>
+          {reading&&<div style={summaryBox}><strong>{summary(reading)||"Invoice fields detected"}</strong>{reading.uncertain.length>0&&<span>{reading.uncertain.slice(0,4).map(item=><span key={item}>• {item}</span>)}</span>}</div>}
         </div>
-        <button type="button" onClick={()=>setOpen(value=>!value)} style={toggle} aria-expanded={open}>{open?"HIDE HELPER":"OPEN HELPER"}</button>
+        {state==="reading"?<span style={badge}>READING…</span>:lastFile&&state==="error"?<button type="button" style={retry} onClick={()=>void readInvoice(lastFile)}>TRY AI AGAIN</button>:state==="success"?<span style={badge}>FILLED STEP 2</span>:<span style={badge}>READY</span>}
       </div>
-
-      {open&&<div style={body}>
-        <div style={steps}>
-          <div style={step}><strong>1</strong><span>Click <b>COPY READING PROMPT</b>.</span></div>
-          <div style={step}><strong>2</strong><span>Upload this same invoice to ChatGPT or Claude and paste the prompt.</span></div>
-          <div style={step}><strong>3</strong><span>Copy its answer back here and click <b>APPLY TO REVIEW FIELDS</b>.</span></div>
-        </div>
-
-        <button type="button" onClick={()=>void copyPrompt()} style={secondary}>{copied?"PROMPT COPIED":"COPY READING PROMPT"}</button>
-        <details style={details}><summary style={{cursor:"pointer",fontWeight:850}}>Show the exact reading prompt</summary><pre style={prompt}>{AI_READING_PROMPT}</pre></details>
-        <textarea value={text} onChange={event=>{setText(event.target.value);setMessage("");}} placeholder="Paste the ChatGPT or Claude invoice reading here…" style={textarea}/>
-
-        {parsed&&<div style={preview}><strong>{summary(parsed)||"Reading detected"}</strong><span>{parsed.serviceSummary?"Work description detected. ":""}{parsed.uncertain.length?`${parsed.uncertain.length} item${parsed.uncertain.length===1?"":"s"} need verification.`:"No uncertainty wording detected."}</span></div>}
-        {parsed?.uncertain.length>0&&<div style={warning}><strong>VERIFY FROM ORIGINAL INVOICE</strong>{parsed.uncertain.slice(0,6).map(item=><span key={item}>• {item}</span>)}</div>}
-        {message&&<div style={notice}>{message}</div>}
-
-        <div style={actions}>
-          <button type="button" onClick={()=>{setText("");setMessage("");}} style={ghost}>CLEAR</button>
-          <button type="button" onClick={apply} style={primary}>APPLY TO REVIEW FIELDS</button>
-        </div>
-        <p style={foot}>This helper does not save anything by itself. The original invoice still stays attached, and the normal Outside Work validation and save button remain in control.</p>
-      </div>}
-    </section>,
-    host,
+      <p style={foot}>The original invoice remains attached. AI-filled values are review-first; anything uncertain stays blank or is called out for verification before saving.</p>
+    </section>,host,
   );
 }
 
-const card:CSSProperties={background:"#eef7fb",border:"2px solid #8fb8cc",borderRadius:14,padding:18,boxShadow:"0 2px 10px rgba(15,32,48,.05)",color:"#172536"};
-const topRow:CSSProperties={display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",flexWrap:"wrap"};
-const eyebrow:CSSProperties={fontSize:10,fontWeight:950,letterSpacing:1.1,color:"#50768a"};
-const title:CSSProperties={margin:"3px 0 0",fontSize:21,lineHeight:1.15,color:"#123348"};
-const copy:CSSProperties={fontSize:13,lineHeight:1.5,color:"#526c7b",margin:"8px 0 0",maxWidth:980};
-const toggle:CSSProperties={border:"1px solid #9fb8c6",borderRadius:9,padding:"9px 12px",background:"#fff",color:"#173d52",fontWeight:900,cursor:"pointer",whiteSpace:"nowrap"};
-const body:CSSProperties={marginTop:14,borderTop:"1px solid #c7dce7",paddingTop:14};
-const steps:CSSProperties={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:9,marginBottom:12};
-const step:CSSProperties={display:"grid",gridTemplateColumns:"30px 1fr",gap:8,alignItems:"center",padding:"9px 10px",borderRadius:9,background:"#fff",border:"1px solid #cbdde6",fontSize:12,lineHeight:1.4,color:"#405b69"};
-const secondary:CSSProperties={width:"100%",border:"1px solid #8da9b8",borderRadius:9,padding:"10px 12px",background:"#fff",color:"#173d52",fontWeight:950,cursor:"pointer"};
-const details:CSSProperties={marginTop:10,fontSize:12,color:"#566f7d"};
-const prompt:CSSProperties={whiteSpace:"pre-wrap",fontSize:11,lineHeight:1.4,background:"#fff",border:"1px solid #d5e2e8",borderRadius:9,padding:10,overflowX:"auto"};
-const textarea:CSSProperties={width:"100%",minHeight:180,boxSizing:"border-box",marginTop:12,border:"1px solid #9eb8c6",borderRadius:10,padding:12,fontSize:13,lineHeight:1.45,resize:"vertical",outline:"none",background:"#fff"};
-const preview:CSSProperties={display:"grid",gap:3,marginTop:10,padding:10,borderRadius:9,background:"#fff",border:"1px solid #d3e2e9",fontSize:12,color:"#3e5967"};
-const warning:CSSProperties={display:"grid",gap:4,marginTop:10,padding:10,borderRadius:9,background:"#fff7df",border:"1px solid #ead18a",fontSize:12,color:"#71570f"};
-const notice:CSSProperties={marginTop:10,padding:10,borderRadius:9,background:"#e2f0f7",border:"1px solid #bfd9e6",fontSize:12,lineHeight:1.45,color:"#31556d"};
-const actions:CSSProperties={display:"flex",justifyContent:"flex-end",gap:8,marginTop:12,flexWrap:"wrap"};
-const ghost:CSSProperties={border:"1px solid #aebfc8",borderRadius:9,padding:"10px 12px",background:"#fff",fontWeight:900,color:"#556b77",cursor:"pointer"};
-const primary:CSSProperties={border:0,borderRadius:9,padding:"10px 14px",background:"#123f58",color:"#fff",fontWeight:950,cursor:"pointer"};
+const card:CSSProperties={borderRadius:14,padding:16,boxShadow:"0 2px 10px rgba(15,32,48,.04)",color:"#172536"};
+const ready:CSSProperties={background:"#f2f8fb",border:"1px solid #b7d1df"};
+const active:CSSProperties={background:"#eef7fb",border:"2px solid #7daec7"};
+const success:CSSProperties={background:"#f1faf4",border:"2px solid #9bc5a7"};
+const failure:CSSProperties={background:"#fff9e8",border:"2px solid #dfc16e"};
+const row:CSSProperties={display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap"};
+const eyebrow:CSSProperties={fontSize:10,fontWeight:950,letterSpacing:1.05,color:"#507287"};
+const title:CSSProperties={margin:"3px 0 0",fontSize:20,lineHeight:1.15,color:"#123348"};
+const copy:CSSProperties={fontSize:13,lineHeight:1.5,color:"#526c7b",margin:"7px 0 0",maxWidth:980};
+const badge:CSSProperties={display:"inline-flex",alignItems:"center",minHeight:34,padding:"0 11px",borderRadius:999,background:"#fff",border:"1px solid #b9cbd5",fontSize:10,fontWeight:950,letterSpacing:.4,color:"#31566b",whiteSpace:"nowrap"};
+const retry:CSSProperties={border:"1px solid #b89b4a",borderRadius:9,padding:"9px 12px",background:"#fff",color:"#604d18",fontWeight:900,cursor:"pointer",whiteSpace:"nowrap"};
+const summaryBox:CSSProperties={display:"grid",gap:5,marginTop:10,padding:"10px 11px",borderRadius:9,background:"rgba(255,255,255,.8)",border:"1px solid rgba(130,160,175,.35)",fontSize:12,color:"#3d5968"};
 const foot:CSSProperties={fontSize:11,lineHeight:1.4,color:"#71828b",margin:"10px 0 0"};
