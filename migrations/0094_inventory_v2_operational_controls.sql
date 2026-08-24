@@ -10,12 +10,12 @@ WHERE core_return_part_id IS NOT NULL;
 
 -- Make core obligations idempotent per issued inventory operation.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_core_obligation_source_operation
-ON part_core_obligations(source_operation_id)
-WHERE status IN ('open','returned','waived');
+ON part_core_obligations(source_operation_id);
 
 -- Open the obligation at the database boundary for every committed part issue.
 -- The returned core is NOT added to saleable stock; it remains an obligation until
--- a manager records returned/waived disposition.
+-- a manager records returned/waived disposition. A failed D1 operation batch rolls
+-- this trigger insert back with the rest of the batch.
 CREATE TRIGGER IF NOT EXISTS trg_inventory_part_issue_open_core
 AFTER INSERT ON inventory_operation_lines
 FOR EACH ROW
@@ -37,9 +37,11 @@ BEGIN
 END;
 
 ALTER TABLE recovered_used_tires ADD COLUMN disposition_repair_id INTEGER;
+ALTER TABLE recovered_used_tires ADD COLUMN disposition_position_code TEXT;
 
--- Keep recovered tire source records uniquely attributable to one repair/position
--- while allowing multiple positions on the same repair.
+-- One recovered tire can originate from one wheel position on a repair. Idempotency
+-- keys handle request retries; this index also prevents a second operation key from
+-- recording the same removed tire twice.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_recovered_tire_source_position
-ON recovered_used_tires(repair_id, position_code, source_operation_id)
+ON recovered_used_tires(repair_id, position_code)
 WHERE repair_id IS NOT NULL AND position_code IS NOT NULL;
