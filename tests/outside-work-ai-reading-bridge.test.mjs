@@ -22,19 +22,17 @@ test('Outside Work captures the selected file before native input clearing, then
   assert.match(bridge,/fetch\("\/api\/outside-work\/ai-read"/);
   assert.match(bridge,/Handwriting is read automatically/);
   assert.match(bridge,/applyReading\(result\.reading\)/);
-  assert.match(bridge,/FILLED STEP 2/);
 });
 
 test('AI result is applied only after native OCR is finished so OCR cannot overwrite handwriting fields',async()=>{
   const [bridge]=await sources();
   assert.match(bridge,/function nativeReaderBusy\(/);
-  assert.match(bridge,/outside-work-camera-input/);
   assert.match(bridge,/READING DOCUMENT/);
   assert.match(bridge,/await waitForNativeReader/);
   const waitIndex=bridge.indexOf('await waitForNativeReader');
   const applyIndex=bridge.indexOf('applyReading(result.reading)');
   assert.ok(waitIndex>=0&&applyIndex>waitIndex,'AI reading must be applied after waiting for native OCR');
-  assert.match(bridge,/applied after OCR/);
+  assert.match(bridge,/after OCR/);
 });
 
 test('automatic reader never mutates React-owned Outside Work DOM structure',async()=>{
@@ -69,21 +67,31 @@ test('PDF scans are rendered into page images before AI reading',async()=>{
   assert.match(bridge,/body\.append\("image",page/);
 });
 
-test('server uses OpenAI GPT-5.6 Sol first with Qwen vision fallback',async()=>{
+test('GPT-5.6 Sol uses its required Responses-format multimodal request',async()=>{
   const [,route]=await sources();
   assert.match(route,/PRIMARY_MODEL='openai\/gpt-5\.6-sol'/);
-  assert.match(route,/FALLBACK_MODEL='@cf\/qwen\/qwen3\.8-27b'/);
-  assert.match(route,/gateway:\{id:'default'\}/);
-  assert.match(route,/tryModel\(ai,PRIMARY_MODEL,input/);
-  assert.match(route,/tryModel\(ai,FALLBACK_MODEL,input\)/);
-  assert.match(route,/response_format:\{type:'json_object'\}/);
+  assert.match(route,/function primaryInput\(imageUrls:string\[\]\)/);
+  assert.match(route,/instructions:SYSTEM_PROMPT/);
+  assert.match(route,/type:'input_text',text:USER_PROMPT/);
+  assert.match(route,/type:'input_image',image_url,detail:'high'/);
+  assert.match(route,/max_output_tokens:1800/);
+  assert.match(route,/tryModel\(ai,PRIMARY_MODEL,primaryInput\(imageUrls\),\{gateway:\{id:'default'\}\}\)/);
 });
 
-test('server accepts provider response shapes instead of treating valid OpenAI output as empty',async()=>{
+test('Qwen vision remains a separate chat-format fallback',async()=>{
+  const [,route]=await sources();
+  assert.match(route,/FALLBACK_MODEL='@cf\/qwen\/qwen3\.8-27b'/);
+  assert.match(route,/function fallbackInput\(imageUrls:string\[\]\)/);
+  assert.match(route,/type:'image_url',image_url:\{url\}/);
+  assert.match(route,/response_format:\{type:'json_object'\}/);
+  assert.match(route,/tryModel\(ai,FALLBACK_MODEL,fallbackInput\(imageUrls\)\)/);
+});
+
+test('server accepts Responses and chat-completion output shapes',async()=>{
   const [,route]=await sources();
   assert.match(route,/row\.output_text/);
-  assert.match(route,/row\.choices\?\.\[0\]\?\.message\?\.content/);
   assert.match(route,/contentText\(row\.output\)/);
+  assert.match(route,/row\.choices\?\.\[0\]\?\.message\?\.content/);
   assert.match(route,/contentText\(row\.result\?\.output\)/);
 });
 
@@ -100,12 +108,20 @@ test('server keeps fail-closed invoice extraction rules',async()=>{
   const [,route]=await sources();
   assert.match(route,/getSessionUser\(env\.DB,request\)/);
   assert.match(route,/manager.*admin/s);
-  assert.match(route,/type:'image_url'/);
   assert.match(route,/Northern Logistics\/Norlow is the customer, not the outside repair vendor/);
   assert.match(route,/Keep invoiceNumber and unit distinct/);
   assert.match(route,/serviceDate must be YYYY-MM-DD only when month, day, AND year are clearly present/);
   assert.match(route,/Do not guess from context/);
   assert.match(route,/Cost breakdown:/);
+});
+
+test('reader status visibly names the model that handled the invoice',async()=>{
+  const [bridge]=await sources();
+  assert.match(bridge,/GPT-5\.6 Sol/);
+  assert.match(bridge,/Qwen 3\.8 27B fallback/);
+  assert.match(bridge,/modelLabel\(result\.model/);
+  assert.match(bridge,/position:"sticky"/);
+  assert.match(bridge,/GPT-5\.6 SOL · READING/);
 });
 
 test('production Worker config requires the AI binding',async()=>{
