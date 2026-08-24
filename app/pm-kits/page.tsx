@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import MaintenanceTabs from "../maintenance-tabs";
+import ModuleTabs from "../module-tabs";
 
 type Part = { id: number; partNumber: string; description: string; quantityOnHand: number };
 type Truck = { id: number; unit: string; modelYear: number | null; make: string; model: string; engine: string; equipmentType: string };
@@ -10,12 +10,14 @@ type Kit = {
   id: string;
   name: string;
   pmType: string;
+  years: number[];
+  makes: string[];
+  models: string[];
+  engines: string[];
   yearFrom: number | null;
   yearTo: number | null;
-  make: string;
-  model: string;
-  engine: string;
   active: boolean;
+  fitmentCount: number;
   parts: KitPart[];
 };
 type Data = {
@@ -31,43 +33,109 @@ type Draft = {
   id: string;
   name: string;
   pmType: string;
-  yearFrom: string;
-  yearTo: string;
-  make: string;
-  model: string;
-  engine: string;
+  years: number[];
+  makes: string[];
+  models: string[];
+  engines: string[];
   parts: DraftPart[];
 };
 
-const blankDraft: Draft = { id: "", name: "", pmType: "", yearFrom: "", yearTo: "", make: "", model: "", engine: "", parts: [] };
+const blankDraft: Draft = { id: "", name: "", pmType: "", years: [], makes: [], models: [], engines: [], parts: [] };
 
 function same(left: string, right: string) {
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 function unique(values: string[]) {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  const result: string[] = [];
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value || result.some((existing) => same(existing, value))) continue;
+    result.push(value);
+  }
+  return result.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 }
 
-function matches(truck: Truck, criteria: Pick<Draft, "yearFrom" | "yearTo" | "make" | "model" | "engine">) {
-  const from = criteria.yearFrom ? Number(criteria.yearFrom) : null;
-  const to = criteria.yearTo ? Number(criteria.yearTo) : null;
-  if (from != null && (truck.modelYear == null || truck.modelYear < from)) return false;
-  if (to != null && (truck.modelYear == null || truck.modelYear > to)) return false;
-  if (criteria.make && !same(truck.make, criteria.make)) return false;
-  if (criteria.model && !same(truck.model, criteria.model)) return false;
-  if (criteria.engine && !same(truck.engine, criteria.engine)) return false;
+function includesText(values: string[], value: string) {
+  return values.some((candidate) => same(candidate, value));
+}
+
+function matches(truck: Truck, criteria: Pick<Draft, "years" | "makes" | "models" | "engines">) {
+  if (criteria.years.length && (truck.modelYear == null || !criteria.years.includes(truck.modelYear))) return false;
+  if (criteria.makes.length && !includesText(criteria.makes, truck.make)) return false;
+  if (criteria.models.length && !includesText(criteria.models, truck.model)) return false;
+  if (criteria.engines.length && !includesText(criteria.engines, truck.engine)) return false;
   return true;
 }
 
-function kitCriteria(kit: Kit): Pick<Draft, "yearFrom" | "yearTo" | "make" | "model" | "engine"> {
-  return {
-    yearFrom: kit.yearFrom == null ? "" : String(kit.yearFrom),
-    yearTo: kit.yearTo == null ? "" : String(kit.yearTo),
-    make: kit.make,
-    model: kit.model,
-    engine: kit.engine,
-  };
+function toggleText(values: string[], value: string) {
+  return includesText(values, value) ? values.filter((item) => !same(item, value)) : [...values, value];
+}
+
+function toggleYear(values: number[], year: number) {
+  return values.includes(year) ? values.filter((item) => item !== year) : [...values, year].sort((a, b) => a - b);
+}
+
+function formatList(values: string[], anyLabel: string) {
+  if (!values.length) return anyLabel;
+  if (values.length <= 4) return values.join(", ");
+  return `${values.slice(0, 4).join(", ")} +${values.length - 4} more`;
+}
+
+function formatYears(values: number[]) {
+  if (!values.length) return "Any year";
+  const sorted = [...new Set(values)].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+  for (const year of sorted.slice(1)) {
+    if (year === previous + 1) {
+      previous = year;
+      continue;
+    }
+    ranges.push(start === previous ? String(start) : `${start}–${previous}`);
+    start = year;
+    previous = year;
+  }
+  ranges.push(start === previous ? String(start) : `${start}–${previous}`);
+  return ranges.join(", ");
+}
+
+function ChoiceField({ label, options, values, onChange, anyText }: { label: string; options: string[]; values: string[]; onChange: (value: string) => void; anyText: string }) {
+  return (
+    <div style={choiceFieldStyle}>
+      <div style={choiceHeaderStyle}>
+        <span style={labelStyle}>{label}</span>
+        <span style={choiceCountStyle}>{values.length ? `${values.length} selected` : anyText}</span>
+      </div>
+      <div style={choiceBoxStyle}>
+        {options.map((option) => {
+          const selected = includesText(values, option);
+          return <button key={option} type="button" style={selected ? selectedChoiceStyle : choiceStyle} onClick={() => onChange(option)}>{selected ? "✓ " : ""}{option}</button>;
+        })}
+        {!options.length && <span style={helperStyle}>No current equipment values are available.</span>}
+      </div>
+      {values.length > 0 && <div style={{ marginTop: 7, color: "#526473", fontSize: 11 }}>{formatList(values, anyText)}</div>}
+    </div>
+  );
+}
+
+function YearField({ options, values, onChange }: { options: number[]; values: number[]; onChange: (year: number) => void }) {
+  return (
+    <div style={choiceFieldStyle}>
+      <div style={choiceHeaderStyle}>
+        <span style={labelStyle}>YEARS</span>
+        <span style={choiceCountStyle}>{values.length ? `${values.length} selected` : "Any year"}</span>
+      </div>
+      <div style={yearBoxStyle}>
+        {options.map((year) => {
+          const selected = values.includes(year);
+          return <button key={year} type="button" style={selected ? selectedYearStyle : yearStyle} onClick={() => onChange(year)}>{selected ? "✓ " : ""}{year}</button>;
+        })}
+      </div>
+      {values.length > 0 && <div style={{ marginTop: 7, color: "#526473", fontSize: 11 }}>{formatYears(values)}</div>}
+    </div>
+  );
 }
 
 export default function PmKitsPage() {
@@ -91,12 +159,22 @@ export default function PmKitsPage() {
   }, []);
 
   const years = useMemo(() => {
-    const current = new Date().getFullYear() + 1;
-    return Array.from({ length: current - 1989 }, (_, index) => current - index);
+    const current = new Date().getFullYear() + 2;
+    return Array.from({ length: current - 1979 }, (_, index) => current - index);
   }, []);
-  const makeOptions = useMemo(() => unique(data?.trucks.map((truck) => truck.make) ?? []), [data]);
-  const modelOptions = useMemo(() => unique((data?.trucks ?? []).filter((truck) => !draft.make || same(truck.make, draft.make)).map((truck) => truck.model)), [data, draft.make]);
-  const engineOptions = useMemo(() => unique((data?.trucks ?? []).filter((truck) => (!draft.make || same(truck.make, draft.make)) && (!draft.model || same(truck.model, draft.model))).map((truck) => truck.engine)), [data, draft.make, draft.model]);
+
+  const makeOptions = useMemo(() => unique([...(data?.trucks.map((truck) => truck.make) ?? []), ...draft.makes]), [data, draft.makes]);
+  const modelOptions = useMemo(() => unique([
+    ...(data?.trucks ?? []).filter((truck) => !draft.makes.length || includesText(draft.makes, truck.make)).map((truck) => truck.model),
+    ...draft.models,
+  ]), [data, draft.makes, draft.models]);
+  const engineOptions = useMemo(() => unique([
+    ...(data?.trucks ?? []).filter((truck) =>
+      (!draft.makes.length || includesText(draft.makes, truck.make)) &&
+      (!draft.models.length || includesText(draft.models, truck.model)),
+    ).map((truck) => truck.engine),
+    ...draft.engines,
+  ]), [data, draft.makes, draft.models, draft.engines]);
   const matchingTrucks = useMemo(() => (data?.trucks ?? []).filter((truck) => matches(truck, draft)), [data, draft]);
   const filteredParts = useMemo(() => {
     const needle = partSearch.trim().toLowerCase();
@@ -110,15 +188,16 @@ export default function PmKitsPage() {
   }
 
   function edit(kit: Kit) {
+    const legacyYears = kit.years.length ? kit.years : years
+      .filter((year) => (kit.yearFrom == null || year >= kit.yearFrom) && (kit.yearTo == null || year <= kit.yearTo));
     setDraft({
       id: kit.id,
       name: kit.name,
       pmType: kit.pmType,
-      yearFrom: kit.yearFrom == null ? "" : String(kit.yearFrom),
-      yearTo: kit.yearTo == null ? "" : String(kit.yearTo),
-      make: kit.make,
-      model: kit.model,
-      engine: kit.engine,
+      years: legacyYears,
+      makes: [...kit.makes],
+      models: [...kit.models],
+      engines: [...kit.engines],
       parts: kit.parts.map((part) => ({ partId: part.partId, quantity: part.quantity })),
     });
     setMessage(`Editing ${kit.name}.`);
@@ -151,20 +230,19 @@ export default function PmKitsPage() {
           id: draft.id || undefined,
           name: draft.name,
           pmType: draft.pmType,
-          yearFrom: draft.yearFrom,
-          yearTo: draft.yearTo,
-          make: draft.make,
-          model: draft.model,
-          engine: draft.engine,
+          years: draft.years,
+          makes: draft.makes,
+          models: draft.models,
+          engines: draft.engines,
           parts: draft.parts,
         }),
       });
-      const result = await response.json() as { ok?: boolean; error?: string };
+      const result = await response.json() as { ok?: boolean; error?: string; fitmentCount?: number };
       if (!response.ok || !result.ok) throw new Error(result.error || "PM kit could not be saved.");
       const edited = Boolean(draft.id);
       await load();
       reset();
-      setMessage(edited ? "PM kit updated." : "PM kit created.");
+      setMessage(`${edited ? "PM kit updated" : "PM kit created"}${result.fitmentCount ? ` with ${result.fitmentCount} fitment combination${result.fitmentCount === 1 ? "" : "s"}` : ""}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "PM kit could not be saved.");
     } finally {
@@ -192,16 +270,18 @@ export default function PmKitsPage() {
     }
   }
 
-  const selectedPartRows = draft.parts.map((selected) => ({ selected, part: data?.parts.find((part) => part.id === selected.partId) })).filter((row) => row.part);
+  const selectedPartRows = draft.parts
+    .map((selected) => ({ selected, part: data?.parts.find((part) => part.id === selected.partId) }))
+    .filter((row) => row.part);
 
   return (
     <main style={pageStyle}>
-      <MaintenanceTabs />
+      <ModuleTabs module="parts" />
       <header style={headerStyle}>
         <div>
-          <p style={eyebrow}>MAINTENANCE SETUP</p>
+          <p style={eyebrow}>PARTS & INVENTORY</p>
           <h1 style={{ margin: "5px 0", fontSize: 32 }}>Truck PM Kits</h1>
-          <p style={subtitle}>Build reusable expected-parts kits by PM type and truck year range, make, model, and engine. Matching parts are copied to each PM work order without reducing inventory.</p>
+          <p style={subtitle}>Build reusable PM parts kits and apply one kit to multiple interchangeable truck years, makes, models, and engines. Planned kit parts do not reduce inventory until they are actually used.</p>
         </div>
       </header>
 
@@ -209,28 +289,37 @@ export default function PmKitsPage() {
 
       <section style={editorStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-          <div><strong style={{ fontSize: 18 }}>{draft.id ? "Edit PM Kit" : "Create PM Kit"}</strong><div style={helperStyle}>Blank matching fields mean “Any.” More-specific matching kits win over broad kits.</div></div>
+          <div>
+            <strong style={{ fontSize: 18 }}>{draft.id ? "Edit PM Kit" : "Create PM Kit"}</strong>
+            <div style={helperStyle}>Select as many values as apply. Leaving Years, Makes, Models, or Engines blank means “Any” for that category.</div>
+          </div>
           {draft.id && <button type="button" style={lightButton} onClick={reset}>Cancel Edit</button>}
         </div>
 
-        <div style={formGrid}>
-          <label style={labelStyle}>KIT NAME<input style={inputStyle} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="2022-2025 Cascadia DD15 20A" /></label>
+        <div style={topFormGrid}>
+          <label style={labelStyle}>KIT NAME<input style={inputStyle} value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Cascadia / Western Star DD15 PM 20A" /></label>
           <label style={labelStyle}>PM TYPE<select style={inputStyle} value={draft.pmType} onChange={(event) => setDraft((current) => ({ ...current, pmType: event.target.value }))}><option value="">Choose PM type…</option>{data?.pmTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
-          <label style={labelStyle}>YEAR FROM<select style={inputStyle} value={draft.yearFrom} onChange={(event) => setDraft((current) => ({ ...current, yearFrom: event.target.value }))}><option value="">Any year</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
-          <label style={labelStyle}>YEAR TO<select style={inputStyle} value={draft.yearTo} onChange={(event) => setDraft((current) => ({ ...current, yearTo: event.target.value }))}><option value="">Any year</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
-          <label style={labelStyle}>MAKE<select style={inputStyle} value={draft.make} onChange={(event) => setDraft((current) => ({ ...current, make: event.target.value, model: "", engine: "" }))}><option value="">Any make</option>{makeOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
-          <label style={labelStyle}>MODEL<select style={inputStyle} value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value, engine: "" }))}><option value="">Any model</option>{modelOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
-          <label style={labelStyle}>ENGINE / MOTOR<select style={inputStyle} value={draft.engine} onChange={(event) => setDraft((current) => ({ ...current, engine: event.target.value }))}><option value="">Any engine / motor</option>{engineOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
+        </div>
+
+        <div style={fitmentNoteStyle}>
+          <strong>Interchangeable fitment:</strong> a truck matches when it is in any selected year, any selected make, any selected model, and any selected engine/motor. This lets one kit cover shared filters and service parts across several truck configurations.
+        </div>
+
+        <div style={fitmentGridStyle}>
+          <YearField options={years} values={draft.years} onChange={(year) => setDraft((current) => ({ ...current, years: toggleYear(current.years, year) }))} />
+          <ChoiceField label="MAKES" options={makeOptions} values={draft.makes} anyText="Any make" onChange={(value) => setDraft((current) => ({ ...current, makes: toggleText(current.makes, value) }))} />
+          <ChoiceField label="MODELS" options={modelOptions} values={draft.models} anyText="Any model" onChange={(value) => setDraft((current) => ({ ...current, models: toggleText(current.models, value) }))} />
+          <ChoiceField label="ENGINES / MOTORS" options={engineOptions} values={draft.engines} anyText="Any engine / motor" onChange={(value) => setDraft((current) => ({ ...current, engines: toggleText(current.engines, value) }))} />
         </div>
 
         <div style={matchBox}>
-          <strong>{matchingTrucks.length} matching truck{matchingTrucks.length === 1 ? "" : "s"}</strong>
-          <span style={helperStyle}>{matchingTrucks.length ? matchingTrucks.slice(0, 16).map((truck) => truck.unit).join(", ") + (matchingTrucks.length > 16 ? ` + ${matchingTrucks.length - 16} more` : "") : "No current trucks match these selections. The kit can still be saved for future equipment."}</span>
+          <strong>{matchingTrucks.length} current matching truck{matchingTrucks.length === 1 ? "" : "s"}</strong>
+          <span style={helperStyle}>{matchingTrucks.length ? matchingTrucks.slice(0, 20).map((truck) => truck.unit).join(", ") + (matchingTrucks.length > 20 ? ` + ${matchingTrucks.length - 20} more` : "") : "No current trucks match these selections. The kit can still be saved for future equipment."}</span>
         </div>
 
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 18 }}>
           <h2 style={sectionHeading}>Kit Parts</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(180px,1fr) minmax(260px,2fr) auto", gap: 8 }}>
+          <div style={partPickerStyle}>
             <input style={inputStyle} value={partSearch} onChange={(event) => { setPartSearch(event.target.value); setPartToAdd(""); }} placeholder="Search part number or description" />
             <select style={inputStyle} value={partToAdd} onChange={(event) => setPartToAdd(event.target.value)}><option value="">Choose matching inventory part…</option>{filteredParts.map((part) => <option key={part.id} value={part.id}>{part.partNumber} — {part.description} ({part.quantityOnHand} on hand)</option>)}</select>
             <button type="button" style={orangeButton} onClick={addPart}>Add Part</button>
@@ -255,14 +344,23 @@ export default function PmKitsPage() {
 
       <section style={{ marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}><h2 style={sectionHeading}>Saved PM Kits</h2><span style={helperStyle}>{data?.kits.length ?? 0} total</span></div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 12 }}>
           {data?.kits.map((kit) => {
-            const kitMatches = (data.trucks ?? []).filter((truck) => matches(truck, kitCriteria(kit)));
+            const criteria = { years: kit.years, makes: kit.makes, models: kit.models, engines: kit.engines };
+            const kitMatches = (data.trucks ?? []).filter((truck) => matches(truck, criteria));
             return (
               <article key={kit.id} style={{ ...kitCard, opacity: kit.active ? 1 : .62 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}><div><span style={pmBadge}>{kit.pmType}</span><h3 style={{ margin: "7px 0 4px" }}>{kit.name}</h3></div><span style={kit.active ? activeBadge : inactiveBadge}>{kit.active ? "Active" : "Disabled"}</span></div>
-                <div style={criteriaText}>{kit.yearFrom || kit.yearTo ? `${kit.yearFrom ?? "Any"}–${kit.yearTo ?? "Any"}` : "Any year"} · {kit.make || "Any make"} · {kit.model || "Any model"} · {kit.engine || "Any engine"}</div>
-                <div style={{ marginTop: 8, color: "#47606f", fontSize: 12 }}>{kitMatches.length} current truck{kitMatches.length === 1 ? "" : "s"} match</div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div><span style={pmBadge}>{kit.pmType}</span><h3 style={{ margin: "7px 0 4px" }}>{kit.name}</h3></div>
+                  <span style={kit.active ? activeBadge : inactiveBadge}>{kit.active ? "Active" : "Disabled"}</span>
+                </div>
+                <div style={criteriaGridStyle}>
+                  <div><b>Years</b><span>{formatYears(kit.years)}</span></div>
+                  <div><b>Makes</b><span>{formatList(kit.makes, "Any make")}</span></div>
+                  <div><b>Models</b><span>{formatList(kit.models, "Any model")}</span></div>
+                  <div><b>Engines</b><span>{formatList(kit.engines, "Any engine / motor")}</span></div>
+                </div>
+                <div style={{ marginTop: 9, color: "#47606f", fontSize: 12 }}>{kitMatches.length} current truck{kitMatches.length === 1 ? "" : "s"} match · {kit.fitmentCount} stored fitment combination{kit.fitmentCount === 1 ? "" : "s"}</div>
                 <div style={{ marginTop: 10, display: "flex", gap: 5, flexWrap: "wrap" }}>{kit.parts.map((part) => <span key={part.partId} style={partChip}>{part.partNumber} × {part.quantity}</span>)}</div>
                 <div style={{ marginTop: 13, display: "flex", gap: 7 }}><button type="button" style={lightButton} onClick={() => edit(kit)} disabled={busy}>Edit</button><button type="button" style={kit.active ? removeButton : saveButton} onClick={() => void setActive(kit, !kit.active)} disabled={busy}>{kit.active ? "Disable" : "Enable"}</button></div>
               </article>
@@ -278,24 +376,36 @@ export default function PmKitsPage() {
 const pageStyle = { minHeight: "100vh", background: "#f3f5f7", color: "#182331", padding: "30px 34px 90px" } as const;
 const headerStyle = { display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-end", flexWrap: "wrap" as const };
 const eyebrow = { margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".15em" } as const;
-const subtitle = { margin: 0, color: "#667482", maxWidth: 820, lineHeight: 1.5 } as const;
+const subtitle = { margin: 0, color: "#667482", maxWidth: 900, lineHeight: 1.5 } as const;
 const editorStyle = { marginTop: 18, background: "white", border: "1px solid #d6dde3", borderRadius: 13, padding: 18, boxShadow: "0 6px 22px #12202f0d" } as const;
-const formGrid = { marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 10 } as const;
+const topFormGrid = { marginTop: 14, display: "grid", gridTemplateColumns: "minmax(240px,2fr) minmax(180px,1fr)", gap: 10 } as const;
+const fitmentGridStyle = { marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 10 } as const;
+const fitmentNoteStyle = { marginTop: 14, padding: "10px 12px", background: "#eef4f8", border: "1px solid #c9d7e2", borderRadius: 8, color: "#405566", fontSize: 12, lineHeight: 1.5 } as const;
+const choiceFieldStyle = { border: "1px solid #d8dfe5", borderRadius: 9, padding: 10, background: "#fbfcfd" } as const;
+const choiceHeaderStyle = { display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 7 } as const;
+const choiceCountStyle = { color: "#6f7d88", fontSize: 10, fontWeight: 800 } as const;
+const choiceBoxStyle = { display: "flex", flexWrap: "wrap" as const, gap: 6, maxHeight: 190, overflowY: "auto" as const, alignContent: "flex-start" } as const;
+const yearBoxStyle = { ...choiceBoxStyle, maxHeight: 230 } as const;
+const choiceStyle = { minHeight: 30, border: "1px solid #cbd4dc", borderRadius: 999, padding: "5px 9px", background: "white", color: "#425462", cursor: "pointer", fontSize: 11, fontWeight: 700 } as const;
+const selectedChoiceStyle = { ...choiceStyle, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
+const yearStyle = { ...choiceStyle, minWidth: 66, borderRadius: 7 } as const;
+const selectedYearStyle = { ...yearStyle, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
 const labelStyle = { display: "grid", gap: 5, color: "#5b6873", fontSize: 9, fontWeight: 900, letterSpacing: ".05em" } as const;
 const inputStyle = { minHeight: 38, boxSizing: "border-box" as const, border: "1px solid #cbd3da", borderRadius: 7, padding: "8px 10px", background: "white", color: "#182331", fontSize: 12 } as const;
 const helperStyle = { display: "block", marginTop: 3, color: "#7a8792", fontSize: 11, lineHeight: 1.45 } as const;
 const matchBox = { marginTop: 13, padding: "10px 12px", background: "#eef6ed", border: "1px solid #b9d2b3", borderRadius: 8 } as const;
 const sectionHeading = { margin: "0 0 9px", fontSize: 18, color: "#0d1b2b" } as const;
+const partPickerStyle = { display: "grid", gridTemplateColumns: "minmax(180px,1fr) minmax(260px,2fr) auto", gap: 8 } as const;
 const partRowStyle = { display: "grid", gridTemplateColumns: "minmax(180px,1fr) auto auto", gap: 10, alignItems: "center", padding: "9px 10px", border: "1px solid #e0e5e9", borderRadius: 8, background: "#fbfcfd" } as const;
 const kitCard = { background: "white", border: "1px solid #d7dfe4", borderRadius: 11, padding: 15 } as const;
-const criteriaText = { marginTop: 4, color: "#5d6975", fontSize: 12, lineHeight: 1.45 } as const;
+const criteriaGridStyle = { marginTop: 9, display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 7, color: "#5d6975", fontSize: 11 } as const;
 const pmBadge = { display: "inline-flex", padding: "3px 7px", borderRadius: 999, background: "#fff0df", color: "#9a4d0b", fontSize: 10, fontWeight: 900 } as const;
 const activeBadge = { height: 24, display: "inline-flex", alignItems: "center", padding: "0 8px", borderRadius: 999, background: "#e5f6eb", color: "#176440", fontSize: 10, fontWeight: 900 } as const;
 const inactiveBadge = { ...activeBadge, background: "#edf0f2", color: "#68757e" } as const;
 const partChip = { display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: "#eef2f5", color: "#344654", fontSize: 11, fontWeight: 800 } as const;
 const noticeStyle = { marginTop: 14, padding: "10px 12px", borderRadius: 8, background: "#fff8e6", border: "1px solid #f2c66d", color: "#6e5017" } as const;
 const emptyStyle = { padding: 18, border: "1px dashed #cbd4dc", borderRadius: 9, color: "#7a8792", background: "#fafbfc" } as const;
-const lightButton = { minHeight: 36, border: "1px solid #cbd3da", borderRadius: 7, padding: "0 11px", background: "white", color: "#263746", fontWeight: 800, cursor: "pointer" } as const;
-const orangeButton = { ...lightButton, background: "#fff0df", borderColor: "#e69a52", color: "#8c4708" } as const;
+const lightButton = { minHeight: 34, border: "1px solid #cbd4dc", borderRadius: 7, padding: "7px 11px", background: "white", color: "#263746", cursor: "pointer", fontWeight: 800, fontSize: 11 } as const;
+const orangeButton = { ...lightButton, background: "#f47b20", borderColor: "#f47b20", color: "white" } as const;
 const saveButton = { ...lightButton, background: "#0d1b2b", borderColor: "#0d1b2b", color: "white" } as const;
 const removeButton = { ...lightButton, background: "#fff0ef", borderColor: "#e4aaa5", color: "#8b312a" } as const;
