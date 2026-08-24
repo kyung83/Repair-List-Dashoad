@@ -23,6 +23,11 @@ const PDF_WORKER="/api/outside-work-reader/pdf.worker.min.js";
 const MAX_AI_PAGES=3;
 
 function delay(ms:number){return new Promise<void>(resolve=>window.setTimeout(resolve,ms));}
+function modelLabel(model:string){
+  if(model==="openai/gpt-5.6-sol")return"GPT-5.6 Sol";
+  if(model==="@cf/qwen/qwen3.8-27b")return"Qwen 3.8 27B fallback";
+  return model||"AI";
+}
 
 function setReactValue(target:HTMLInputElement|HTMLTextAreaElement|null,value:string){
   if(!target||!value)return false;
@@ -205,14 +210,16 @@ export default function AiReadingBridge(){
   const[message,setMessage]=useState("Scan or upload an invoice once. Printed OCR runs first, then AI handwriting results are applied automatically.");
   const[reading,setReading]=useState<Reading|null>(null);
   const[lastFile,setLastFile]=useState<File|null>(null);
+  const[model,setModel]=useState("");
   const requestId=useRef(0);
 
   async function readInvoice(file:File){
     const id=++requestId.current;
     setLastFile(file);
     setReading(null);
+    setModel("");
     setState("reading");
-    setMessage("Reading handwriting with AI while the normal invoice reader finishes…");
+    setMessage("Reading handwriting with GPT-5.6 Sol while the normal invoice reader finishes…");
     try{
       const pages=await preparedPages(file);
       if(id!==requestId.current)return;
@@ -222,14 +229,16 @@ export default function AiReadingBridge(){
       const result=await response.json() as ApiResult;
       if(!response.ok||!result.ok||!result.reading)throw new Error(result.error||"AI handwriting reader could not read this invoice.");
       if(id!==requestId.current)return;
-      setMessage("AI finished reading. Waiting for the printed OCR pass to finish before filling Step 2…");
+      const usedModel=modelLabel(result.model||"");
+      setModel(result.model||"");
+      setMessage(`${usedModel} finished reading. Waiting for the printed OCR pass to finish before filling Step 2…`);
       const stillCurrent=await waitForNativeReader(()=>id===requestId.current);
       if(!stillCurrent)return;
       const applied=applyReading(result.reading);
       setReading(result.reading);
       setState("success");
       const warning=result.reading.uncertain.length?` ${result.reading.uncertain.length} item${result.reading.uncertain.length===1?"":"s"} still need verification from the original.`:"";
-      setMessage(`AI handwriting reading is complete and was applied after OCR. Filled ${applied.count} review field${applied.count===1?"":"s"}.${warning}`);
+      setMessage(`${usedModel} read this invoice and filled ${applied.count} review field${applied.count===1?"":"s"} after OCR.${warning}`);
       window.setTimeout(()=>applied.form.scrollIntoView({behavior:"smooth",block:"start"}),250);
     }catch(error){
       if(id!==requestId.current)return;
@@ -250,7 +259,8 @@ export default function AiReadingBridge(){
   },[]);
 
   const tone=state==="success"?success:state==="error"?failure:state==="reading"?active:ready;
-  return <section style={{...card,...tone}} aria-label="Automatic AI handwriting reader" data-ai-reading-inline-card="true">
+  const badgeText=state==="reading"?"GPT-5.6 SOL · READING":state==="success"?`${modelLabel(model).toUpperCase()} · FILLED`:state==="error"?"AI NEEDS ATTENTION":"AI READY";
+  return <section style={{...card,...tone,...(state==="idle"?{}:sticky)}} aria-label="Automatic AI handwriting reader" data-ai-reading-inline-card="true">
     <div style={row}>
       <div style={{minWidth:0}}>
         <div style={eyebrow}>{state==="reading"?"AI READING INVOICE":state==="success"?"AI READING COMPLETE":state==="error"?"AI READER NEEDS ATTENTION":"AUTOMATIC HANDWRITING READER"}</div>
@@ -258,13 +268,14 @@ export default function AiReadingBridge(){
         <p style={copy}>{message}</p>
         {reading&&<div style={summaryBox}><strong>{summary(reading)||"Invoice fields detected"}</strong>{reading.uncertain.length>0&&<span>{reading.uncertain.slice(0,4).map(item=><span key={item}>• {item}</span>)}</span>}</div>}
       </div>
-      {state==="reading"?<span style={badge}>READING…</span>:lastFile&&state==="error"?<button type="button" style={retry} onClick={()=>void readInvoice(lastFile)}>TRY AI AGAIN</button>:state==="success"?<span style={badge}>FILLED STEP 2</span>:<span style={badge}>READY</span>}
+      {lastFile&&state==="error"?<button type="button" style={retry} onClick={()=>void readInvoice(lastFile)}>TRY AI AGAIN</button>:<span style={badge}>{badgeText}</span>}
     </div>
-    <p style={foot}>The original invoice remains attached. AI values are applied only after the normal OCR pass so they cannot be overwritten by the older reader. Anything uncertain stays blank or is called out for verification.</p>
+    <p style={foot}>The original invoice remains attached. GPT-5.6 Sol is tried first; if it is unavailable, the screen explicitly shows the fallback model. AI values are applied only after normal OCR so OCR cannot overwrite them.</p>
   </section>;
 }
 
-const card:CSSProperties={margin:"12px 16px 0",borderRadius:14,padding:16,boxShadow:"0 2px 10px rgba(15,32,48,.04)",color:"#172536"};
+const card:CSSProperties={width:"calc(100% - 32px)",maxWidth:1468,boxSizing:"border-box",margin:"12px auto 0",borderRadius:14,padding:16,boxShadow:"0 2px 10px rgba(15,32,48,.04)",color:"#172536"};
+const sticky:CSSProperties={position:"sticky",top:112,zIndex:80,boxShadow:"0 8px 24px rgba(15,32,48,.16)"};
 const ready:CSSProperties={background:"#f2f8fb",border:"1px solid #b7d1df"};
 const active:CSSProperties={background:"#eef7fb",border:"2px solid #7daec7"};
 const success:CSSProperties={background:"#f1faf4",border:"2px solid #9bc5a7"};
