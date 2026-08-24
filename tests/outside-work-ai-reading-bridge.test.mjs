@@ -67,16 +67,23 @@ test('reading prompt explicitly tells the chat model not to guess',()=>{
   assert.match(AI_READING_PROMPT,/WORK PERFORMED/i);
 });
 
-test('Outside Work mounts a no-API paste helper that writes into the existing review form',async()=>{
-  const [page,bridge]=await Promise.all([
+test('Outside Work mounts the AI helper in the same client boundary and keeps it visibly sticky',async()=>{
+  const [page,wrapper,bridge]=await Promise.all([
     readFile(new URL('../app/outside-work/page.tsx',import.meta.url),'utf8'),
+    readFile(new URL('../app/outside-work/intake-v3.tsx',import.meta.url),'utf8'),
     readFile(new URL('../app/outside-work/ai-reading-bridge.tsx',import.meta.url),'utf8'),
   ]);
-  assert.match(page,/AiReadingBridge/);
-  assert.match(bridge,/PASTE AI READING/);
+  assert.match(page,/OutsideWorkIntakeV3/);
+  assert.doesNotMatch(page,/AiReadingBridge/);
+  assert.match(wrapper,/^"use client";/);
+  assert.match(wrapper,/AiReadingBridge/);
+  assert.match(wrapper,/OutsideWorkIntakeV2/);
+  assert.match(bridge,/HANDWRITING\? PASTE AI READING/);
+  assert.match(bridge,/position:"sticky"/);
+  assert.match(bridge,/zIndex:2147483000/);
   assert.match(bridge,/COPY READING PROMPT/);
   assert.match(bridge,/APPLY TO OUTSIDE WORK/);
   assert.match(bridge,/input\[placeholder="Unit number"\]/);
-  assert.match(bridge,/Dealer \/ repair shop/);
+  assert.match(bridge,/closest\("form"\)/);
   assert.doesNotMatch(bridge,/fetch\(/);
 });
