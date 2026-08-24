@@ -5,12 +5,15 @@ import {readFile} from 'node:fs/promises';
 const root=new URL('../',import.meta.url);
 const migration=await readFile(new URL('migrations/0092_parts_inventory_v2_operations.sql',root),'utf8');
 const compat=await readFile(new URL('migrations/0093_inventory_v2_compat.sql',root),'utf8');
+const operational=await readFile(new URL('migrations/0094_inventory_v2_operational_controls.sql',root),'utf8');
 const ops=await readFile(new URL('lib/inventory-operations.ts',root),'utf8');
 const derived=await readFile(new URL('lib/derived-reservations.ts',root),'utf8');
 const lifecycle=await readFile(new URL('lib/parts-lifecycle.ts',root),'utf8');
 const workOrders=await readFile(new URL('app/api/work-orders/route.ts',root),'utf8');
 const review=await readFile(new URL('app/api/work-orders/review-part-correction.ts',root),'utf8');
 const inventory=await readFile(new URL('app/api/inventory/route.ts',root),'utf8');
+const controls=await readFile(new URL('app/api/inventory-controls/route.ts',root),'utf8');
+const controlsPage=await readFile(new URL('app/inventory-controls/page.tsx',root),'utf8');
 const check=(name,text,regex)=>test(name,()=>assert.match(text,regex));
 
 check('01 operation keys are unique for idempotency',migration,/operation_key TEXT NOT NULL UNIQUE/);
@@ -61,3 +64,19 @@ check('45 lifecycle compatibility layer disables reservation allocation mutation
 
 check('inventory API exposes controlled physical-count recording',inventory,/recordPhysicalCount/);
 check('inventory API blocks all direct manual stock adjustments',inventory,/Manual \+\/− stock adjustments are disabled/);
+
+check('46 core-return configuration is stored on parts',operational,/core_return_part_id[\s\S]*core_return_quantity/);
+check('47 issuing a configured part opens the core obligation in D1',operational,/trg_inventory_part_issue_open_core/);
+check('48 undo deletes only still-open core obligations',operational,/DELETE FROM part_core_obligations[\s\S]*status = 'open'/);
+check('49 undo is blocked after a core is returned or waived',operational,/RAISE\(ABORT, 'Undo blocked: core obligation already returned or waived\.'/);
+check('50 recovered tire source repair-position is unique',operational,/UNIQUE INDEX[\s\S]*recovered_used_tires\(repair_id, position_code\)/);
+check('51 recovered tire reuse stores destination position',operational,/disposition_position_code/);
+check('52 controls require manager or admin',controls,/Manager or administrator access is required/);
+check('53 core disposition creates a dependency on the issued part',controls,/Core obligation disposition depends on the original issued part/);
+check('54 recovered tire requires a saved source wheel position',controls,/not recorded on the source repair/);
+check('55 recovered tire reuse requires destination repair position',controls,/not recorded on the destination repair/);
+check('56 recovered tire disposition depends on recovery operation',controls,/Recovered tire disposition depends on the recovery operation/);
+check('57 manager controls UI exposes discrepancy resolution',controlsPage,/Physical-count discrepancies[\s\S]*Apply count/);
+check('58 manager controls UI exposes core obligations',controlsPage,/Open core obligations[\s\S]*Returned[\s\S]*Waive/);
+check('59 manager controls UI keeps recovered tire separate from new stock',controlsPage,/separate from new\/saleable tire stock/);
+check('60 manager controls UI records destination repair and wheel position',controlsPage,/destinationRepairId[\s\S]*destinationPositionCode/);

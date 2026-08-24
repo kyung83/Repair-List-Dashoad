@@ -70,6 +70,56 @@ fi
 # Apply schema/data migrations only after the application build is known-good.
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
+# Prove the operational Parts & Inventory v2 migration exists on REMOTE D1 before
+# publishing application code that depends on it. This is intentionally a direct D1
+# check rather than an HTTP health endpoint so the internal diagnostics route stays
+# authenticated.
+parts_v2_schema_sql="SELECT CASE WHEN
+  EXISTS(SELECT 1 FROM sqlite_master WHERE name='trg_inventory_part_issue_open_core' AND type='trigger')
+  AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='trg_inventory_operation_undo_core_guard' AND type='trigger')
+  AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='idx_core_obligation_source_operation' AND type='index')
+  AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='idx_recovered_tire_source_position' AND type='index')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('parts') WHERE name='core_return_part_id')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('parts') WHERE name='core_return_quantity')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('recovered_used_tires') WHERE name='disposition_repair_id')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('recovered_used_tires') WHERE name='disposition_position_code')
+THEN 1 ELSE 0 END AS parts_v2_0094_ok;"
+
+npx wrangler d1 execute "$DB_NAME" \
+  --remote \
+  --config "$CONFIG_FILE" \
+  "${ACCOUNT_ARG[@]}" \
+  --command "$parts_v2_schema_sql" \
+  --json > /tmp/parts-v2-schema.json
+
+node - /tmp/parts-v2-schema.json <<'NODE'
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+function findFlag(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findFlag(item);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'parts_v2_0094_ok')) return Number(value.parts_v2_0094_ok);
+  for (const child of Object.values(value)) {
+    const found = findFlag(child);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+const flag = findFlag(payload);
+if (flag !== 1) {
+  console.error('Remote D1 is missing required Parts & Inventory v2 migration 0094 objects.');
+  console.error(JSON.stringify(payload));
+  process.exit(1);
+}
+console.log('Verified remote Parts & Inventory v2 schema 0094.');
+NODE
+
 # Deploy the exact build snapshot produced by the Cloudflare Vite plugin.
 npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"
 
