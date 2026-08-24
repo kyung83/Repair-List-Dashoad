@@ -37,7 +37,7 @@ test('AI result is applied only after native OCR is finished so OCR cannot overw
   assert.match(bridge,/applied after OCR/);
 });
 
-test('automatic reader never mutates React-owned Outside Work DOM',async()=>{
+test('automatic reader never mutates React-owned Outside Work DOM structure',async()=>{
   const [bridge,,,,wrapper]=await sources();
   assert.match(wrapper,/AiReadingBridge/);
   assert.match(wrapper,/OutsideWorkIntakeV2/);
@@ -69,13 +69,40 @@ test('PDF scans are rendered into page images before AI reading',async()=>{
   assert.match(bridge,/body\.append\("image",page/);
 });
 
-test('server uses Cloudflare vision AI with fail-closed invoice extraction rules',async()=>{
+test('server uses OpenAI GPT-5.6 Sol first with Qwen vision fallback',async()=>{
   const [,route]=await sources();
-  assert.match(route,/@cf\/google\/gemma-4-26b-a4b-it/);
+  assert.match(route,/PRIMARY_MODEL='openai\/gpt-5\.6-sol'/);
+  assert.match(route,/FALLBACK_MODEL='@cf\/qwen\/qwen3\.8-27b'/);
+  assert.match(route,/gateway:\{id:'default'\}/);
+  assert.match(route,/tryModel\(ai,PRIMARY_MODEL,input/);
+  assert.match(route,/tryModel\(ai,FALLBACK_MODEL,input\)/);
+  assert.match(route,/response_format:\{type:'json_object'\}/);
+});
+
+test('server accepts provider response shapes instead of treating valid OpenAI output as empty',async()=>{
+  const [,route]=await sources();
+  assert.match(route,/row\.output_text/);
+  assert.match(route,/row\.choices\?\.\[0\]\?\.message\?\.content/);
+  assert.match(route,/contentText\(row\.output\)/);
+  assert.match(route,/contentText\(row\.result\?\.output\)/);
+});
+
+test('server validates AI-read units against active Master Equipment',async()=>{
+  const [,route]=await sources();
+  assert.match(route,/SELECT unit,vin FROM equipment/);
+  assert.match(route,/active=1 AND archived_at IS NULL AND merged_into_equipment_id IS NULL/);
+  assert.match(route,/AI read a VIN as the unit/);
+  assert.match(route,/does not match one active Master Equipment unit/);
+  assert.match(route,/reading\.unit=''/);
+});
+
+test('server keeps fail-closed invoice extraction rules',async()=>{
+  const [,route]=await sources();
   assert.match(route,/getSessionUser\(env\.DB,request\)/);
   assert.match(route,/manager.*admin/s);
   assert.match(route,/type:'image_url'/);
   assert.match(route,/Northern Logistics\/Norlow is the customer, not the outside repair vendor/);
+  assert.match(route,/Keep invoiceNumber and unit distinct/);
   assert.match(route,/serviceDate must be YYYY-MM-DD only when month, day, AND year are clearly present/);
   assert.match(route,/Do not guess from context/);
   assert.match(route,/Cost breakdown:/);
