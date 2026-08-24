@@ -8,6 +8,7 @@ type KitRow = {
   model: string | null;
   engine: string | null;
   active: number;
+  updated_at?: string;
 };
 
 type KitPartRow = {
@@ -29,9 +30,27 @@ type TruckRow = {
   equipment_type: string;
 };
 
+type FamilyRow = {
+  id: string;
+  name: string;
+  pm_type: string;
+  active: number;
+};
+
+type FamilyMemberRow = {
+  family_id: string;
+  pm_kit_id: string;
+  sort_order: number;
+  retired_at: string | null;
+};
+
 type ProfileRow = { sequence_json: string };
 type PartRow = { id: number; part_number: string; description: string; quantity_on_hand: number };
 type KitPartInput = { partId: number; quantity: number };
+type YearRange = { from: number | null; to: number | null };
+type Fitment = YearRange & { make: string | null; model: string | null; engine: string | null };
+
+const MAX_FITMENT_COMBINATIONS = 200;
 
 function text(value: unknown, max = 160) {
   return String(value ?? '').trim().slice(0, max);
@@ -98,10 +117,115 @@ async function validateParts(db: D1Database, parts: KitPartInput[]) {
   if (result.results.length !== parts.length) throw new Error('One or more PM kit parts are no longer active in inventory.');
 }
 
+function parseStringList(value: unknown, label: string, maxLength: number) {
+  if (value == null) return [] as string[];
+  if (!Array.isArray(value)) throw new Error(`${label} selections are invalid.`);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of value) {
+    const item = text(raw, maxLength);
+    if (!item) continue;
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  if (result.length > 40) throw new Error(`Choose no more than 40 ${label.toLowerCase()} values for one PM kit.`);
+  return result;
+}
+
+function parseYears(value: unknown) {
+  if (value == null) return [] as number[];
+  if (!Array.isArray(value)) throw new Error('Year selections are invalid.');
+  const years = [...new Set(value.map((item) => optionalYear(item, 'Year')).filter((item): item is number => item != null))].sort((a, b) => a - b);
+  if (years.length > 120) throw new Error('Choose no more than 120 years for one PM kit.');
+  return years;
+}
+
+function compressYears(years: number[]): YearRange[] {
+  if (!years.length) return [{ from: null, to: null }];
+  const sorted = [...years].sort((a, b) => a - b);
+  const ranges: YearRange[] = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+  for (const year of sorted.slice(1)) {
+    if (year === previous + 1) {
+      previous = year;
+      continue;
+    }
+    ranges.push({ from: start, to: previous });
+    start = year;
+    previous = year;
+  }
+  ranges.push({ from: start, to: previous });
+  return ranges;
+}
+
+function expandFitments(years: number[], makes: string[], models: string[], engines: string[]): Fitment[] {
+  const yearRanges = compressYears(years);
+  const makeValues: Array<string | null> = makes.length ? makes : [null];
+  const modelValues: Array<string | null> = models.length ? models : [null];
+  const engineValues: Array<string | null> = engines.length ? engines : [null];
+  const count = yearRanges.length * makeValues.length * modelValues.length * engineValues.length;
+  if (count > MAX_FITMENT_COMBINATIONS) {
+    throw new Error(`These selections create ${count} fitment combinations. Narrow them to ${MAX_FITMENT_COMBINATIONS} or fewer.`);
+  }
+  const fitments: Fitment[] = [];
+  for (const range of yearRanges) {
+    for (const make of makeValues) {
+      for (const model of modelValues) {
+        for (const engine of engineValues) {
+          fitments.push({ from: range.from, to: range.to, make, model, engine });
+        }
+      }
+    }
+  }
+  return fitments;
+}
+
+function uniqueText(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of values) {
+    const value = text(raw, 160);
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+function expandedYears(rows: KitRow[]) {
+  if (!rows.length || rows.some((row) => row.year_from == null && row.year_to == null)) return [] as number[];
+  const years = new Set<number>();
+  for (const row of rows) {
+    if (row.year_from == null || row.year_to == null) return [];
+    for (let year = row.year_from; year <= row.year_to && year <= 2100; year += 1) years.add(year);
+  }
+  return [...years].sort((a, b) => a - b);
+}
+
+function aggregatedValues(rows: KitRow[], key: 'make' | 'model' | 'engine') {
+  if (!rows.length || rows.some((row) => !text(row[key], 160))) return [] as string[];
+  return uniqueText(rows.map((row) => row[key]));
+}
+
+function legacyYears(row: KitRow) {
+  if (row.year_from == null && row.year_to == null) return [] as number[];
+  if (row.year_from != null && row.year_to != null) {
+    const years: number[] = [];
+    for (let year = row.year_from; year <= row.year_to && year <= 2100; year += 1) years.push(year);
+    return years;
+  }
+  return [] as number[];
+}
+
 export async function getPmKitData(db: D1Database) {
-  const [kits, kitParts, parts, trucks, pmTypes] = await Promise.all([
+  const [kits, kitParts, parts, trucks, pmTypes, families, familyMembers] = await Promise.all([
     db.prepare(`
-      SELECT id, name, pm_type, year_from, year_to, make, model, engine, active
+      SELECT id, name, pm_type, year_from, year_to, make, model, engine, active, updated_at
       FROM pm_kits
       ORDER BY active DESC, pm_type COLLATE NOCASE, name COLLATE NOCASE
     `).all<KitRow>(),
@@ -125,8 +249,19 @@ export async function getPmKitData(db: D1Database) {
       ORDER BY unit COLLATE NOCASE
     `).all<TruckRow>(),
     activePmTypes(db),
+    db.prepare(`
+      SELECT id, name, pm_type, active
+      FROM pm_kit_families
+      ORDER BY active DESC, pm_type COLLATE NOCASE, name COLLATE NOCASE
+    `).all<FamilyRow>(),
+    db.prepare(`
+      SELECT family_id, pm_kit_id, sort_order, retired_at
+      FROM pm_kit_family_members
+      ORDER BY family_id, sort_order, pm_kit_id
+    `).all<FamilyMemberRow>(),
   ]);
 
+  const kitById = new Map(kits.results.map((kit) => [kit.id, kit]));
   const partsByKit = new Map<string, KitPartRow[]>();
   for (const part of kitParts.results) {
     const list = partsByKit.get(part.pm_kit_id) ?? [];
@@ -134,25 +269,79 @@ export async function getPmKitData(db: D1Database) {
     partsByKit.set(part.pm_kit_id, list);
   }
 
-  return {
-    pmTypes,
-    kits: kits.results.map((kit) => ({
+  const membersByFamily = new Map<string, FamilyMemberRow[]>();
+  const mappedKitIds = new Set<string>();
+  for (const member of familyMembers.results) {
+    mappedKitIds.add(member.pm_kit_id);
+    const list = membersByFamily.get(member.family_id) ?? [];
+    list.push(member);
+    membersByFamily.set(member.family_id, list);
+  }
+
+  const visibleKits: Array<Record<string, unknown>> = [];
+  for (const family of families.results) {
+    const currentRows = (membersByFamily.get(family.id) ?? [])
+      .filter((member) => member.retired_at == null)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((member) => kitById.get(member.pm_kit_id))
+      .filter((kit): kit is KitRow => Boolean(kit));
+    if (!currentRows.length) continue;
+    const template = currentRows[0];
+    visibleKits.push({
+      id: family.id,
+      name: family.name,
+      pmType: family.pm_type,
+      years: expandedYears(currentRows),
+      makes: aggregatedValues(currentRows, 'make'),
+      models: aggregatedValues(currentRows, 'model'),
+      engines: aggregatedValues(currentRows, 'engine'),
+      yearFrom: null,
+      yearTo: null,
+      active: Boolean(family.active),
+      fitmentCount: currentRows.length,
+      parts: (partsByKit.get(template.id) ?? []).map((part) => ({
+        partId: part.part_id,
+        partNumber: part.part_number,
+        description: part.description,
+        quantity: Number(part.quantity),
+      })),
+    });
+  }
+
+  for (const kit of kits.results) {
+    if (mappedKitIds.has(kit.id)) continue;
+    visibleKits.push({
       id: kit.id,
       name: kit.name,
       pmType: kit.pm_type,
+      years: legacyYears(kit),
+      makes: text(kit.make) ? [text(kit.make)] : [],
+      models: text(kit.model) ? [text(kit.model)] : [],
+      engines: text(kit.engine) ? [text(kit.engine)] : [],
       yearFrom: kit.year_from == null ? null : Number(kit.year_from),
       yearTo: kit.year_to == null ? null : Number(kit.year_to),
-      make: kit.make ?? '',
-      model: kit.model ?? '',
-      engine: kit.engine ?? '',
       active: Boolean(kit.active),
+      fitmentCount: 1,
       parts: (partsByKit.get(kit.id) ?? []).map((part) => ({
         partId: part.part_id,
         partNumber: part.part_number,
         description: part.description,
         quantity: Number(part.quantity),
       })),
-    })),
+    });
+  }
+
+  visibleKits.sort((left, right) => {
+    const active = Number(Boolean(right.active)) - Number(Boolean(left.active));
+    if (active) return active;
+    const pm = String(left.pmType).localeCompare(String(right.pmType), undefined, { numeric: true, sensitivity: 'base' });
+    if (pm) return pm;
+    return String(left.name).localeCompare(String(right.name), undefined, { numeric: true, sensitivity: 'base' });
+  });
+
+  return {
+    pmTypes,
+    kits: visibleKits,
     parts: parts.results.map((part) => ({
       id: part.id,
       partNumber: part.part_number,
@@ -174,7 +363,7 @@ export async function getPmKitData(db: D1Database) {
 
 export async function savePmKit(db: D1Database, body: Record<string, unknown>) {
   const suppliedId = text(body.id, 80);
-  const id = suppliedId || crypto.randomUUID();
+  const familyId = suppliedId || crypto.randomUUID();
   const name = text(body.name, 120);
   if (!name) throw new Error('PM kit name is required.');
 
@@ -183,46 +372,126 @@ export async function savePmKit(db: D1Database, body: Record<string, unknown>) {
   const pmType = pmTypes.find((type) => type.toLowerCase() === requestedPmType.toLowerCase());
   if (!pmType) throw new Error('Choose a PM type from the active PM profiles.');
 
-  const yearFrom = optionalYear(body.yearFrom, 'Starting year');
-  const yearTo = optionalYear(body.yearTo, 'Ending year');
-  if (yearFrom != null && yearTo != null && yearFrom > yearTo) throw new Error('Starting year cannot be after ending year.');
-  const make = text(body.make, 100);
-  const model = text(body.model, 100);
-  const engine = text(body.engine, 160);
+  const years = parseYears(body.years);
+  const makes = parseStringList(body.makes, 'Make', 100);
+  const models = parseStringList(body.models, 'Model', 100);
+  const engines = parseStringList(body.engines, 'Engine / motor', 160);
+  const fitments = expandFitments(years, makes, models, engines);
   const parts = parseKitParts(body.parts);
   await validateParts(db, parts);
 
-  if (suppliedId) {
-    const existing = await db.prepare('SELECT id FROM pm_kits WHERE id = ?').bind(id).first<{ id: string }>();
-    if (!existing) throw new Error('PM kit was not found.');
+  const existingFamily = suppliedId
+    ? await db.prepare('SELECT id, active FROM pm_kit_families WHERE id = ?').bind(familyId).first<{ id: string; active: number }>()
+    : null;
+  const legacyKit = suppliedId && !existingFamily
+    ? await db.prepare(`
+        SELECT id, active
+        FROM pm_kits
+        WHERE id = ?
+          AND NOT EXISTS (SELECT 1 FROM pm_kit_family_members m WHERE m.pm_kit_id = pm_kits.id)
+      `).bind(suppliedId).first<{ id: string; active: number }>()
+    : null;
+  if (suppliedId && !existingFamily && !legacyKit) throw new Error('PM kit was not found.');
+
+  const active = existingFamily ? Number(existingFamily.active) : legacyKit ? Number(legacyKit.active) : 1;
+  const statements: D1PreparedStatement[] = [];
+
+  statements.push(db.prepare(`
+    INSERT INTO pm_kit_families (id, name, pm_type, active)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      pm_type = excluded.pm_type,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(familyId, name, pmType, active));
+
+  if (existingFamily) {
+    statements.push(db.prepare(`
+      UPDATE pm_kits
+      SET active = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE id IN (
+        SELECT pm_kit_id FROM pm_kit_family_members
+        WHERE family_id = ? AND retired_at IS NULL
+      )
+    `).bind(familyId));
+    statements.push(db.prepare(`
+      UPDATE pm_kit_family_members
+      SET retired_at = CURRENT_TIMESTAMP
+      WHERE family_id = ? AND retired_at IS NULL
+    `).bind(familyId));
+  } else if (legacyKit) {
+    statements.push(db.prepare('UPDATE pm_kits SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(legacyKit.id));
+    statements.push(db.prepare(`
+      INSERT OR IGNORE INTO pm_kit_family_members (family_id, pm_kit_id, sort_order, retired_at)
+      VALUES (?, ?, 0, CURRENT_TIMESTAMP)
+    `).bind(familyId, legacyKit.id));
   }
 
-  const kitStatement = suppliedId
-    ? db.prepare(`
-        UPDATE pm_kits
-        SET name = ?, pm_type = ?, year_from = ?, year_to = ?, make = ?, model = ?, engine = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).bind(name, pmType, yearFrom, yearTo, make || null, model || null, engine || null, id)
-    : db.prepare(`
-        INSERT INTO pm_kits (id, name, pm_type, year_from, year_to, make, model, engine, active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-      `).bind(id, name, pmType, yearFrom, yearTo, make || null, model || null, engine || null);
-
-  const statements: D1PreparedStatement[] = [kitStatement, db.prepare('DELETE FROM pm_kit_parts WHERE pm_kit_id = ?').bind(id)];
-  parts.forEach((part, index) => {
+  let templateKitId = '';
+  fitments.forEach((fitment, index) => {
+    const kitId = crypto.randomUUID();
     statements.push(db.prepare(`
-      INSERT INTO pm_kit_parts (pm_kit_id, part_id, quantity, sort_order)
-      VALUES (?, ?, ?, ?)
-    `).bind(id, part.partId, part.quantity, index));
+      INSERT INTO pm_kits (id, name, pm_type, year_from, year_to, make, model, engine, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      kitId,
+      name,
+      pmType,
+      fitment.from,
+      fitment.to,
+      fitment.make,
+      fitment.model,
+      fitment.engine,
+      active,
+    ));
+    statements.push(db.prepare(`
+      INSERT INTO pm_kit_family_members (family_id, pm_kit_id, sort_order, retired_at)
+      VALUES (?, ?, ?, NULL)
+    `).bind(familyId, kitId, index));
+
+    if (index === 0) {
+      templateKitId = kitId;
+      parts.forEach((part, partIndex) => {
+        statements.push(db.prepare(`
+          INSERT INTO pm_kit_parts (pm_kit_id, part_id, quantity, sort_order)
+          VALUES (?, ?, ?, ?)
+        `).bind(kitId, part.partId, part.quantity, partIndex));
+      });
+    } else {
+      statements.push(db.prepare(`
+        INSERT INTO pm_kit_parts (pm_kit_id, part_id, quantity, sort_order)
+        SELECT ?, part_id, quantity, sort_order
+        FROM pm_kit_parts
+        WHERE pm_kit_id = ?
+        ORDER BY sort_order, id
+      `).bind(kitId, templateKitId));
+    }
   });
+
   await db.batch(statements);
-  return { ok: true, id, created: !suppliedId };
+  return { ok: true, id: familyId, created: !suppliedId, fitmentCount: fitments.length };
 }
 
 export async function setPmKitActive(db: D1Database, body: Record<string, unknown>) {
   const id = text(body.id, 80);
   if (!id) throw new Error('PM kit is required.');
   const active = body.active === false || body.active === 0 || body.active === '0' ? 0 : 1;
+  const family = await db.prepare('SELECT id FROM pm_kit_families WHERE id = ?').bind(id).first<{ id: string }>();
+  if (family) {
+    await db.batch([
+      db.prepare('UPDATE pm_kit_families SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(active, id),
+      db.prepare(`
+        UPDATE pm_kits
+        SET active = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (
+          SELECT pm_kit_id FROM pm_kit_family_members
+          WHERE family_id = ? AND retired_at IS NULL
+        )
+      `).bind(active, id),
+    ]);
+    return { ok: true, id, active: Boolean(active) };
+  }
+
   const result = await db.prepare('UPDATE pm_kits SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(active, id).run();
   if (!Number(result.meta.changes ?? 0)) throw new Error('PM kit was not found.');
   return { ok: true, id, active: Boolean(active) };
