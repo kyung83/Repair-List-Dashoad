@@ -7,6 +7,7 @@ const migration=await readFile(new URL('migrations/0092_parts_inventory_v2_opera
 const compat=await readFile(new URL('migrations/0093_inventory_v2_compat.sql',root),'utf8');
 const operational=await readFile(new URL('migrations/0094_inventory_v2_operational_controls.sql',root),'utf8');
 const ops=await readFile(new URL('lib/inventory-operations.ts',root),'utf8');
+const stockOps=await readFile(new URL('lib/part-stock-operations.ts',root),'utf8');
 const derived=await readFile(new URL('lib/derived-reservations.ts',root),'utf8');
 const lifecycle=await readFile(new URL('lib/parts-lifecycle.ts',root),'utf8');
 const workOrders=await readFile(new URL('app/api/work-orders/route.ts',root),'utf8');
@@ -14,6 +15,7 @@ const review=await readFile(new URL('app/api/work-orders/review-part-correction.
 const inventory=await readFile(new URL('app/api/inventory/route.ts',root),'utf8');
 const controls=await readFile(new URL('app/api/inventory-controls/route.ts',root),'utf8');
 const controlsPage=await readFile(new URL('app/inventory-controls/page.tsx',root),'utf8');
+const tsconfig=await readFile(new URL('tsconfig.json',root),'utf8');
 const check=(name,text,regex)=>test(name,()=>assert.match(text,regex));
 
 check('01 operation keys are unique for idempotency',migration,/operation_key TEXT NOT NULL UNIQUE/);
@@ -32,23 +34,23 @@ check('13 completed repairs do not hold reservations',migration,/lower\(COALESCE
 check('14 repair part usage links to its inventory operation',compat,/ALTER TABLE repair_parts ADD COLUMN inventory_operation_id/);
 check('15 vendor master stores a normalized key',compat,/ALTER TABLE vendors ADD COLUMN normalized_name/);
 check('16 normalized vendor lookup is indexed',compat,/idx_vendors_normalized_name/);
-check('17 part issue rechecks physical stock inside batch',ops,/quantity_on_hand >= \?/);
-check('18 repair part records the operation id',ops,/inventory_operation_id\)/);
-check('19 final guard requires matching part issue line',ops,/inventory_operation_commits[\s\S]*line_type = 'part_issue'/);
-check('20 duplicate operation key is checked before mutation',ops,/const prior = await operationByKey\(db,operationKey\)/);
-check('21 duplicate race resolves to original result',ops,/const duplicate = await operationByKey\(db,operationKey\)/);
-check('22 warehouse choice is explicit',ops,/Choose the warehouse the part is physically coming from/);
-check('23 normal issue cannot drive physical stock negative',ops,/quantity_on_hand = quantity_on_hand - \?[\s\S]*quantity_on_hand >= \?/);
-check('24 completed repair blocks ordinary part issue',ops,/Completed repairs cannot issue additional parts outside Work Order Review/);
-check('25 review issues have their own operation type',ops,/work_order_review_part/);
+check('17 part issue rechecks physical stock inside batch',stockOps,/quantity_on_hand >= \?/);
+check('18 repair part records the operation id',stockOps,/inventory_operation_id\)/);
+check('19 final guard requires matching part issue line',stockOps,/inventory_operation_commits[\s\S]*line_type = 'part_issue'/);
+check('20 duplicate operation key is checked before mutation',stockOps,/const prior = await operationByKey\(db,operationKey\)/);
+check('21 duplicate race resolves to original result',stockOps,/const duplicate = await operationByKey\(db,operationKey\)/);
+check('22 warehouse choice is explicit',stockOps,/Choose the warehouse the part is physically coming from/);
+check('23 normal issue cannot drive physical stock negative',stockOps,/quantity_on_hand = quantity_on_hand - \?[\s\S]*quantity_on_hand >= \?/);
+check('24 completed repair blocks ordinary part issue',stockOps,/Completed repairs cannot issue additional parts outside Work Order Review/);
+check('25 review issues have their own operation type',stockOps,/work_order_review_part/);
 check('26 Work Order Review uses shared operation service',review,/applyPartToRepair/);
 check('27 normal Work Order Apply Part uses same service',workOrders,/applyPartToRepair/);
 check('28 Work Order removal uses dependency-aware undo',workOrders,/undoInventoryOperation/);
 check('29 undo from Work Orders is manager controlled',workOrders,/Manager or administrator access is required to undo a posted part/);
-check('30 undo checks downstream dependencies',ops,/depends_on_operation_id = \?[\s\S]*o.status = 'applied'/);
-check('31 undo restores physical stock',ops,/quantity_on_hand = quantity_on_hand \+ \?/);
-check('32 undo removes only the linked repair usage',ops,/DELETE FROM repair_parts WHERE id = \? AND inventory_operation_id = \?/);
-check('33 undo marks original operation as undone',ops,/SET status = 'undone',undone_at = CURRENT_TIMESTAMP/);
+check('30 undo checks downstream dependencies',stockOps,/depends_on_operation_id = \?[\s\S]*o.status = 'applied'/);
+check('31 undo restores physical stock',stockOps,/quantity_on_hand = quantity_on_hand \+ \?/);
+check('32 undo removes only the linked repair usage',stockOps,/DELETE FROM repair_parts WHERE id = \? AND inventory_operation_id = \?/);
+check('33 undo marks original operation as undone',stockOps,/SET status = 'undone',undone_at = CURRENT_TIMESTAMP/);
 check('34 physical count requires observed stock version',ops,/Inventory changed after this count screen was loaded/);
 check('35 discrepancy creation records expected and counted quantities',ops,/expected_quantity,counted_quantity,difference_quantity/);
 check('36 discrepancy resolution rejects stale stock',ops,/Inventory changed after the discrepancy was recorded/);
@@ -66,9 +68,9 @@ check('inventory API exposes controlled physical-count recording',inventory,/rec
 check('inventory API blocks all direct manual stock adjustments',inventory,/Manual \+\/− stock adjustments are disabled/);
 
 check('46 core-return configuration is stored on parts',operational,/core_return_part_id[\s\S]*core_return_quantity/);
-check('47 issuing a configured part opens the core obligation in D1',operational,/trg_inventory_part_issue_open_core/);
-check('48 undo deletes only still-open core obligations',operational,/DELETE FROM part_core_obligations[\s\S]*status = 'open'/);
-check('49 undo is blocked after a core is returned or waived',operational,/RAISE\(ABORT, 'Undo blocked: core obligation already returned or waived\.'/);
+check('47 issuing a configured part opens core obligation in the same D1 batch',stockOps,/INSERT OR IGNORE INTO part_core_obligations[\s\S]*core_return_part_id/);
+check('48 undo deletes only still-open core obligations in the same D1 batch',stockOps,/DELETE FROM part_core_obligations WHERE source_operation_id = \? AND status = 'open'/);
+check('49 undo is blocked after a core is returned or waived',stockOps,/core obligation was already returned or waived/);
 check('50 recovered tire source repair-position is unique',operational,/UNIQUE INDEX[\s\S]*recovered_used_tires\(repair_id, position_code\)/);
 check('51 recovered tire reuse stores destination position',operational,/disposition_position_code/);
 check('52 controls require manager or admin',controls,/Manager or administrator access is required/);
@@ -80,3 +82,6 @@ check('57 manager controls UI exposes discrepancy resolution',controlsPage,/Phys
 check('58 manager controls UI exposes core obligations',controlsPage,/Open core obligations[\s\S]*Returned[\s\S]*Waive/);
 check('59 manager controls UI keeps recovered tire separate from new stock',controlsPage,/separate from new\/saleable tire stock/);
 check('60 manager controls UI records destination repair and wheel position',controlsPage,/destinationRepairId[\s\S]*destinationPositionCode/);
+
+test('61 migration 0094 is trigger-free for Wrangler D1 migration parsing',()=>assert.doesNotMatch(operational,/CREATE\s+TRIGGER/i));
+check('62 application imports resolve stock mutations through the v2 entrypoint',tsconfig,/"@\/lib\/inventory-operations"[\s\S]*inventory-operations-entry\.ts/);
