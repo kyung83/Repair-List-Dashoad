@@ -22,6 +22,8 @@ const PDF_SCRIPT="/api/outside-work-reader/pdf.min.js";
 const PDF_WORKER="/api/outside-work-reader/pdf.worker.min.js";
 const MAX_AI_PAGES=3;
 
+function delay(ms:number){return new Promise<void>(resolve=>window.setTimeout(resolve,ms));}
+
 function setReactValue(target:HTMLInputElement|HTMLTextAreaElement|null,value:string){
   if(!target||!value)return false;
   const prototype=target instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
@@ -46,6 +48,29 @@ function targetFields(){
     work:form.querySelector<HTMLTextAreaElement>('textarea[placeholder^="Example:"]'),
     form,
   };
+}
+
+function nativeReaderBusy(){
+  const camera=document.getElementById("outside-work-camera-input") as HTMLInputElement|null;
+  const upload=document.getElementById("outside-work-file-input") as HTMLInputElement|null;
+  const retry=Array.from(document.querySelectorAll("button")).find(button=>/READING DOCUMENT|READ THIS SOURCE AGAIN/i.test(button.textContent||""));
+  return Boolean(camera?.disabled||upload?.disabled||/READING DOCUMENT/i.test(retry?.textContent||""));
+}
+
+async function waitForNativeReader(requestStillCurrent:()=>boolean){
+  const started=Date.now();
+  let sawBusy=false;
+  while(Date.now()-started<90000){
+    if(!requestStillCurrent())return false;
+    const busy=nativeReaderBusy();
+    if(busy)sawBusy=true;
+    if(!busy&&(sawBusy||Date.now()-started>800)){
+      await delay(250);
+      return requestStillCurrent();
+    }
+    await delay(150);
+  }
+  return requestStillCurrent();
 }
 
 function summary(reading:Reading){
@@ -177,7 +202,7 @@ function applyReading(reading:Reading){
 
 export default function AiReadingBridge(){
   const[state,setState]=useState<ReaderState>("idle");
-  const[message,setMessage]=useState("Scan or upload an invoice once. Printed OCR and AI handwriting reading will run automatically.");
+  const[message,setMessage]=useState("Scan or upload an invoice once. Printed OCR runs first, then AI handwriting results are applied automatically.");
   const[reading,setReading]=useState<Reading|null>(null);
   const[lastFile,setLastFile]=useState<File|null>(null);
   const requestId=useRef(0);
@@ -187,7 +212,7 @@ export default function AiReadingBridge(){
     setLastFile(file);
     setReading(null);
     setState("reading");
-    setMessage("Reading printed text and handwriting automatically…");
+    setMessage("Reading handwriting with AI while the normal invoice reader finishes…");
     try{
       const pages=await preparedPages(file);
       if(id!==requestId.current)return;
@@ -197,16 +222,19 @@ export default function AiReadingBridge(){
       const result=await response.json() as ApiResult;
       if(!response.ok||!result.ok||!result.reading)throw new Error(result.error||"AI handwriting reader could not read this invoice.");
       if(id!==requestId.current)return;
+      setMessage("AI finished reading. Waiting for the printed OCR pass to finish before filling Step 2…");
+      const stillCurrent=await waitForNativeReader(()=>id===requestId.current);
+      if(!stillCurrent)return;
       const applied=applyReading(result.reading);
       setReading(result.reading);
       setState("success");
       const warning=result.reading.uncertain.length?` ${result.reading.uncertain.length} item${result.reading.uncertain.length===1?"":"s"} still need verification from the original.`:"";
-      setMessage(`AI read the invoice and filled ${applied.count} review field${applied.count===1?"":"s"}.${warning}`);
+      setMessage(`AI handwriting reading is complete and was applied after OCR. Filled ${applied.count} review field${applied.count===1?"":"s"}.${warning}`);
       window.setTimeout(()=>applied.form.scrollIntoView({behavior:"smooth",block:"start"}),250);
     }catch(error){
       if(id!==requestId.current)return;
       setState("error");
-      setMessage(`${error instanceof Error?error.message:"AI handwriting reader failed."} You can still correct the fields manually and save the original.`);
+      setMessage(`${error instanceof Error?error.message:"AI handwriting reader failed."} The normal printed OCR still works; you can correct any remaining fields manually.`);
     }
   }
 
@@ -232,7 +260,7 @@ export default function AiReadingBridge(){
       </div>
       {state==="reading"?<span style={badge}>READING…</span>:lastFile&&state==="error"?<button type="button" style={retry} onClick={()=>void readInvoice(lastFile)}>TRY AI AGAIN</button>:state==="success"?<span style={badge}>FILLED STEP 2</span>:<span style={badge}>READY</span>}
     </div>
-    <p style={foot}>The original invoice remains attached. AI-filled values are review-first; anything uncertain stays blank or is called out for verification before saving.</p>
+    <p style={foot}>The original invoice remains attached. AI values are applied only after the normal OCR pass so they cannot be overwritten by the older reader. Anything uncertain stays blank or is called out for verification.</p>
   </section>;
 }
 
