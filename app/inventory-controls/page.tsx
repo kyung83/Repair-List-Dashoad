@@ -80,7 +80,7 @@ export default function InventoryControlsPage() {
     const payload = await response.json() as ControlsData & { error?: string };
     if (!response.ok) throw new Error(payload.error || "Inventory controls could not be loaded.");
     setData(payload);
-    if (!tireWarehouse && payload.warehouses.length) setTireWarehouse(payload.warehouses[0].code);
+    setTireWarehouse((current) => current || payload.warehouses[0]?.code || "");
   }
 
   useEffect(() => {
@@ -108,8 +108,10 @@ export default function InventoryControlsPage() {
       if (!response.ok) throw new Error(payload.error || "Inventory control action failed.");
       setMessage(success);
       await load();
+      return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Inventory control action failed.");
+      return false;
     } finally {
       setBusy("");
     }
@@ -127,17 +129,33 @@ export default function InventoryControlsPage() {
 
   async function recoverTire(event: FormEvent) {
     event.preventDefault();
-    await post("recoverUsedTire", {
+    const saved = await post("recoverUsedTire", {
       repairId: Number(sourceRepairId),
       warehouseCode: tireWarehouse,
       positionCode: tirePosition,
       partId: tirePartId ? Number(tirePartId) : null,
       conditionNote: tireNote,
     }, "Recovered tire recorded separately from new inventory.");
+    if (!saved) return;
     setSourceRepairId("");
     setTirePosition("");
     setTirePartId("");
     setTireNote("");
+  }
+
+  async function reuseTire(tireId: number) {
+    const repairValue = window.prompt("Destination repair ID for this reused tire?") ?? "";
+    const repairId = Number(repairValue);
+    if (!Number.isInteger(repairId) || repairId <= 0) return setMessage("Enter a valid destination repair ID.");
+    const position = (window.prompt(`Destination wheel position? (${tirePositions.join(", ")})`) ?? "").trim().toUpperCase();
+    if (!tirePositions.includes(position)) return setMessage("Choose a valid destination tire position.");
+    await post("disposeUsedTire", {
+      tireId,
+      disposition: "reused",
+      destinationRepairId: repairId,
+      destinationPositionCode: position,
+      note: "Recovered tire reused",
+    }, "Recovered tire assigned to its destination repair and wheel position.");
   }
 
   const selectedIssuedPart = useMemo(() => data?.parts.find((part) => part.id === Number(issuedPartId)) ?? null, [data, issuedPartId]);
@@ -145,6 +163,7 @@ export default function InventoryControlsPage() {
   const cardStyle = { background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 18 } as const;
   const inputStyle = { padding: "10px 11px", border: "1px solid #cfd7de", borderRadius: 8, background: "white", width: "100%", boxSizing: "border-box" as const };
   const buttonStyle = { border: 0, borderRadius: 8, padding: "9px 13px", background: "#0d1b2b", color: "white", fontWeight: 800, cursor: "pointer" } as const;
+  const splitStyle = { marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 18, alignItems: "start" } as const;
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: 42, color: "#182331" }}>
@@ -179,7 +198,7 @@ export default function InventoryControlsPage() {
         </div>
       </section>
 
-      <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "minmax(320px, .8fr) minmax(420px, 1.2fr)", gap: 18, alignItems: "start" }}>
+      <section style={splitStyle}>
         <form onSubmit={configureCore} style={cardStyle}>
           <h2 style={{ margin: 0 }}>Core-return rules</h2>
           <p style={{ color: "#6c7886", fontSize: 13 }}>Configure which issued stocked parts create a core obligation. The returned core is an obligation record, not normal on-hand inventory.</p>
@@ -198,7 +217,7 @@ export default function InventoryControlsPage() {
 
         <article style={cardStyle}>
           <h2 style={{ margin: 0 }}>Open core obligations</h2>
-          <p style={{ color: "#6c7886", fontSize: 13 }}>These were opened automatically when a configured part was issued.</p>
+          <p style={{ color: "#6c7886", fontSize: 13 }}>These are opened automatically when a configured part is issued. Returned or waived cores become downstream dependencies, so the original issue cannot later be undone.</p>
           <div style={{ display: "grid", gap: 10 }}>
             {(data?.coreObligations ?? []).map((core) => <div key={core.id} style={{ border: "1px solid #e2e7eb", borderRadius: 9, padding: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -214,10 +233,10 @@ export default function InventoryControlsPage() {
         </article>
       </section>
 
-      <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "minmax(320px, .8fr) minmax(420px, 1.2fr)", gap: 18, alignItems: "start" }}>
+      <section style={splitStyle}>
         <form onSubmit={recoverTire} style={cardStyle}>
           <h2 style={{ margin: 0 }}>Recover a used tire</h2>
-          <p style={{ color: "#6c7886", fontSize: 13 }}>Record a usable tire removed during a repair. It is segregated from new/saleable tire inventory.</p>
+          <p style={{ color: "#6c7886", fontSize: 13 }}>Record a usable tire removed during a tire repair. The wheel position must already be saved on that repair, and the recovered tire remains separate from new/saleable tire stock.</p>
           <label style={{ display: "grid", gap: 6, marginTop: 12, fontSize: 12, fontWeight: 800 }}>SOURCE REPAIR ID<input required type="number" min="1" value={sourceRepairId} onChange={(event) => setSourceRepairId(event.target.value)} style={inputStyle} /></label>
           <label style={{ display: "grid", gap: 6, marginTop: 12, fontSize: 12, fontWeight: 800 }}>WAREHOUSE<select required value={tireWarehouse} onChange={(event) => setTireWarehouse(event.target.value)} style={inputStyle}>{(data?.warehouses ?? []).map((warehouse) => <option key={warehouse.code} value={warehouse.code}>{warehouse.name}</option>)}</select></label>
           <label style={{ display: "grid", gap: 6, marginTop: 12, fontSize: 12, fontWeight: 800 }}>REMOVED POSITION<select required value={tirePosition} onChange={(event) => setTirePosition(event.target.value)} style={inputStyle}><option value="">Choose position…</option>{tirePositions.map((position) => <option key={position} value={position}>{position}</option>)}</select></label>
@@ -228,13 +247,13 @@ export default function InventoryControlsPage() {
 
         <article style={cardStyle}>
           <h2 style={{ margin: 0 }}>Recovered tires available</h2>
-          <p style={{ color: "#6c7886", fontSize: 13 }}>Reuse consumes the recovered-tire record only; it does not decrement new tire stock. Scrap closes the record permanently.</p>
+          <p style={{ color: "#6c7886", fontSize: 13 }}>Reuse links the take-off to a destination repair and wheel position without decrementing new tire stock. Scrap closes the recovered-tire record permanently.</p>
           <div style={{ display: "grid", gap: 10 }}>
             {(data?.recoveredTires ?? []).map((tire) => <div key={tire.id} style={{ border: "1px solid #e2e7eb", borderRadius: 9, padding: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <div><b>{tire.position_code || "Unknown position"} · {tire.part_number || "Uncataloged tire"}</b><small style={{ display: "block", color: "#6c7886" }}>{tire.source_unit ? `Unit ${tire.source_unit} · ` : ""}Repair {tire.repair_id ?? "—"} · {tire.warehouse_name}</small><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{tire.condition_note || "No condition note"}</small></div>
                 <div style={{ display: "flex", gap: 7 }}>
-                  <button disabled={!!busy} onClick={() => { const value = window.prompt("Destination repair ID for this reused tire?") ?? ""; const repairId = Number(value); if (Number.isInteger(repairId) && repairId > 0) void post("disposeUsedTire", { tireId: tire.id, disposition: "reused", destinationRepairId: repairId, note: "Recovered tire reused" }, "Recovered tire assigned as reused."); }} style={buttonStyle}>Reuse</button>
+                  <button disabled={!!busy} onClick={() => void reuseTire(tire.id)} style={buttonStyle}>Reuse</button>
                   <button disabled={!!busy} onClick={() => { if (window.confirm("Scrap this recovered tire?")) void post("disposeUsedTire", { tireId: tire.id, disposition: "scrapped", note: "Recovered tire scrapped" }, "Recovered tire marked scrapped."); }} style={{ ...buttonStyle, background: "#8a2a20" }}>Scrap</button>
                 </div>
               </div>
