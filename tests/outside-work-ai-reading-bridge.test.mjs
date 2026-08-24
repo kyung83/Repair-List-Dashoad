@@ -12,10 +12,12 @@ async function sources(){
   ]);
 }
 
-test('Outside Work automatically sends a selected invoice to the AI handwriting reader',async()=>{
+test('Outside Work captures the selected file before native input clearing, then defers AI work',async()=>{
   const [bridge]=await sources();
   assert.match(bridge,/outside-work-camera-input/);
   assert.match(bridge,/outside-work-file-input/);
+  assert.match(bridge,/const file=input\.files\?\.\[0\]/);
+  assert.match(bridge,/window\.setTimeout\(\(\)=>void readInvoice\(file\),0\)/);
   assert.match(bridge,/document\.addEventListener\("change",handler,true\)/);
   assert.match(bridge,/fetch\("\/api\/outside-work\/ai-read"/);
   assert.match(bridge,/Reading printed text and handwriting automatically/);
@@ -23,10 +25,13 @@ test('Outside Work automatically sends a selected invoice to the AI handwriting 
   assert.match(bridge,/FILLED STEP 2/);
 });
 
-test('automatic reader stays inside React ownership so upload state changes cannot blank the page',async()=>{
+test('automatic reader never mutates React-owned Outside Work DOM',async()=>{
   const [bridge,,,,wrapper]=await sources();
   assert.match(wrapper,/AiReadingBridge/);
   assert.match(wrapper,/OutsideWorkIntakeV2/);
+  assert.doesNotMatch(wrapper,/MutationObserver/);
+  assert.doesNotMatch(wrapper,/textContent\s*=/);
+  assert.doesNotMatch(wrapper,/querySelector/);
   assert.doesNotMatch(bridge,/createPortal/);
   assert.doesNotMatch(bridge,/insertBefore\(/);
   assert.doesNotMatch(bridge,/outside-work-ai-inline-host/);
