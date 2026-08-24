@@ -36,6 +36,22 @@ BEGIN
   WHERE o.id = NEW.operation_id;
 END;
 
+-- Undoing an untouched part issue removes its still-open core obligation with the
+-- same D1 batch. Once a manager has returned or waived the core, undo must fail.
+CREATE TRIGGER IF NOT EXISTS trg_inventory_operation_undo_core_guard
+BEFORE UPDATE OF status ON inventory_operations
+FOR EACH ROW
+WHEN OLD.status = 'applied' AND NEW.status = 'undone'
+BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM part_core_obligations c
+    WHERE c.source_operation_id = OLD.id AND c.status <> 'open'
+  ) THEN RAISE(ABORT, 'Undo blocked: core obligation already returned or waived.') END;
+
+  DELETE FROM part_core_obligations
+  WHERE source_operation_id = OLD.id AND status = 'open';
+END;
+
 ALTER TABLE recovered_used_tires ADD COLUMN disposition_repair_id INTEGER;
 ALTER TABLE recovered_used_tires ADD COLUMN disposition_position_code TEXT;
 
