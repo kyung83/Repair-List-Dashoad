@@ -15,7 +15,11 @@ export default function ModuleTabs({ module }: { module: ModuleName }) {
   const pathname=usePathname();
   const [role,setRole]=useState<Role|null>(null);
   const [currentView,setCurrentView]=useState("invoices");
-  const resolvedModule:ModuleName=module==="parts"&&pathname.startsWith("/invoices")?"billing":module;
+  const resolvedModule:ModuleName=pathname.startsWith("/pm-kits")
+    ?"parts"
+    :module==="parts"&&pathname.startsWith("/invoices")
+      ?"billing"
+      :module;
 
   useEffect(()=>{
     let cancelled=false;
