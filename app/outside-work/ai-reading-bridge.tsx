@@ -10,22 +10,24 @@ function setReactValue(target:HTMLInputElement|HTMLTextAreaElement|null,value:st
   const prototype=target instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
   const descriptor=Object.getOwnPropertyDescriptor(prototype,"value");
   descriptor?.set?.call(target,value);
-  target.dispatchEvent(new Event("input",{bubbles:true}));
+  target.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"insertText",data:value}));
   target.dispatchEvent(new Event("change",{bubbles:true}));
   return true;
 }
 
 function targetFields(){
-  const form=document.querySelector("form");
+  const unit=document.querySelector<HTMLInputElement>('input[placeholder="Unit number"]');
+  const form=unit?.closest("form");
   if(!form)return null;
   return{
-    unit:form.querySelector<HTMLInputElement>('input[placeholder="Unit number"]'),
+    unit,
     vendor:form.querySelector<HTMLInputElement>('input[placeholder="Dealer / repair shop"]'),
     invoice:form.querySelector<HTMLInputElement>('input[placeholder="Vendor invoice or repair order"]'),
     date:form.querySelector<HTMLInputElement>('input[type="date"]'),
     mileage:form.querySelector<HTMLInputElement>('input[placeholder="Optional odometer"]'),
     total:form.querySelector<HTMLInputElement>('input[type="number"]'),
     work:form.querySelector<HTMLTextAreaElement>('textarea[placeholder^="Example:"]'),
+    form,
   };
 }
 
@@ -44,7 +46,7 @@ export default function AiReadingBridge(){
   const parsed=useMemo(()=>text.trim()?parseAiReading(text):null,[text]);
 
   async function copyPrompt(){
-    try{await navigator.clipboard.writeText(AI_READING_PROMPT);setCopied(true);setMessage("Reading prompt copied. Upload the same invoice to ChatGPT or Claude, then paste its response here.");window.setTimeout(()=>setCopied(false),1800);}catch{setMessage("Copy failed. Select the prompt below and copy it manually.");}
+    try{await navigator.clipboard.writeText(AI_READING_PROMPT);setCopied(true);setMessage("Reading prompt copied. Upload the same invoice to ChatGPT or Claude, then paste its response here.");window.setTimeout(()=>setCopied(false),1800);}catch{setMessage("Copy failed. Open the exact prompt below and copy it manually.");}
   }
 
   function apply(){
@@ -58,16 +60,19 @@ export default function AiReadingBridge(){
     count+=Number(setReactValue(fields.mileage,parsed.mileage));
     count+=Number(setReactValue(fields.total,parsed.totalAmount));
     count+=Number(setReactValue(fields.work,parsed.serviceSummary));
+    fields.unit?.blur();
     if(!count){setMessage("I could not find any safe labeled values to apply. Ask the AI to use the copied reading prompt and try again.");return;}
     const warning=parsed.uncertain.length?` Review the uncertain items before saving: ${parsed.uncertain.slice(0,4).join("; ")}${parsed.uncertain.length>4?"; …":""}`:"";
     setMessage(`Applied ${count} field${count===1?"":"s"}. AI-filled fields stay yellow REVIEW in Outside Work.${warning}`);
-    document.querySelector("form")?.scrollIntoView({behavior:"smooth",block:"start"});
+    fields.form.scrollIntoView({behavior:"smooth",block:"start"});
   }
 
-  return <>
-    <button type="button" onClick={()=>setOpen(value=>!value)} style={launcher} aria-expanded={open} aria-controls="outside-work-ai-helper">{open?"CLOSE AI PASTE":"PASTE AI READING"}</button>
-    {open&&<aside id="outside-work-ai-helper" style={panel} aria-label="Paste ChatGPT or Claude invoice reading">
-      <div style={head}><div><div style={eyebrow}>NO-API HANDWRITING HELPER</div><h2 style={title}>Paste AI Reading</h2></div><button type="button" onClick={()=>setOpen(false)} style={close} aria-label="Close">×</button></div>
+  return <section style={dock} aria-label="Handwriting invoice helper">
+    <button type="button" onClick={()=>setOpen(value=>!value)} style={launcher} aria-expanded={open} aria-controls="outside-work-ai-helper" data-ai-reading-launcher="true">
+      {open?"CLOSE AI PASTE":"HANDWRITING? PASTE AI READING"}
+    </button>
+    {open&&<div id="outside-work-ai-helper" style={panel} aria-label="Paste ChatGPT or Claude invoice reading">
+      <div style={head}><div><div style={eyebrow}>NO-API HANDWRITING HELPER</div><h2 style={title}>Paste ChatGPT / Claude Reading</h2></div><button type="button" onClick={()=>setOpen(false)} style={close} aria-label="Close">×</button></div>
       <p style={copy}>Keep the original invoice selected in Outside Work. Upload that same scan to ChatGPT or Claude, have it read the handwriting, then paste the result here. The dashboard itself does not call an AI API.</p>
       <button type="button" onClick={()=>void copyPrompt()} style={secondary}>{copied?"PROMPT COPIED":"COPY READING PROMPT"}</button>
       <details style={details}><summary style={{cursor:"pointer",fontWeight:850}}>Show the exact prompt</summary><pre style={prompt}>{AI_READING_PROMPT}</pre></details>
@@ -77,12 +82,13 @@ export default function AiReadingBridge(){
       {message&&<div style={notice}>{message}</div>}
       <div style={actions}><button type="button" onClick={()=>{setText("");setMessage("");}} style={ghost}>CLEAR</button><button type="button" onClick={apply} style={primary}>APPLY TO OUTSIDE WORK</button></div>
       <p style={foot}>Nothing is saved by this helper. The normal Outside Work save button, unit match, vendor rules, and original-document retention still control the record.</p>
-    </aside>}
-  </>;
+    </div>}
+  </section>;
 }
 
-const launcher:React.CSSProperties={position:"fixed",right:18,bottom:18,zIndex:80,border:0,borderRadius:999,padding:"12px 17px",fontWeight:900,fontSize:12,letterSpacing:.45,background:"#17242f",color:"#fff",boxShadow:"0 8px 28px rgba(16,30,42,.25)",cursor:"pointer"};
-const panel:React.CSSProperties={position:"fixed",right:18,bottom:72,zIndex:79,width:"min(430px,calc(100vw - 24px))",maxHeight:"calc(100vh - 96px)",overflowY:"auto",background:"#fff",border:"1px solid #dfe5e9",borderRadius:18,padding:18,boxShadow:"0 18px 60px rgba(20,35,45,.28)",fontFamily:"inherit"};
+const dock:React.CSSProperties={position:"sticky",top:8,zIndex:2147483000,width:"calc(100% - 32px)",maxWidth:1400,margin:"8px auto 0",display:"grid",justifyItems:"end",pointerEvents:"none"};
+const launcher:React.CSSProperties={pointerEvents:"auto",border:"2px solid #fff",borderRadius:999,padding:"13px 18px",fontWeight:950,fontSize:12,letterSpacing:.45,background:"#123f58",color:"#fff",boxShadow:"0 8px 28px rgba(16,30,42,.28)",cursor:"pointer",whiteSpace:"nowrap"};
+const panel:React.CSSProperties={pointerEvents:"auto",width:"min(460px,calc(100vw - 36px))",maxHeight:"calc(100vh - 86px)",overflowY:"auto",marginTop:8,background:"#fff",border:"1px solid #dfe5e9",borderRadius:18,padding:18,boxShadow:"0 18px 60px rgba(20,35,45,.28)",fontFamily:"inherit"};
 const head:React.CSSProperties={display:"flex",justifyContent:"space-between",gap:12,alignItems:"start"};
 const eyebrow:React.CSSProperties={fontSize:10,fontWeight:950,letterSpacing:1.1,color:"#6d7f8c"};
 const title:React.CSSProperties={margin:"3px 0 0",fontSize:23,lineHeight:1.05,color:"#17242f"};

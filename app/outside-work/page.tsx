@@ -1,9 +1,5 @@
-import OutsideWorkIntakeV2 from "./intake-v2";
-import AiReadingBridge from "./ai-reading-bridge";
+import OutsideWorkIntakeV3 from "./intake-v3";
 
 export default function OutsideWorkPage(){
-  return <>
-    <OutsideWorkIntakeV2/>
-    <AiReadingBridge/>
-  </>;
+  return <OutsideWorkIntakeV3/>;
 }
