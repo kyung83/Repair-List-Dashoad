@@ -8,6 +8,7 @@ async function sources(){
     readFile(new URL('../app/api/outside-work/ai-read/route.ts',import.meta.url),'utf8'),
     readFile(new URL('../wrangler.template.jsonc',import.meta.url),'utf8'),
     readFile(new URL('../scripts/build-verified.sh',import.meta.url),'utf8'),
+    readFile(new URL('../app/outside-work/intake-v3.tsx',import.meta.url),'utf8'),
   ]);
 }
 
@@ -20,6 +21,17 @@ test('Outside Work automatically sends a selected invoice to the AI handwriting 
   assert.match(bridge,/Reading printed text and handwriting automatically/);
   assert.match(bridge,/applyReading\(result\.reading\)/);
   assert.match(bridge,/FILLED STEP 2/);
+});
+
+test('automatic reader stays inside React ownership so upload state changes cannot blank the page',async()=>{
+  const [bridge,,,,wrapper]=await sources();
+  assert.match(wrapper,/AiReadingBridge/);
+  assert.match(wrapper,/OutsideWorkIntakeV2/);
+  assert.doesNotMatch(bridge,/createPortal/);
+  assert.doesNotMatch(bridge,/insertBefore\(/);
+  assert.doesNotMatch(bridge,/outside-work-ai-inline-host/);
+  assert.doesNotMatch(bridge,/parentElement/);
+  assert.match(bridge,/return <section/);
 });
 
 test('normal use has no copy-prompt or paste-back workflow',async()=>{
