@@ -26,6 +26,9 @@ node --test \
   "${project_root}/tests/tire-position-repair.test.mjs" \
   "${project_root}/tests/parts-inventory-v2-contract.test.mjs"
 
+echo "Running local D1 integration scenarios..."
+bash "${project_root}/scripts/test-parts-inventory-v2-d1.sh"
+
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
   --signal=TERM \
