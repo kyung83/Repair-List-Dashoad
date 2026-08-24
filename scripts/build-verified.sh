@@ -77,12 +77,12 @@ if (!compatibilityDate) {
 if (!compatibilityFlags.includes("nodejs_compat")) {
   throw new Error("Cloudflare output config is missing nodejs_compat");
 }
-if (config.ai?.binding) {
-  throw new Error("Outside Work is intentionally no-AI; generated Worker config must not include an AI binding.");
+if (config.ai?.binding !== "AI") {
+  throw new Error("Outside Work automatic handwriting reader requires Cloudflare Workers AI binding `AI`.");
 }
 if (!crons.includes("* * * * *")) {
   throw new Error("Geotab LogRecord feed must run every minute.");
 }
 NODE
 
-echo "Validated Cloudflare Worker bundle, no-AI output, and minute Geotab feed schedule."
+echo "Validated Cloudflare Worker bundle, AI handwriting binding, and minute Geotab feed schedule."
