@@ -217,8 +217,8 @@ export default function AiReadingBridge(){
       const file=input.files?.[0];
       if(file)window.setTimeout(()=>void readInvoice(file),0);
     };
-    document.addEventListener("change",handler);
-    return()=>document.removeEventListener("change",handler);
+    document.addEventListener("change",handler,true);
+    return()=>document.removeEventListener("change",handler,true);
   },[]);
 
   const tone=state==="success"?success:state==="error"?failure:state==="reading"?active:ready;
