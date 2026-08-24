@@ -1,6 +1,6 @@
 export * from './parts-lifecycle-legacy';
 
-import { applyPartToRepair } from './inventory-operations';
+import { applyPartToRepair } from './part-stock-operations';
 import {
   decorateInventoryDataDerived,
   decorateShopPartsDerived,
