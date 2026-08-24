@@ -75,13 +75,13 @@ function responseText(result:unknown){
   if(typeof result==='string')return result;
   const row=result as Record<string,any>|null;
   if(!row)return'';
-  const direct=[row.response,row.output_text,row.result?.response,row.result?.output_text]
+  const direct=[row.output_text,row.response,row.result?.output_text,row.result?.response]
     .map(contentText).find(Boolean);
   if(direct)return direct;
+  const fromOutput=contentText(row.output)||contentText(row.result?.output);
+  if(fromOutput)return fromOutput;
   const choice=row.choices?.[0]?.message?.content??row.result?.choices?.[0]?.message?.content;
-  const fromChoice=contentText(choice);
-  if(fromChoice)return fromChoice;
-  return contentText(row.output)||contentText(row.result?.output);
+  return contentText(choice);
 }
 
 function jsonObjectFromText(text:string):RawReading{
@@ -245,14 +245,34 @@ Rules:
 - If handwriting could reasonably be read two ways, use null for that field and add a short explanation to uncertain.
 - Do not guess from context. Do not add any prose outside the JSON object.`;
 
-function modelInput(content:Array<Record<string,unknown>>){
+function primaryInput(imageUrls:string[]){
+  return{
+    instructions:SYSTEM_PROMPT,
+    input:[{
+      role:'user',
+      content:[
+        {type:'input_text',text:USER_PROMPT},
+        ...imageUrls.map(image_url=>({type:'input_image',image_url,detail:'high'})),
+      ],
+    }],
+    max_output_tokens:1800,
+    reasoning:{effort:'low'},
+    store:false,
+  };
+}
+
+function fallbackInput(imageUrls:string[]){
   return{
     messages:[
       {role:'system',content:SYSTEM_PROMPT},
-      {role:'user',content},
+      {role:'user',content:[
+        {type:'text',text:USER_PROMPT},
+        ...imageUrls.map(url=>({type:'image_url',image_url:{url}})),
+      ]},
     ],
     max_completion_tokens:1800,
     response_format:{type:'json_object'},
+    temperature:0,
   };
 }
 
@@ -279,27 +299,25 @@ export async function POST(request:Request){
     const totalBytes=images.reduce((sum,file)=>sum+file.size,0);
     if(totalBytes>MAX_TOTAL_IMAGE_BYTES)return Response.json({error:'Invoice pages are too large for the automatic AI reader.'},{status:413,headers:{'cache-control':'no-store'}});
 
-    const content:Array<Record<string,unknown>>=[{type:'text',text:USER_PROMPT}];
-    for(const image of images){
-      content.push({type:'image_url',image_url:{url:await imageDataUri(image)}});
-    }
-    const input=modelInput(content);
+    const imageUrls:string[]=[];
+    for(const image of images)imageUrls.push(await imageDataUri(image));
 
     let reading:Reading|null=null;
     let model='';
     const errors:string[]=[];
+
     try{
-      reading=await tryModel(ai,PRIMARY_MODEL,input,{gateway:{id:'default'}});
+      reading=await tryModel(ai,PRIMARY_MODEL,primaryInput(imageUrls),{gateway:{id:'default'}});
       model=PRIMARY_MODEL;
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
       errors.push(`primary: ${message}`);
-      console.warn('Outside Work OpenAI invoice reader failed; using Cloudflare fallback.',message);
+      console.warn('Outside Work GPT-5.6 Sol invoice reader failed; using Workers AI fallback.',message);
     }
 
     if(!reading){
       try{
-        reading=await tryModel(ai,FALLBACK_MODEL,input);
+        reading=await tryModel(ai,FALLBACK_MODEL,fallbackInput(imageUrls));
         model=FALLBACK_MODEL;
       }catch(error){
         const message=error instanceof Error?error.message:String(error);
@@ -310,7 +328,11 @@ export async function POST(request:Request){
 
     if(!reading){
       console.error('Outside Work automatic invoice reader failed.',errors.join(' | '));
-      return Response.json({error:'The automatic invoice reader could not read this document with either AI model. Try again or review the invoice manually.'},{status:502,headers:{'cache-control':'no-store'}});
+      const primaryBillingIssue=errors.some(item=>/credit|billing|payment|quota|unified/i.test(item));
+      const error=primaryBillingIssue
+        ?'GPT-5.6 Sol is not available through this Cloudflare AI Gateway billing setup, and the fallback reader also failed. Check AI Gateway Unified Billing credits.'
+        :'The automatic invoice reader could not read this document with either AI model. Try again or review the invoice manually.';
+      return Response.json({error},{status:502,headers:{'cache-control':'no-store'}});
     }
 
     return Response.json({ok:true,model,reading},{headers:{'cache-control':'no-store'}});
