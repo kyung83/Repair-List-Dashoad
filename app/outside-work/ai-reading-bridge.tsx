@@ -1,7 +1,6 @@
 "use client";
 
 import {useEffect,useRef,useState,type CSSProperties} from "react";
-import {createPortal} from "react-dom";
 
 type Reading={
   vendor:string;
@@ -15,7 +14,6 @@ type Reading={
   uncertain:string[];
 };
 type ApiResult={ok?:boolean;model?:string;reading?:Reading;error?:string};
-type PdfTextItem={str?:string};
 type PdfLib={GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}};
 type BrowserTools=Window&{pdfjsLib?:PdfLib};
 type ReaderState="idle"|"reading"|"success"|"error";
@@ -62,17 +60,35 @@ function summary(reading:Reading){
 
 function loadPdfScript(){
   return new Promise<void>((resolve,reject)=>{
-    const existing=document.getElementById("outside-work-pdfjs") as HTMLScriptElement|null;
     if((window as BrowserTools).pdfjsLib){resolve();return;}
-    const script=existing||document.createElement("script");
-    if(!existing){script.id="outside-work-pdfjs";script.src=PDF_SCRIPT;script.async=true;script.crossOrigin="anonymous";document.head.appendChild(script);}
+    let script=document.getElementById("outside-work-pdfjs") as HTMLScriptElement|null;
+    if(script?.dataset.failed==="1"){
+      script.remove();
+      script=null;
+    }
+    if(!script){
+      script=document.createElement("script");
+      script.id="outside-work-pdfjs";
+      script.src=PDF_SCRIPT;
+      script.async=true;
+      script.crossOrigin="anonymous";
+      document.head.appendChild(script);
+    }
+    const target=script;
     let settled=false;
-    const finish=(error?:Error)=>{if(settled)return;settled=true;window.clearTimeout(timer);script.removeEventListener("load",loaded);script.removeEventListener("error",failed);error?reject(error):resolve();};
+    const finish=(error?:Error)=>{
+      if(settled)return;
+      settled=true;
+      window.clearTimeout(timer);
+      target.removeEventListener("load",loaded);
+      target.removeEventListener("error",failed);
+      if(error){target.dataset.failed="1";reject(error);}else resolve();
+    };
     const loaded=()=>finish();
     const failed=()=>finish(new Error("Invoice PDF reader could not load for handwriting recognition."));
     const timer=window.setTimeout(()=>finish(new Error("Invoice PDF reader timed out.")),20000);
-    script.addEventListener("load",loaded,{once:true});
-    script.addEventListener("error",failed,{once:true});
+    target.addEventListener("load",loaded,{once:true});
+    target.addEventListener("error",failed,{once:true});
   });
 }
 
@@ -91,8 +107,13 @@ async function imagePage(file:File){
       canvas.height=Math.max(1,Math.round(bitmap.height*scale));
       const context=canvas.getContext("2d");
       if(!context)throw new Error("Invoice image could not be prepared for handwriting recognition.");
-      context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(bitmap,0,0,canvas.width,canvas.height);
-      const blob=await canvasBlob(canvas);canvas.width=1;canvas.height=1;return blob;
+      context.fillStyle="#fff";
+      context.fillRect(0,0,canvas.width,canvas.height);
+      context.drawImage(bitmap,0,0,canvas.width,canvas.height);
+      const blob=await canvasBlob(canvas);
+      canvas.width=1;
+      canvas.height=1;
+      return blob;
     }finally{bitmap.close();}
   }catch(error){
     if(["image/jpeg","image/png","image/webp"].includes(file.type))return file;
@@ -116,15 +137,21 @@ async function pdfPages(file:File){
       const scale=Math.min(2.25,2400/Math.max(1,base.width,base.height));
       const viewport=page.getViewport({scale:Math.max(1.5,scale)});
       const canvas=document.createElement("canvas");
-      canvas.width=Math.max(1,Math.round(viewport.width));canvas.height=Math.max(1,Math.round(viewport.height));
+      canvas.width=Math.max(1,Math.round(viewport.width));
+      canvas.height=Math.max(1,Math.round(viewport.height));
       const context=canvas.getContext("2d");
       if(!context)throw new Error("Invoice PDF page could not be rendered for handwriting recognition.");
-      context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);
+      context.fillStyle="#fff";
+      context.fillRect(0,0,canvas.width,canvas.height);
       await page.render({canvasContext:context,viewport}).promise;
-      pages.push(await canvasBlob(canvas));canvas.width=1;canvas.height=1;
+      pages.push(await canvasBlob(canvas));
+      canvas.width=1;
+      canvas.height=1;
     }
     return pages;
-  }finally{if(typeof pdf.destroy==="function")await pdf.destroy();}
+  }finally{
+    if(typeof pdf.destroy==="function")await pdf.destroy();
+  }
 }
 
 async function preparedPages(file:File){
@@ -149,28 +176,18 @@ function applyReading(reading:Reading){
 }
 
 export default function AiReadingBridge(){
-  const[host,setHost]=useState<HTMLElement|null>(null);
   const[state,setState]=useState<ReaderState>("idle");
   const[message,setMessage]=useState("Scan or upload an invoice once. Printed OCR and AI handwriting reading will run automatically.");
   const[reading,setReading]=useState<Reading|null>(null);
   const[lastFile,setLastFile]=useState<File|null>(null);
   const requestId=useRef(0);
 
-  useEffect(()=>{
-    const form=document.querySelector<HTMLInputElement>('input[placeholder="Unit number"]')?.closest("form");
-    const parent=form?.parentElement;
-    if(!form||!parent)return;
-    const existing=document.getElementById("outside-work-ai-inline-host");
-    const mount=existing||document.createElement("div");
-    mount.id="outside-work-ai-inline-host";mount.setAttribute("data-outside-work-ai-inline","true");mount.style.width="100%";mount.style.marginTop="16px";
-    if(!existing)parent.insertBefore(mount,form);
-    setHost(mount);
-    return()=>{if(!existing&&mount.parentElement)mount.remove();};
-  },[]);
-
   async function readInvoice(file:File){
     const id=++requestId.current;
-    setLastFile(file);setReading(null);setState("reading");setMessage("Reading printed text and handwriting automatically…");
+    setLastFile(file);
+    setReading(null);
+    setState("reading");
+    setMessage("Reading printed text and handwriting automatically…");
     try{
       const pages=await preparedPages(file);
       if(id!==requestId.current)return;
@@ -181,13 +198,15 @@ export default function AiReadingBridge(){
       if(!response.ok||!result.ok||!result.reading)throw new Error(result.error||"AI handwriting reader could not read this invoice.");
       if(id!==requestId.current)return;
       const applied=applyReading(result.reading);
-      setReading(result.reading);setState("success");
+      setReading(result.reading);
+      setState("success");
       const warning=result.reading.uncertain.length?` ${result.reading.uncertain.length} item${result.reading.uncertain.length===1?"":"s"} still need verification from the original.`:"";
       setMessage(`AI read the invoice and filled ${applied.count} review field${applied.count===1?"":"s"}.${warning}`);
       window.setTimeout(()=>applied.form.scrollIntoView({behavior:"smooth",block:"start"}),250);
     }catch(error){
       if(id!==requestId.current)return;
-      setState("error");setMessage(`${error instanceof Error?error.message:"AI handwriting reader failed."} You can still correct the fields manually and save the original.`);
+      setState("error");
+      setMessage(`${error instanceof Error?error.message:"AI handwriting reader failed."} You can still correct the fields manually and save the original.`);
     }
   }
 
@@ -202,26 +221,22 @@ export default function AiReadingBridge(){
     return()=>document.removeEventListener("change",handler,true);
   },[]);
 
-  if(!host)return null;
   const tone=state==="success"?success:state==="error"?failure:state==="reading"?active:ready;
-
-  return createPortal(
-    <section style={{...card,...tone}} aria-label="Automatic AI handwriting reader" data-ai-reading-inline-card="true">
-      <div style={row}>
-        <div style={{minWidth:0}}>
-          <div style={eyebrow}>{state==="reading"?"AI READING INVOICE":state==="success"?"AI READING COMPLETE":state==="error"?"AI READER NEEDS ATTENTION":"AUTOMATIC HANDWRITING READER"}</div>
-          <h2 style={title}>{state==="idle"?"Handwriting is read automatically":"Outside Work invoice reader"}</h2>
-          <p style={copy}>{message}</p>
-          {reading&&<div style={summaryBox}><strong>{summary(reading)||"Invoice fields detected"}</strong>{reading.uncertain.length>0&&<span>{reading.uncertain.slice(0,4).map(item=><span key={item}>• {item}</span>)}</span>}</div>}
-        </div>
-        {state==="reading"?<span style={badge}>READING…</span>:lastFile&&state==="error"?<button type="button" style={retry} onClick={()=>void readInvoice(lastFile)}>TRY AI AGAIN</button>:state==="success"?<span style={badge}>FILLED STEP 2</span>:<span style={badge}>READY</span>}
+  return <section style={{...card,...tone}} aria-label="Automatic AI handwriting reader" data-ai-reading-inline-card="true">
+    <div style={row}>
+      <div style={{minWidth:0}}>
+        <div style={eyebrow}>{state==="reading"?"AI READING INVOICE":state==="success"?"AI READING COMPLETE":state==="error"?"AI READER NEEDS ATTENTION":"AUTOMATIC HANDWRITING READER"}</div>
+        <h2 style={title}>{state==="idle"?"Handwriting is read automatically":"Outside Work invoice reader"}</h2>
+        <p style={copy}>{message}</p>
+        {reading&&<div style={summaryBox}><strong>{summary(reading)||"Invoice fields detected"}</strong>{reading.uncertain.length>0&&<span>{reading.uncertain.slice(0,4).map(item=><span key={item}>• {item}</span>)}</span>}</div>}
       </div>
-      <p style={foot}>The original invoice remains attached. AI-filled values are review-first; anything uncertain stays blank or is called out for verification before saving.</p>
-    </section>,host,
-  );
+      {state==="reading"?<span style={badge}>READING…</span>:lastFile&&state==="error"?<button type="button" style={retry} onClick={()=>void readInvoice(lastFile)}>TRY AI AGAIN</button>:state==="success"?<span style={badge}>FILLED STEP 2</span>:<span style={badge}>READY</span>}
+    </div>
+    <p style={foot}>The original invoice remains attached. AI-filled values are review-first; anything uncertain stays blank or is called out for verification before saving.</p>
+  </section>;
 }
 
-const card:CSSProperties={borderRadius:14,padding:16,boxShadow:"0 2px 10px rgba(15,32,48,.04)",color:"#172536"};
+const card:CSSProperties={margin:"12px 16px 0",borderRadius:14,padding:16,boxShadow:"0 2px 10px rgba(15,32,48,.04)",color:"#172536"};
 const ready:CSSProperties={background:"#f2f8fb",border:"1px solid #b7d1df"};
 const active:CSSProperties={background:"#eef7fb",border:"2px solid #7daec7"};
 const success:CSSProperties={background:"#f1faf4",border:"2px solid #9bc5a7"};
