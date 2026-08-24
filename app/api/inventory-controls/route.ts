@@ -32,6 +32,17 @@ async function warehouseId(code: unknown) {
   return row;
 }
 
+async function activePart(id: number) {
+  return env.DB.prepare('SELECT id,part_number,description FROM parts WHERE id=? AND active=1').bind(id).first<{id:number;part_number:string;description:string}>();
+}
+
+async function repairPosition(repairId: number, positionCode: string) {
+  return env.DB.prepare(`
+    SELECT id FROM repair_tire_positions
+    WHERE repair_id=? AND position_code=?
+  `).bind(repairId,positionCode).first<{id:number}>();
+}
+
 async function existingOperation(key: string) {
   return env.DB.prepare('SELECT id,operation_type,status FROM inventory_operations WHERE operation_key=?').bind(key).first<{id:number;operation_type:string;status:string}>();
 }
@@ -60,8 +71,8 @@ export async function GET(request: Request) {
       `).all<any>(),
       env.DB.prepare(`
         SELECT t.id,t.source_operation_id,t.repair_id,t.part_id,t.warehouse_id,t.position_code,t.condition_note,t.status,t.recovered_at,
-               t.disposition_at,t.disposition_repair_id,p.part_number,p.description,w.code AS warehouse_code,w.name AS warehouse_name,
-               COALESCE(e.unit,'') AS source_unit
+               t.disposition_at,t.disposition_repair_id,t.disposition_position_code,p.part_number,p.description,
+               w.code AS warehouse_code,w.name AS warehouse_name,COALESCE(e.unit,'') AS source_unit
         FROM recovered_used_tires t
         LEFT JOIN parts p ON p.id=t.part_id JOIN warehouses w ON w.id=t.warehouse_id
         LEFT JOIN repairs r ON r.id=t.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id
@@ -99,6 +110,8 @@ export async function POST(request: Request) {
       const corePartId = body.corePartId == null || body.corePartId === '' ? null : positiveId(body.corePartId,'Core part');
       const quantity = corePartId == null ? 0 : positiveNumber(body.coreReturnQuantity,'Core quantity');
       if (corePartId === partId) throw new Error('The issued part and returned-core part must be different catalog items.');
+      if (!await activePart(partId)) throw new Error('Issued part was not found or is inactive.');
+      if (corePartId && !await activePart(corePartId)) throw new Error('Returned-core part was not found or is inactive.');
       await env.DB.prepare('UPDATE parts SET core_return_part_id=?,core_return_quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND active=1')
         .bind(corePartId,quantity,partId).run();
       return Response.json({ok:true,partId,corePartId,coreReturnQuantity:quantity});
@@ -111,14 +124,24 @@ export async function POST(request: Request) {
       const key = operationKey(request,body,`core-${disposition}`);
       const prior = await existingOperation(key);
       if (prior) return Response.json({ok:true,idempotent:true,operationId:prior.id,obligationId,disposition});
+      const obligation = await env.DB.prepare(`
+        SELECT id,source_operation_id,repair_id,status
+        FROM part_core_obligations WHERE id=?
+      `).bind(obligationId).first<{id:number;source_operation_id:number;repair_id:number|null;status:string}>();
+      if (!obligation || obligation.status !== 'open') throw new Error('Core obligation is no longer open.');
       await env.DB.batch([
-        env.DB.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,user_id,note) VALUES (?,?,?,?)`)
-          .bind(key,`core_${disposition}`,user.id,String(body.note ?? '').trim().slice(0,500)),
+        env.DB.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note) VALUES (?,?,?,?,?)`)
+          .bind(key,`core_${disposition}`,obligation.repair_id,user.id,String(body.note ?? '').trim().slice(0,500)),
         env.DB.prepare(`
           UPDATE part_core_obligations
           SET status=?,closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?
           WHERE id=? AND status='open'
         `).bind(disposition,user.id,obligationId),
+        env.DB.prepare(`
+          INSERT INTO inventory_operation_dependencies (operation_id,depends_on_operation_id,reason)
+          SELECT id,?,'Core obligation disposition depends on the original issued part.'
+          FROM inventory_operations WHERE operation_key=?
+        `).bind(obligation.source_operation_id,key),
         env.DB.prepare(`
           INSERT INTO inventory_operation_commits (operation_id,applied)
           SELECT id,CASE WHEN (SELECT status FROM part_core_obligations WHERE id=?)=? THEN 1 ELSE 0 END
@@ -135,24 +158,29 @@ export async function POST(request: Request) {
       const positionCode = String(body.positionCode ?? '').trim().toUpperCase().slice(0,40);
       if (!positionCode) throw new Error('Tire position is required.');
       const partId = body.partId == null || body.partId === '' ? null : positiveId(body.partId,'Tire catalog part');
-      const repair = await env.DB.prepare('SELECT id FROM repairs WHERE id=?').bind(repairId).first<{id:number}>();
-      if (!repair) throw new Error('Source repair was not found.');
       const key = operationKey(request,body,'recover-used-tire');
       const prior = await existingOperation(key);
       if (prior) return Response.json({ok:true,idempotent:true,operationId:prior.id});
-      await env.DB.batch([
-        env.DB.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note) VALUES (?,'recover_used_tire',?,?,?)`)
-          .bind(key,repairId,user.id,String(body.conditionNote ?? '').trim().slice(0,500)),
-        env.DB.prepare(`
-          INSERT INTO recovered_used_tires (source_operation_id,repair_id,part_id,warehouse_id,position_code,condition_note,status)
-          SELECT id,?,?,?,?,?,'available' FROM inventory_operations WHERE operation_key=?
-        `).bind(repairId,partId,warehouse.id,positionCode,String(body.conditionNote ?? '').trim().slice(0,500),key),
-        env.DB.prepare(`
-          INSERT INTO inventory_operation_commits (operation_id,applied)
-          SELECT id,CASE WHEN EXISTS(SELECT 1 FROM recovered_used_tires t WHERE t.source_operation_id=id) THEN 1 ELSE 0 END
-          FROM inventory_operations WHERE operation_key=?
-        `).bind(key),
-      ]);
+      if (!await repairPosition(repairId,positionCode)) throw new Error('That tire position is not recorded on the source repair. Save the tire position on the repair first.');
+      if (partId && !await activePart(partId)) throw new Error('Tire catalog part was not found or is inactive.');
+      try {
+        await env.DB.batch([
+          env.DB.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note) VALUES (?,'recover_used_tire',?,?,?)`)
+            .bind(key,repairId,user.id,String(body.conditionNote ?? '').trim().slice(0,500)),
+          env.DB.prepare(`
+            INSERT INTO recovered_used_tires (source_operation_id,repair_id,part_id,warehouse_id,position_code,condition_note,status)
+            SELECT id,?,?,?,?,?,'available' FROM inventory_operations WHERE operation_key=?
+          `).bind(repairId,partId,warehouse.id,positionCode,String(body.conditionNote ?? '').trim().slice(0,500),key),
+          env.DB.prepare(`
+            INSERT INTO inventory_operation_commits (operation_id,applied)
+            SELECT id,CASE WHEN EXISTS(SELECT 1 FROM recovered_used_tires t WHERE t.source_operation_id=id) THEN 1 ELSE 0 END
+            FROM inventory_operations WHERE operation_key=?
+          `).bind(key),
+        ]);
+      } catch (error) {
+        if (error instanceof Error && /UNIQUE constraint|constraint failed/i.test(error.message)) throw new Error('That repair position is already recorded as a recovered tire.');
+        throw error;
+      }
       const operation = await existingOperation(key);
       return Response.json({ok:true,idempotent:false,operationId:operation?.id});
     }
@@ -162,21 +190,31 @@ export async function POST(request: Request) {
       const disposition = String(body.disposition ?? '').toLowerCase();
       if (disposition !== 'reused' && disposition !== 'scrapped') throw new Error('Tire disposition must be reused or scrapped.');
       const destinationRepairId = disposition === 'reused' ? positiveId(body.destinationRepairId,'Destination repair') : null;
-      if (destinationRepairId) {
-        const repair = await env.DB.prepare('SELECT id FROM repairs WHERE id=?').bind(destinationRepairId).first<{id:number}>();
-        if (!repair) throw new Error('Destination repair was not found.');
-      }
+      const destinationPositionCode = disposition === 'reused' ? String(body.destinationPositionCode ?? '').trim().toUpperCase().slice(0,40) : null;
+      if (disposition === 'reused' && !destinationPositionCode) throw new Error('Destination tire position is required when reusing a recovered tire.');
       const key = operationKey(request,body,`used-tire-${disposition}`);
       const prior = await existingOperation(key);
       if (prior) return Response.json({ok:true,idempotent:true,operationId:prior.id,tireId,disposition});
+      const tire = await env.DB.prepare(`SELECT id,source_operation_id,status FROM recovered_used_tires WHERE id=?`).bind(tireId).first<{id:number;source_operation_id:number;status:string}>();
+      if (!tire || tire.status !== 'available') throw new Error('Recovered tire is no longer available.');
+      if (destinationRepairId && destinationPositionCode && !await repairPosition(destinationRepairId,destinationPositionCode)) {
+        throw new Error('That tire position is not recorded on the destination repair. Save the destination tire position first.');
+      }
       await env.DB.batch([
         env.DB.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note) VALUES (?,?,?,?,?)`)
           .bind(key,`used_tire_${disposition}`,destinationRepairId,user.id,String(body.note ?? '').trim().slice(0,500)),
         env.DB.prepare(`
           UPDATE recovered_used_tires
-          SET status=?,disposition_at=CURRENT_TIMESTAMP,disposition_operation_id=(SELECT id FROM inventory_operations WHERE operation_key=?),disposition_repair_id=?
+          SET status=?,disposition_at=CURRENT_TIMESTAMP,
+              disposition_operation_id=(SELECT id FROM inventory_operations WHERE operation_key=?),
+              disposition_repair_id=?,disposition_position_code=?
           WHERE id=? AND status='available'
-        `).bind(disposition,key,destinationRepairId,tireId),
+        `).bind(disposition,key,destinationRepairId,destinationPositionCode,tireId),
+        env.DB.prepare(`
+          INSERT INTO inventory_operation_dependencies (operation_id,depends_on_operation_id,reason)
+          SELECT id,?,'Recovered tire disposition depends on the recovery operation.'
+          FROM inventory_operations WHERE operation_key=?
+        `).bind(tire.source_operation_id,key),
         env.DB.prepare(`
           INSERT INTO inventory_operation_commits (operation_id,applied)
           SELECT id,CASE WHEN (SELECT status FROM recovered_used_tires WHERE id=?)=? THEN 1 ELSE 0 END
@@ -184,7 +222,7 @@ export async function POST(request: Request) {
         `).bind(tireId,disposition,key),
       ]);
       const operation = await existingOperation(key);
-      return Response.json({ok:true,idempotent:false,operationId:operation?.id,tireId,disposition,destinationRepairId});
+      return Response.json({ok:true,idempotent:false,operationId:operation?.id,tireId,disposition,destinationRepairId,destinationPositionCode});
     }
 
     return Response.json({error:'Unknown inventory-control action.'},{status:400});
