@@ -67,6 +67,64 @@ if [ ! -s "$OUTPUT_CONFIG" ]; then
   exit 1
 fi
 
+# Migration 0094 previously failed while Wrangler parsed trigger bodies. The Worker was not
+# deployed, but defensively probe remote D1 before retrying in case any early ALTER TABLE
+# statements persisted. Rewrite only this still-unapplied migration so each missing column is
+# added exactly once and the trigger-free indexes are created idempotently.
+parts_v2_probe_sql="SELECT
+  EXISTS(SELECT 1 FROM pragma_table_info('parts') WHERE name='core_return_part_id') AS core_return_part_id,
+  EXISTS(SELECT 1 FROM pragma_table_info('parts') WHERE name='core_return_quantity') AS core_return_quantity,
+  EXISTS(SELECT 1 FROM pragma_table_info('recovered_used_tires') WHERE name='disposition_repair_id') AS disposition_repair_id,
+  EXISTS(SELECT 1 FROM pragma_table_info('recovered_used_tires') WHERE name='disposition_position_code') AS disposition_position_code;"
+
+npx wrangler d1 execute "$DB_NAME" \
+  --remote \
+  --config "$CONFIG_FILE" \
+  "${ACCOUNT_ARG[@]}" \
+  --command "$parts_v2_probe_sql" \
+  --json > /tmp/parts-v2-pre-migration.json
+
+node - /tmp/parts-v2-pre-migration.json migrations/0094_inventory_v2_operational_controls.sql <<'NODE'
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+function findRow(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findRow(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  if (Object.prototype.hasOwnProperty.call(value, 'core_return_part_id')) return value;
+  for (const child of Object.values(value)) {
+    const found = findRow(child);
+    if (found) return found;
+  }
+  return null;
+}
+const row = findRow(payload);
+if (!row) {
+  console.error('Could not determine remote Parts v2 column state before migration 0094.');
+  process.exit(1);
+}
+const statements = ['PRAGMA foreign_keys = ON;'];
+if (Number(row.core_return_part_id) !== 1) statements.push('ALTER TABLE parts ADD COLUMN core_return_part_id INTEGER;');
+if (Number(row.core_return_quantity) !== 1) statements.push('ALTER TABLE parts ADD COLUMN core_return_quantity REAL NOT NULL DEFAULT 0;');
+statements.push(`CREATE INDEX IF NOT EXISTS idx_parts_core_return_part
+ON parts(core_return_part_id)
+WHERE core_return_part_id IS NOT NULL;`);
+statements.push(`CREATE UNIQUE INDEX IF NOT EXISTS idx_core_obligation_source_operation
+ON part_core_obligations(source_operation_id);`);
+if (Number(row.disposition_repair_id) !== 1) statements.push('ALTER TABLE recovered_used_tires ADD COLUMN disposition_repair_id INTEGER;');
+if (Number(row.disposition_position_code) !== 1) statements.push('ALTER TABLE recovered_used_tires ADD COLUMN disposition_position_code TEXT;');
+statements.push(`CREATE UNIQUE INDEX IF NOT EXISTS idx_recovered_tire_source_position
+ON recovered_used_tires(repair_id, position_code)
+WHERE repair_id IS NOT NULL AND position_code IS NOT NULL;`);
+fs.writeFileSync(process.argv[3], statements.join('\n\n') + '\n');
+console.log('Prepared recovery-safe trigger-free migration 0094 from remote D1 schema state.');
+NODE
+
 # Apply schema/data migrations only after the application build is known-good.
 npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${ACCOUNT_ARG[@]}"
 
@@ -75,9 +133,7 @@ npx wrangler d1 migrations apply "$DB_NAME" --remote --config "$CONFIG_FILE" "${
 # check rather than an HTTP health endpoint so the internal diagnostics route stays
 # authenticated.
 parts_v2_schema_sql="SELECT CASE WHEN
-  EXISTS(SELECT 1 FROM sqlite_master WHERE name='trg_inventory_part_issue_open_core' AND type='trigger')
-  AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='trg_inventory_operation_undo_core_guard' AND type='trigger')
-  AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='idx_core_obligation_source_operation' AND type='index')
+  EXISTS(SELECT 1 FROM sqlite_master WHERE name='idx_core_obligation_source_operation' AND type='index')
   AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='idx_recovered_tire_source_position' AND type='index')
   AND EXISTS(SELECT 1 FROM pragma_table_info('parts') WHERE name='core_return_part_id')
   AND EXISTS(SELECT 1 FROM pragma_table_info('parts') WHERE name='core_return_quantity')

@@ -33,12 +33,24 @@ FROM vendors WHERE id=1;
 -- Configure one core per issued AGM battery.
 UPDATE parts SET core_return_part_id=2,core_return_quantity=1 WHERE id=1;
 
--- Simulate a successful part issue at the operation/ledger boundary.
+-- Mirror the shared applyPartToRepair D1 batch: operation + ledger line + optional core.
 INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note)
 VALUES ('d1-core-open','apply_part',1,1,'D1 integration issue');
 INSERT INTO inventory_operation_lines
   (operation_id,part_id,warehouse_stock_id,warehouse_id,quantity_delta,unit_cost,line_type)
 SELECT id,1,1,1,-2,125,'part_issue' FROM inventory_operations WHERE operation_key='d1-core-open';
+INSERT OR IGNORE INTO part_core_obligations
+  (source_operation_id,repair_id,issued_part_id,core_part_id,quantity,status)
+SELECT o.id,1,p.id,p.core_return_part_id,2 * p.core_return_quantity,'open'
+FROM inventory_operations o
+JOIN parts p ON p.id=1
+WHERE o.operation_key='d1-core-open'
+  AND p.core_return_part_id IS NOT NULL
+  AND p.core_return_quantity > 0
+  AND EXISTS (
+    SELECT 1 FROM inventory_operation_lines l
+    WHERE l.operation_id=o.id AND l.line_type='part_issue'
+  );
 
 INSERT INTO test_assertions
 SELECT 'core obligation opens once', CASE WHEN COUNT(*)=1 THEN 1 ELSE 0 END
@@ -47,7 +59,10 @@ INSERT INTO test_assertions
 SELECT 'core obligation quantity follows issued quantity', CASE WHEN quantity=2 AND status='open' THEN 1 ELSE 0 END
 FROM part_core_obligations WHERE source_operation_id=(SELECT id FROM inventory_operations WHERE operation_key='d1-core-open');
 
--- Undoing an untouched issue removes its open core obligation in the same D1 statement.
+-- Mirror undo batch behavior for an untouched open core.
+DELETE FROM part_core_obligations
+WHERE source_operation_id=(SELECT id FROM inventory_operations WHERE operation_key='d1-core-open')
+  AND status='open';
 UPDATE inventory_operations SET status='undone',undone_at=CURRENT_TIMESTAMP
 WHERE operation_key='d1-core-open';
 INSERT INTO test_assertions
@@ -60,6 +75,18 @@ VALUES ('d1-core-closed-source','apply_part',1,1,'Second issue');
 INSERT INTO inventory_operation_lines
   (operation_id,part_id,warehouse_stock_id,warehouse_id,quantity_delta,unit_cost,line_type)
 SELECT id,1,1,1,-1,125,'part_issue' FROM inventory_operations WHERE operation_key='d1-core-closed-source';
+INSERT OR IGNORE INTO part_core_obligations
+  (source_operation_id,repair_id,issued_part_id,core_part_id,quantity,status)
+SELECT o.id,1,p.id,p.core_return_part_id,1 * p.core_return_quantity,'open'
+FROM inventory_operations o
+JOIN parts p ON p.id=1
+WHERE o.operation_key='d1-core-closed-source'
+  AND p.core_return_part_id IS NOT NULL
+  AND p.core_return_quantity > 0
+  AND EXISTS (
+    SELECT 1 FROM inventory_operation_lines l
+    WHERE l.operation_id=o.id AND l.line_type='part_issue'
+  );
 INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note)
 VALUES ('d1-core-return','core_returned',1,1,'Core physically returned');
 UPDATE part_core_obligations
@@ -133,5 +160,4 @@ SELECT 'completed repair releases reservation', CASE WHEN
   AND (SELECT reserved_quantity FROM derived_repair_part_reservations WHERE repair_id=2 AND part_id=3)=4
 THEN 1 ELSE 0 END;
 
--- Final count lets the shell harness verify every D1 assertion executed.
 SELECT COUNT(*) AS passed_assertions FROM test_assertions;
