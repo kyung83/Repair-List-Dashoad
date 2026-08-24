@@ -24,6 +24,7 @@ node --test \
   "${project_root}/tests/outside-work-vendor-separation.test.mjs" \
   "${project_root}/tests/outside-work-ai-reading-bridge.test.mjs" \
   "${project_root}/tests/geotab-location-state.test.mjs" \
+  "${project_root}/tests/working-manager-shop-jobs.test.mjs" \
   "${project_root}/tests/tire-position-repair.test.mjs" \
   "${project_root}/tests/parts-inventory-v2-contract.test.mjs" \
   "${project_root}/tests/pm-kits-multi-fitment.test.mjs" \

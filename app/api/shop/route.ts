@@ -2,7 +2,19 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { applyPartToRepair } from '@/lib/inventory-operations';
 import { getDerivedPartAvailability, requestPartDerived } from '@/lib/derived-reservations';
+import { getRepairPartRequests } from '@/lib/parts-lifecycle';
+import { normalizeYard } from '@/lib/yards';
+import { GET as originalGET } from './original';
 import { GET as legacyGET, POST as legacyPOST } from './route-legacy';
+
+type ShopRepair = {
+  id:string;
+  equipmentId:number|null;
+  technicianId:number|null;
+  location?:string;
+  yard?:string;
+  [key:string]:unknown;
+};
 
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
@@ -32,8 +44,49 @@ async function repairJobEvent(repairId:number,userId:number,technicianId:number|
   `).bind(repairId,userId,technicianId,action,detail.slice(0,500)).run();
 }
 
+async function restoreWorkingManagerAssignments(request:Request,response:Response) {
+  const user = await getSessionUser(env.DB, request);
+  if (!response.ok || user?.role !== 'manager' || !user.technicianId) return response;
+
+  const payload = await response.json() as {
+    repairs?:ShopRepair[];
+    partRequests?:Array<{repairNumericId:number;reservedQuantity:number;[key:string]:unknown}>;
+    partsReadyCount?:number;
+    [key:string]:unknown;
+  };
+  const fullResponse = await originalGET(request);
+  if (!fullResponse.ok) return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
+  const full = await fullResponse.json() as {repairs?:ShopRepair[]};
+  const technicianId = Number(user.technicianId);
+  const assigned = (full.repairs ?? []).filter((repair)=>Number(repair.technicianId ?? 0) === technicianId);
+  const visible = payload.repairs ?? [];
+  const visibleIds = new Set(visible.map((repair)=>repair.id));
+  const missing = assigned.filter((repair)=>!visibleIds.has(repair.id));
+  if (!missing.length) return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
+
+  const equipment = await env.DB.prepare(`
+    SELECT id,COALESCE(current_yard,'') AS current_yard
+    FROM equipment
+    WHERE active = 1
+  `).all<{id:number;current_yard:string}>();
+  const yards = new Map(equipment.results.map((row)=>[Number(row.id),normalizeYard(row.current_yard)]));
+  const restored = missing.map((repair)=>({
+    ...repair,
+    yard:repair.equipmentId === null
+      ? normalizeYard(repair.location)
+      : yards.get(Number(repair.equipmentId)) ?? '',
+  }));
+  payload.repairs = [...visible,...restored];
+
+  const repairIds = new Set(payload.repairs.map((repair)=>numericRepairId(repair.id)).filter(Boolean));
+  const requests = (await getRepairPartRequests(env.DB)).filter((partRequest)=>repairIds.has(partRequest.repairNumericId));
+  payload.partRequests = requests;
+  payload.partsReadyCount = requests.filter((partRequest)=>partRequest.reservedQuantity > 0).length;
+  return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
+}
+
 export async function GET(request: Request) {
-  return legacyGET(request);
+  return restoreWorkingManagerAssignments(request,await legacyGET(request));
 }
 
 export async function POST(request: Request) {
