@@ -68,7 +68,8 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
   reports: {
     label: "Reports",
     tabs: [
-      { href: "/reports", label: "Reports", exact: true, roles: officeRoles },
+      { href: "/reports", label: "Summary", exact: true, roles: officeRoles },
+      { href: "/reports/search", label: "Search Reports", exact: true, roles: officeRoles },
       { href: "/reports/history", label: "Repair History", roles: officeRoles },
     ],
   },
