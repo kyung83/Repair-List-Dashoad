@@ -7,7 +7,6 @@ CREATE TABLE test_assertions (
 
 INSERT INTO app_users (id,username) VALUES (1,'manager');
 INSERT INTO warehouses (id,code,name,active) VALUES (1,'CLARE','Clare',1),(2,'BOYNE','Boyne',1);
-INSERT INTO vendors (id,name,active) VALUES (1,'ACME-Co.',1);
 INSERT INTO equipment (id,unit,out_of_service) VALUES (1,'100',1),(2,'200',0),(3,'300',0);
 INSERT INTO repairs (id,equipment_id,status,priority) VALUES
   (1,1,'Open','2'),
