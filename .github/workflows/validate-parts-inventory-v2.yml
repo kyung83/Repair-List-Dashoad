@@ -31,6 +31,8 @@ jobs:
         run: |
           grep -q "inventory_operation_commits" migrations/0092_parts_inventory_v2_operations.sql
           grep -q "derived_repair_part_reservations" migrations/0092_parts_inventory_v2_operations.sql
-          grep -q "applyPartToRepair" lib/inventory-operations.ts
+          grep -q "applyPartToRepair" lib/part-stock-operations.ts
+          grep -q "INSERT OR IGNORE INTO part_core_obligations" lib/part-stock-operations.ts
+          grep -q "undoInventoryOperation" lib/part-stock-operations.ts
           grep -q "getDerivedPartAvailability" lib/derived-reservations.ts
-          grep -q "undoInventoryOperation" lib/inventory-operations.ts
+          ! grep -qi "CREATE[[:space:]]\+TRIGGER" migrations/0094_inventory_v2_operational_controls.sql
