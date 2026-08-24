@@ -1,91 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {AI_READING_PROMPT,parseAiReading} from '../app/outside-work/ai-reading-parser.js';
 
-const demo=`
-**Dennis Carney "The Original On-Site" Repair Service, Inc.** — Davison, MI
-No. 26754
-
-- **Name:** Northern Logistics
-- **City/State:** Clare, MI
-- **Date:** 8/19 (year unclear)
-- **No.:** 360
-- **Ordered by:** Carrie (driver)
-- **Service:** To Flint, MI / rear warehouse
-  - Left headlight inop — replace plug (broken at bulb)
-  - Visor lights all out, power to lights, harness taped end to end, open — recommend replacement of harness
-  - Headlamp plug
-- **Service Call:** $135.00
-- **Labor:** $270.00
-- **Parts:** $15.00
-- **Tax:** $0.90
-- **Total:** $420.90
-`;
-
-test('pasted AI reading maps the handwritten demo without guessing the unclear year',()=>{
-  const parsed=parseAiReading(demo);
-  assert.match(parsed.vendor,/Dennis Carney/i);
-  assert.equal(parsed.invoiceNumber,'26754');
-  assert.equal(parsed.unit,'360');
-  assert.equal(parsed.invoiceDate,'');
-  assert.equal(parsed.totalAmount,'420.90');
-  assert.equal(parsed.costs.serviceCall,'135.00');
-  assert.equal(parsed.costs.labor,'270.00');
-  assert.equal(parsed.costs.parts,'15.00');
-  assert.equal(parsed.costs.tax,'0.90');
-  assert.match(parsed.serviceSummary,/Left headlight inop/i);
-  assert.match(parsed.serviceSummary,/Cost breakdown: Service call \$135\.00 · Labor \$270\.00 · Parts \$15\.00 · Tax \$0\.90 · Total \$420\.90/);
-  assert.ok(parsed.uncertain.some(value=>/Service date|year unclear/i.test(value)));
-});
-
-test('standard ChatGPT or Claude response fills all safe labeled fields',()=>{
-  const parsed=parseAiReading(`
-VENDOR: The Original On-Site Repair Service, Inc.
-INVOICE NUMBER: 26754
-SERVICE DATE: 2026-08-19
-UNIT: 360
-MILEAGE: 523114
-SERVICE CALL: $135.00
-LABOR: $270.00
-PARTS: $15.00
-TAX: $0.90
-TOTAL: $420.90
-WORK PERFORMED: Replace broken left headlamp plug and diagnose open visor-light harness.
-UNCERTAIN:
-`);
-  assert.equal(parsed.invoiceDate,'2026-08-19');
-  assert.equal(parsed.mileage,'523114');
-  assert.equal(parsed.unit,'360');
-  assert.equal(parsed.totalAmount,'420.90');
-  assert.match(parsed.serviceSummary,/Replace broken left headlamp plug/);
-});
-
-test('reading prompt explicitly tells the chat model not to guess',()=>{
-  assert.match(AI_READING_PROMPT,/Do not guess or invent anything/i);
-  assert.match(AI_READING_PROMPT,/UNCERTAIN/i);
-  assert.match(AI_READING_PROMPT,/WORK PERFORMED/i);
-});
-
-test('Outside Work inserts the handwriting helper directly before Review and correct',async()=>{
-  const [page,wrapper,bridge]=await Promise.all([
-    readFile(new URL('../app/outside-work/page.tsx',import.meta.url),'utf8'),
-    readFile(new URL('../app/outside-work/intake-v3.tsx',import.meta.url),'utf8'),
+async function sources(){
+  return Promise.all([
     readFile(new URL('../app/outside-work/ai-reading-bridge.tsx',import.meta.url),'utf8'),
+    readFile(new URL('../app/api/outside-work/ai-read/route.ts',import.meta.url),'utf8'),
+    readFile(new URL('../wrangler.template.jsonc',import.meta.url),'utf8'),
+    readFile(new URL('../scripts/build-verified.sh',import.meta.url),'utf8'),
   ]);
-  assert.match(page,/OutsideWorkIntakeV3/);
-  assert.match(wrapper,/^"use client";/);
-  assert.match(wrapper,/AiReadingBridge/);
-  assert.match(wrapper,/OutsideWorkIntakeV2/);
-  assert.match(bridge,/createPortal/);
-  assert.match(bridge,/outside-work-ai-inline-host/);
-  assert.match(bridge,/parent\.insertBefore\(mount,form\)/);
-  assert.match(bridge,/Handwritten invoice\? Use ChatGPT or Claude/);
-  assert.match(bridge,/COPY READING PROMPT/);
-  assert.match(bridge,/APPLY TO REVIEW FIELDS/);
-  assert.match(bridge,/input\[placeholder="Unit number"\]/);
-  assert.match(bridge,/closest\("form"\)/);
-  assert.doesNotMatch(bridge,/position:"sticky"/);
-  assert.doesNotMatch(bridge,/position:"fixed"/);
-  assert.doesNotMatch(bridge,/fetch\(/);
+}
+
+test('Outside Work automatically sends a selected invoice to the AI handwriting reader',async()=>{
+  const [bridge]=await sources();
+  assert.match(bridge,/outside-work-camera-input/);
+  assert.match(bridge,/outside-work-file-input/);
+  assert.match(bridge,/document\.addEventListener\("change",handler,true\)/);
+  assert.match(bridge,/fetch\("\/api\/outside-work\/ai-read"/);
+  assert.match(bridge,/Reading printed text and handwriting automatically/);
+  assert.match(bridge,/applyReading\(result\.reading\)/);
+  assert.match(bridge,/FILLED STEP 2/);
+});
+
+test('normal use has no copy-prompt or paste-back workflow',async()=>{
+  const [bridge]=await sources();
+  assert.doesNotMatch(bridge,/COPY READING PROMPT/);
+  assert.doesNotMatch(bridge,/APPLY TO REVIEW FIELDS/);
+  assert.doesNotMatch(bridge,/ChatGPT or Claude/);
+  assert.doesNotMatch(bridge,/navigator\.clipboard/);
+  assert.match(bridge,/Handwriting is read automatically/);
+  assert.match(bridge,/TRY AI AGAIN/);
+});
+
+test('PDF scans are rendered into page images before AI reading',async()=>{
+  const [bridge]=await sources();
+  assert.match(bridge,/MAX_AI_PAGES=3/);
+  assert.match(bridge,/pdf\.getPage\(pageNumber\)/);
+  assert.match(bridge,/page\.render\(\{canvasContext:context,viewport\}\)/);
+  assert.match(bridge,/body\.append\("image",page/);
+});
+
+test('server uses Cloudflare vision AI with fail-closed invoice extraction rules',async()=>{
+  const [,route]=await sources();
+  assert.match(route,/@cf\/google\/gemma-4-26b-a4b-it/);
+  assert.match(route,/getSessionUser\(env\.DB,request\)/);
+  assert.match(route,/manager.*admin/s);
+  assert.match(route,/type:'image_url'/);
+  assert.match(route,/Northern Logistics\/Norlow is the customer, not the outside repair vendor/);
+  assert.match(route,/serviceDate must be YYYY-MM-DD only when month, day, AND year are clearly present/);
+  assert.match(route,/Do not guess from context/);
+  assert.match(route,/Cost breakdown:/);
+});
+
+test('production Worker config requires the AI binding',async()=>{
+  const [,,wrangler,build]=await sources();
+  assert.match(wrangler,/"ai"\s*:\s*\{\s*"binding"\s*:\s*"AI"/s);
+  assert.match(build,/config\.ai\?\.binding !== "AI"/);
+  assert.match(build,/AI handwriting binding/);
+  assert.doesNotMatch(build,/intentionally no-AI/);
 });
