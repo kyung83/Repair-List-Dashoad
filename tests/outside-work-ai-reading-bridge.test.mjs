@@ -20,9 +20,21 @@ test('Outside Work captures the selected file before native input clearing, then
   assert.match(bridge,/window\.setTimeout\(\(\)=>void readInvoice\(file\),0\)/);
   assert.match(bridge,/document\.addEventListener\("change",handler,true\)/);
   assert.match(bridge,/fetch\("\/api\/outside-work\/ai-read"/);
-  assert.match(bridge,/Reading printed text and handwriting automatically/);
+  assert.match(bridge,/Handwriting is read automatically/);
   assert.match(bridge,/applyReading\(result\.reading\)/);
   assert.match(bridge,/FILLED STEP 2/);
+});
+
+test('AI result is applied only after native OCR is finished so OCR cannot overwrite handwriting fields',async()=>{
+  const [bridge]=await sources();
+  assert.match(bridge,/function nativeReaderBusy\(/);
+  assert.match(bridge,/outside-work-camera-input/);
+  assert.match(bridge,/READING DOCUMENT/);
+  assert.match(bridge,/await waitForNativeReader/);
+  const waitIndex=bridge.indexOf('await waitForNativeReader');
+  const applyIndex=bridge.indexOf('applyReading(result.reading)');
+  assert.ok(waitIndex>=0&&applyIndex>waitIndex,'AI reading must be applied after waiting for native OCR');
+  assert.match(bridge,/applied after OCR/);
 });
 
 test('automatic reader never mutates React-owned Outside Work DOM',async()=>{
