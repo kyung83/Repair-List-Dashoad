@@ -3,6 +3,7 @@ import RepairBoardSelfAssignPanel from "./self-assign-panel";
 import s from "./repair-board.module.css";
 import ModuleTabs from "../module-tabs";
 
+// Production refresh: keep expanded Repair Board assignment controls de-duplicated.
 export default function RepairBoardPage() {
   return (
     <>
