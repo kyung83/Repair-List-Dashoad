@@ -3,7 +3,7 @@ import RepairBoardSelfAssignPanel from "./self-assign-panel";
 import s from "./repair-board.module.css";
 import ModuleTabs from "../module-tabs";
 
-// Keep one working assignment control when a Repair Board unit is expanded.
+// Keep one working assignment control when a Repair Board unit is expanded. Production refresh 2026-08-26.
 export default function RepairBoardPage() {
   return (
     <>
