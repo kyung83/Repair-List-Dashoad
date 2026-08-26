@@ -1,0 +1,19 @@
+name: Temporary Cloudflare Dispatch Bridge
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.issue.title == '[deploy] Norlow Cloudflare production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch production workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run cloudflare-bootstrap.yml --ref main
