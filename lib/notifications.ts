@@ -9,7 +9,13 @@ type BreakdownEmailBinding = {
     subject: string;
     html: string;
     text: string;
-  }): Promise<unknown>;
+    headers?: Record<string, string>;
+  }): Promise<{ messageId?: string }>;
+};
+
+type BreakdownEmailThread = {
+  root_message_id: string;
+  subject: string;
 };
 
 /**
@@ -42,6 +48,12 @@ function htmlToText(html: string) {
     .trim();
 }
 
+function normalizedMessageId(value: string) {
+  const messageId = String(value || '').trim();
+  if (!messageId) return '';
+  return messageId.startsWith('<') && messageId.endsWith('>') ? messageId : `<${messageId}>`;
+}
+
 async function logNotification(row: {
   breakdownId: number | null;
   channel: 'sms' | 'email';
@@ -57,22 +69,57 @@ async function logNotification(row: {
   `).bind(row.breakdownId, row.channel, row.direction, row.recipient, row.body, row.status, row.error ?? null).run();
 }
 
+async function rememberEmailThread(breakdownId: number, recipient: string, subject: string, messageId: string) {
+  const rootMessageId = normalizedMessageId(messageId);
+  if (!rootMessageId) return;
+  await env.DB.prepare(`
+    INSERT INTO roadside_breakdown_email_threads (
+      breakdown_id, recipient, root_message_id, subject, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(breakdown_id, recipient) DO UPDATE SET
+      root_message_id = excluded.root_message_id,
+      subject = excluded.subject,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(breakdownId, recipient.toLowerCase(), rootMessageId, subject).run();
+}
+
+async function getEmailThread(breakdownId: number, recipient: string) {
+  return env.DB.prepare(`
+    SELECT root_message_id, subject
+    FROM roadside_breakdown_email_threads
+    WHERE breakdown_id = ? AND lower(recipient) = lower(?)
+  `).bind(breakdownId, recipient).first<BreakdownEmailThread>();
+}
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function sendSmsLive(toPhone: string, message: string): Promise<void> {
   // TODO when SMS is approved to go live: connect Twilio with Worker secrets.
   throw new Error('sendSmsLive is not implemented yet -- Twilio is not connected.');
 }
 
-async function sendEmailLive(toEmail: string, subject: string, html: string): Promise<void> {
+async function sendEmailLive(
+  toEmail: string,
+  subject: string,
+  html: string,
+  replyToMessageId = '',
+): Promise<string> {
   const binding = breakdownEmailBinding();
   if (!binding) throw new Error('Cloudflare Breakdown Email binding is not configured.');
-  await binding.send({
+  const rootMessageId = normalizedMessageId(replyToMessageId);
+  const result = await binding.send({
     from: BREAKDOWN_EMAIL_FROM,
     to: toEmail,
     subject,
     html,
     text: htmlToText(html),
+    ...(rootMessageId ? {
+      headers: {
+        'In-Reply-To': rootMessageId,
+        References: rootMessageId,
+      },
+    } : {}),
   });
+  return normalizedMessageId(String(result?.messageId || ''));
 }
 
 export async function sendBreakdownSms(breakdownId: number, toPhone: string, message: string) {
@@ -88,16 +135,27 @@ export async function sendBreakdownSms(breakdownId: number, toPhone: string, mes
   }
 }
 
-export async function sendBreakdownEmail(breakdownId: number, toEmail: string, subject: string, html: string) {
+export async function sendBreakdownEmail(
+  breakdownId: number,
+  toEmail: string,
+  subject: string,
+  html: string,
+  options: { rememberThread?: boolean; replyToMessageId?: string } = {},
+) {
   try {
     if (breakdownEmailBinding()) {
-      await sendEmailLive(toEmail, subject, html);
+      const messageId = await sendEmailLive(toEmail, subject, html, options.replyToMessageId);
+      if (options.rememberThread && messageId) {
+        await rememberEmailThread(breakdownId, toEmail, subject, messageId);
+      }
       await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'sent' });
-    } else {
-      await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'stubbed' });
+      return { sent: true, messageId } as const;
     }
+    await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'stubbed' });
+    return { sent: false, messageId: '' } as const;
   } catch (err) {
     await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'error', error: String((err as Error)?.message ?? err) });
+    return { sent: false, messageId: '' } as const;
   }
 }
 
@@ -114,7 +172,7 @@ async function activeGroupContacts(groupName: string) {
   return contacts.results;
 }
 
-/** Sends the new-breakdown alert to all active contacts in the configured group. */
+/** Sends the new-breakdown alert and remembers each email's root Message-ID. */
 export async function notifyBreakdownGroup(breakdownId: number, groupName: string, message: string, emailSubject: string, emailHtml: string) {
   const contacts = await activeGroupContacts(groupName);
   let contacted = 0;
@@ -131,15 +189,15 @@ export async function notifyBreakdownGroup(breakdownId: number, groupName: strin
     }
     if (email && !seenEmails.has(email)) {
       seenEmails.add(email);
-      await sendBreakdownEmail(breakdownId, email, emailSubject, emailHtml);
+      await sendBreakdownEmail(breakdownId, email, emailSubject, emailHtml, { rememberThread: true });
       contacted++;
     }
   }
   return { contacted };
 }
 
-/** Email-only follow-up used for dispatch/provider and ETA changes. */
-export async function notifyBreakdownEmailGroup(breakdownId: number, groupName: string, emailSubject: string, emailHtml: string) {
+/** Email-only follow-up that replies into the original breakdown email thread. */
+export async function notifyBreakdownEmailGroup(breakdownId: number, groupName: string, baseSubject: string, emailHtml: string) {
   const contacts = await activeGroupContacts(groupName);
   const seenEmails = new Set<string>();
   let contacted = 0;
@@ -147,7 +205,11 @@ export async function notifyBreakdownEmailGroup(breakdownId: number, groupName: 
     const email = String(contact.email || '').trim().toLowerCase();
     if (!email || seenEmails.has(email)) continue;
     seenEmails.add(email);
-    await sendBreakdownEmail(breakdownId, email, emailSubject, emailHtml);
+    const thread = await getEmailThread(breakdownId, email);
+    const subject = thread?.subject ? `Re: ${thread.subject.replace(/^Re:\s*/i, '')}` : `Re: ${baseSubject.replace(/^Re:\s*/i, '')}`;
+    await sendBreakdownEmail(breakdownId, email, subject, emailHtml, {
+      replyToMessageId: thread?.root_message_id || '',
+    });
     contacted++;
   }
   return { contacted };
