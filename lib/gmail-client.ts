@@ -14,6 +14,12 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 
+export type GmailRuntimeAttachment = {
+  filename: string;
+  contentType: string;
+  data: ArrayBuffer;
+};
+
 function utf8Base64(value: string) {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
@@ -21,6 +27,19 @@ function utf8Base64(value: string) {
     binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + 0x8000)));
   }
   return btoa(binary);
+}
+
+function arrayBufferBase64(value: ArrayBuffer) {
+  const bytes = new Uint8Array(value);
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + 0x8000)));
+  }
+  return btoa(binary);
+}
+
+function wrapBase64(value: string) {
+  return value.match(/.{1,76}/g)?.join('\r\n') || value;
 }
 
 function base64Url(value: string) {
@@ -38,6 +57,16 @@ function safeAddress(value: string) {
   return clean;
 }
 
+function safeFilename(value: string) {
+  const clean = String(value || 'photo').replace(/[\r\n"]/g, '').trim().slice(0, 180);
+  return clean || 'photo';
+}
+
+function safeContentType(value: string) {
+  const clean = String(value || '').trim().toLowerCase();
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(clean) ? clean : 'application/octet-stream';
+}
+
 function randomToken(bytesCount = 18) {
   const bytes = crypto.getRandomValues(new Uint8Array(bytesCount));
   let binary = '';
@@ -51,6 +80,22 @@ function normalizedMessageId(value: string) {
   return id.startsWith('<') && id.endsWith('>') ? id : `<${id}>`;
 }
 
+function alternativeBody(boundary: string, text: string, html: string) {
+  return [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrapBase64(utf8Base64(text)),
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrapBase64(utf8Base64(html)),
+    `--${boundary}--`,
+  ];
+}
+
 function buildMime(input: {
   from: string;
   to: string;
@@ -59,12 +104,15 @@ function buildMime(input: {
   text: string;
   messageId: string;
   replyToMessageId?: string;
+  attachments?: GmailRuntimeAttachment[];
 }) {
-  const boundary = `norlow_${randomToken(12)}`;
+  const alternativeBoundary = `norlow_alt_${randomToken(10)}`;
+  const mixedBoundary = `norlow_mixed_${randomToken(10)}`;
   const from = safeAddress(input.from);
   const to = safeAddress(input.to);
   const messageId = normalizedMessageId(input.messageId);
   const replyTo = normalizedMessageId(input.replyToMessageId || '');
+  const attachments = Array.isArray(input.attachments) ? input.attachments.filter((item) => item?.data instanceof ArrayBuffer) : [];
   const headers = [
     `From: ${from}`,
     `To: ${to}`,
@@ -73,24 +121,41 @@ function buildMime(input: {
     `Message-ID: ${messageId}`,
     ...(replyTo ? [`In-Reply-To: ${replyTo}`, `References: ${replyTo}`] : []),
     'MIME-Version: 1.0',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: ${attachments.length ? 'multipart/mixed' : 'multipart/alternative'}; boundary="${attachments.length ? mixedBoundary : alternativeBoundary}"`,
   ];
-  return [
+
+  if (!attachments.length) {
+    return [
+      ...headers,
+      '',
+      ...alternativeBody(alternativeBoundary, input.text, input.html),
+      '',
+    ].join('\r\n');
+  }
+
+  const parts = [
     ...headers,
     '',
-    `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: base64',
+    `--${mixedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
     '',
-    utf8Base64(input.text),
-    `--${boundary}`,
-    'Content-Type: text/html; charset="UTF-8"',
-    'Content-Transfer-Encoding: base64',
-    '',
-    utf8Base64(input.html),
-    `--${boundary}--`,
-    '',
-  ].join('\r\n');
+    ...alternativeBody(alternativeBoundary, input.text, input.html),
+  ];
+
+  for (const attachment of attachments) {
+    const filename = safeFilename(attachment.filename);
+    const contentType = safeContentType(attachment.contentType);
+    parts.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${contentType}; name="${filename}"`,
+      `Content-Disposition: attachment; filename="${filename}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      wrapBase64(arrayBufferBase64(attachment.data)),
+    );
+  }
+  parts.push(`--${mixedBoundary}--`, '');
+  return parts.join('\r\n');
 }
 
 async function postForm(url: string, fields: Record<string, string>) {
@@ -181,6 +246,7 @@ export async function sendGmailRuntimeEmail(input: {
   text: string;
   replyToMessageId?: string;
   gmailThreadId?: string;
+  attachments?: GmailRuntimeAttachment[];
 }) {
   const accessToken = await refreshAccessToken();
   const messageId = `<norlow-breakdown-${Date.now()}-${randomToken(10)}@norloworld.com>`;
@@ -192,6 +258,7 @@ export async function sendGmailRuntimeEmail(input: {
     text: input.text,
     messageId,
     replyToMessageId: input.replyToMessageId,
+    attachments: input.attachments,
   });
   const response = await fetch(GMAIL_SEND_URL, {
     method: 'POST',
