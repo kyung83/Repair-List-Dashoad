@@ -22,9 +22,12 @@ function safeText(value: FormDataEntryValue | null, max: number) {
  */
 export async function POST(request: Request) {
   try {
-    const requestUrl = new URL(request.url);
-    const origin = request.headers.get('origin');
-    if (origin && origin !== requestUrl.origin) {
+    // Do not compare Origin to request.url: the same first-party Worker may be
+    // reached through different proxy/browser hostnames. Modern browsers expose
+    // Sec-Fetch-Site, which lets us reject actual cross-site submissions without
+    // breaking mobile or alternate first-party entry URLs.
+    const fetchSite = String(request.headers.get('sec-fetch-site') ?? '').trim().toLowerCase();
+    if (fetchSite === 'cross-site') {
       return Response.json({ error: 'Cross-site breakdown submission rejected.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
     }
 
