@@ -1,5 +1,9 @@
 import { geotabProtectedConfig } from './geotab-protected-config';
-import { loadGeotabRuntimeCredentials } from './geotab-runtime-credentials';
+import {
+  decryptGeotabRuntimeSecret,
+  encryptGeotabRuntimeSecret,
+  loadGeotabRuntimeCredentials,
+} from './geotab-runtime-credentials';
 
 export type GeotabClientEnv = {
   DB?: D1Database;
@@ -22,6 +26,13 @@ type Login = { database: string; userName: string; password: string };
 type Auth = { endpoint: string; credentials: Credentials };
 type ProtectedConfig = { database: string; serviceUsername: string; servicePassword: string };
 type Payload<T> = { result?: T; error?: { message?: string; name?: string } };
+type SharedSessionRow = {
+  database_name: string;
+  username: string;
+  endpoint: string;
+  session_ciphertext: string;
+  session_iv: string;
+};
 
 let protectedLoginPromise: Promise<Login> | undefined;
 
@@ -176,8 +187,79 @@ async function authenticateLogin(login: Login): Promise<Auth> {
   return { endpoint: endpointFromPath(result.path), credentials: result.credentials };
 }
 
-async function authenticate(env: GeotabClientEnv): Promise<Auth> {
-  return authenticateLogin(await configuredLogin(env));
+async function loadSharedAuth(env: GeotabClientEnv, login: Login): Promise<Auth | null> {
+  if (!env.DB) return null;
+  try {
+    const row = await env.DB.prepare(`
+      SELECT database_name, username, endpoint, session_ciphertext, session_iv
+      FROM geotab_runtime_sessions
+      WHERE id = 1
+    `).first<SharedSessionRow>();
+    if (!row) return null;
+    if (String(row.database_name) !== login.database || String(row.username) !== login.userName) return null;
+    const sessionId = await decryptGeotabRuntimeSecret(row.session_ciphertext, row.session_iv, env);
+    if (!sessionId) return null;
+    return {
+      endpoint: String(row.endpoint),
+      credentials: { database: login.database, userName: login.userName, sessionId },
+    };
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'geotab_shared_session_load_failed', error: cleanApiMessage(String(error)) }));
+    return null;
+  }
+}
+
+async function saveSharedAuth(env: GeotabClientEnv, auth: Auth) {
+  if (!env.DB) return;
+  try {
+    const encrypted = await encryptGeotabRuntimeSecret(auth.credentials.sessionId, env);
+    await env.DB.prepare(`
+      INSERT INTO geotab_runtime_sessions (
+        id, database_name, username, endpoint, session_ciphertext, session_iv, authenticated_at, updated_at
+      ) VALUES (1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET
+        database_name = excluded.database_name,
+        username = excluded.username,
+        endpoint = excluded.endpoint,
+        session_ciphertext = excluded.session_ciphertext,
+        session_iv = excluded.session_iv,
+        authenticated_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(
+      auth.credentials.database,
+      auth.credentials.userName,
+      auth.endpoint,
+      encrypted.ciphertext,
+      encrypted.iv,
+    ).run();
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'geotab_shared_session_save_failed', error: cleanApiMessage(String(error)) }));
+  }
+}
+
+async function clearSharedAuth(env: GeotabClientEnv) {
+  if (!env.DB) return;
+  try {
+    await env.DB.prepare('DELETE FROM geotab_runtime_sessions WHERE id = 1').run();
+  } catch {
+    // The session cache is an optimization. A missing table during a rolling migration must not block Geotab.
+  }
+}
+
+function looksLikeAuthenticationFailure(error: unknown) {
+  const message = String(error instanceof Error ? error.message : error).toLowerCase();
+  return message.includes('invaliduser')
+    || message.includes('invalid session')
+    || message.includes('session has expired')
+    || message.includes('sessionid')
+    || message.includes('credentials')
+    || message.includes('authentication');
+}
+
+async function freshAuth(env: GeotabClientEnv, login: Login) {
+  const auth = await authenticateLogin(login);
+  await saveSharedAuth(env, auth);
+  return auth;
 }
 
 export async function testGeotabCredentials(input: GeotabCredentialInput) {
@@ -190,10 +272,20 @@ export async function testGeotabCredentials(input: GeotabCredentialInput) {
 }
 
 export async function createGeotabClient(env: GeotabClientEnv) {
-  const auth = await authenticate(env);
+  const login = await configuredLogin(env);
+  let auth = await loadSharedAuth(env, login);
+  if (!auth) auth = await freshAuth(env, login);
+
   return {
     async call<T>(method: string, params: GeotabJsonRecord) {
-      return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
+      try {
+        return await rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
+      } catch (error) {
+        if (!looksLikeAuthenticationFailure(error)) throw error;
+        await clearSharedAuth(env);
+        auth = await freshAuth(env, login);
+        return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
+      }
     },
   };
 }

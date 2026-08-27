@@ -3,12 +3,14 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const resolver = readFileSync(new URL('../lib/breakdown-geotab-snapshot.ts', import.meta.url), 'utf8');
+const geotabClient = readFileSync(new URL('../lib/geotab-client.ts', import.meta.url), 'utf8');
 const breakdowns = readFileSync(new URL('../lib/roadside-breakdowns.ts', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../app/api/breakdowns/route.ts', import.meta.url), 'utf8');
 const previewRoute = readFileSync(new URL('../app/api/breakdowns/geotab-preview/route.ts', import.meta.url), 'utf8');
 const page = readFileSync(new URL('../app/report-breakdown/page.tsx', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0098_breakdown_geotab_snapshots.sql', import.meta.url), 'utf8');
 const tireMigration = readFileSync(new URL('../migrations/0099_breakdown_tire_details.sql', import.meta.url), 'utf8');
+const sessionMigration = readFileSync(new URL('../migrations/0100_geotab_shared_sessions.sql', import.meta.url), 'utf8');
 
 const SNAPSHOT_COLUMNS = [
   'snapshot_source',
@@ -41,18 +43,39 @@ test('trailer identity resolution does not use unsupported Trailer name search',
   assert.match(resolver, /exactTrailerId\(client, env\.DB, equipment\)/);
 });
 
-test('driver sees Geotab preview and can verify or correct it before submit', () => {
-  assert.match(previewRoute, /previewBreakdownGeotab/);
-  assert.match(previewRoute, /driverName:\s*snapshot\.driverName/);
-  assert.match(previewRoute, /city:\s*snapshot\.city/);
-  assert.match(previewRoute, /state:\s*snapshot\.state/);
+test('Geotab preview resolves driver independently from fresh GPS and address', () => {
+  assert.match(previewRoute, /resolveBreakdownGeotabPreview/);
+  assert.match(previewRoute, /driverAvailable:\s*preview\.driverAvailable/);
+  assert.match(previewRoute, /locationAvailable:\s*preview\.locationAvailable/);
+  assert.match(previewRoute, /partial:\s*!\(preview\.driverAvailable && preview\.locationAvailable\)/);
+  assert.match(resolver, /if \(!driver && !address\) return null/);
+  assert.match(resolver, /driverAvailable:\s*Boolean\(driver\)/);
+  assert.match(resolver, /locationAvailable:\s*Boolean\(address\)/);
   assert.doesNotMatch(previewRoute, /headers\.get\(['"]origin['"]\)/);
-  assert.match(route, /headers\.get\(['"]sec-fetch-site['"]\)/);
-  assert.match(route, /fetchSite === ['"]cross-site['"]/);
   assert.match(page, /VERIFY DRIVER & LOCATION/);
   assert.match(page, /Geotab found/);
   assert.match(page, /Yes, correct/);
   assert.match(page, /No, correct it/);
+});
+
+test('Geotab API session is shared across Cloudflare isolates and refreshed when invalid', () => {
+  assert.match(sessionMigration, /CREATE TABLE IF NOT EXISTS geotab_runtime_sessions/);
+  assert.match(sessionMigration, /session_ciphertext TEXT NOT NULL/);
+  assert.match(geotabClient, /loadSharedAuth/);
+  assert.match(geotabClient, /saveSharedAuth/);
+  assert.match(geotabClient, /geotab_runtime_sessions/);
+  assert.match(geotabClient, /encryptGeotabRuntimeSecret/);
+  assert.match(geotabClient, /looksLikeAuthenticationFailure/);
+  assert.match(geotabClient, /clearSharedAuth/);
+  assert.match(geotabClient, /auth = await freshAuth\(env, login\)/);
+});
+
+test('driver sees Geotab preview and can verify or correct it before submit', () => {
+  assert.match(previewRoute, /driverName:\s*preview\.driverName/);
+  assert.match(previewRoute, /city:\s*preview\.city/);
+  assert.match(previewRoute, /state:\s*preview\.state/);
+  assert.match(route, /headers\.get\(['"]sec-fetch-site['"]\)/);
+  assert.match(route, /fetchSite === ['"]cross-site['"]/);
   assert.match(page, /snapshotVerification/);
   assert.match(breakdowns, /wantsCorrection/);
   assert.match(breakdowns, /geotab-corrected/);

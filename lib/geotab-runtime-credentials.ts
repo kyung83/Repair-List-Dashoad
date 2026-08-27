@@ -17,6 +17,11 @@ export type GeotabRuntimeCredentialMetadata = {
   updatedByUserId: number | null;
 };
 
+export type EncryptedGeotabRuntimeSecret = {
+  ciphertext: string;
+  iv: string;
+};
+
 type CredentialRow = {
   database_name: string;
   username: string;
@@ -50,17 +55,24 @@ async function encryptionKey(env: GeotabRuntimeSecretEnv) {
   return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
-async function encryptPassword(password: string, env: GeotabRuntimeSecretEnv) {
+export async function encryptGeotabRuntimeSecret(
+  value: string,
+  env: GeotabRuntimeSecretEnv,
+): Promise<EncryptedGeotabRuntimeSecret> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await encryptionKey(env);
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(password));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(value));
   return {
     ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
     iv: bytesToBase64(iv),
   };
 }
 
-async function decryptPassword(ciphertext: string, iv: string, env: GeotabRuntimeSecretEnv) {
+export async function decryptGeotabRuntimeSecret(
+  ciphertext: string,
+  iv: string,
+  env: GeotabRuntimeSecretEnv,
+) {
   const key = await encryptionKey(env);
   const plaintext = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: base64ToBytes(iv) },
@@ -96,7 +108,7 @@ export async function loadGeotabRuntimeCredentials(
 ): Promise<GeotabRuntimeCredentials | null> {
   const current = await row(db);
   if (!current) return null;
-  const password = await decryptPassword(current.password_ciphertext, current.password_iv, env);
+  const password = await decryptGeotabRuntimeSecret(current.password_ciphertext, current.password_iv, env);
   if (!current.database_name || !current.username || !password) throw new Error('Saved Geotab credentials are incomplete.');
   return {
     database: String(current.database_name),
@@ -115,7 +127,7 @@ export async function saveGeotabRuntimeCredentials(
   const username = credentials.username.trim();
   const password = credentials.password;
   if (!database || !username || !password) throw new Error('Database, username, and password are required.');
-  const encrypted = await encryptPassword(password, env);
+  const encrypted = await encryptGeotabRuntimeSecret(password, env);
   await db.prepare(`
     INSERT INTO geotab_runtime_credentials (
       id, credential_version, database_name, username, password_ciphertext, password_iv,
@@ -130,8 +142,12 @@ export async function saveGeotabRuntimeCredentials(
       updated_at = CURRENT_TIMESTAMP,
       updated_by_user_id = excluded.updated_by_user_id
   `).bind(database, username, encrypted.ciphertext, encrypted.iv, updatedByUserId).run();
+
+  // A credential replacement must never keep using a session created by the previous account/password.
+  await db.prepare('DELETE FROM geotab_runtime_sessions WHERE id = 1').run().catch(() => undefined);
 }
 
 export async function clearGeotabRuntimeCredentials(db: D1Database) {
   await db.prepare('DELETE FROM geotab_runtime_credentials WHERE id = 1').run();
+  await db.prepare('DELETE FROM geotab_runtime_sessions WHERE id = 1').run().catch(() => undefined);
 }
