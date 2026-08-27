@@ -6,6 +6,7 @@ const breakdownRoute = readFileSync(new URL('../app/api/breakdowns/route.ts', im
 const photoListRoute = readFileSync(new URL('../app/api/breakdowns/photos/route.ts', import.meta.url), 'utf8');
 const photoReader = readFileSync(new URL('../app/api/photos/[...key]/route.ts', import.meta.url), 'utf8');
 const breakdownPage = readFileSync(new URL('../app/breakdowns/page.tsx', import.meta.url), 'utf8');
+const publicBreakdownPage = readFileSync(new URL('../app/report-breakdown/page.tsx', import.meta.url), 'utf8');
 const gmailClient = readFileSync(new URL('../lib/gmail-client.ts', import.meta.url), 'utf8');
 const notifications = readFileSync(new URL('../lib/notifications.ts', import.meta.url), 'utf8');
 
@@ -44,4 +45,11 @@ test('uploaded roadside photos are attached to the one original Gmail breakdown 
   assert.match(gmailClient, /multipart\/mixed/);
   assert.match(gmailClient, /Content-Disposition: attachment/);
   assert.match(gmailClient, /arrayBufferBase64/);
+});
+
+test('public breakdown photo upload avoids the forced iPhone camera capture path', () => {
+  assert.match(publicBreakdownPage, /<input type="file" name="photos" accept="image\/\*" multiple/);
+  assert.doesNotMatch(publicBreakdownPage, /capture="environment"/);
+  assert.match(publicBreakdownPage, /const responseText = await response\.text\(\)/);
+  assert.match(publicBreakdownPage, /string did not match the expected pattern/i);
 });
