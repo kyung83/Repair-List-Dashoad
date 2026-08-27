@@ -16,6 +16,12 @@ function safeText(value: FormDataEntryValue | null, max: number) {
  */
 export async function POST(request: Request) {
   try {
+    const requestUrl = new URL(request.url);
+    const origin = request.headers.get('origin');
+    if (origin && origin !== requestUrl.origin) {
+      return Response.json({ error: 'Cross-site breakdown submission rejected.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
+    }
+
     const form = await request.formData();
     const unitType = safeText(form.get('unitType'), 10);
     const unitNumber = safeText(form.get('unitNumber'), 20);

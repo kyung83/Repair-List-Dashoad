@@ -29,7 +29,18 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-const PUBLIC_PATHS = new Set(['/login','/setup','/api/auth/login','/api/auth/logout','/api/auth/me','/api/auth/setup','/favicon.svg']);
+const PUBLIC_PATHS = new Set([
+  '/login',
+  '/setup',
+  '/report-breakdown',
+  '/api/equipment/search',
+  '/api/breakdowns',
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/me',
+  '/api/auth/setup',
+  '/favicon.svg',
+]);
 const ASSIGNED_MAINTENANCE_WRITE_PATHS = new Set([
   '/api/maintenance-actions',
   '/api/maintenance-checklist',
