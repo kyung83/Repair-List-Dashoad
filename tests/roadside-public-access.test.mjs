@@ -10,6 +10,7 @@ test('driver roadside page and only its public data entrypoints bypass dashboard
   assert.match(worker, /['"]\/report-breakdown['"]/);
   assert.match(worker, /['"]\/api\/equipment\/search['"]/);
   assert.match(worker, /['"]\/api\/breakdowns['"]/);
+  assert.match(worker, /['"]\/api\/breakdowns\/geotab-preview['"]/);
   assert.doesNotMatch(worker, /['"]\/breakdowns['"][\s,]*\n?[\s\S]{0,40}PUBLIC_PATHS/);
 });
 
