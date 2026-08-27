@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
-import { createBreakdown, listBreakdowns } from '@/lib/roadside-breakdowns';
+import {
+  createBreakdown,
+  listBreakdowns,
+  ManualBreakdownSnapshotRequiredError,
+} from '@/lib/roadside-breakdowns';
 
 const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 
@@ -9,10 +13,9 @@ function safeText(value: FormDataEntryValue | null, max: number) {
 }
 
 /**
- * PUBLIC endpoint -- no session required. This is what the driver-facing
- * report page posts to. Keep this route's surface area tight: only what a
- * driver on the shoulder of a highway needs to submit, nothing that reveals
- * shop-repair data.
+ * PUBLIC endpoint -- no session required. The server resolves driver/location
+ * from Geotab privately. Manual driver/city/state are accepted only as a
+ * fallback when Geotab cannot produce a trustworthy current snapshot.
  */
 export async function POST(request: Request) {
   try {
@@ -33,29 +36,45 @@ export async function POST(request: Request) {
 
     if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
     if (!unitNumber) throw new Error('Unit # is required.');
-    if (!driverName) throw new Error('Driver name is required.');
-    if (!state) throw new Error('State is required.');
-    if (!city) throw new Error('City is required.');
     if (!repairCategory) throw new Error('Repair type is required.');
     if (!description) throw new Error('Description is required.');
 
-    const photoObjectKeys: string[] = [];
+    const { breakdownId, repairId, snapshotSource } = await createBreakdown({
+      unitType: unitType as 'truck' | 'trailer',
+      unitNumber,
+      driverName,
+      state,
+      city,
+      repairCategory,
+      description,
+    });
+
+    // Upload only after the breakdown snapshot has passed validation. This
+    // prevents orphaned R2 files when the first attempt needs manual fallback.
     const files = form.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
     for (const file of files.slice(0, 6)) {
       if (!SAFE_IMAGE_TYPES.has(file.type)) continue;
-      const bytes = await file.arrayBuffer();
-      const key = `roadside-breakdowns/${new Date().toISOString().slice(0, 4)}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-140)}`;
-      await env.FILES.put(key, bytes, { httpMetadata: { contentType: file.type } });
-      photoObjectKeys.push(key);
+      try {
+        const bytes = await file.arrayBuffer();
+        const key = `roadside-breakdowns/${new Date().toISOString().slice(0, 4)}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-140)}`;
+        await env.FILES.put(key, bytes, { httpMetadata: { contentType: file.type } });
+        await env.DB.prepare(`
+          INSERT INTO attachments (repair_id, object_key, file_name, content_type)
+          VALUES (?, ?, ?, ?)
+        `).bind(repairId, key, file.name.slice(0, 255), file.type).run();
+      } catch (error) {
+        console.warn(JSON.stringify({ event: 'breakdown_photo_upload_failed', breakdownId, error: String(error) }));
+      }
     }
 
-    const { breakdownId } = await createBreakdown({
-      unitType: unitType as 'truck' | 'trailer',
-      unitNumber, driverName, state, city, repairCategory, description, photoObjectKeys,
-    });
-
-    return Response.json({ ok: true, breakdownId }, { headers: { 'cache-control': 'no-store' } });
+    return Response.json({ ok: true, breakdownId, snapshotSource }, { headers: { 'cache-control': 'no-store' } });
   } catch (err) {
+    if (err instanceof ManualBreakdownSnapshotRequiredError) {
+      return Response.json(
+        { error: err.message, manualFallbackRequired: true },
+        { status: 422, headers: { 'cache-control': 'no-store' } },
+      );
+    }
     return Response.json({ error: String((err as Error)?.message ?? err) }, { status: 400, headers: { 'cache-control': 'no-store' } });
   }
 }

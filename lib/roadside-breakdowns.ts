@@ -1,8 +1,17 @@
 import { env } from 'cloudflare:workers';
 import { notifyBreakdownGroup } from '@/lib/notifications';
+import { resolveBreakdownGeotabSnapshot } from '@/lib/breakdown-geotab-snapshot';
 
 export type BreakdownStage = 1 | 2 | 3 | 4 | 5;
 export type UnitType = 'truck' | 'trailer';
+
+export class ManualBreakdownSnapshotRequiredError extends Error {
+  readonly manualFallbackRequired = true;
+  constructor() {
+    super('Geotab could not confirm a current driver and location. Enter the driver and location manually to continue.');
+    this.name = 'ManualBreakdownSnapshotRequiredError';
+  }
+}
 
 export type BreakdownRow = {
   id: number;
@@ -25,6 +34,15 @@ export type BreakdownRow = {
   claimed_by: string | null;
   on_location_at: string | null;
   cost: number | null;
+  snapshot_source: string;
+  geotab_driver_id: string | null;
+  driver_observed_at: string | null;
+  geotab_device_id: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  gps_observed_at: string | null;
+  gps_source: string | null;
+  snapshot_captured_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,7 +54,10 @@ const LIST_SELECT = `
     b.driver_name, b.state, b.city, b.repair_category, b.repair_needed, b.description,
     b.stage, b.status, b.service_provider, b.service_provider_phone, b.eta,
     b.claimed_by_user_id, u.display_name AS claimed_by, b.on_location_at,
-    r.outside_cost AS cost, b.created_at, b.updated_at
+    r.outside_cost AS cost,
+    b.snapshot_source, b.geotab_driver_id, b.driver_observed_at, b.geotab_device_id,
+    b.latitude, b.longitude, b.gps_observed_at, b.gps_source, b.snapshot_captured_at,
+    b.created_at, b.updated_at
   FROM roadside_breakdowns b
   JOIN repairs r ON r.id = b.repair_id
   JOIN equipment e ON e.id = b.equipment_id
@@ -68,36 +89,73 @@ async function resolveUnit(unit: string, unitType: UnitType): Promise<number> {
 export type CreateBreakdownInput = {
   unitType: UnitType;
   unitNumber: string;
-  driverName: string;
-  state: string;
-  city: string;
+  driverName?: string;
+  state?: string;
+  city?: string;
   repairCategory: string;
   description: string;
   photoObjectKeys?: string[];
 };
 
 /**
- * Creates the repairs row (source='roadside-breakdown', excluded from shop
- * views) plus the roadside_breakdowns detail row, then fires the stage-1
- * group notification (stubbed unless NOTIFICATIONS_LIVE=true).
+ * Creates the repairs row plus the roadside_breakdowns detail row. The affected
+ * unit is always the selected equipment_id. For trailers, Geotab may privately
+ * resolve the currently attached tractor to obtain its driver, but that tractor
+ * is never written as another repair/breakdown unit.
  */
 export async function createBreakdown(input: CreateBreakdownInput) {
   const equipmentId = await resolveUnit(input.unitNumber, input.unitType);
+  const geotabSnapshot = await resolveBreakdownGeotabSnapshot(env, {
+    equipmentId,
+    unitType: input.unitType,
+  });
 
-  const title = `Roadside breakdown - ${input.driverName}: ${input.repairCategory}`.slice(0, 500);
+  const manualDriver = String(input.driverName ?? '').trim().slice(0, 120);
+  const manualState = String(input.state ?? '').trim().toUpperCase().slice(0, 2);
+  const manualCity = String(input.city ?? '').trim().slice(0, 120);
+  if (!geotabSnapshot && (!manualDriver || !manualState || !manualCity)) {
+    throw new ManualBreakdownSnapshotRequiredError();
+  }
+
+  const driverName = geotabSnapshot?.driverName || manualDriver;
+  const state = geotabSnapshot?.state || manualState;
+  const city = geotabSnapshot?.city || manualCity;
+  const snapshotSource = geotabSnapshot ? 'geotab' : 'manual-fallback';
+  const snapshotCapturedAt = geotabSnapshot?.capturedAt || new Date().toISOString();
+
+  const title = `Roadside breakdown - ${driverName}: ${input.repairCategory}`.slice(0, 500);
 
   const insertedRepair = await env.DB.prepare(`
     INSERT INTO repairs (equipment_id, title, description, status, priority, source, driver, location)
     VALUES (?, ?, ?, 'open', 'urgent', 'roadside-breakdown', ?, ?)
-  `).bind(equipmentId, title, input.description, input.driverName, `${input.city}, ${input.state}`).run();
+  `).bind(equipmentId, title, input.description, driverName, `${city}, ${state}`).run();
   const repairId = Number(insertedRepair.meta.last_row_id ?? 0);
   if (!repairId) throw new Error('Could not create the repair record for this breakdown.');
 
   const insertedBreakdown = await env.DB.prepare(`
-    INSERT INTO roadside_breakdowns
-      (repair_id, equipment_id, driver_name, state, city, repair_category, description, stage, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'reported')
-  `).bind(repairId, equipmentId, input.driverName, input.state, input.city, input.repairCategory, input.description).run();
+    INSERT INTO roadside_breakdowns (
+      repair_id, equipment_id, driver_name, state, city, repair_category, description, stage, status,
+      snapshot_source, geotab_driver_id, driver_observed_at, geotab_device_id,
+      latitude, longitude, gps_observed_at, gps_source, snapshot_captured_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'reported', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    repairId,
+    equipmentId,
+    driverName,
+    state,
+    city,
+    input.repairCategory,
+    input.description,
+    snapshotSource,
+    geotabSnapshot?.geotabDriverId ?? null,
+    geotabSnapshot?.driverObservedAt ?? null,
+    geotabSnapshot?.geotabDeviceId ?? null,
+    geotabSnapshot?.latitude ?? null,
+    geotabSnapshot?.longitude ?? null,
+    geotabSnapshot?.gpsObservedAt ?? null,
+    geotabSnapshot?.gpsSource ?? null,
+    snapshotCapturedAt,
+  ).run();
   const breakdownId = Number(insertedBreakdown.meta.last_row_id ?? 0);
   if (!breakdownId) throw new Error('Could not create the breakdown record.');
 
@@ -110,11 +168,11 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   }
 
   const unitLabel = input.unitType === 'truck' ? 'Truck' : 'Trailer';
-  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${input.driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${input.city}, ${input.state}\nCategory: ${input.repairCategory}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
+  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
   const emailHtml = message.replace(/\n/g, '<br>');
-  await notifyBreakdownGroup(breakdownId, 'Breakdown Alerts', message, `Breakdown Reported - ${input.driverName}`, emailHtml);
+  await notifyBreakdownGroup(breakdownId, 'Breakdown Alerts', message, `Breakdown Reported - ${driverName}`, emailHtml);
 
-  return { breakdownId, repairId };
+  return { breakdownId, repairId, snapshotSource };
 }
 
 /** First-reply-wins claim, mirroring the current Twilio SMS-reply behavior. Returns false if already claimed. */
