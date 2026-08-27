@@ -2,12 +2,13 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import {
   createBreakdown,
+  getBreakdown,
   listBreakdowns,
   ManualBreakdownSnapshotRequiredError,
   type BreakdownSnapshotVerification,
   type ReportedTireDetail,
 } from '@/lib/roadside-breakdowns';
-import { notifyBreakdownEmailGroup, type BreakdownEmailAttachment } from '@/lib/notifications';
+import { notifyBreakdownInitialEmailGroup, type BreakdownEmailAttachment } from '@/lib/notifications';
 
 const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const VALID_SNAPSHOT_VERIFICATION = new Set(['verified', 'corrected', 'unavailable']);
@@ -15,6 +16,37 @@ const BREAKDOWN_ALERT_GROUP = 'Breakdown Alerts';
 
 function safeText(value: FormDataEntryValue | null, max: number) {
   return String(value ?? '').trim().slice(0, max);
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parsedTimestamp(value: unknown) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return new Date();
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : raw;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function easternTimestamp(value: unknown) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Detroit',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(parsedTimestamp(value));
 }
 
 /**
@@ -93,24 +125,38 @@ export async function POST(request: Request) {
       }
     }
 
-    // The initial breakdown alert is created before uploads so validation cannot leave
-    // orphaned R2 objects. Once photos are safely stored, send them immediately as a
-    // reply in the same Gmail conversation so dispatch can see the actual roadside images.
-    if (emailAttachments.length) {
-      try {
-        const actual = await env.DB.prepare('SELECT driver_name FROM roadside_breakdowns WHERE id = ?')
-          .bind(breakdownId).first<{ driver_name: string }>();
-        const actualDriver = String(actual?.driver_name || driverName || unitNumber).trim();
-        await notifyBreakdownEmailGroup(
-          breakdownId,
-          BREAKDOWN_ALERT_GROUP,
-          `Breakdown - ${actualDriver}`,
-          `<strong>BREAKDOWN PHOTOS</strong><br><strong>Breakdown #:</strong> ${breakdownId}<br>${emailAttachments.length} driver-submitted photo${emailAttachments.length === 1 ? '' : 's'} attached.`,
-          emailAttachments,
-        );
-      } catch (error) {
-        console.warn(JSON.stringify({ event: 'breakdown_photo_email_failed', breakdownId, error: String(error) }));
-      }
+    // Send exactly one original breakdown email after uploads finish. When Gmail is
+    // connected, any successfully uploaded driver photos are attached to this first
+    // message, and the Message-ID/thread is saved for later provider/ETA replies.
+    try {
+      const actual = await getBreakdown(breakdownId);
+      if (!actual) throw new Error('Breakdown could not be reloaded for its email alert.');
+      const submittedAt = easternTimestamp(actual.created_at);
+      const unitLabel = actual.equipment_type === 'trailer' ? 'Trailer' : 'Truck';
+      const tireHtml = tireDetails.length
+        ? `<br><strong>Tires:</strong> ${escapeHtml(tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', '))}`
+        : '';
+      const emailHtml = [
+        '<strong>ROADSIDE BREAKDOWN</strong>',
+        '',
+        `<strong>Submitted:</strong> ${escapeHtml(submittedAt)}`,
+        `<strong>Driver:</strong> ${escapeHtml(actual.driver_name)}`,
+        `<strong>${unitLabel}:</strong> ${escapeHtml(actual.unit)}`,
+        `<strong>Location:</strong> ${escapeHtml(`${actual.city}, ${actual.state}`)}`,
+        `<strong>Category:</strong> ${escapeHtml(actual.repair_category)}${tireHtml}`,
+        `<strong>Description:</strong> ${escapeHtml(actual.description)}`,
+        `<strong>Breakdown #:</strong> ${breakdownId}`,
+      ].join('<br>');
+
+      await notifyBreakdownInitialEmailGroup(
+        breakdownId,
+        BREAKDOWN_ALERT_GROUP,
+        `Breakdown - ${actual.driver_name}`,
+        emailHtml,
+        emailAttachments,
+      );
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'breakdown_initial_email_failed', breakdownId, error: String(error) }));
     }
 
     return Response.json({ ok: true, breakdownId, snapshotSource }, { headers: { 'cache-control': 'no-store' } });
