@@ -4,9 +4,12 @@ import {
   createBreakdown,
   listBreakdowns,
   ManualBreakdownSnapshotRequiredError,
+  type BreakdownSnapshotVerification,
+  type ReportedTireDetail,
 } from '@/lib/roadside-breakdowns';
 
 const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
+const VALID_SNAPSHOT_VERIFICATION = new Set(['verified', 'corrected', 'unavailable']);
 
 function safeText(value: FormDataEntryValue | null, max: number) {
   return String(value ?? '').trim().slice(0, max);
@@ -14,8 +17,8 @@ function safeText(value: FormDataEntryValue | null, max: number) {
 
 /**
  * PUBLIC endpoint -- no session required. The server resolves driver/location
- * from Geotab privately. Manual driver/city/state are accepted only as a
- * fallback when Geotab cannot produce a trustworthy current snapshot.
+ * from Geotab privately. The driver can verify the preview or correct it before
+ * submit; the Geotab snapshot remains the evidence source when available.
  */
 export async function POST(request: Request) {
   try {
@@ -33,11 +36,25 @@ export async function POST(request: Request) {
     const city = safeText(form.get('city'), 120);
     const repairCategory = safeText(form.get('repairCategory'), 60);
     const description = safeText(form.get('description'), 2000);
+    const rawSnapshotVerification = safeText(form.get('snapshotVerification'), 20).toLowerCase();
+    const snapshotVerification = VALID_SNAPSHOT_VERIFICATION.has(rawSnapshotVerification)
+      ? rawSnapshotVerification as BreakdownSnapshotVerification
+      : undefined;
 
     if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
     if (!unitNumber) throw new Error('Unit # is required.');
     if (!repairCategory) throw new Error('Repair type is required.');
     if (!description) throw new Error('Description is required.');
+
+    const tireDetails: ReportedTireDetail[] = [];
+    if (repairCategory.toUpperCase() === 'TIRES') {
+      for (const entry of form.getAll('tirePosition')) {
+        const positionCode = safeText(entry, 10).toUpperCase();
+        if (!positionCode) continue;
+        const tireSize = safeText(form.get(`tireSize_${positionCode}`), 40);
+        tireDetails.push({ positionCode, tireSize });
+      }
+    }
 
     const { breakdownId, repairId, snapshotSource } = await createBreakdown({
       unitType: unitType as 'truck' | 'trailer',
@@ -45,12 +62,14 @@ export async function POST(request: Request) {
       driverName,
       state,
       city,
+      snapshotVerification,
       repairCategory,
       description,
+      tireDetails,
     });
 
-    // Upload only after the breakdown snapshot has passed validation. This
-    // prevents orphaned R2 files when the first attempt needs manual fallback.
+    // Upload only after the breakdown snapshot and tire details have passed validation.
+    // This prevents orphaned R2 files when the first attempt needs correction/fallback.
     const files = form.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
     for (const file of files.slice(0, 6)) {
       if (!SAFE_IMAGE_TYPES.has(file.type)) continue;

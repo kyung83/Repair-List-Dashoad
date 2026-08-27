@@ -5,8 +5,10 @@ import test from 'node:test';
 const resolver = readFileSync(new URL('../lib/breakdown-geotab-snapshot.ts', import.meta.url), 'utf8');
 const breakdowns = readFileSync(new URL('../lib/roadside-breakdowns.ts', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../app/api/breakdowns/route.ts', import.meta.url), 'utf8');
+const previewRoute = readFileSync(new URL('../app/api/breakdowns/geotab-preview/route.ts', import.meta.url), 'utf8');
 const page = readFileSync(new URL('../app/report-breakdown/page.tsx', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0098_breakdown_geotab_snapshots.sql', import.meta.url), 'utf8');
+const tireMigration = readFileSync(new URL('../migrations/0099_breakdown_tire_details.sql', import.meta.url), 'utf8');
 
 const SNAPSHOT_COLUMNS = [
   'snapshot_source',
@@ -30,15 +32,27 @@ test('trailer lookup uses Geotab association privately without creating a second
   assert.match(breakdowns, /INSERT INTO roadside_breakdowns[\s\S]*repair_id, equipment_id/);
 });
 
+test('driver sees Geotab preview and can verify or correct it before submit', () => {
+  assert.match(previewRoute, /previewBreakdownGeotab/);
+  assert.match(previewRoute, /driverName:\s*snapshot\.driverName/);
+  assert.match(previewRoute, /city:\s*snapshot\.city/);
+  assert.match(previewRoute, /state:\s*snapshot\.state/);
+  assert.match(page, /VERIFY DRIVER & LOCATION/);
+  assert.match(page, /Geotab found/);
+  assert.match(page, /Yes, correct/);
+  assert.match(page, /No, correct it/);
+  assert.match(page, /snapshotVerification/);
+  assert.match(breakdowns, /wantsCorrection/);
+  assert.match(breakdowns, /geotab-corrected/);
+});
+
 test('breakdown create snapshots Geotab evidence and falls back to manual fields only when needed', () => {
   assert.match(breakdowns, /resolveBreakdownGeotabSnapshot/);
-  assert.match(breakdowns, /snapshotSource = geotabSnapshot \? ['"]geotab['"] : ['"]manual-fallback['"]/);
+  assert.match(breakdowns, /manual-fallback/);
   assert.match(route, /ManualBreakdownSnapshotRequiredError/);
   assert.match(route, /manualFallbackRequired:\s*true/);
   assert.match(route, /status:\s*422/);
-  assert.match(page, /manualFallback &&/);
-  assert.match(page, /Driver and location will be captured from Geotab/);
-  assert.doesNotMatch(page, /name="driverName" required[\s\S]{0,200}manualFallback \?/);
+  assert.match(page, /manualFallback && selectedUnit/);
 });
 
 test('migration 0098 contains every breakdown Geotab snapshot field', () => {
@@ -48,7 +62,24 @@ test('migration 0098 contains every breakdown Geotab snapshot field', () => {
   }
 });
 
-test('photo uploads occur only after snapshot validation and breakdown creation', () => {
+test('tire breakdown reporting stores structured positions and tire sizes', () => {
+  assert.match(page, /Tire position and size/);
+  assert.match(page, /name="tirePosition"/);
+  assert.match(page, /tireSize_\$\{position\.code\}/);
+  assert.match(page, /A1L/);
+  assert.match(page, /A3RO/);
+  assert.match(page, /A2RO/);
+  assert.match(route, /form\.getAll\(['"]tirePosition['"]\)/);
+  assert.match(breakdowns, /normalizeTirePositions/);
+  assert.match(breakdowns, /INSERT INTO roadside_breakdown_tires/);
+  assert.match(breakdowns, /Tires:\s*\$\{tireDetails/);
+  assert.match(tireMigration, /CREATE TABLE IF NOT EXISTS roadside_breakdown_tires/);
+  assert.match(tireMigration, /position_code TEXT NOT NULL/);
+  assert.match(tireMigration, /tire_size TEXT NOT NULL/);
+  assert.match(tireMigration, /UNIQUE \(breakdown_id, position_code\)/);
+});
+
+test('photo uploads occur only after snapshot and tire validation plus breakdown creation', () => {
   const createIndex = route.indexOf('await createBreakdown');
   const uploadIndex = route.indexOf('await env.FILES.put');
   assert.ok(createIndex >= 0 && uploadIndex > createIndex);
