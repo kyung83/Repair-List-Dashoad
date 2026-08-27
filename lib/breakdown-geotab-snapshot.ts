@@ -55,6 +55,17 @@ export type BreakdownGeotabSnapshot = {
   capturedAt: string;
 };
 
+export type BreakdownGeotabPreview = {
+  driverAvailable: boolean;
+  locationAvailable: boolean;
+  driverName: string;
+  city: string;
+  state: string;
+  observedAt: string;
+  driverObservedAt: string;
+  gpsObservedAt: string;
+};
+
 const MAX_GPS_AGE_MS = 30 * 60 * 1000;
 const TRAILER_LIST_LIMIT = 50_000;
 const STATE_CODES = new Set([
@@ -249,6 +260,80 @@ async function reverseGeocode(
   const city = geotabText(geotabGet(rows[0], 'city', 'City', 'otherCity', 'OtherCity')).trim();
   const state = stateFromAddress(rows[0]);
   return city && state ? { city, state } : null;
+}
+
+/**
+ * Lightweight driver-facing preview. Driver and location are intentionally
+ * independent here: a stale GPS/address lookup must not hide a valid Geotab driver,
+ * and a trailer with fresh cached GPS can still show location even if no tractor is attached.
+ */
+export async function resolveBreakdownGeotabPreview(
+  env: Env,
+  input: { equipmentId: number; unitType: BreakdownUnitType },
+): Promise<BreakdownGeotabPreview | null> {
+  try {
+    const equipment = await resolveEquipment(env.DB, input.equipmentId, input.unitType);
+    if (!equipment) return null;
+    const client = await createGeotabClient(env);
+
+    const cached = await selectedUnitCachedPosition(env.DB, equipment.id);
+
+    let driverDeviceId = '';
+    try {
+      if (input.unitType === 'truck') {
+        driverDeviceId = await currentDeviceAssignment(env.DB, equipment.id);
+      } else {
+        const trailerId = await exactTrailerId(client, env.DB, equipment);
+        driverDeviceId = await privatelyResolveTrailerTractorDevice(client, trailerId);
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'breakdown_geotab_preview_driver_device_unavailable', unitType: input.unitType, error: String(error) }));
+    }
+
+    let status: GeotabJsonRecord | null = null;
+    if (driverDeviceId) {
+      try {
+        status = await deviceStatus(client, driverDeviceId);
+      } catch (error) {
+        console.warn(JSON.stringify({ event: 'breakdown_geotab_preview_status_unavailable', unitType: input.unitType, error: String(error) }));
+      }
+    }
+
+    let driver: DriverSnapshot | null = null;
+    if (status && driverDeviceId) {
+      try {
+        driver = await driverFromStatus(client, status, driverDeviceId);
+      } catch (error) {
+        console.warn(JSON.stringify({ event: 'breakdown_geotab_preview_driver_unavailable', unitType: input.unitType, error: String(error) }));
+      }
+    }
+
+    const statusPosition = freshPosition(status ? deviceStatusPosition(status) : null);
+    const position = cached || statusPosition;
+    let address: { city: string; state: string } | null = null;
+    if (position) {
+      try {
+        address = await reverseGeocode(client, position);
+      } catch (error) {
+        console.warn(JSON.stringify({ event: 'breakdown_geotab_preview_address_unavailable', unitType: input.unitType, error: String(error) }));
+      }
+    }
+
+    if (!driver && !address) return null;
+    return {
+      driverAvailable: Boolean(driver),
+      locationAvailable: Boolean(address),
+      driverName: driver?.name || '',
+      city: address?.city || '',
+      state: address?.state || '',
+      observedAt: position?.observedAt || driver?.observedAt || '',
+      driverObservedAt: driver?.observedAt || '',
+      gpsObservedAt: position?.observedAt || '',
+    };
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'breakdown_geotab_preview_unavailable', error: String(error) }));
+    return null;
+  }
 }
 
 /**
