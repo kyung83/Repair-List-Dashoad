@@ -22,7 +22,7 @@ export default function AppNav(){
   const pathname=usePathname();
   const [user,setUser]=useState<User|null>(null);
   const [health,setHealth]=useState<GeotabHealth|null>(null);
-  const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print")||pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print");
+  const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/report-breakdown")||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print")||pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print");
 
   useEffect(()=>{
     if(hidden)return;
