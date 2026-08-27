@@ -232,26 +232,54 @@ async function activeGroupContacts(groupName: string) {
   return contacts.results;
 }
 
-/** Sends the new-breakdown alert and remembers each email's root Message-ID. */
-export async function notifyBreakdownGroup(breakdownId: number, groupName: string, message: string, emailSubject: string, emailHtml: string) {
+/**
+ * Sends only the SMS side of a new-breakdown alert. The initial email is deliberately
+ * sent by the POST route after any driver photos have finished uploading, so the first
+ * email can contain those photos instead of creating a second email.
+ */
+export async function notifyBreakdownGroup(
+  breakdownId: number,
+  groupName: string,
+  message: string,
+  _emailSubject: string,
+  _emailHtml: string,
+) {
   const contacts = await activeGroupContacts(groupName);
   let contacted = 0;
   const seenPhones = new Set<string>();
-  const seenEmails = new Set<string>();
 
   for (const contact of contacts) {
     const phone = String(contact.phone || '').trim();
-    const email = String(contact.email || '').trim().toLowerCase();
     if (phone && !seenPhones.has(phone)) {
       seenPhones.add(phone);
       await sendBreakdownSms(breakdownId, phone, message);
       contacted++;
     }
-    if (email && !seenEmails.has(email)) {
-      seenEmails.add(email);
-      await sendBreakdownEmail(breakdownId, email, emailSubject, emailHtml, { rememberThread: true });
-      contacted++;
-    }
+  }
+  return { contacted };
+}
+
+/** Sends the one original breakdown email after uploads, and remembers its Gmail thread. */
+export async function notifyBreakdownInitialEmailGroup(
+  breakdownId: number,
+  groupName: string,
+  emailSubject: string,
+  emailHtml: string,
+  attachments: BreakdownEmailAttachment[] = [],
+) {
+  const contacts = await activeGroupContacts(groupName);
+  let contacted = 0;
+  const seenEmails = new Set<string>();
+
+  for (const contact of contacts) {
+    const email = String(contact.email || '').trim().toLowerCase();
+    if (!email || seenEmails.has(email)) continue;
+    seenEmails.add(email);
+    await sendBreakdownEmail(breakdownId, email, emailSubject, emailHtml, {
+      rememberThread: true,
+      attachments,
+    });
+    contacted++;
   }
   return { contacted };
 }
