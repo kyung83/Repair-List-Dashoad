@@ -32,11 +32,23 @@ test('trailer lookup uses Geotab association privately without creating a second
   assert.match(breakdowns, /INSERT INTO roadside_breakdowns[\s\S]*repair_id, equipment_id/);
 });
 
+test('trailer identity resolution does not use unsupported Trailer name search', () => {
+  assert.match(resolver, /typeName:\s*['"]Trailer['"]/);
+  assert.match(resolver, /resultsLimit:\s*TRAILER_LIST_LIMIT/);
+  assert.match(resolver, /function trailerUnitKey/);
+  assert.doesNotMatch(resolver, /typeName:\s*['"]Trailer['"][\s\S]{0,160}search:\s*\{\s*name:/);
+  assert.match(resolver, /SET geotab_trailer_id = \?/);
+  assert.match(resolver, /exactTrailerId\(client, env\.DB, equipment\)/);
+});
+
 test('driver sees Geotab preview and can verify or correct it before submit', () => {
   assert.match(previewRoute, /previewBreakdownGeotab/);
   assert.match(previewRoute, /driverName:\s*snapshot\.driverName/);
   assert.match(previewRoute, /city:\s*snapshot\.city/);
   assert.match(previewRoute, /state:\s*snapshot\.state/);
+  assert.doesNotMatch(previewRoute, /headers\.get\(['"]origin['"]\)/);
+  assert.match(route, /headers\.get\(['"]sec-fetch-site['"]\)/);
+  assert.match(route, /fetchSite === ['"]cross-site['"]/);
   assert.match(page, /VERIFY DRIVER & LOCATION/);
   assert.match(page, /Geotab found/);
   assert.match(page, /Yes, correct/);
