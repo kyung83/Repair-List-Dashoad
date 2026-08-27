@@ -1,24 +1,57 @@
 import { env } from 'cloudflare:workers';
 
-/**
- * Notification sending is OFF by default. Every call still validates its
- * inputs and writes a row to notification_log (status='stubbed'), so the
- * whole breakdown flow -- group membership, message content, who would have
- * been texted -- can be tested end to end before Twilio/email are live.
- *
- * To go live later:
- *   1. Set the Worker secret/var NOTIFICATIONS_LIVE = "true"
- *   2. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_MESSAGING_SERVICE_SID
- *      as Worker secrets (wrangler secret put ...) -- never commit these.
- *   3. Set an email provider key (e.g. RESEND_API_KEY) as a Worker secret.
- *   4. Implement sendSmsLive() / sendEmailLive() below -- both are stubbed
- *      with a clear TODO and throw if called while NOTIFICATIONS_LIVE=true
- *      but the provider isn't actually wired up yet, so this can't silently
- *      no-op once you flip the flag.
- */
+const BREAKDOWN_EMAIL_FROM = 'norlow-breakdowns@norloworld.com';
 
-function notificationsLive() {
+type BreakdownEmailBinding = {
+  send(message: {
+    from: string;
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    headers?: Record<string, string>;
+  }): Promise<{ messageId?: string }>;
+};
+
+type BreakdownEmailThread = {
+  root_message_id: string;
+  subject: string;
+};
+
+/**
+ * SMS remains opt-in until Twilio is deliberately connected. Breakdown email
+ * is independent: when the Cloudflare Email Service binding exists, email is
+ * live without enabling SMS.
+ */
+function smsNotificationsLive() {
   return String((env as any).NOTIFICATIONS_LIVE ?? '').toLowerCase() === 'true';
+}
+
+function breakdownEmailBinding(): BreakdownEmailBinding | null {
+  const binding = (env as any).BREAKDOWN_EMAIL as BreakdownEmailBinding | undefined;
+  return binding && typeof binding.send === 'function' ? binding : null;
+}
+
+function htmlToText(html: string) {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function normalizedMessageId(value: string) {
+  const messageId = String(value || '').trim();
+  if (!messageId) return '';
+  return messageId.startsWith('<') && messageId.endsWith('>') ? messageId : `<${messageId}>`;
 }
 
 async function logNotification(row: {
@@ -36,32 +69,62 @@ async function logNotification(row: {
   `).bind(row.breakdownId, row.channel, row.direction, row.recipient, row.body, row.status, row.error ?? null).run();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function sendSmsLive(toPhone: string, message: string): Promise<void> {
-  // TODO when ready to go live:
-  //   const sid = env.TWILIO_ACCOUNT_SID; const token = env.TWILIO_AUTH_TOKEN;
-  //   const messagingServiceSid = env.TWILIO_MESSAGING_SERVICE_SID;
-  //   await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-  //     method: 'POST',
-  //     headers: {
-  //       'Content-Type': 'application/x-www-form-urlencoded',
-  //       Authorization: 'Basic ' + btoa(`${sid}:${token}`),
-  //     },
-  //     body: new URLSearchParams({ To: `+${toPhone}`, Body: message, MessagingServiceSid: messagingServiceSid }),
-  //   });
-  throw new Error('sendSmsLive is not implemented yet -- Twilio is not connected. Set NOTIFICATIONS_LIVE=false until this is built.');
+async function rememberEmailThread(breakdownId: number, recipient: string, subject: string, messageId: string) {
+  const rootMessageId = normalizedMessageId(messageId);
+  if (!rootMessageId) return;
+  await env.DB.prepare(`
+    INSERT INTO roadside_breakdown_email_threads (
+      breakdown_id, recipient, root_message_id, subject, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(breakdown_id, recipient) DO UPDATE SET
+      root_message_id = excluded.root_message_id,
+      subject = excluded.subject,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(breakdownId, recipient.toLowerCase(), rootMessageId, subject).run();
+}
+
+async function getEmailThread(breakdownId: number, recipient: string) {
+  return env.DB.prepare(`
+    SELECT root_message_id, subject
+    FROM roadside_breakdown_email_threads
+    WHERE breakdown_id = ? AND lower(recipient) = lower(?)
+  `).bind(breakdownId, recipient).first<BreakdownEmailThread>();
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function sendEmailLive(toEmail: string, subject: string, html: string): Promise<void> {
-  // TODO when ready to go live: call your email provider's API here
-  // (Resend/Postmark/SendGrid), with the API key as a Worker secret.
-  throw new Error('sendEmailLive is not implemented yet -- email sending is not connected. Set NOTIFICATIONS_LIVE=false until this is built.');
+async function sendSmsLive(toPhone: string, message: string): Promise<void> {
+  // TODO when SMS is approved to go live: connect Twilio with Worker secrets.
+  throw new Error('sendSmsLive is not implemented yet -- Twilio is not connected.');
+}
+
+async function sendEmailLive(
+  toEmail: string,
+  subject: string,
+  html: string,
+  replyToMessageId = '',
+): Promise<string> {
+  const binding = breakdownEmailBinding();
+  if (!binding) throw new Error('Cloudflare Breakdown Email binding is not configured.');
+  const rootMessageId = normalizedMessageId(replyToMessageId);
+  const result = await binding.send({
+    from: BREAKDOWN_EMAIL_FROM,
+    to: toEmail,
+    subject,
+    html,
+    text: htmlToText(html),
+    ...(rootMessageId ? {
+      headers: {
+        'In-Reply-To': rootMessageId,
+        References: rootMessageId,
+      },
+    } : {}),
+  });
+  return normalizedMessageId(String(result?.messageId || ''));
 }
 
 export async function sendBreakdownSms(breakdownId: number, toPhone: string, message: string) {
   try {
-    if (notificationsLive()) {
+    if (smsNotificationsLive()) {
       await sendSmsLive(toPhone, message);
       await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'sent' });
     } else {
@@ -72,16 +135,27 @@ export async function sendBreakdownSms(breakdownId: number, toPhone: string, mes
   }
 }
 
-export async function sendBreakdownEmail(breakdownId: number, toEmail: string, subject: string, html: string) {
+export async function sendBreakdownEmail(
+  breakdownId: number,
+  toEmail: string,
+  subject: string,
+  html: string,
+  options: { rememberThread?: boolean; replyToMessageId?: string } = {},
+) {
   try {
-    if (notificationsLive()) {
-      await sendEmailLive(toEmail, subject, html);
+    if (breakdownEmailBinding()) {
+      const messageId = await sendEmailLive(toEmail, subject, html, options.replyToMessageId);
+      if (options.rememberThread && messageId) {
+        await rememberEmailThread(breakdownId, toEmail, subject, messageId);
+      }
       await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'sent' });
-    } else {
-      await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'stubbed' });
+      return { sent: true, messageId } as const;
     }
+    await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'stubbed' });
+    return { sent: false, messageId: '' } as const;
   } catch (err) {
     await logNotification({ breakdownId, channel: 'email', direction: 'outbound', recipient: toEmail, body: html, status: 'error', error: String((err as Error)?.message ?? err) });
+    return { sent: false, messageId: '' } as const;
   }
 }
 
@@ -89,19 +163,54 @@ export async function logInboundSms(breakdownId: number | null, fromPhone: strin
   await logNotification({ breakdownId, channel: 'sms', direction: 'inbound', recipient: fromPhone, body, status: 'sent' });
 }
 
-/** Sends (or, while stubbed, logs) the stage-1 "new breakdown reported" blast to an active notification group. */
-export async function notifyBreakdownGroup(breakdownId: number, groupName: string, message: string, emailSubject: string, emailHtml: string) {
+async function activeGroupContacts(groupName: string) {
   const group = await env.DB.prepare(`SELECT id FROM notification_groups WHERE name = ? AND active = 1`).bind(groupName).first<{ id: number }>();
-  if (!group) return { contacted: 0 };
-
+  if (!group) return [] as { phone: string | null; email: string | null }[];
   const contacts = await env.DB.prepare(`
     SELECT phone, email FROM notification_group_contacts WHERE group_id = ? AND active = 1
   `).bind(group.id).all<{ phone: string | null; email: string | null }>();
+  return contacts.results;
+}
 
+/** Sends the new-breakdown alert and remembers each email's root Message-ID. */
+export async function notifyBreakdownGroup(breakdownId: number, groupName: string, message: string, emailSubject: string, emailHtml: string) {
+  const contacts = await activeGroupContacts(groupName);
   let contacted = 0;
-  for (const contact of contacts.results) {
-    if (contact.phone) { await sendBreakdownSms(breakdownId, contact.phone, message); contacted++; }
-    if (contact.email) { await sendBreakdownEmail(breakdownId, contact.email, emailSubject, emailHtml); contacted++; }
+  const seenPhones = new Set<string>();
+  const seenEmails = new Set<string>();
+
+  for (const contact of contacts) {
+    const phone = String(contact.phone || '').trim();
+    const email = String(contact.email || '').trim().toLowerCase();
+    if (phone && !seenPhones.has(phone)) {
+      seenPhones.add(phone);
+      await sendBreakdownSms(breakdownId, phone, message);
+      contacted++;
+    }
+    if (email && !seenEmails.has(email)) {
+      seenEmails.add(email);
+      await sendBreakdownEmail(breakdownId, email, emailSubject, emailHtml, { rememberThread: true });
+      contacted++;
+    }
+  }
+  return { contacted };
+}
+
+/** Email-only follow-up that replies into the original breakdown email thread. */
+export async function notifyBreakdownEmailGroup(breakdownId: number, groupName: string, baseSubject: string, emailHtml: string) {
+  const contacts = await activeGroupContacts(groupName);
+  const seenEmails = new Set<string>();
+  let contacted = 0;
+  for (const contact of contacts) {
+    const email = String(contact.email || '').trim().toLowerCase();
+    if (!email || seenEmails.has(email)) continue;
+    seenEmails.add(email);
+    const thread = await getEmailThread(breakdownId, email);
+    const subject = thread?.subject ? `Re: ${thread.subject.replace(/^Re:\s*/i, '')}` : `Re: ${baseSubject.replace(/^Re:\s*/i, '')}`;
+    await sendBreakdownEmail(breakdownId, email, subject, emailHtml, {
+      replyToMessageId: thread?.root_message_id || '',
+    });
+    contacted++;
   }
   return { contacted };
 }

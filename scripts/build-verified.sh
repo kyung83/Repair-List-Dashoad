@@ -66,11 +66,13 @@ const compatibilityFlags = Array.isArray(config.compatibility_flags)
   ? config.compatibility_flags.map(String)
   : [];
 const crons = Array.isArray(config.triggers?.crons) ? config.triggers.crons.map(String) : [];
+const emailBindings = Array.isArray(config.send_email) ? config.send_email : [];
 
 console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missing>"}`);
 console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
 console.log(`Generated Worker main=${config.main}`);
 console.log(`Generated Worker AI binding=${config.ai?.binding || "<none>"}`);
+console.log(`Generated Worker email bindings=${emailBindings.map((entry) => String(entry?.name || "")).filter(Boolean).join(",") || "<none>"}`);
 console.log(`Generated Worker crons=${crons.join(",") || "<none>"}`);
 
 if (!compatibilityDate) {
@@ -82,9 +84,12 @@ if (!compatibilityFlags.includes("nodejs_compat")) {
 if (config.ai?.binding !== "AI") {
   throw new Error("Outside Work automatic handwriting reader requires Cloudflare Workers AI binding `AI`.");
 }
+if (!emailBindings.some((entry) => String(entry?.name || '') === 'BREAKDOWN_EMAIL')) {
+  throw new Error("Roadside breakdown email alerts require Cloudflare Email Service binding `BREAKDOWN_EMAIL`.");
+}
 if (!crons.includes("* * * * *")) {
   throw new Error("Geotab LogRecord feed must run every minute.");
 }
 NODE
 
-echo "Validated Cloudflare Worker bundle, AI handwriting binding, and minute Geotab feed schedule."
+echo "Validated Cloudflare Worker bundle, AI handwriting binding, breakdown email binding, and minute Geotab feed schedule."

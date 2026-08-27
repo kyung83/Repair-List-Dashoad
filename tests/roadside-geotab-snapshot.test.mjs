@@ -5,12 +5,16 @@ import test from 'node:test';
 const resolver = readFileSync(new URL('../lib/breakdown-geotab-snapshot.ts', import.meta.url), 'utf8');
 const geotabClient = readFileSync(new URL('../lib/geotab-client.ts', import.meta.url), 'utf8');
 const breakdowns = readFileSync(new URL('../lib/roadside-breakdowns.ts', import.meta.url), 'utf8');
+const notifications = readFileSync(new URL('../lib/notifications.ts', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../app/api/breakdowns/route.ts', import.meta.url), 'utf8');
 const previewRoute = readFileSync(new URL('../app/api/breakdowns/geotab-preview/route.ts', import.meta.url), 'utf8');
 const page = readFileSync(new URL('../app/report-breakdown/page.tsx', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0098_breakdown_geotab_snapshots.sql', import.meta.url), 'utf8');
 const tireMigration = readFileSync(new URL('../migrations/0099_breakdown_tire_details.sql', import.meta.url), 'utf8');
 const sessionMigration = readFileSync(new URL('../migrations/0100_geotab_shared_sessions.sql', import.meta.url), 'utf8');
+const recipientMigration = readFileSync(new URL('../migrations/0101_breakdown_email_recipient.sql', import.meta.url), 'utf8');
+const threadMigration = readFileSync(new URL('../migrations/0102_breakdown_email_threads.sql', import.meta.url), 'utf8');
+const wranglerTemplate = readFileSync(new URL('../wrangler.template.jsonc', import.meta.url), 'utf8');
 
 const SNAPSHOT_COLUMNS = [
   'snapshot_source',
@@ -112,6 +116,24 @@ test('tire breakdown reporting stores structured positions and tire sizes', () =
   assert.match(tireMigration, /position_code TEXT NOT NULL/);
   assert.match(tireMigration, /tire_size TEXT NOT NULL/);
   assert.match(tireMigration, /UNIQUE \(breakdown_id, position_code\)/);
+});
+
+test('breakdown emails go to the roadside mailbox with timestamps and threaded provider ETA replies', () => {
+  assert.match(recipientMigration, /breakdown@norloworld\.com/i);
+  assert.match(wranglerTemplate, /"send_email"/);
+  assert.match(wranglerTemplate, /"name":\s*"BREAKDOWN_EMAIL"/);
+  assert.match(notifications, /BREAKDOWN_EMAIL_FROM/);
+  assert.match(notifications, /messageId/);
+  assert.match(notifications, /'In-Reply-To':\s*rootMessageId/);
+  assert.match(notifications, /References:\s*rootMessageId/);
+  assert.match(notifications, /roadside_breakdown_email_threads/);
+  assert.match(threadMigration, /CREATE TABLE IF NOT EXISTS roadside_breakdown_email_threads/);
+  assert.match(threadMigration, /PRIMARY KEY \(breakdown_id, recipient\)/);
+  assert.match(breakdowns, /Submitted:/);
+  assert.match(breakdowns, /`Breakdown - \$\{driverName\}`/);
+  assert.match(breakdowns, /Original Submitted:/);
+  assert.match(breakdowns, /notifyBreakdownEmailGroup/);
+  assert.match(breakdowns, /\(providerChanged \|\| etaChanged\) && provider && eta/);
 });
 
 test('photo uploads occur only after snapshot and tire validation plus breakdown creation', () => {
