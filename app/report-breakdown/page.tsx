@@ -5,6 +5,20 @@ import { useEffect, useRef, useState } from 'react';
 type UnitType = '' | 'truck' | 'trailer';
 type UnitResult = { unit: string; equipmentType: string };
 type SubmitResult = { ok: true; breakdownId: number } | { error: string } | null;
+type SnapshotChoice = '' | 'verified' | 'corrected' | 'unavailable';
+type GeotabPreview = {
+  status: 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
+  driverName?: string;
+  city?: string;
+  state?: string;
+  observedAt?: string;
+  error?: string;
+};
+
+type TireAxle = {
+  label: string;
+  positions: { code: string; label: string }[];
+};
 
 const REPAIR_CATEGORIES = [
   'AIR/CHAMBERS/GLADHANDS',
@@ -15,8 +29,19 @@ const REPAIR_CATEGORIES = [
   'Other',
 ];
 
+const TRUCK_TIRE_AXLES: TireAxle[] = [
+  { label: 'Axle 1 · Steer', positions: [{ code: 'A1L', label: 'Left' }, { code: 'A1R', label: 'Right' }] },
+  { label: 'Axle 2 · Drive', positions: [{ code: 'A2LO', label: 'Left Outer' }, { code: 'A2LI', label: 'Left Inner' }, { code: 'A2RI', label: 'Right Inner' }, { code: 'A2RO', label: 'Right Outer' }] },
+  { label: 'Axle 3 · Drive', positions: [{ code: 'A3LO', label: 'Left Outer' }, { code: 'A3LI', label: 'Left Inner' }, { code: 'A3RI', label: 'Right Inner' }, { code: 'A3RO', label: 'Right Outer' }] },
+];
+
+const TRAILER_TIRE_AXLES: TireAxle[] = [
+  { label: 'Axle 1', positions: [{ code: 'A1LO', label: 'Left Outer' }, { code: 'A1LI', label: 'Left Inner' }, { code: 'A1RI', label: 'Right Inner' }, { code: 'A1RO', label: 'Right Outer' }] },
+  { label: 'Axle 2', positions: [{ code: 'A2LO', label: 'Left Outer' }, { code: 'A2LI', label: 'Left Inner' }, { code: 'A2RI', label: 'Right Inner' }, { code: 'A2RO', label: 'Right Outer' }] },
+];
+
 const STATES = [
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
 ];
 
 const fieldStyle: React.CSSProperties = {
@@ -28,6 +53,13 @@ const labelStyle: React.CSSProperties = {
   display: 'grid', gap: 7, color: '#334155', fontSize: 13, fontWeight: 850,
 };
 
+function observedLabel(value?: string) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString();
+}
+
 export default function ReportBreakdownPage() {
   const [unitType, setUnitType] = useState<UnitType>('');
   const [unitQuery, setUnitQuery] = useState('');
@@ -38,6 +70,11 @@ export default function ReportBreakdownPage() {
   const [searchError, setSearchError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [manualFallback, setManualFallback] = useState(false);
+  const [snapshotChoice, setSnapshotChoice] = useState<SnapshotChoice>('');
+  const [geotabPreview, setGeotabPreview] = useState<GeotabPreview>({ status: 'idle' });
+  const [repairCategory, setRepairCategory] = useState('');
+  const [selectedTirePositions, setSelectedTirePositions] = useState<string[]>([]);
+  const [tireSizes, setTireSizes] = useState<Record<string, string>>({});
   const [result, setResult] = useState<SubmitResult>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -79,6 +116,66 @@ export default function ReportBreakdownPage() {
     };
   }, [unitType, unitQuery, selectedUnit]);
 
+  useEffect(() => {
+    if (!unitType || !selectedUnit) {
+      setGeotabPreview({ status: 'idle' });
+      return;
+    }
+
+    const controller = new AbortController();
+    setGeotabPreview({ status: 'loading' });
+    setManualFallback(false);
+    setSnapshotChoice('');
+
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ unitType, unitNumber: selectedUnit });
+        const response = await fetch(`/api/breakdowns/geotab-preview?${params.toString()}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const payload = await response.json() as {
+          available?: boolean;
+          driverName?: string;
+          city?: string;
+          state?: string;
+          observedAt?: string;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || 'Could not check Geotab.');
+        if (!payload.available) {
+          setGeotabPreview({ status: 'unavailable' });
+          setManualFallback(true);
+          setSnapshotChoice('unavailable');
+          return;
+        }
+        setGeotabPreview({
+          status: 'available',
+          driverName: payload.driverName || '',
+          city: payload.city || '',
+          state: payload.state || '',
+          observedAt: payload.observedAt || '',
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setGeotabPreview({ status: 'error', error: error instanceof Error ? error.message : 'Could not check Geotab.' });
+        setManualFallback(true);
+        setSnapshotChoice('unavailable');
+      }
+    })();
+
+    return () => controller.abort();
+  }, [unitType, selectedUnit]);
+
+  function resetBreakdownDetails() {
+    setManualFallback(false);
+    setSnapshotChoice('');
+    setGeotabPreview({ status: 'idle' });
+    setRepairCategory('');
+    setSelectedTirePositions([]);
+    setTireSizes({});
+  }
+
   function chooseType(next: Exclude<UnitType, ''>) {
     setUnitType(next);
     setUnitQuery('');
@@ -86,7 +183,7 @@ export default function ReportBreakdownPage() {
     setUnits([]);
     setHasMore(false);
     setSearchError('');
-    setManualFallback(false);
+    resetBreakdownDetails();
     setResult(null);
   }
 
@@ -97,12 +194,25 @@ export default function ReportBreakdownPage() {
     setHasMore(false);
     setSearchError('');
     setManualFallback(false);
+    setSnapshotChoice('');
+    setResult(null);
   }
 
   function changeUnit() {
     setSelectedUnit('');
     setUnitQuery('');
-    setManualFallback(false);
+    resetBreakdownDetails();
+    setResult(null);
+  }
+
+  function chooseSnapshot(choice: 'verified' | 'corrected') {
+    setSnapshotChoice(choice);
+    setManualFallback(choice === 'corrected');
+    setResult(null);
+  }
+
+  function toggleTirePosition(code: string) {
+    setSelectedTirePositions((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code]);
     setResult(null);
   }
 
@@ -118,6 +228,25 @@ export default function ReportBreakdownPage() {
       setResult({ error: 'Search for and tap the unit number.' });
       return;
     }
+    if (geotabPreview.status === 'loading') {
+      setResult({ error: 'Geotab is still checking the driver and location.' });
+      return;
+    }
+    if (geotabPreview.status === 'available' && !snapshotChoice) {
+      setResult({ error: 'Verify whether the Geotab driver and location are correct.' });
+      return;
+    }
+    if (repairCategory === 'TIRES') {
+      if (!selectedTirePositions.length) {
+        setResult({ error: 'Choose at least one tire position.' });
+        return;
+      }
+      const missingSize = selectedTirePositions.find((code) => !String(tireSizes[code] || '').trim());
+      if (missingSize) {
+        setResult({ error: `Enter the tire size for ${missingSize}.` });
+        return;
+      }
+    }
 
     setSubmitting(true);
     try {
@@ -131,6 +260,7 @@ export default function ReportBreakdownPage() {
       };
       if (response.status === 422 && payload.manualFallbackRequired) {
         setManualFallback(true);
+        setSnapshotChoice('unavailable');
         setResult({ error: payload.error || 'Enter the driver and location manually to continue.' });
         return;
       }
@@ -139,7 +269,7 @@ export default function ReportBreakdownPage() {
       }
       setResult({ ok: true, breakdownId: payload.breakdownId });
       formRef.current?.reset();
-      setManualFallback(false);
+      resetBreakdownDetails();
     } catch (error) {
       setResult({ error: error instanceof Error ? error.message : 'The breakdown could not be saved.' });
     } finally {
@@ -155,8 +285,10 @@ export default function ReportBreakdownPage() {
     setUnits([]);
     setHasMore(false);
     setSearchError('');
-    setManualFallback(false);
+    resetBreakdownDetails();
   }
+
+  const tireAxles = unitType === 'trailer' ? TRAILER_TIRE_AXLES : TRUCK_TIRE_AXLES;
 
   if (result && 'ok' in result) {
     return (
@@ -172,7 +304,7 @@ export default function ReportBreakdownPage() {
             </div>
             <div className="easy-card-body">
               <p className="easy-section-copy" style={{ marginTop: 0 }}>
-                The report is now in Northern&apos;s breakdown system. Dispatch can see the affected unit, driver, and captured location.
+                The report is now in Northern&apos;s breakdown system. Dispatch can see the affected unit, driver, captured location, and any reported tire position/size details.
               </p>
               <div className="easy-actions">
                 <button type="button" className="easy-button orange" onClick={reportAnother}>Report another breakdown</button>
@@ -189,11 +321,12 @@ export default function ReportBreakdownPage() {
       <div className="easy-page-narrow" style={{ maxWidth: 820 }}>
         <p className="easy-eyebrow">NORTHERN LOGISTICS</p>
         <h1 className="easy-title">Report a Roadside Breakdown</h1>
-        <p className="easy-subtitle">Choose only the unit that is actually broken down. Driver and location are pulled from Geotab automatically when available.</p>
+        <p className="easy-subtitle">Choose only the unit that is actually broken down. We&apos;ll show you the driver and location Geotab finds so you can verify them before submitting.</p>
 
         <form ref={formRef} onSubmit={handleSubmit} className="easy-card" style={{ marginTop: 20, overflow: 'hidden' }}>
           <input type="hidden" name="unitType" value={unitType} />
           <input type="hidden" name="unitNumber" value={selectedUnit} />
+          <input type="hidden" name="snapshotVerification" value={snapshotChoice} />
 
           <section style={{ padding: 22, borderBottom: '1px solid #e2e8f0' }}>
             <p className="easy-eyebrow">1 · WHICH UNIT BROKE DOWN?</p>
@@ -264,23 +397,38 @@ export default function ReportBreakdownPage() {
             )}
           </section>
 
-          <section style={{ padding: 22 }}>
-            <p className="easy-eyebrow">2 · BREAKDOWN DETAILS</p>
+          <section style={{ padding: 22, borderBottom: '1px solid #e2e8f0' }}>
+            <p className="easy-eyebrow">2 · VERIFY DRIVER & LOCATION</p>
 
-            {manualFallback ? (
-              <div className="easy-notice" style={{ marginTop: 14, borderColor: '#efb36c', background: '#fff8ed', color: '#7a4514' }}>
-                Geotab could not safely confirm this driver/location. Enter them below; the affected unit stays {unitType === 'trailer' ? 'this trailer only' : 'this truck only'}.
-              </div>
-            ) : (
-              <div className="easy-notice" style={{ marginTop: 14 }}>
-                Driver and location will be captured from Geotab when you submit. If Geotab cannot confirm them, this form will ask you for those fields instead.
+            {!selectedUnit && <div className="easy-notice" style={{ marginTop: 14 }}>Select the broken-down unit first.</div>}
+            {selectedUnit && geotabPreview.status === 'loading' && <div className="easy-notice" style={{ marginTop: 14 }}>Checking Geotab for the current driver and location...</div>}
+
+            {selectedUnit && geotabPreview.status === 'available' && (
+              <div style={{ marginTop: 14, padding: 18, borderRadius: 14, border: '1px solid #b7d9c4', background: '#f1fbf5' }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 900, color: '#27623f', textTransform: 'uppercase' }}>Geotab found</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 14, marginTop: 12 }}>
+                  <div><small style={{ color: '#64748b', fontWeight: 800 }}>DRIVER</small><strong style={{ display: 'block', marginTop: 3, fontSize: 20 }}>{geotabPreview.driverName}</strong></div>
+                  <div><small style={{ color: '#64748b', fontWeight: 800 }}>LOCATION</small><strong style={{ display: 'block', marginTop: 3, fontSize: 20 }}>{geotabPreview.city}, {geotabPreview.state}</strong></div>
+                </div>
+                {observedLabel(geotabPreview.observedAt) && <p style={{ margin: '10px 0 0', color: '#64748b', fontSize: 12 }}>Location observed {observedLabel(geotabPreview.observedAt)}</p>}
+                <p style={{ margin: '16px 0 8px', fontWeight: 900, color: '#334155' }}>Is this driver and location correct?</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button type="button" className={`easy-button ${snapshotChoice === 'verified' ? 'orange' : ''}`} onClick={() => chooseSnapshot('verified')}>Yes, correct</button>
+                  <button type="button" className={`easy-button ${snapshotChoice === 'corrected' ? 'orange' : ''}`} onClick={() => chooseSnapshot('corrected')}>No, correct it</button>
+                </div>
               </div>
             )}
 
-            {manualFallback && (
+            {selectedUnit && (geotabPreview.status === 'unavailable' || geotabPreview.status === 'error') && (
+              <div className="easy-notice" style={{ marginTop: 14, borderColor: '#efb36c', background: '#fff8ed', color: '#7a4514' }}>
+                Geotab could not safely confirm the current driver/location{geotabPreview.error ? `: ${geotabPreview.error}` : '.'} Enter them below. The affected unit stays {unitType === 'trailer' ? 'this trailer only' : 'this truck only'}.
+              </div>
+            )}
+
+            {manualFallback && selectedUnit && (
               <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 14 }}>
                 <label style={labelStyle}>
-                  Driver Name *
+                  {snapshotChoice === 'corrected' ? 'Correct Driver Name *' : 'Driver Name *'}
                   <input name="driverName" required maxLength={120} autoComplete="name" style={fieldStyle} />
                 </label>
 
@@ -288,7 +436,7 @@ export default function ReportBreakdownPage() {
                   State *
                   <select name="state" required defaultValue="" style={fieldStyle}>
                     <option value="" disabled>Select state</option>
-                    {STATES.map((state) => <option key={state} value={state}>{state}</option>)}
+                    {STATES.map((state, index) => <option key={`${state}-${index}`} value={state}>{state}</option>)}
                   </select>
                 </label>
 
@@ -298,16 +446,78 @@ export default function ReportBreakdownPage() {
                 </label>
               </div>
             )}
+          </section>
+
+          <section style={{ padding: 22 }}>
+            <p className="easy-eyebrow">3 · BREAKDOWN DETAILS</p>
 
             <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 14 }}>
               <label style={labelStyle}>
                 Repair Type *
-                <select name="repairCategory" required defaultValue="" style={fieldStyle}>
+                <select
+                  name="repairCategory"
+                  required
+                  value={repairCategory}
+                  onChange={(event) => {
+                    setRepairCategory(event.target.value);
+                    if (event.target.value !== 'TIRES') {
+                      setSelectedTirePositions([]);
+                      setTireSizes({});
+                    }
+                  }}
+                  style={fieldStyle}
+                >
                   <option value="" disabled>Select repair type</option>
                   {REPAIR_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
                 </select>
               </label>
             </div>
+
+            {repairCategory === 'TIRES' && unitType && (
+              <div style={{ marginTop: 18, padding: 16, borderRadius: 14, border: '1px solid #cbd5e1', background: '#f8fafc' }}>
+                <p style={{ margin: 0, fontSize: 16, fontWeight: 900, color: '#172033' }}>Tire position and size *</p>
+                <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>Choose every affected tire. Enter the tire size for each selected position.</p>
+
+                {tireAxles.map((axle) => (
+                  <div key={axle.label} style={{ marginTop: 16 }}>
+                    <strong style={{ display: 'block', color: '#334155', marginBottom: 8 }}>{axle.label}</strong>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(165px,1fr))', gap: 10 }}>
+                      {axle.positions.map((position) => {
+                        const selected = selectedTirePositions.includes(position.code);
+                        return (
+                          <div key={position.code} style={{ padding: 12, border: selected ? '2px solid #ea7b22' : '1px solid #cbd5e1', borderRadius: 12, background: '#fff' }}>
+                            <label style={{ display: 'flex', gap: 9, alignItems: 'center', cursor: 'pointer', color: '#172033', fontWeight: 850 }}>
+                              <input
+                                type="checkbox"
+                                name="tirePosition"
+                                value={position.code}
+                                checked={selected}
+                                onChange={() => toggleTirePosition(position.code)}
+                              />
+                              <span>{position.label}</span>
+                            </label>
+                            <small style={{ display: 'block', marginTop: 4, color: '#64748b' }}>{position.code}</small>
+                            {selected && (
+                              <label style={{ ...labelStyle, marginTop: 10 }}>
+                                Tire size *
+                                <input
+                                  name={`tireSize_${position.code}`}
+                                  required
+                                  value={tireSizes[position.code] || ''}
+                                  onChange={(event) => setTireSizes((current) => ({ ...current, [position.code]: event.target.value.slice(0, 40) }))}
+                                  placeholder="Example: 11R22.5"
+                                  style={{ ...fieldStyle, minHeight: 44 }}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <label style={{ ...labelStyle, marginTop: 14 }}>
               What happened / what needs repair? *
@@ -321,8 +531,8 @@ export default function ReportBreakdownPage() {
 
             {result && 'error' in result && <div className="easy-notice" style={{ borderColor: '#e49b95', background: '#fff0ef', color: '#8a2922' }}>{result.error}</div>}
 
-            <button type="submit" className="easy-button orange" disabled={submitting} style={{ width: '100%', minHeight: 58, marginTop: 18, fontSize: 16 }}>
-              {submitting ? 'Saving breakdown...' : manualFallback ? 'Submit Breakdown with Manual Location' : 'Submit Breakdown'}
+            <button type="submit" className="easy-button orange" disabled={submitting || geotabPreview.status === 'loading'} style={{ width: '100%', minHeight: 58, marginTop: 18, fontSize: 16 }}>
+              {submitting ? 'Saving breakdown...' : 'Submit Breakdown'}
             </button>
           </section>
         </form>
