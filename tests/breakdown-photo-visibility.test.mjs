@@ -23,14 +23,24 @@ test('breakdown dashboard loads and renders driver photos', () => {
   assert.match(breakdownPage, /href=\{photo\.url\}/);
 });
 
-test('uploaded roadside photos are attached to a reply in the original Gmail thread', () => {
+test('uploaded roadside photos are attached to the one original Gmail breakdown email', () => {
+  const createIndex = breakdownRoute.indexOf('await createBreakdown');
   const uploadIndex = breakdownRoute.indexOf('await env.FILES.put');
   const attachmentIndex = breakdownRoute.indexOf('emailAttachments.push');
-  const emailIndex = breakdownRoute.indexOf('await notifyBreakdownEmailGroup');
-  assert.ok(uploadIndex >= 0 && attachmentIndex > uploadIndex && emailIndex > attachmentIndex);
-  assert.match(notifications, /attachments:\s*BreakdownEmailAttachment\[\]/);
-  assert.match(notifications, /gmailThreadId:\s*thread\?\.gmail_thread_id/);
-  assert.match(notifications, /replyToMessageId:\s*thread\?\.root_message_id/);
+  const emailIndex = breakdownRoute.indexOf('await notifyBreakdownInitialEmailGroup');
+  assert.ok(createIndex >= 0 && uploadIndex > createIndex && attachmentIndex > uploadIndex && emailIndex > attachmentIndex);
+  assert.doesNotMatch(breakdownRoute, /await notifyBreakdownEmailGroup/);
+
+  const groupStart = notifications.indexOf('export async function notifyBreakdownGroup');
+  const initialEmailStart = notifications.indexOf('export async function notifyBreakdownInitialEmailGroup');
+  const groupBody = notifications.slice(groupStart, initialEmailStart);
+  assert.ok(groupStart >= 0 && initialEmailStart > groupStart);
+  assert.doesNotMatch(groupBody, /sendBreakdownEmail/);
+
+  const initialEmailEnd = notifications.indexOf('/** Email-only follow-up', initialEmailStart);
+  const initialEmailBody = notifications.slice(initialEmailStart, initialEmailEnd);
+  assert.match(initialEmailBody, /rememberThread:\s*true/);
+  assert.match(initialEmailBody, /attachments/);
   assert.match(gmailClient, /multipart\/mixed/);
   assert.match(gmailClient, /Content-Disposition: attachment/);
   assert.match(gmailClient, /arrayBufferBase64/);
