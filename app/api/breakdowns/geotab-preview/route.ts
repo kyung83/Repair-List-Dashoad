@@ -1,13 +1,14 @@
 import { previewBreakdownGeotab } from '@/lib/roadside-breakdowns';
 
+/**
+ * PUBLIC and intentionally narrow. This read-only endpoint exposes only the
+ * driver/location snapshot for the explicitly selected active unit. Do not
+ * compare Origin to request.url here: the same Worker can be reached through
+ * different first-party browser/proxy hostnames, especially on mobile.
+ */
 export async function GET(request: Request) {
   try {
     const requestUrl = new URL(request.url);
-    const origin = request.headers.get('origin');
-    if (origin && origin !== requestUrl.origin) {
-      return Response.json({ error: 'Cross-site Geotab preview rejected.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
-    }
-
     const unitType = String(requestUrl.searchParams.get('unitType') ?? '').trim().toLowerCase();
     const unitNumber = String(requestUrl.searchParams.get('unitNumber') ?? '').trim().slice(0, 20);
     if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
