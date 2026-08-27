@@ -3,7 +3,6 @@ import {
   geotabArray,
   geotabGet,
   geotabObjectId,
-  geotabRecord,
   geotabText,
   type GeotabClientEnv,
   type GeotabJsonRecord,
@@ -57,6 +56,7 @@ export type BreakdownGeotabSnapshot = {
 };
 
 const MAX_GPS_AGE_MS = 30 * 60 * 1000;
+const TRAILER_LIST_LIMIT = 50_000;
 const STATE_CODES = new Set([
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
 ]);
@@ -106,6 +106,13 @@ function stateFromAddress(address: GeotabJsonRecord) {
   return '';
 }
 
+function trailerUnitKey(value: unknown) {
+  const compact = geotabText(value).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const numeric = compact.match(/^(?:TRL|TRAILER)?0*(\d+)$/);
+  if (numeric) return String(Number(numeric[1]));
+  return compact;
+}
+
 async function resolveEquipment(db: D1Database, equipmentId: number, unitType: BreakdownUnitType) {
   const row = await db.prepare(`
     SELECT id, unit, equipment_type, geotab_trailer_id
@@ -146,16 +153,34 @@ async function currentDeviceAssignment(db: D1Database, equipmentId: number) {
   return rows.results.length === 1 ? String(rows.results[0].geotab_device_id || '').trim() : '';
 }
 
-async function exactTrailerId(client: Awaited<ReturnType<typeof createGeotabClient>>, equipment: EquipmentLookup) {
-  if (equipment.geotab_trailer_id) return equipment.geotab_trailer_id.trim();
+async function exactTrailerId(
+  client: Awaited<ReturnType<typeof createGeotabClient>>,
+  db: D1Database,
+  equipment: EquipmentLookup,
+) {
+  const stored = String(equipment.geotab_trailer_id || '').trim();
+  if (stored) return stored;
+
+  // Geotab's Trailer entity does not support name search. Read the bounded
+  // Trailer list and exact-match locally instead of sending an ignored search
+  // object that can return an arbitrary first page.
   const rows = await client.call<GeotabJsonRecord[]>('Get', {
     typeName: 'Trailer',
-    search: { name: equipment.unit },
-    resultsLimit: 20,
+    resultsLimit: TRAILER_LIST_LIMIT,
   });
-  const exact = rows.filter((row) => geotabText(geotabGet(row, 'name', 'Name')).trim().toLowerCase() === equipment.unit.trim().toLowerCase());
+  const wanted = trailerUnitKey(equipment.unit);
+  const exact = rows.filter((row) => trailerUnitKey(geotabGet(row, 'name', 'Name')) === wanted);
   const ids = [...new Set(exact.map(geotabObjectId).filter(Boolean))];
-  return ids.length === 1 ? ids[0] : '';
+  if (ids.length !== 1) return '';
+
+  const trailerId = ids[0];
+  await db.prepare(`
+    UPDATE equipment
+    SET geotab_trailer_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND (geotab_trailer_id IS NULL OR trim(geotab_trailer_id) = '')
+  `).bind(trailerId, equipment.id).run();
+  return trailerId;
 }
 
 async function privatelyResolveTrailerTractorDevice(
@@ -244,7 +269,7 @@ export async function resolveBreakdownGeotabSnapshot(
     if (input.unitType === 'truck') {
       driverDeviceId = await currentDeviceAssignment(env.DB, equipment.id);
     } else {
-      const trailerId = await exactTrailerId(client, equipment);
+      const trailerId = await exactTrailerId(client, env.DB, equipment);
       driverDeviceId = await privatelyResolveTrailerTractorDevice(client, trailerId);
     }
     if (!driverDeviceId) return null;
