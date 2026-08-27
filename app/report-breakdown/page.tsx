@@ -37,6 +37,7 @@ export default function ReportBreakdownPage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [manualFallback, setManualFallback] = useState(false);
   const [result, setResult] = useState<SubmitResult>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -85,6 +86,7 @@ export default function ReportBreakdownPage() {
     setUnits([]);
     setHasMore(false);
     setSearchError('');
+    setManualFallback(false);
     setResult(null);
   }
 
@@ -94,11 +96,13 @@ export default function ReportBreakdownPage() {
     setUnits([]);
     setHasMore(false);
     setSearchError('');
+    setManualFallback(false);
   }
 
   function changeUnit() {
     setSelectedUnit('');
     setUnitQuery('');
+    setManualFallback(false);
     setResult(null);
   }
 
@@ -119,12 +123,23 @@ export default function ReportBreakdownPage() {
     try {
       const form = new FormData(event.currentTarget);
       const response = await fetch('/api/breakdowns', { method: 'POST', body: form });
-      const payload = await response.json() as { ok?: boolean; breakdownId?: number; error?: string };
+      const payload = await response.json() as {
+        ok?: boolean;
+        breakdownId?: number;
+        error?: string;
+        manualFallbackRequired?: boolean;
+      };
+      if (response.status === 422 && payload.manualFallbackRequired) {
+        setManualFallback(true);
+        setResult({ error: payload.error || 'Enter the driver and location manually to continue.' });
+        return;
+      }
       if (!response.ok || !payload.ok || !payload.breakdownId) {
         throw new Error(payload.error || 'The breakdown could not be saved.');
       }
       setResult({ ok: true, breakdownId: payload.breakdownId });
       formRef.current?.reset();
+      setManualFallback(false);
     } catch (error) {
       setResult({ error: error instanceof Error ? error.message : 'The breakdown could not be saved.' });
     } finally {
@@ -140,6 +155,7 @@ export default function ReportBreakdownPage() {
     setUnits([]);
     setHasMore(false);
     setSearchError('');
+    setManualFallback(false);
   }
 
   if (result && 'ok' in result) {
@@ -156,7 +172,7 @@ export default function ReportBreakdownPage() {
             </div>
             <div className="easy-card-body">
               <p className="easy-section-copy" style={{ marginTop: 0 }}>
-                The report is now in Northern&apos;s breakdown system. Email and Twilio alerts will be connected later; this page is currently saving directly to D1 only.
+                The report is now in Northern&apos;s breakdown system. Dispatch can see the affected unit, driver, and captured location.
               </p>
               <div className="easy-actions">
                 <button type="button" className="easy-button orange" onClick={reportAnother}>Report another breakdown</button>
@@ -173,7 +189,7 @@ export default function ReportBreakdownPage() {
       <div className="easy-page-narrow" style={{ maxWidth: 820 }}>
         <p className="easy-eyebrow">NORTHERN LOGISTICS</p>
         <h1 className="easy-title">Report a Roadside Breakdown</h1>
-        <p className="easy-subtitle">Choose the unit that is broken down, then give dispatch the information they need.</p>
+        <p className="easy-subtitle">Choose only the unit that is actually broken down. Driver and location are pulled from Geotab automatically when available.</p>
 
         <form ref={formRef} onSubmit={handleSubmit} className="easy-card" style={{ marginTop: 20, overflow: 'hidden' }}>
           <input type="hidden" name="unitType" value={unitType} />
@@ -250,25 +266,40 @@ export default function ReportBreakdownPage() {
 
           <section style={{ padding: 22 }}>
             <p className="easy-eyebrow">2 · BREAKDOWN DETAILS</p>
+
+            {manualFallback ? (
+              <div className="easy-notice" style={{ marginTop: 14, borderColor: '#efb36c', background: '#fff8ed', color: '#7a4514' }}>
+                Geotab could not safely confirm this driver/location. Enter them below; the affected unit stays {unitType === 'trailer' ? 'this trailer only' : 'this truck only'}.
+              </div>
+            ) : (
+              <div className="easy-notice" style={{ marginTop: 14 }}>
+                Driver and location will be captured from Geotab when you submit. If Geotab cannot confirm them, this form will ask you for those fields instead.
+              </div>
+            )}
+
+            {manualFallback && (
+              <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 14 }}>
+                <label style={labelStyle}>
+                  Driver Name *
+                  <input name="driverName" required maxLength={120} autoComplete="name" style={fieldStyle} />
+                </label>
+
+                <label style={labelStyle}>
+                  State *
+                  <select name="state" required defaultValue="" style={fieldStyle}>
+                    <option value="" disabled>Select state</option>
+                    {STATES.map((state) => <option key={state} value={state}>{state}</option>)}
+                  </select>
+                </label>
+
+                <label style={labelStyle}>
+                  City *
+                  <input name="city" required maxLength={120} autoComplete="address-level2" style={fieldStyle} />
+                </label>
+              </div>
+            )}
+
             <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(230px,1fr))', gap: 14 }}>
-              <label style={labelStyle}>
-                Driver Name *
-                <input name="driverName" required maxLength={120} autoComplete="name" style={fieldStyle} />
-              </label>
-
-              <label style={labelStyle}>
-                State *
-                <select name="state" required defaultValue="" style={fieldStyle}>
-                  <option value="" disabled>Select state</option>
-                  {STATES.map((state) => <option key={state} value={state}>{state}</option>)}
-                </select>
-              </label>
-
-              <label style={labelStyle}>
-                City *
-                <input name="city" required maxLength={120} autoComplete="address-level2" style={fieldStyle} />
-              </label>
-
               <label style={labelStyle}>
                 Repair Type *
                 <select name="repairCategory" required defaultValue="" style={fieldStyle}>
@@ -291,7 +322,7 @@ export default function ReportBreakdownPage() {
             {result && 'error' in result && <div className="easy-notice" style={{ borderColor: '#e49b95', background: '#fff0ef', color: '#8a2922' }}>{result.error}</div>}
 
             <button type="submit" className="easy-button orange" disabled={submitting} style={{ width: '100%', minHeight: 58, marginTop: 18, fontSize: 16 }}>
-              {submitting ? 'Saving breakdown...' : 'Submit Breakdown'}
+              {submitting ? 'Saving breakdown...' : manualFallback ? 'Submit Breakdown with Manual Location' : 'Submit Breakdown'}
             </button>
           </section>
         </form>
