@@ -59,7 +59,7 @@ export async function getWorkOrderData(db:D1Database){
     LEFT JOIN equipment e ON e.id=r.equipment_id
     LEFT JOIN technicians t ON t.id=r.technician_id
     LEFT JOIN app_users au ON au.id=r.reviewed_by_user_id
-    WHERE COALESCE(r.source,'') <> 'outside-work'
+    WHERE COALESCE(r.source,'') NOT IN ('outside-work','roadside-breakdown')
     ORDER BY CASE WHEN lower(r.status) LIKE '%complete%' THEN 1 ELSE 0 END,r.updated_at DESC
   `).all<RepairRow>(),
   db.prepare(`SELECT id,name,email,phone FROM technicians WHERE active=1 ORDER BY name`).all<TechnicianRow>(),
