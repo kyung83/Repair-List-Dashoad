@@ -25,7 +25,7 @@ test('trailer lookup uses Geotab association privately without creating a second
   assert.match(resolver, /trailerSearch:\s*\{\s*id:\s*trailerId\s*\}/);
   assert.match(resolver, /typeName:\s*['"]DeviceStatusInfo['"]/);
   assert.match(resolver, /GetAddresses/);
-  assert.match(resolver, /never written as another repair\/breakdown unit/);
+  assert.match(resolver, /never written as an affected unit or equipment FK/);
   assert.doesNotMatch(breakdowns, /trailer_equipment_id\s*[,)]/);
   assert.match(breakdowns, /INSERT INTO roadside_breakdowns[\s\S]*repair_id, equipment_id/);
 });
