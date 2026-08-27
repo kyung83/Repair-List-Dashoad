@@ -6,6 +6,12 @@ type UnitType = '' | 'truck' | 'trailer';
 type UnitResult = { unit: string; equipmentType: string };
 type SubmitResult = { ok: true; breakdownId: number } | { error: string } | null;
 type SnapshotChoice = '' | 'verified' | 'corrected' | 'unavailable';
+type BreakdownSubmitPayload = {
+  ok?: boolean;
+  breakdownId?: number;
+  error?: string;
+  manualFallbackRequired?: boolean;
+};
 type GeotabPreview = {
   status: 'idle' | 'loading' | 'available' | 'unavailable' | 'error';
   driverName?: string;
@@ -252,12 +258,23 @@ export default function ReportBreakdownPage() {
     try {
       const form = new FormData(event.currentTarget);
       const response = await fetch('/api/breakdowns', { method: 'POST', body: form });
-      const payload = await response.json() as {
-        ok?: boolean;
-        breakdownId?: number;
-        error?: string;
-        manualFallbackRequired?: boolean;
-      };
+      const responseText = await response.text();
+      let payload: BreakdownSubmitPayload = {};
+      if (responseText) {
+        try {
+          payload = JSON.parse(responseText) as BreakdownSubmitPayload;
+        } catch {
+          if (response.status === 413) {
+            throw new Error('That photo is too large to upload. Choose a smaller photo and try again.');
+          }
+          if (response.ok) {
+            throw new Error('The breakdown may have been saved, but the confirmation could not be read. Check the breakdown dashboard before submitting again.');
+          }
+          throw new Error(`The breakdown service returned an unreadable response (HTTP ${response.status}). Try again.`);
+        }
+      } else if (!response.ok) {
+        throw new Error(`The breakdown service returned HTTP ${response.status}. Try again.`);
+      }
       if (response.status === 422 && payload.manualFallbackRequired) {
         setManualFallback(true);
         setSnapshotChoice('unavailable');
@@ -271,7 +288,12 @@ export default function ReportBreakdownPage() {
       formRef.current?.reset();
       resetBreakdownDetails();
     } catch (error) {
-      setResult({ error: error instanceof Error ? error.message : 'The breakdown could not be saved.' });
+      const message = error instanceof Error ? error.message : 'The breakdown could not be saved.';
+      setResult({
+        error: /string did not match the expected pattern/i.test(message)
+          ? 'Your iPhone could not attach that camera photo. Re-select the picture from Photo Library and submit again.'
+          : message,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -526,7 +548,7 @@ export default function ReportBreakdownPage() {
 
             <label style={{ ...labelStyle, marginTop: 14 }}>
               Photos (optional)
-              <input type="file" name="photos" accept="image/*" multiple capture="environment" style={{ ...fieldStyle, paddingTop: 12 }} />
+              <input type="file" name="photos" accept="image/*" multiple style={{ ...fieldStyle, paddingTop: 12 }} />
             </label>
 
             {result && 'error' in result && <div className="easy-notice" style={{ borderColor: '#e49b95', background: '#fff0ef', color: '#8a2922' }}>{result.error}</div>}
