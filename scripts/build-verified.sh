@@ -92,4 +92,4 @@ if (!crons.includes("* * * * *")) {
 }
 NODE
 
-echo "Validated Cloudflare Worker bundle, AI binding, breakdown email binding, and minute Geotab feed schedule."
+echo "Validated Cloudflare Worker bundle, AI handwriting binding, breakdown email binding, and minute Geotab feed schedule."
