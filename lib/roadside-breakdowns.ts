@@ -2,14 +2,14 @@ import { env } from 'cloudflare:workers';
 import { notifyBreakdownGroup } from '@/lib/notifications';
 
 export type BreakdownStage = 1 | 2 | 3 | 4 | 5;
+export type UnitType = 'truck' | 'trailer';
 
 export type BreakdownRow = {
   id: number;
   repair_id: number;
   equipment_id: number;
-  trailer_equipment_id: number | null;
   unit: string;
-  trailer_unit: string | null;
+  equipment_type: string;
   driver_name: string;
   state: string;
   city: string;
@@ -31,8 +31,8 @@ export type BreakdownRow = {
 
 const LIST_SELECT = `
   SELECT
-    b.id, b.repair_id, b.equipment_id, b.trailer_equipment_id,
-    e.unit AS unit, t.unit AS trailer_unit,
+    b.id, b.repair_id, b.equipment_id,
+    e.unit AS unit, e.equipment_type AS equipment_type,
     b.driver_name, b.state, b.city, b.repair_category, b.repair_needed, b.description,
     b.stage, b.status, b.service_provider, b.service_provider_phone, b.eta,
     b.claimed_by_user_id, u.display_name AS claimed_by, b.on_location_at,
@@ -40,7 +40,6 @@ const LIST_SELECT = `
   FROM roadside_breakdowns b
   JOIN repairs r ON r.id = b.repair_id
   JOIN equipment e ON e.id = b.equipment_id
-  LEFT JOIN equipment t ON t.id = b.trailer_equipment_id
   LEFT JOIN app_users u ON u.id = b.claimed_by_user_id
 `;
 
@@ -55,15 +54,20 @@ export async function getBreakdown(id: number): Promise<BreakdownRow | null> {
   return row ?? null;
 }
 
-async function resolveEquipmentByUnit(unit: string): Promise<number> {
-  const row = await env.DB.prepare(`SELECT id FROM equipment WHERE unit = ? COLLATE NOCASE`).bind(unit.trim()).first<{ id: number }>();
-  if (!row) throw new Error(`Unit "${unit}" was not found. Check the truck/trailer number and try again.`);
+/** Finds active equipment by unit number and confirms it matches the type the driver picked (truck vs trailer). */
+async function resolveUnit(unit: string, unitType: UnitType): Promise<number> {
+  const row = await env.DB.prepare(`SELECT id, equipment_type FROM equipment WHERE unit = ? AND active = 1`)
+    .bind(unit.trim()).first<{ id: number; equipment_type: string }>();
+  if (!row) throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${unit}" was not found. Check the number and try again.`);
+  if (row.equipment_type !== unitType) {
+    throw new Error(`"${unit}" is on file as a ${row.equipment_type}, not a ${unitType}. Double-check the number.`);
+  }
   return row.id;
 }
 
 export type CreateBreakdownInput = {
-  truckUnit: string;
-  trailerUnit?: string;
+  unitType: UnitType;
+  unitNumber: string;
   driverName: string;
   state: string;
   city: string;
@@ -78,23 +82,22 @@ export type CreateBreakdownInput = {
  * group notification (stubbed unless NOTIFICATIONS_LIVE=true).
  */
 export async function createBreakdown(input: CreateBreakdownInput) {
-  const truckId = await resolveEquipmentByUnit(input.truckUnit);
-  const trailerId = input.trailerUnit ? await resolveEquipmentByUnit(input.trailerUnit) : null;
+  const equipmentId = await resolveUnit(input.unitNumber, input.unitType);
 
   const title = `Roadside breakdown - ${input.driverName}: ${input.repairCategory}`.slice(0, 500);
 
   const insertedRepair = await env.DB.prepare(`
     INSERT INTO repairs (equipment_id, title, description, status, priority, source, driver, location)
     VALUES (?, ?, ?, 'open', 'urgent', 'roadside-breakdown', ?, ?)
-  `).bind(truckId, title, input.description, input.driverName, `${input.city}, ${input.state}`).run();
+  `).bind(equipmentId, title, input.description, input.driverName, `${input.city}, ${input.state}`).run();
   const repairId = Number(insertedRepair.meta.last_row_id ?? 0);
   if (!repairId) throw new Error('Could not create the repair record for this breakdown.');
 
   const insertedBreakdown = await env.DB.prepare(`
     INSERT INTO roadside_breakdowns
-      (repair_id, equipment_id, trailer_equipment_id, driver_name, state, city, repair_category, description, stage, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'reported')
-  `).bind(repairId, truckId, trailerId, input.driverName, input.state, input.city, input.repairCategory, input.description).run();
+      (repair_id, equipment_id, driver_name, state, city, repair_category, description, stage, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'reported')
+  `).bind(repairId, equipmentId, input.driverName, input.state, input.city, input.repairCategory, input.description).run();
   const breakdownId = Number(insertedBreakdown.meta.last_row_id ?? 0);
   if (!breakdownId) throw new Error('Could not create the breakdown record.');
 
@@ -106,7 +109,8 @@ export async function createBreakdown(input: CreateBreakdownInput) {
     await env.DB.batch(batch);
   }
 
-  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${input.driverName}\nTruck: ${input.truckUnit}${input.trailerUnit ? ` / Trailer: ${input.trailerUnit}` : ''}\nLocation: ${input.city}, ${input.state}\nCategory: ${input.repairCategory}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
+  const unitLabel = input.unitType === 'truck' ? 'Truck' : 'Trailer';
+  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${input.driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${input.city}, ${input.state}\nCategory: ${input.repairCategory}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
   const emailHtml = message.replace(/\n/g, '<br>');
   await notifyBreakdownGroup(breakdownId, 'Breakdown Alerts', message, `Breakdown Reported - ${input.driverName}`, emailHtml);
 
