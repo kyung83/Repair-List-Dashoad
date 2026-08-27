@@ -80,7 +80,8 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
       { href: "/admin/geotab-review/health", label: "Fleet Health", exact: true, roles: adminRoles },
       { href: "/admin/geotab-review/assignments", label: "Device Assignments", exact: true, roles: adminRoles },
       { href: "/admin/geotab-review", label: "Identity & Mileage", exact: true, roles: adminRoles },
-      { href: "/admin/geotab-review/connection", label: "Connection", exact: true, roles: adminRoles },
+      { href: "/admin/geotab-review/connection", label: "Geotab Connection", exact: true, roles: adminRoles },
+      { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
       { href: "/admin/equipment-merge", label: "Duplicate Units", roles: adminRoles },
     ],
   },
@@ -98,7 +99,7 @@ const managerPrimary: NavLink[] = [
 
 const adminPrimary: NavLink[] = [
   ...managerPrimary,
-  { href: "/admin/geotab-review/health", label: "Diagnostics", activeFor: ["/admin/geotab-review", "/admin/equipment-merge"] },
+  { href: "/admin/geotab-review/health", label: "Diagnostics", activeFor: ["/admin/geotab-review", "/admin/gmail", "/admin/equipment-merge"] },
 ];
 
 const mechanicPrimary: NavLink[] = [
