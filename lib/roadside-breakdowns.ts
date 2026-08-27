@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { notifyBreakdownGroup } from '@/lib/notifications';
+import { notifyBreakdownEmailGroup, notifyBreakdownGroup } from '@/lib/notifications';
 import { resolveBreakdownGeotabSnapshot } from '@/lib/breakdown-geotab-snapshot';
 import { normalizeTirePositions } from '@/lib/tire-position-rules.js';
 
@@ -7,6 +7,8 @@ export type BreakdownStage = 1 | 2 | 3 | 4 | 5;
 export type UnitType = 'truck' | 'trailer';
 export type BreakdownSnapshotVerification = 'verified' | 'corrected' | 'unavailable';
 export type ReportedTireDetail = { positionCode: string; tireSize: string };
+
+const BREAKDOWN_ALERT_GROUP = 'Breakdown Alerts';
 
 export class ManualBreakdownSnapshotRequiredError extends Error {
   readonly manualFallbackRequired = true;
@@ -66,6 +68,37 @@ const LIST_SELECT = `
   JOIN equipment e ON e.id = b.equipment_id
   LEFT JOIN app_users u ON u.id = b.claimed_by_user_id
 `;
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parsedTimestamp(value: unknown) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return new Date();
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : raw;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function easternTimestamp(value: unknown) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Detroit',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(parsedTimestamp(value));
+}
 
 export async function listBreakdowns(opts: { openOnly?: boolean } = {}): Promise<BreakdownRow[]> {
   const where = opts.openOnly ? `WHERE b.stage < 5` : '';
@@ -218,13 +251,28 @@ export async function createBreakdown(input: CreateBreakdownInput) {
     await env.DB.batch(batch);
   }
 
+  const created = await getBreakdown(breakdownId);
+  const submittedAt = easternTimestamp(created?.created_at || new Date().toISOString());
   const unitLabel = input.unitType === 'truck' ? 'Truck' : 'Trailer';
   const tireMessage = tireDetails.length
     ? `\nTires: ${tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', ')}`
     : '';
-  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}${tireMessage}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
-  const emailHtml = message.replace(/\n/g, '<br>');
-  await notifyBreakdownGroup(breakdownId, 'Breakdown Alerts', message, `Breakdown Reported - ${driverName}`, emailHtml);
+  const message = `ROADSIDE BREAKDOWN\n\nSubmitted: ${submittedAt}\nDriver: ${driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}${tireMessage}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
+  const tireHtml = tireDetails.length
+    ? `<br><strong>Tires:</strong> ${escapeHtml(tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', '))}`
+    : '';
+  const emailHtml = [
+    '<strong>ROADSIDE BREAKDOWN</strong>',
+    '',
+    `<strong>Submitted:</strong> ${escapeHtml(submittedAt)}`,
+    `<strong>Driver:</strong> ${escapeHtml(driverName)}`,
+    `<strong>${unitLabel}:</strong> ${escapeHtml(input.unitNumber)}`,
+    `<strong>Location:</strong> ${escapeHtml(`${city}, ${state}`)}`,
+    `<strong>Category:</strong> ${escapeHtml(input.repairCategory)}${tireHtml}`,
+    `<strong>Description:</strong> ${escapeHtml(input.description)}`,
+    `<strong>Breakdown #:</strong> ${breakdownId}`,
+  ].join('<br>');
+  await notifyBreakdownGroup(breakdownId, BREAKDOWN_ALERT_GROUP, message, `Breakdown - ${driverName}`, emailHtml);
 
   return { breakdownId, repairId, snapshotSource };
 }
@@ -260,6 +308,9 @@ export type UpdateBreakdownInput = Partial<{
 }>;
 
 export async function updateBreakdown(breakdownId: number, input: UpdateBreakdownInput) {
+  const before = await getBreakdown(breakdownId);
+  if (!before) throw new Error('Breakdown not found.');
+
   const sets: string[] = [];
   const values: unknown[] = [];
   if (input.stage !== undefined) { sets.push('stage = ?'); values.push(input.stage); }
@@ -288,6 +339,42 @@ export async function updateBreakdown(breakdownId: number, input: UpdateBreakdow
       WHERE id = (SELECT repair_id FROM roadside_breakdowns WHERE id = ?)
     `).bind(breakdownId).run();
     await env.DB.prepare(`UPDATE roadside_breakdowns SET status='complete' WHERE id = ?`).bind(breakdownId).run();
+  }
+
+  const after = await getBreakdown(breakdownId);
+  if (!after) return;
+  const providerChanged = input.serviceProvider !== undefined
+    && String(before.service_provider || '').trim() !== String(after.service_provider || '').trim();
+  const etaChanged = input.eta !== undefined
+    && String(before.eta || '').trim() !== String(after.eta || '').trim();
+  const provider = String(after.service_provider || '').trim();
+  const eta = String(after.eta || '').trim();
+
+  if ((providerChanged || etaChanged) && provider && eta) {
+    const unitLabel = String(after.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
+    const submittedAt = easternTimestamp(after.created_at);
+    const updatedAt = easternTimestamp(after.updated_at);
+    const phoneLine = after.service_provider_phone
+      ? `<strong>Provider Phone:</strong> ${escapeHtml(after.service_provider_phone)}<br>`
+      : '';
+    const updateHtml = [
+      '<strong>ROADSIDE BREAKDOWN UPDATE</strong>',
+      '',
+      `<strong>Updated:</strong> ${escapeHtml(updatedAt)}`,
+      `<strong>Original Submitted:</strong> ${escapeHtml(submittedAt)}`,
+      `<strong>Driver:</strong> ${escapeHtml(after.driver_name)}`,
+      `<strong>${unitLabel}:</strong> ${escapeHtml(after.unit)}`,
+      `<strong>Location:</strong> ${escapeHtml(`${after.city}, ${after.state}`)}`,
+      `<strong>Service Provider:</strong> ${escapeHtml(provider)}`,
+      `${phoneLine}<strong>ETA:</strong> ${escapeHtml(eta)}`,
+      `<strong>Breakdown #:</strong> ${after.id}`,
+    ].join('<br>');
+    await notifyBreakdownEmailGroup(
+      breakdownId,
+      BREAKDOWN_ALERT_GROUP,
+      `Breakdown - ${after.driver_name}`,
+      updateHtml,
+    );
   }
 }
 
