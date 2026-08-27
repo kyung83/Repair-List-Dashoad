@@ -11,6 +11,11 @@
   "ai": {
     "binding": "AI"
   },
+  "send_email": [
+    {
+      "name": "BREAKDOWN_EMAIL"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
