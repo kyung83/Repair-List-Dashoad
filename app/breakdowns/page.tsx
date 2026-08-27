@@ -18,6 +18,14 @@ type DispatchDraft = {
   cost: string;
 };
 
+type BreakdownPhoto = {
+  breakdownId: number;
+  objectKey: string;
+  fileName: string;
+  contentType: string;
+  url: string;
+};
+
 function unitLabel(row: BreakdownRow) {
   const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
   return `${type} ${row.unit}`;
@@ -50,6 +58,7 @@ const inputStyle: React.CSSProperties = {
 
 export default function BreakdownsPage() {
   const [breakdowns, setBreakdowns] = useState<BreakdownRow[]>([]);
+  const [photosByBreakdown, setPhotosByBreakdown] = useState<Record<number, BreakdownPhoto[]>>({});
   const [drafts, setDrafts] = useState<Record<number, DispatchDraft>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
@@ -59,11 +68,26 @@ export default function BreakdownsPage() {
     setLoading(true);
     setMessage('');
     try {
-      const response = await fetch('/api/breakdowns?open=1', { cache: 'no-store' });
-      const payload = await response.json() as { breakdowns?: BreakdownRow[]; error?: string };
-      if (!response.ok) throw new Error(payload.error || 'Failed to load breakdowns.');
+      const [breakdownResponse, photoResponse] = await Promise.all([
+        fetch('/api/breakdowns?open=1', { cache: 'no-store' }),
+        fetch('/api/breakdowns/photos?open=1', { cache: 'no-store' }),
+      ]);
+      const payload = await breakdownResponse.json() as { breakdowns?: BreakdownRow[]; error?: string };
+      const photoPayload = await photoResponse.json() as { photos?: BreakdownPhoto[]; error?: string };
+      if (!breakdownResponse.ok) throw new Error(payload.error || 'Failed to load breakdowns.');
+      if (!photoResponse.ok) throw new Error(photoPayload.error || 'Failed to load breakdown photos.');
+
       const rows = Array.isArray(payload.breakdowns) ? payload.breakdowns : [];
+      const photos = Array.isArray(photoPayload.photos) ? photoPayload.photos : [];
+      const grouped = photos.reduce<Record<number, BreakdownPhoto[]>>((current, photo) => {
+        const id = Number(photo.breakdownId);
+        if (!Number.isFinite(id)) return current;
+        (current[id] ||= []).push(photo);
+        return current;
+      }, {});
+
       setBreakdowns(rows);
+      setPhotosByBreakdown(grouped);
       setDrafts(Object.fromEntries(rows.map((row) => [row.id, draftFromRow(row)])));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Failed to load breakdowns.');
@@ -165,7 +189,7 @@ export default function BreakdownsPage() {
       <div className="easy-page-narrow">
         <p className="easy-eyebrow">ROADSIDE OPERATIONS</p>
         <h1 className="easy-title">Breakdowns</h1>
-        <p className="easy-subtitle">Manage active roadside calls, record who was used, ETA and cost. Email and Twilio notifications are intentionally not enabled yet.</p>
+        <p className="easy-subtitle">Manage active roadside calls, view driver-submitted photos, and record who was used, ETA and cost. Breakdown email is active when Gmail is connected; SMS remains off.</p>
 
         {message && <div className="easy-notice">{message}</div>}
 
@@ -197,6 +221,7 @@ export default function BreakdownsPage() {
                   const stage = STAGE_LABELS[row.stage] ?? `Stage ${row.stage}`;
                   const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
                   const draft = drafts[row.id] || draftFromRow(row);
+                  const photos = photosByBreakdown[row.id] || [];
                   return (
                     <article key={row.id} className="easy-card" style={{ padding: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -218,6 +243,31 @@ export default function BreakdownsPage() {
                           <div className="easy-form-row"><strong>Cost</strong><span>{money(row.cost)}</span></div>
                         </div>
                       </div>
+
+                      {photos.length > 0 && (
+                        <section style={{ marginTop: 14 }}>
+                          <p className="easy-eyebrow" style={{ marginBottom: 9 }}>DRIVER PHOTOS</p>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,220px))', gap: 10 }}>
+                            {photos.map((photo) => (
+                              <a
+                                key={photo.objectKey}
+                                href={photo.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={photo.fileName}
+                                style={{ display: 'block', border: '1px solid #d9e1e8', borderRadius: 10, overflow: 'hidden', background: '#f8fafc' }}
+                              >
+                                <img
+                                  src={photo.url}
+                                  alt={`Breakdown ${row.id} - ${photo.fileName}`}
+                                  loading="lazy"
+                                  style={{ display: 'block', width: '100%', height: 150, objectFit: 'cover' }}
+                                />
+                              </a>
+                            ))}
+                          </div>
+                        </section>
+                      )}
 
                       <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}>
                         <p className="easy-eyebrow" style={{ marginBottom: 10 }}>WHO WE USED</p>

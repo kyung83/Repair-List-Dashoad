@@ -7,8 +7,14 @@ export async function GET(request: Request, context: { params: Promise<{ key: st
 
   const { key } = await context.params;
   const objectKey = (key ?? []).map(decodeURIComponent).join('/');
-  if (!objectKey.startsWith('maintenance-checklists/')) {
+  const maintenancePhoto = objectKey.startsWith('maintenance-checklists/');
+  const roadsidePhoto = objectKey.startsWith('roadside-breakdowns/');
+
+  if (!maintenancePhoto && !roadsidePhoto) {
     return new Response('Not found.', { status: 404 });
+  }
+  if (roadsidePhoto && user.role !== 'manager' && user.role !== 'admin') {
+    return new Response('Manager or administrator access is required.', { status: 403 });
   }
 
   const object = await env.FILES.get(objectKey);

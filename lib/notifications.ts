@@ -1,8 +1,10 @@
 import { env } from 'cloudflare:workers';
-import { sendGmailRuntimeEmail } from '@/lib/gmail-client';
+import { sendGmailRuntimeEmail, type GmailRuntimeAttachment } from '@/lib/gmail-client';
 import { getGmailRuntimeCredentialMetadata } from '@/lib/gmail-runtime-credentials';
 
 const BREAKDOWN_EMAIL_FROM = 'norlow-breakdowns@norloworld.com';
+
+export type BreakdownEmailAttachment = GmailRuntimeAttachment;
 
 type BreakdownEmailBinding = {
   send(message: {
@@ -122,6 +124,7 @@ async function sendEmailLive(
   html: string,
   replyToMessageId = '',
   gmailThreadId = '',
+  attachments: BreakdownEmailAttachment[] = [],
 ): Promise<EmailSendResult> {
   if (await gmailConnected()) {
     const result = await sendGmailRuntimeEmail({
@@ -131,6 +134,7 @@ async function sendEmailLive(
       text: htmlToText(html),
       replyToMessageId,
       gmailThreadId,
+      attachments,
     });
     return {
       messageId: normalizedMessageId(result.messageId),
@@ -142,12 +146,15 @@ async function sendEmailLive(
   const binding = breakdownEmailBinding();
   if (!binding) throw new Error('No live breakdown email provider is configured.');
   const rootMessageId = normalizedMessageId(replyToMessageId);
+  const fallbackHtml = attachments.length
+    ? `${html}<br><br><em>${attachments.length} breakdown photo${attachments.length === 1 ? '' : 's'} are available in the Norlow Breakdown dashboard.</em>`
+    : html;
   const result = await binding.send({
     from: BREAKDOWN_EMAIL_FROM,
     to: toEmail,
     subject,
-    html,
-    text: htmlToText(html),
+    html: fallbackHtml,
+    text: htmlToText(fallbackHtml),
     ...(rootMessageId ? {
       headers: {
         'In-Reply-To': rootMessageId,
@@ -180,7 +187,12 @@ export async function sendBreakdownEmail(
   toEmail: string,
   subject: string,
   html: string,
-  options: { rememberThread?: boolean; replyToMessageId?: string; gmailThreadId?: string } = {},
+  options: {
+    rememberThread?: boolean;
+    replyToMessageId?: string;
+    gmailThreadId?: string;
+    attachments?: BreakdownEmailAttachment[];
+  } = {},
 ) {
   try {
     const hasProvider = (await gmailConnected()) || Boolean(breakdownEmailBinding());
@@ -194,6 +206,7 @@ export async function sendBreakdownEmail(
       html,
       options.replyToMessageId,
       options.gmailThreadId,
+      options.attachments,
     );
     if (options.rememberThread && result.messageId) {
       await rememberEmailThread(breakdownId, toEmail, subject, result.messageId, result.gmailThreadId);
@@ -244,7 +257,13 @@ export async function notifyBreakdownGroup(breakdownId: number, groupName: strin
 }
 
 /** Email-only follow-up that stays in the original Gmail/email conversation. */
-export async function notifyBreakdownEmailGroup(breakdownId: number, groupName: string, baseSubject: string, emailHtml: string) {
+export async function notifyBreakdownEmailGroup(
+  breakdownId: number,
+  groupName: string,
+  baseSubject: string,
+  emailHtml: string,
+  attachments: BreakdownEmailAttachment[] = [],
+) {
   const contacts = await activeGroupContacts(groupName);
   const seenEmails = new Set<string>();
   let contacted = 0;
@@ -257,6 +276,7 @@ export async function notifyBreakdownEmailGroup(breakdownId: number, groupName: 
     await sendBreakdownEmail(breakdownId, email, subject, emailHtml, {
       replyToMessageId: thread?.root_message_id || '',
       gmailThreadId: thread?.gmail_thread_id || '',
+      attachments,
     });
     contacted++;
   }

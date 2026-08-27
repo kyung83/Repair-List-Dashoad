@@ -7,9 +7,11 @@ import {
   type BreakdownSnapshotVerification,
   type ReportedTireDetail,
 } from '@/lib/roadside-breakdowns';
+import { notifyBreakdownEmailGroup, type BreakdownEmailAttachment } from '@/lib/notifications';
 
 const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const VALID_SNAPSHOT_VERIFICATION = new Set(['verified', 'corrected', 'unavailable']);
+const BREAKDOWN_ALERT_GROUP = 'Breakdown Alerts';
 
 function safeText(value: FormDataEntryValue | null, max: number) {
   return String(value ?? '').trim().slice(0, max);
@@ -74,6 +76,7 @@ export async function POST(request: Request) {
     // Upload only after the breakdown snapshot and tire details have passed validation.
     // This prevents orphaned R2 files when the first attempt needs correction/fallback.
     const files = form.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
+    const emailAttachments: BreakdownEmailAttachment[] = [];
     for (const file of files.slice(0, 6)) {
       if (!SAFE_IMAGE_TYPES.has(file.type)) continue;
       try {
@@ -84,8 +87,29 @@ export async function POST(request: Request) {
           INSERT INTO attachments (repair_id, object_key, file_name, content_type)
           VALUES (?, ?, ?, ?)
         `).bind(repairId, key, file.name.slice(0, 255), file.type).run();
+        emailAttachments.push({ filename: file.name.slice(0, 180) || 'breakdown-photo', contentType: file.type, data: bytes });
       } catch (error) {
         console.warn(JSON.stringify({ event: 'breakdown_photo_upload_failed', breakdownId, error: String(error) }));
+      }
+    }
+
+    // The initial breakdown alert is created before uploads so validation cannot leave
+    // orphaned R2 objects. Once photos are safely stored, send them immediately as a
+    // reply in the same Gmail conversation so dispatch can see the actual roadside images.
+    if (emailAttachments.length) {
+      try {
+        const actual = await env.DB.prepare('SELECT driver_name FROM roadside_breakdowns WHERE id = ?')
+          .bind(breakdownId).first<{ driver_name: string }>();
+        const actualDriver = String(actual?.driver_name || driverName || unitNumber).trim();
+        await notifyBreakdownEmailGroup(
+          breakdownId,
+          BREAKDOWN_ALERT_GROUP,
+          `Breakdown - ${actualDriver}`,
+          `<strong>BREAKDOWN PHOTOS</strong><br><strong>Breakdown #:</strong> ${breakdownId}<br>${emailAttachments.length} driver-submitted photo${emailAttachments.length === 1 ? '' : 's'} attached.`,
+          emailAttachments,
+        );
+      } catch (error) {
+        console.warn(JSON.stringify({ event: 'breakdown_photo_email_failed', breakdownId, error: String(error) }));
       }
     }
 
