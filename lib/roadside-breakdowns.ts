@@ -1,9 +1,12 @@
 import { env } from 'cloudflare:workers';
 import { notifyBreakdownGroup } from '@/lib/notifications';
 import { resolveBreakdownGeotabSnapshot } from '@/lib/breakdown-geotab-snapshot';
+import { normalizeTirePositions } from '@/lib/tire-position-rules.js';
 
 export type BreakdownStage = 1 | 2 | 3 | 4 | 5;
 export type UnitType = 'truck' | 'trailer';
+export type BreakdownSnapshotVerification = 'verified' | 'corrected' | 'unavailable';
+export type ReportedTireDetail = { positionCode: string; tireSize: string };
 
 export class ManualBreakdownSnapshotRequiredError extends Error {
   readonly manualFallbackRequired = true;
@@ -86,16 +89,48 @@ async function resolveUnit(unit: string, unitType: UnitType): Promise<number> {
   return row.id;
 }
 
+export async function previewBreakdownGeotab(unitNumber: string, unitType: UnitType) {
+  const equipmentId = await resolveUnit(unitNumber, unitType);
+  return resolveBreakdownGeotabSnapshot(env, { equipmentId, unitType });
+}
+
 export type CreateBreakdownInput = {
   unitType: UnitType;
   unitNumber: string;
   driverName?: string;
   state?: string;
   city?: string;
+  snapshotVerification?: BreakdownSnapshotVerification;
   repairCategory: string;
   description: string;
+  tireDetails?: ReportedTireDetail[];
   photoObjectKeys?: string[];
 };
+
+function validatedTireDetails(input: CreateBreakdownInput) {
+  const isTires = input.repairCategory.trim().toUpperCase() === 'TIRES';
+  const raw = Array.isArray(input.tireDetails) ? input.tireDetails : [];
+  if (!isTires) return [] as ReportedTireDetail[];
+  if (!raw.length) throw new Error('Choose at least one tire position and enter its tire size.');
+
+  const normalized = normalizeTirePositions(raw.map((item) => item.positionCode), input.unitType);
+  if (normalized.invalid.length) {
+    throw new Error(`Invalid tire position for this ${input.unitType}: ${normalized.invalid.join(', ')}.`);
+  }
+
+  const byCode = new Map<string, string>();
+  for (const item of raw) {
+    const code = String(item.positionCode ?? '').trim().toUpperCase();
+    const size = String(item.tireSize ?? '').trim().slice(0, 40);
+    if (!code) continue;
+    if (!size) throw new Error(`Enter the tire size for ${code}.`);
+    byCode.set(code, size);
+  }
+
+  const details = normalized.positions.map((positionCode) => ({ positionCode, tireSize: byCode.get(positionCode) || '' }));
+  if (details.some((item) => !item.tireSize)) throw new Error('Every selected tire position needs a tire size.');
+  return details;
+}
 
 /**
  * Creates the repairs row plus the roadside_breakdowns detail row. The affected
@@ -113,15 +148,24 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   const manualDriver = String(input.driverName ?? '').trim().slice(0, 120);
   const manualState = String(input.state ?? '').trim().toUpperCase().slice(0, 2);
   const manualCity = String(input.city ?? '').trim().slice(0, 120);
-  if (!geotabSnapshot && (!manualDriver || !manualState || !manualCity)) {
+  const wantsCorrection = input.snapshotVerification === 'corrected';
+  const hasManualSnapshot = Boolean(manualDriver && manualState && manualCity);
+
+  if (wantsCorrection && !hasManualSnapshot) {
+    throw new Error('Enter the corrected driver, city, and state before submitting.');
+  }
+  if (!geotabSnapshot && !hasManualSnapshot) {
     throw new ManualBreakdownSnapshotRequiredError();
   }
 
-  const driverName = geotabSnapshot?.driverName || manualDriver;
-  const state = geotabSnapshot?.state || manualState;
-  const city = geotabSnapshot?.city || manualCity;
-  const snapshotSource = geotabSnapshot ? 'geotab' : 'manual-fallback';
+  const driverName = wantsCorrection ? manualDriver : (geotabSnapshot?.driverName || manualDriver);
+  const state = wantsCorrection ? manualState : (geotabSnapshot?.state || manualState);
+  const city = wantsCorrection ? manualCity : (geotabSnapshot?.city || manualCity);
+  const snapshotSource = geotabSnapshot
+    ? (wantsCorrection ? 'geotab-corrected' : 'geotab')
+    : 'manual-fallback';
   const snapshotCapturedAt = geotabSnapshot?.capturedAt || new Date().toISOString();
+  const tireDetails = validatedTireDetails(input);
 
   const title = `Roadside breakdown - ${driverName}: ${input.repairCategory}`.slice(0, 500);
 
@@ -159,6 +203,13 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   const breakdownId = Number(insertedBreakdown.meta.last_row_id ?? 0);
   if (!breakdownId) throw new Error('Could not create the breakdown record.');
 
+  if (tireDetails.length) {
+    await env.DB.batch(tireDetails.map((item) => env.DB.prepare(`
+      INSERT INTO roadside_breakdown_tires (breakdown_id, repair_id, position_code, tire_size)
+      VALUES (?, ?, ?, ?)
+    `).bind(breakdownId, repairId, item.positionCode, item.tireSize)));
+  }
+
   if (input.photoObjectKeys?.length) {
     const batch = input.photoObjectKeys.map(key =>
       env.DB.prepare(`INSERT INTO attachments (repair_id, object_key, file_name, content_type) VALUES (?, ?, ?, ?)`)
@@ -168,7 +219,10 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   }
 
   const unitLabel = input.unitType === 'truck' ? 'Truck' : 'Trailer';
-  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
+  const tireMessage = tireDetails.length
+    ? `\nTires: ${tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', ')}`
+    : '';
+  const message = `ROADSIDE BREAKDOWN\n\nDriver: ${driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}${tireMessage}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
   const emailHtml = message.replace(/\n/g, '<br>');
   await notifyBreakdownGroup(breakdownId, 'Breakdown Alerts', message, `Breakdown Reported - ${driverName}`, emailHtml);
 
@@ -223,7 +277,7 @@ export async function updateBreakdown(breakdownId: number, input: UpdateBreakdow
 
   if (input.cost !== undefined) {
     await env.DB.prepare(`
-      UPDATE repairs SET outside_cost = ?, updated_at = CURRENT_TIMESTAMP
+      UPDATE repairs SET outside_cost = ?, updated_at=CURRENT_TIMESTAMP
       WHERE id = (SELECT repair_id FROM roadside_breakdowns WHERE id = ?)
     `).bind(input.cost, breakdownId).run();
   }
