@@ -17,15 +17,16 @@ function safeText(value: FormDataEntryValue | null, max: number) {
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
-    const truckUnit = safeText(form.get('truckUnit'), 20);
-    const trailerUnit = safeText(form.get('trailerUnit'), 20);
+    const unitType = safeText(form.get('unitType'), 10);
+    const unitNumber = safeText(form.get('unitNumber'), 20);
     const driverName = safeText(form.get('driverName'), 120);
     const state = safeText(form.get('state'), 2).toUpperCase();
     const city = safeText(form.get('city'), 120);
     const repairCategory = safeText(form.get('repairCategory'), 60);
     const description = safeText(form.get('description'), 2000);
 
-    if (!truckUnit) throw new Error('Truck # is required.');
+    if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
+    if (!unitNumber) throw new Error('Unit # is required.');
     if (!driverName) throw new Error('Driver name is required.');
     if (!state) throw new Error('State is required.');
     if (!city) throw new Error('City is required.');
@@ -43,7 +44,8 @@ export async function POST(request: Request) {
     }
 
     const { breakdownId } = await createBreakdown({
-      truckUnit, trailerUnit: trailerUnit || undefined, driverName, state, city, repairCategory, description, photoObjectKeys,
+      unitType: unitType as 'truck' | 'trailer',
+      unitNumber, driverName, state, city, repairCategory, description, photoObjectKeys,
     });
 
     return Response.json({ ok: true, breakdownId }, { headers: { 'cache-control': 'no-store' } });
