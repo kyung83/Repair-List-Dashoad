@@ -176,6 +176,59 @@ if (flag !== 1) {
 console.log('Verified remote Parts & Inventory v2 schema 0094.');
 NODE
 
+# Migration 0098 is a hard prerequisite for the breakdown Worker. Refuse to publish
+# unless every driver/GPS snapshot column exists on REMOTE D1. This check reads only
+# schema metadata and never creates a fake breakdown.
+breakdown_snapshot_schema_sql="SELECT CASE WHEN
+  EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='snapshot_source')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='geotab_driver_id')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='driver_observed_at')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='geotab_device_id')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='latitude')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='longitude')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='gps_observed_at')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='gps_source')
+  AND EXISTS(SELECT 1 FROM pragma_table_info('roadside_breakdowns') WHERE name='snapshot_captured_at')
+  AND EXISTS(SELECT 1 FROM sqlite_master WHERE name='idx_roadside_breakdowns_snapshot_source' AND type='index')
+THEN 1 ELSE 0 END AS breakdown_snapshot_0098_ok;"
+
+npx wrangler d1 execute "$DB_NAME" \
+  --remote \
+  --config "$CONFIG_FILE" \
+  "${ACCOUNT_ARG[@]}" \
+  --command "$breakdown_snapshot_schema_sql" \
+  --json > /tmp/breakdown-snapshot-schema.json
+
+node - /tmp/breakdown-snapshot-schema.json <<'NODE'
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+function findFlag(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findFlag(item);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'breakdown_snapshot_0098_ok')) {
+    return Number(value.breakdown_snapshot_0098_ok);
+  }
+  for (const child of Object.values(value)) {
+    const found = findFlag(child);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+const flag = findFlag(payload);
+if (flag !== 1) {
+  console.error('Remote D1 is missing required roadside breakdown Geotab snapshot migration 0098 fields.');
+  console.error(JSON.stringify(payload));
+  process.exit(1);
+}
+console.log('Verified remote roadside breakdown Geotab snapshot schema 0098.');
+NODE
+
 # Deploy the exact build snapshot produced by the Cloudflare Vite plugin.
 npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"
 
