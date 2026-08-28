@@ -62,3 +62,15 @@ CREATE INDEX IF NOT EXISTS idx_roadside_breakdowns_claimed_sms_contact
   ON roadside_breakdowns(claimed_by_notification_contact_id);
 CREATE INDEX IF NOT EXISTS idx_notification_group_contacts_phone
   ON notification_group_contacts(group_id, phone);
+
+-- Existing dashboard claim code uses claimed_by_user_id. Once an SMS contact
+-- has won the first-reply race, ignore any later attempt to overwrite that
+-- claim with a dashboard user ID. The caller's existing post-update check then
+-- correctly reports "already claimed".
+CREATE TRIGGER IF NOT EXISTS trg_preserve_roadside_sms_claim
+BEFORE UPDATE OF claimed_by_user_id ON roadside_breakdowns
+WHEN OLD.claimed_by_notification_contact_id IS NOT NULL
+  AND NEW.claimed_by_user_id IS NOT NULL
+BEGIN
+  SELECT RAISE(IGNORE);
+END;
