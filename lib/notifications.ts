@@ -3,6 +3,7 @@ import { sendGmailRuntimeEmail, type GmailRuntimeAttachment } from '@/lib/gmail-
 import { getGmailRuntimeCredentialMetadata } from '@/lib/gmail-runtime-credentials';
 import { sendTwilioRuntimeSms, twilioRuntimeReady } from '@/lib/twilio-runtime';
 import { buildNewBreakdownSms } from '@/lib/breakdown-sms-message';
+import { breakdownSmsScheduleAllows } from '@/lib/breakdown-sms-schedule';
 
 const BREAKDOWN_EMAIL_FROM = 'norlow-breakdowns@norloworld.com';
 
@@ -167,11 +168,21 @@ async function sendEmailLive(
 
 export async function sendBreakdownSms(breakdownId: number, toPhone: string, message: string) {
   try {
-    if (await twilioRuntimeReady(env.DB)) {
+    const twilioReady = await twilioRuntimeReady(env.DB);
+    const scheduleAllowed = await breakdownSmsScheduleAllows(env.DB);
+    if (twilioReady && scheduleAllowed) {
       await sendSmsLive(toPhone, message);
       await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'sent' });
     } else {
-      await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'stubbed' });
+      await logNotification({
+        breakdownId,
+        channel: 'sms',
+        direction: 'outbound',
+        recipient: toPhone,
+        body: message,
+        status: 'stubbed',
+        error: twilioReady ? 'Outside configured breakdown SMS schedule.' : 'Twilio breakdown texting is not enabled.',
+      });
     }
   } catch (err) {
     await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'error', error: String((err as Error)?.message ?? err) });
