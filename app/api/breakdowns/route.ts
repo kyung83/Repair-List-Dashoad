@@ -134,6 +134,7 @@ export async function POST(request: Request) {
         '',
         `<strong>Submitted:</strong> ${escapeHtml(submittedAt)}`,
         `<strong>Driver:</strong> ${escapeHtml(actual.driver_name)}`,
+        ...(actual.driver_phone ? [`<strong>Driver Phone:</strong> ${escapeHtml(actual.driver_phone)}`] : []),
         `<strong>${unitLabel}:</strong> ${escapeHtml(actual.unit)}`,
         `<strong>Location:</strong> ${escapeHtml(`${actual.city}, ${actual.state}`)}`,
         `<strong>Category:</strong> ${escapeHtml(actual.repair_category)}${tireHtml}`,
