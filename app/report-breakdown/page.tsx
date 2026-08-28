@@ -1,14 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import DriverFollowup from './driver-followup';
 
 type UnitType = '' | 'truck' | 'trailer';
 type UnitResult = { unit: string; equipmentType: string };
-type SubmitResult = { ok: true; breakdownId: number } | { error: string } | null;
+type SubmitResult = { ok: true; breakdownId: number; driverToken: string } | { error: string } | null;
 type SnapshotChoice = '' | 'verified' | 'corrected' | 'unavailable';
 type BreakdownSubmitPayload = {
   ok?: boolean;
   breakdownId?: number;
+  driverToken?: string;
   error?: string;
   manualFallbackRequired?: boolean;
 };
@@ -25,6 +27,8 @@ type TireAxle = {
   label: string;
   positions: { code: string; label: string }[];
 };
+
+const ACTIVE_BREAKDOWN_KEY='norlow-active-driver-breakdown';
 
 const REPAIR_CATEGORIES = [
   'AIR/CHAMBERS/GLADHANDS',
@@ -83,6 +87,21 @@ export default function ReportBreakdownPage() {
   const [tireSizes, setTireSizes] = useState<Record<string, string>>({});
   const [result, setResult] = useState<SubmitResult>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    try {
+      const raw=window.localStorage.getItem(ACTIVE_BREAKDOWN_KEY);
+      if(!raw)return;
+      const parsed=JSON.parse(raw) as {breakdownId?:unknown;driverToken?:unknown};
+      const breakdownId=Number(parsed.breakdownId);
+      const driverToken=String(parsed.driverToken||'');
+      if(Number.isInteger(breakdownId)&&breakdownId>0&&driverToken.length>=32){
+        setResult({ok:true,breakdownId,driverToken});
+      }
+    } catch {
+      window.localStorage.removeItem(ACTIVE_BREAKDOWN_KEY);
+    }
+  }, []);
 
   useEffect(() => {
     if (!unitType || selectedUnit) {
@@ -281,10 +300,12 @@ export default function ReportBreakdownPage() {
         setResult({ error: payload.error || 'Enter the driver and location manually to continue.' });
         return;
       }
-      if (!response.ok || !payload.ok || !payload.breakdownId) {
+      if (!response.ok || !payload.ok || !payload.breakdownId || !payload.driverToken) {
         throw new Error(payload.error || 'The breakdown could not be saved.');
       }
-      setResult({ ok: true, breakdownId: payload.breakdownId });
+      const next={ok:true as const,breakdownId:payload.breakdownId,driverToken:payload.driverToken};
+      window.localStorage.setItem(ACTIVE_BREAKDOWN_KEY,JSON.stringify({breakdownId:next.breakdownId,driverToken:next.driverToken}));
+      setResult(next);
       formRef.current?.reset();
       resetBreakdownDetails();
     } catch (error) {
@@ -300,6 +321,7 @@ export default function ReportBreakdownPage() {
   }
 
   function reportAnother() {
+    window.localStorage.removeItem(ACTIVE_BREAKDOWN_KEY);
     setResult(null);
     setUnitType('');
     setUnitQuery('');
@@ -313,29 +335,7 @@ export default function ReportBreakdownPage() {
   const tireAxles = unitType === 'trailer' ? TRAILER_TIRE_AXLES : TRUCK_TIRE_AXLES;
 
   if (result && 'ok' in result) {
-    return (
-      <main className="easy-page">
-        <div className="easy-page-narrow" style={{ maxWidth: 720 }}>
-          <section className="easy-card" style={{ overflow: 'hidden' }}>
-            <div style={{ padding: 28, background: '#0d1b2b', color: '#fff' }}>
-              <p className="easy-eyebrow">ROADSIDE BREAKDOWN</p>
-              <h1 style={{ margin: '8px 0 0', fontSize: 34 }}>Breakdown saved</h1>
-              <p style={{ margin: '10px 0 0', color: '#c5d0da', lineHeight: 1.5 }}>
-                Reference #{result.breakdownId}. Keep this number if you need to follow up.
-              </p>
-            </div>
-            <div className="easy-card-body">
-              <p className="easy-section-copy" style={{ marginTop: 0 }}>
-                The report is now in Northern&apos;s breakdown system. Dispatch can see the affected unit, driver, captured location, and any reported tire position/size details.
-              </p>
-              <div className="easy-actions">
-                <button type="button" className="easy-button orange" onClick={reportAnother}>Report another breakdown</button>
-              </div>
-            </div>
-          </section>
-        </div>
-      </main>
-    );
+    return <DriverFollowup breakdownId={result.breakdownId} token={result.driverToken} onReportAnother={reportAnother} />;
   }
 
   return (
