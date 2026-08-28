@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 
 async function sources(){
-  return Promise.all([
+  const [bridge,route,wrangler,build,wrapper,reader]=await Promise.all([
     readFile(new URL('../app/outside-work/ai-reading-bridge.tsx',import.meta.url),'utf8'),
     readFile(new URL('../app/api/outside-work/ai-read/route.ts',import.meta.url),'utf8'),
     readFile(new URL('../wrangler.template.jsonc',import.meta.url),'utf8'),
     readFile(new URL('../scripts/build-verified.sh',import.meta.url),'utf8'),
     readFile(new URL('../app/outside-work/intake-v3.tsx',import.meta.url),'utf8'),
+    readFile(new URL('../lib/outside-work-ai-reader.ts',import.meta.url),'utf8'),
   ]);
+  return[bridge,`${route}\n${reader}`,wrangler,build,wrapper];
 }
 
 test('Outside Work captures the selected file before native input clearing, then defers AI work',async()=>{
@@ -69,22 +71,22 @@ test('PDF scans are rendered into page images before AI reading',async()=>{
 
 test('GPT-5.6 Sol uses its required Responses-format multimodal request',async()=>{
   const [,route]=await sources();
-  assert.match(route,/PRIMARY_MODEL='openai\/gpt-5\.6-sol'/);
+  assert.match(route,/OUTSIDE_WORK_PRIMARY_MODEL='openai\/gpt-5\.6-sol'/);
   assert.match(route,/function primaryInput\(imageUrls:string\[\]\)/);
   assert.match(route,/instructions:SYSTEM_PROMPT/);
   assert.match(route,/type:'input_text',text:USER_PROMPT/);
   assert.match(route,/type:'input_image',image_url,detail:'high'/);
   assert.match(route,/max_output_tokens:1800/);
-  assert.match(route,/tryModel\(ai,PRIMARY_MODEL,primaryInput\(imageUrls\),\{gateway:\{id:'default'\}\}\)/);
+  assert.match(route,/tryModel\(ai,db,OUTSIDE_WORK_PRIMARY_MODEL,primaryInput\(imageUrls\),\{gateway:\{id:'default'\}\}\)/);
 });
 
 test('Qwen vision remains a separate chat-format fallback',async()=>{
   const [,route]=await sources();
-  assert.match(route,/FALLBACK_MODEL='@cf\/qwen\/qwen3\.8-27b'/);
+  assert.match(route,/OUTSIDE_WORK_FALLBACK_MODEL='@cf\/qwen\/qwen3\.8-27b'/);
   assert.match(route,/function fallbackInput\(imageUrls:string\[\]\)/);
   assert.match(route,/type:'image_url',image_url:\{url\}/);
   assert.match(route,/response_format:\{type:'json_object'\}/);
-  assert.match(route,/tryModel\(ai,FALLBACK_MODEL,fallbackInput\(imageUrls\)\)/);
+  assert.match(route,/tryModel\(ai,db,OUTSIDE_WORK_FALLBACK_MODEL,fallbackInput\(imageUrls\)\)/);
 });
 
 test('server accepts Responses and chat-completion output shapes',async()=>{
