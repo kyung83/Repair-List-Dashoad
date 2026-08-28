@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import { issueDriverAccessToken } from '@/lib/breakdown-driver-followup';
 import {
   createBreakdown,
   getBreakdown,
@@ -56,10 +57,6 @@ function easternTimestamp(value: unknown) {
  */
 export async function POST(request: Request) {
   try {
-    // Do not compare Origin to request.url: the same first-party Worker may be
-    // reached through different proxy/browser hostnames. Modern browsers expose
-    // Sec-Fetch-Site, which lets us reject actual cross-site submissions without
-    // breaking mobile or alternate first-party entry URLs.
     const fetchSite = String(request.headers.get('sec-fetch-site') ?? '').trim().toLowerCase();
     if (fetchSite === 'cross-site') {
       return Response.json({ error: 'Cross-site breakdown submission rejected.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
@@ -104,9 +101,8 @@ export async function POST(request: Request) {
       description,
       tireDetails,
     });
+    const driverToken = await issueDriverAccessToken(breakdownId);
 
-    // Upload only after the breakdown snapshot and tire details have passed validation.
-    // This prevents orphaned R2 files when the first attempt needs correction/fallback.
     const files = form.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
     const emailAttachments: BreakdownEmailAttachment[] = [];
     for (const file of files.slice(0, 6)) {
@@ -125,9 +121,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Send exactly one original breakdown email after uploads finish. When Gmail is
-    // connected, any successfully uploaded driver photos are attached to this first
-    // message, and the Message-ID/thread is saved for later provider/ETA replies.
     try {
       const actual = await getBreakdown(breakdownId);
       if (!actual) throw new Error('Breakdown could not be reloaded for its email alert.');
@@ -159,7 +152,7 @@ export async function POST(request: Request) {
       console.warn(JSON.stringify({ event: 'breakdown_initial_email_failed', breakdownId, error: String(error) }));
     }
 
-    return Response.json({ ok: true, breakdownId, snapshotSource }, { headers: { 'cache-control': 'no-store' } });
+    return Response.json({ ok: true, breakdownId, driverToken, snapshotSource }, { headers: { 'cache-control': 'no-store' } });
   } catch (err) {
     if (err instanceof ManualBreakdownSnapshotRequiredError) {
       return Response.json(
