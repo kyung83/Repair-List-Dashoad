@@ -1,9 +1,9 @@
 import {
   getDriverBreakdownFollowup,
   recordDriverBreakdownAction,
-  uploadDriverBreakdownReceipt,
   type DriverBreakdownAction,
 } from '@/lib/breakdown-driver-followup';
+import { uploadAndReadDriverBreakdownReceipt } from '@/lib/breakdown-driver-receipt-server';
 
 const ACTIONS=new Set<DriverBreakdownAction>(['tech_arrived','repair_finished','rolling']);
 
@@ -51,11 +51,11 @@ export async function POST(request:Request){
     const breakdownId=safeId(form.get('breakdownId'));
     const token=String(form.get('token')||'').trim();
     const files=form.getAll('receipt').filter((entry):entry is File=>entry instanceof File&&entry.size>0);
-    const breakdown=await uploadDriverBreakdownReceipt(breakdownId,token,files);
+    const breakdown=await uploadAndReadDriverBreakdownReceipt(breakdownId,token,files);
     return Response.json({ok:true,breakdown},{headers:{'cache-control':'no-store'}});
   }catch(error){
     const message=error instanceof Error?error.message:String(error);
-    const status=/too large|8 MB/i.test(message)?413:400;
+    const status=/too large|20 MB/i.test(message)?413:400;
     return Response.json({error:message},{status,headers:{'cache-control':'no-store'}});
   }
 }
