@@ -26,6 +26,15 @@ type BreakdownPhoto = {
   url: string;
 };
 
+type ServiceProvider = {
+  id: number;
+  name: string;
+  phone: string;
+  city: string;
+  state: string;
+  zip: string;
+};
+
 function unitLabel(row: BreakdownRow) {
   const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
   return `${type} ${row.unit}`;
@@ -55,6 +64,117 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
   boxSizing: 'border-box',
 };
+
+function ProviderPicker({
+  row,
+  disabled,
+  onChoose,
+}: {
+  row: BreakdownRow;
+  disabled: boolean;
+  onChoose: (provider: ServiceProvider) => void;
+}) {
+  const [providers, setProviders] = useState<ServiceProvider[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const state = String(row.state || '').trim().toUpperCase();
+    const city = String(row.city || '').trim();
+
+    if (!state) {
+      setProviders([]);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    setLoading(true);
+    setError('');
+    const params = new URLSearchParams({ state });
+    if (city) params.set('city', city);
+
+    void fetch(`/api/breakdown-service-providers?${params.toString()}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json() as { providers?: ServiceProvider[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || 'Provider directory could not be loaded.');
+        return Array.isArray(payload.providers) ? payload.providers : [];
+      })
+      .then((rows) => {
+        if (!cancelled) setProviders(rows);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : 'Provider directory could not be loaded.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [row.city, row.state]);
+
+  const filteredProviders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return providers;
+    const digits = q.replace(/\D/g, '');
+    return providers.filter((provider) => {
+      const text = `${provider.name} ${provider.city} ${provider.state} ${provider.zip} ${provider.phone}`.toLowerCase();
+      if (text.includes(q)) return true;
+      if (!digits) return false;
+      return provider.phone.replace(/\D/g, '').includes(digits);
+    });
+  }, [providers, search]);
+
+  const state = String(row.state || '').trim().toUpperCase();
+
+  return (
+    <div style={{ gridColumn: '1 / -1', padding: 12, border: '1px solid #d5dee8', borderRadius: 10, background: '#fff' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
+        <strong style={{ color: '#172033', fontSize: 13 }}>{state || 'State'} Provider Directory</strong>
+        {!loading && !error && <span style={{ color: '#64748b', fontSize: 12, fontWeight: 700 }}>{providers.length} provider{providers.length === 1 ? '' : 's'}</span>}
+      </div>
+
+      {error ? (
+        <div style={{ color: '#9f1239', fontSize: 12 }}>{error} You can still type the provider manually below.</div>
+      ) : loading ? (
+        <div style={{ color: '#64748b', fontSize: 12 }}>Loading {state} providers...</div>
+      ) : providers.length === 0 ? (
+        <div style={{ color: '#64748b', fontSize: 12 }}>No providers are on file for {state}. You can still type one manually below.</div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value.slice(0, 80))}
+            placeholder={`Search ${state} by company, city, ZIP or phone`}
+            style={inputStyle}
+            disabled={disabled}
+          />
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const provider = providers.find((item) => item.id === Number(event.target.value));
+              if (provider) onChoose(provider);
+              event.currentTarget.value = '';
+            }}
+            style={inputStyle}
+            disabled={disabled || filteredProviders.length === 0}
+          >
+            <option value="">Choose a {state} service provider...</option>
+            {filteredProviders.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.name} — {provider.city}, {provider.state}{provider.zip ? ` ${provider.zip}` : ''}{provider.phone ? ` — ${provider.phone}` : ''}
+              </option>
+            ))}
+          </select>
+          <small style={{ color: '#64748b', lineHeight: 1.4 }}>
+            Only providers in {state} are shown. Providers in {row.city} are listed first when they are on file.
+          </small>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function BreakdownsPage() {
   const [breakdowns, setBreakdowns] = useState<BreakdownRow[]>([]);
@@ -104,6 +224,17 @@ export default function BreakdownsPage() {
       [id]: {
         ...(current[id] || { serviceProvider: '', serviceProviderPhone: '', eta: '', cost: '' }),
         [field]: value,
+      },
+    }));
+  }
+
+  function chooseProvider(id: number, provider: ServiceProvider) {
+    setDrafts((current) => ({
+      ...current,
+      [id]: {
+        ...(current[id] || { serviceProvider: '', serviceProviderPhone: '', eta: '', cost: '' }),
+        serviceProvider: provider.name,
+        serviceProviderPhone: provider.phone,
       },
     }));
   }
@@ -189,7 +320,7 @@ export default function BreakdownsPage() {
       <div className="easy-page-narrow">
         <p className="easy-eyebrow">ROADSIDE OPERATIONS</p>
         <h1 className="easy-title">Breakdowns</h1>
-        <p className="easy-subtitle">Manage active roadside calls, view driver-submitted photos, and record who was used, ETA and cost. Breakdown email is active when Gmail is connected; SMS remains off.</p>
+        <p className="easy-subtitle">Manage active roadside calls, view driver-submitted photos, and record who was used, ETA and cost. Service providers are filtered to the breakdown state automatically.</p>
 
         {message && <div className="easy-notice">{message}</div>}
 
@@ -205,7 +336,7 @@ export default function BreakdownsPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
                 <h2 className="easy-section-title">Active roadside calls</h2>
-                <p className="easy-section-copy">Enter the service or tow company directly on the breakdown they handled.</p>
+                <p className="easy-section-copy">Choose from the provider directory for the breakdown state, or type a provider manually.</p>
               </div>
               <button type="button" className="easy-button" onClick={() => void load()} disabled={loading}>Refresh</button>
             </div>
@@ -272,6 +403,8 @@ export default function BreakdownsPage() {
                       <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}>
                         <p className="easy-eyebrow" style={{ marginBottom: 10 }}>WHO WE USED</p>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 10 }}>
+                          <ProviderPicker row={row} disabled={isBusy} onChoose={(provider) => chooseProvider(row.id, provider)} />
+
                           <label style={{ display: 'grid', gap: 5, fontSize: 12, fontWeight: 850, color: '#334155' }}>
                             Service / Tow Company
                             <input
