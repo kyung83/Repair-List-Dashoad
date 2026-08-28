@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type DriverFollowupState={
   breakdownId:number;
@@ -121,7 +121,6 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
   const [state,setState]=useState<DriverFollowupState|null>(null);
   const [busy,setBusy]=useState('');
   const [message,setMessage]=useState('');
-  const receiptInputRef=useRef<HTMLInputElement>(null);
 
   const load=useCallback(async()=>{
     try{
@@ -200,7 +199,6 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
         :detail);
     }finally{
       setBusy('');
-      if(receiptInputRef.current)receiptInputRef.current.value='';
     }
   }
 
@@ -222,7 +220,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
 
           <div className="easy-card-body">
             <h2 className="easy-section-title">Roadside Updates</h2>
-            <p className="easy-section-copy">This is your breakdown update screen. Use the three buttons below while you are stopped.</p>
+            <p className="easy-section-copy">This is your breakdown update screen. Use the three controls below while you are stopped.</p>
 
             <div style={{display:'grid',gap:14,marginTop:20}}>
               <button
@@ -236,25 +234,23 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
                 {arrived&&<small>{formatTime(state?.techArrivedAt||null)}</small>}
               </button>
 
-              <input
-                ref={receiptInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                aria-label="Upload Receipt"
-                onChange={(event)=>void uploadReceipt(Array.from(event.target.files||[]).slice(0,3))}
-                style={{display:'none'}}
-              />
-              <button
-                type="button"
-                className={`easy-button ${receiptUploaded?'orange':''}`}
-                disabled={busy!==''||Boolean(state?.closed)}
-                onClick={()=>receiptInputRef.current?.click()}
-                style={{width:'100%',minHeight:68,fontSize:18,justifyContent:'space-between'}}
-              >
-                <span>{busy==='receipt'?'Uploading & Reading...':receiptUploaded?'✓ Receipt Uploaded':'Upload Receipt'}</span>
-                <small>{receiptUploaded?'Tap to replace':'Optional'}</small>
-              </button>
+              <div style={{display:'grid',gap:7}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontWeight:850,color:'#243447'}}>
+                  <span>{receiptUploaded?'✓ Receipt Uploaded':'Upload Receipt'}</span>
+                  <small>{receiptUploaded?'Select again to replace':'Optional'}</small>
+                </div>
+                <input
+                  type="file"
+                  name="receiptPicker"
+                  accept="image/*"
+                  multiple
+                  aria-label="Upload Receipt"
+                  disabled={busy!==''||Boolean(state?.closed)}
+                  onChange={(event)=>void uploadReceipt(Array.from(event.target.files||[]).slice(0,3))}
+                  style={{width:'100%',minHeight:68,padding:'14px',border:'1px solid #cbd5dd',borderRadius:12,background:'#fff',color:'#172033',fontSize:16,boxSizing:'border-box'}}
+                />
+                {busy==='receipt'&&<small style={{color:'#64748b'}}>Uploading & Reading...</small>}
+              </div>
 
               <button
                 type="button"
