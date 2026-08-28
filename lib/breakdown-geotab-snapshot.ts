@@ -36,6 +36,7 @@ type Position = {
 
 type DriverSnapshot = {
   name: string;
+  phone: string;
   geotabUserId: string;
   observedAt: string;
   deviceId: string;
@@ -43,6 +44,7 @@ type DriverSnapshot = {
 
 export type BreakdownGeotabSnapshot = {
   driverName: string;
+  driverPhone: string;
   city: string;
   state: string;
   latitude: number;
@@ -105,6 +107,13 @@ function displayDriverName(user: GeotabJsonRecord) {
   const last = geotabText(geotabGet(user, 'lastName', 'LastName')).trim();
   const full = `${first} ${last}`.trim();
   return full || geotabText(geotabGet(user, 'name', 'Name')).trim();
+}
+
+function displayDriverPhone(user: GeotabJsonRecord) {
+  const phone = geotabText(geotabGet(user, 'phoneNumber', 'PhoneNumber')).trim().replace(/\s+/g, ' ');
+  const extension = geotabText(geotabGet(user, 'phoneNumberExtension', 'PhoneNumberExtension')).trim();
+  if (!phone) return '';
+  return `${phone}${extension ? ` ext. ${extension}` : ''}`.slice(0, 60);
 }
 
 function stateFromAddress(address: GeotabJsonRecord) {
@@ -244,8 +253,9 @@ async function driverFromStatus(
     resultsLimit: 2,
   });
   if (rows.length !== 1) return null;
-  const name = displayDriverName(rows[0]);
-  return name ? { name, geotabUserId, observedAt, deviceId } : null;
+  const user = rows[0];
+  const name = displayDriverName(user);
+  return name ? { name, phone: displayDriverPhone(user), geotabUserId, observedAt, deviceId } : null;
 }
 
 async function reverseGeocode(
@@ -373,6 +383,7 @@ export async function resolveBreakdownGeotabSnapshot(
 
     return {
       driverName: driver.name,
+      driverPhone: driver.phone,
       city: address.city,
       state: address.state,
       latitude: position.latitude,

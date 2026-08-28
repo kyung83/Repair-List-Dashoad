@@ -25,6 +25,7 @@ export type BreakdownRow = {
   unit: string;
   equipment_type: string;
   driver_name: string;
+  driver_phone: string | null;
   state: string;
   city: string;
   repair_category: string;
@@ -56,7 +57,7 @@ const LIST_SELECT = `
   SELECT
     b.id, b.repair_id, b.equipment_id,
     e.unit AS unit, e.equipment_type AS equipment_type,
-    b.driver_name, b.state, b.city, b.repair_category, b.repair_needed, b.description,
+    b.driver_name, b.driver_phone, b.state, b.city, b.repair_category, b.repair_needed, b.description,
     b.stage, b.status, b.service_provider, b.service_provider_phone, b.eta,
     b.claimed_by_user_id, u.display_name AS claimed_by, b.on_location_at,
     r.outside_cost AS cost,
@@ -192,6 +193,7 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   }
 
   const driverName = wantsCorrection ? manualDriver : (geotabSnapshot?.driverName || manualDriver);
+  const driverPhone = wantsCorrection ? '' : String(geotabSnapshot?.driverPhone || '').trim().slice(0, 60);
   const state = wantsCorrection ? manualState : (geotabSnapshot?.state || manualState);
   const city = wantsCorrection ? manualCity : (geotabSnapshot?.city || manualCity);
   const snapshotSource = geotabSnapshot
@@ -211,14 +213,15 @@ export async function createBreakdown(input: CreateBreakdownInput) {
 
   const insertedBreakdown = await env.DB.prepare(`
     INSERT INTO roadside_breakdowns (
-      repair_id, equipment_id, driver_name, state, city, repair_category, description, stage, status,
+      repair_id, equipment_id, driver_name, driver_phone, state, city, repair_category, description, stage, status,
       snapshot_source, geotab_driver_id, driver_observed_at, geotab_device_id,
       latitude, longitude, gps_observed_at, gps_source, snapshot_captured_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'reported', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'reported', ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     repairId,
     equipmentId,
     driverName,
+    driverPhone || null,
     state,
     city,
     input.repairCategory,
@@ -254,10 +257,11 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   const created = await getBreakdown(breakdownId);
   const submittedAt = easternTimestamp(created?.created_at || new Date().toISOString());
   const unitLabel = input.unitType === 'truck' ? 'Truck' : 'Trailer';
+  const driverPhoneMessage = driverPhone ? `\nDriver Phone: ${driverPhone}` : '';
   const tireMessage = tireDetails.length
     ? `\nTires: ${tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', ')}`
     : '';
-  const message = `ROADSIDE BREAKDOWN\n\nSubmitted: ${submittedAt}\nDriver: ${driverName}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}${tireMessage}\n${input.description}\n\nReply ${breakdownId} to claim this breakdown.`;
+  const message = `ROADSIDE BREAKDOWN\n\nSubmitted: ${submittedAt}\nDriver: ${driverName}${driverPhoneMessage}\n${unitLabel}: ${input.unitNumber}\nLocation: ${city}, ${state}\nCategory: ${input.repairCategory}${tireMessage}\nDescription: ${input.description}\nBreakdown #: ${breakdownId}\n\nReply ${breakdownId} to claim this breakdown.`;
   const tireHtml = tireDetails.length
     ? `<br><strong>Tires:</strong> ${escapeHtml(tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', '))}`
     : '';
@@ -266,6 +270,7 @@ export async function createBreakdown(input: CreateBreakdownInput) {
     '',
     `<strong>Submitted:</strong> ${escapeHtml(submittedAt)}`,
     `<strong>Driver:</strong> ${escapeHtml(driverName)}`,
+    ...(driverPhone ? [`<strong>Driver Phone:</strong> ${escapeHtml(driverPhone)}`] : []),
     `<strong>${unitLabel}:</strong> ${escapeHtml(input.unitNumber)}`,
     `<strong>Location:</strong> ${escapeHtml(`${city}, ${state}`)}`,
     `<strong>Category:</strong> ${escapeHtml(input.repairCategory)}${tireHtml}`,
@@ -363,6 +368,7 @@ export async function updateBreakdown(breakdownId: number, input: UpdateBreakdow
       `<strong>Updated:</strong> ${escapeHtml(updatedAt)}`,
       `<strong>Original Submitted:</strong> ${escapeHtml(submittedAt)}`,
       `<strong>Driver:</strong> ${escapeHtml(after.driver_name)}`,
+      ...(after.driver_phone ? [`<strong>Driver Phone:</strong> ${escapeHtml(after.driver_phone)}`] : []),
       `<strong>${unitLabel}:</strong> ${escapeHtml(after.unit)}`,
       `<strong>Location:</strong> ${escapeHtml(`${after.city}, ${after.state}`)}`,
       `<strong>Service Provider:</strong> ${escapeHtml(provider)}`,
