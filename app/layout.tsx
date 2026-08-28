@@ -21,6 +21,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AppNav />
+        <script src="/breakdown-photo-prep.js" defer />
         <script dangerouslySetInnerHTML={{ __html: `(function(){
           var APP_TIME_ZONE='America/Detroit';
           if(!window.__northernEasternTimePatched){
