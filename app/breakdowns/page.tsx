@@ -35,6 +35,14 @@ type ServiceProvider = {
   zip: string;
 };
 
+type NewProviderDraft = {
+  name: string;
+  phone: string;
+  city: string;
+  state: string;
+  zip: string;
+};
+
 function unitLabel(row: BreakdownRow) {
   const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
   return `${type} ${row.unit}`;
@@ -65,54 +73,72 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
+const labelStyle: React.CSSProperties = {
+  display: 'grid',
+  gap: 5,
+  fontSize: 12,
+  fontWeight: 850,
+  color: '#334155',
+};
+
 function ProviderPicker({
   row,
   disabled,
+  selectedName,
+  selectedPhone,
   onChoose,
+  onClear,
 }: {
   row: BreakdownRow;
   disabled: boolean;
+  selectedName: string;
+  selectedPhone: string;
   onChoose: (provider: ServiceProvider) => void;
+  onClear: () => void;
 }) {
+  const state = String(row.state || '').trim().toUpperCase();
+  const city = String(row.city || '').trim();
   const [providers, setProviders] = useState<ServiceProvider[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState('');
+  const [newProvider, setNewProvider] = useState<NewProviderDraft>({
+    name: '',
+    phone: '',
+    city,
+    state,
+    zip: '',
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    const state = String(row.state || '').trim().toUpperCase();
-    const city = String(row.city || '').trim();
-
+  const loadProviders = useCallback(async () => {
     if (!state) {
       setProviders([]);
       setLoading(false);
-      return () => { cancelled = true; };
+      return;
     }
-
     setLoading(true);
     setError('');
-    const params = new URLSearchParams({ state });
-    if (city) params.set('city', city);
+    try {
+      const params = new URLSearchParams({ state });
+      if (city) params.set('city', city);
+      const response = await fetch(`/api/breakdown-service-providers?${params.toString()}`, { cache: 'no-store' });
+      const payload = await response.json() as { providers?: ServiceProvider[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || 'Provider directory could not be loaded.');
+      setProviders(Array.isArray(payload.providers) ? payload.providers : []);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Provider directory could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
+  }, [city, state]);
 
-    void fetch(`/api/breakdown-service-providers?${params.toString()}`, { cache: 'no-store' })
-      .then(async (response) => {
-        const payload = await response.json() as { providers?: ServiceProvider[]; error?: string };
-        if (!response.ok) throw new Error(payload.error || 'Provider directory could not be loaded.');
-        return Array.isArray(payload.providers) ? payload.providers : [];
-      })
-      .then((rows) => {
-        if (!cancelled) setProviders(rows);
-      })
-      .catch((reason) => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : 'Provider directory could not be loaded.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [row.city, row.state]);
+  useEffect(() => {
+    setNewProvider((current) => ({ ...current, city, state }));
+    void loadProviders();
+  }, [city, state, loadProviders]);
 
   const filteredProviders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -121,26 +147,113 @@ function ProviderPicker({
     return providers.filter((provider) => {
       const text = `${provider.name} ${provider.city} ${provider.state} ${provider.zip} ${provider.phone}`.toLowerCase();
       if (text.includes(q)) return true;
-      if (!digits) return false;
-      return provider.phone.replace(/\D/g, '').includes(digits);
+      return Boolean(digits && provider.phone.replace(/\D/g, '').includes(digits));
     });
   }, [providers, search]);
 
-  const state = String(row.state || '').trim().toUpperCase();
+  function setNewProviderField(field: keyof NewProviderDraft, value: string) {
+    setNewProvider((current) => ({ ...current, [field]: value }));
+  }
+
+  async function addProvider() {
+    setAddBusy(true);
+    setAddError('');
+    try {
+      const response = await fetch('/api/breakdown-service-providers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: newProvider.name.trim(),
+          phone: newProvider.phone.trim(),
+          city: newProvider.city.trim(),
+          state: newProvider.state.trim().toUpperCase(),
+          zip: newProvider.zip.trim(),
+        }),
+      });
+      const payload = await response.json() as { provider?: ServiceProvider; error?: string };
+      if (!response.ok || !payload.provider) throw new Error(payload.error || 'Provider could not be saved.');
+
+      if (payload.provider.state === state) {
+        onChoose(payload.provider);
+      }
+      setShowAdd(false);
+      setSearch('');
+      setNewProvider({ name: '', phone: '', city, state, zip: '' });
+      await loadProviders();
+    } catch (reason) {
+      setAddError(reason instanceof Error ? reason.message : 'Provider could not be saved.');
+    } finally {
+      setAddBusy(false);
+    }
+  }
 
   return (
     <div style={{ gridColumn: '1 / -1', padding: 12, border: '1px solid #d5dee8', borderRadius: 10, background: '#fff' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
-        <strong style={{ color: '#172033', fontSize: 13 }}>{state || 'State'} Provider Directory</strong>
-        {!loading && !error && <span style={{ color: '#64748b', fontSize: 12, fontWeight: 700 }}>{providers.length} provider{providers.length === 1 ? '' : 's'}</span>}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+        <div>
+          <strong style={{ color: '#172033', fontSize: 14 }}>Service Provider</strong>
+          <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
+            Showing {state || 'state'} providers only. {city ? `${city} locations are listed first.` : ''}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="easy-button"
+          disabled={disabled}
+          onClick={() => {
+            setShowAdd((current) => !current);
+            setAddError('');
+          }}
+        >
+          {showAdd ? 'Cancel Add' : '+ Add Service Provider'}
+        </button>
       </div>
 
-      {error ? (
-        <div style={{ color: '#9f1239', fontSize: 12 }}>{error} You can still type the provider manually below.</div>
+      {selectedName && (
+        <div style={{ marginBottom: 10, padding: '9px 11px', borderRadius: 9, background: '#f8fafc', border: '1px solid #dfe6ee', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <strong style={{ color: '#172033' }}>{selectedName}</strong>
+            <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>{selectedPhone || 'No phone on file'}</div>
+          </div>
+          <button type="button" className="easy-button" disabled={disabled} onClick={onClear}>Clear Selection</button>
+        </div>
+      )}
+
+      {showAdd ? (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
+            <label style={labelStyle}>
+              Company Name
+              <input value={newProvider.name} onChange={(event) => setNewProviderField('name', event.target.value.slice(0, 160))} style={inputStyle} placeholder="Company name" />
+            </label>
+            <label style={labelStyle}>
+              Phone Number
+              <input value={newProvider.phone} onChange={(event) => setNewProviderField('phone', event.target.value.slice(0, 40))} style={inputStyle} placeholder="Phone" inputMode="tel" />
+            </label>
+            <label style={labelStyle}>
+              City
+              <input value={newProvider.city} onChange={(event) => setNewProviderField('city', event.target.value.slice(0, 120))} style={inputStyle} placeholder="City" />
+            </label>
+            <label style={labelStyle}>
+              State
+              <input value={newProvider.state} onChange={(event) => setNewProviderField('state', event.target.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 2))} style={inputStyle} placeholder="IN" maxLength={2} />
+            </label>
+            <label style={labelStyle}>
+              ZIP
+              <input value={newProvider.zip} onChange={(event) => setNewProviderField('zip', event.target.value.slice(0, 20))} style={inputStyle} placeholder="ZIP" inputMode="numeric" />
+            </label>
+          </div>
+          {addError && <div style={{ color: '#9f1239', fontSize: 12 }}>{addError}</div>}
+          <div className="easy-actions">
+            <button type="button" className="easy-button orange" disabled={disabled || addBusy} onClick={() => void addProvider()}>
+              {addBusy ? 'Saving Provider...' : 'Save Provider'}
+            </button>
+          </div>
+        </div>
+      ) : error ? (
+        <div style={{ color: '#9f1239', fontSize: 12 }}>{error}</div>
       ) : loading ? (
         <div style={{ color: '#64748b', fontSize: 12 }}>Loading {state} providers...</div>
-      ) : providers.length === 0 ? (
-        <div style={{ color: '#64748b', fontSize: 12 }}>No providers are on file for {state}. You can still type one manually below.</div>
       ) : (
         <div style={{ display: 'grid', gap: 8 }}>
           <input
@@ -160,7 +273,7 @@ function ProviderPicker({
             style={inputStyle}
             disabled={disabled || filteredProviders.length === 0}
           >
-            <option value="">Choose a {state} service provider...</option>
+            <option value="">{filteredProviders.length ? `Choose a ${state} service provider...` : `No matching ${state} providers`}</option>
             {filteredProviders.map((provider) => (
               <option key={provider.id} value={provider.id}>
                 {provider.name} — {provider.city}, {provider.state}{provider.zip ? ` ${provider.zip}` : ''}{provider.phone ? ` — ${provider.phone}` : ''}
@@ -168,7 +281,7 @@ function ProviderPicker({
             ))}
           </select>
           <small style={{ color: '#64748b', lineHeight: 1.4 }}>
-            Only providers in {state} are shown. Providers in {row.city} are listed first when they are on file.
+            {providers.length} provider{providers.length === 1 ? '' : 's'} on file for {state}. If the company is missing, use Add Service Provider above.
           </small>
         </div>
       )}
@@ -239,6 +352,17 @@ export default function BreakdownsPage() {
     }));
   }
 
+  function clearProvider(id: number) {
+    setDrafts((current) => ({
+      ...current,
+      [id]: {
+        ...(current[id] || { serviceProvider: '', serviceProviderPhone: '', eta: '', cost: '' }),
+        serviceProvider: '',
+        serviceProviderPhone: '',
+      },
+    }));
+  }
+
   async function saveDispatchDetails(id: number) {
     const draft = drafts[id];
     if (!draft) return;
@@ -266,7 +390,7 @@ export default function BreakdownsPage() {
       const payload = await response.json() as { ok?: boolean; error?: string };
       if (!response.ok || !payload.ok) throw new Error(payload.error || 'Breakdown details could not be saved.');
       await load();
-      setMessage(`Breakdown #${id} dispatch details saved.`);
+      setMessage(`Breakdown #${id} provider details saved.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Breakdown details could not be saved.');
     } finally {
@@ -308,6 +432,31 @@ export default function BreakdownsPage() {
     }
   }
 
+  async function clearNotBreakdown(row: BreakdownRow) {
+    const confirmed = window.confirm(
+      `Clear ${unitLabel(row)} for ${row.driver_name} as NOT A BREAKDOWN?\n\nThis removes it from active breakdowns and closes the linked repair as Cancelled. The history is kept.`,
+    );
+    if (!confirmed) return;
+
+    setBusy(row.id);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/breakdowns/${row.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ notBreakdown: true }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error || 'Breakdown could not be cleared.');
+      await load();
+      setMessage(`Breakdown #${row.id} cleared as not a breakdown.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Breakdown could not be cleared.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const summary = useMemo(() => ({
     open: breakdowns.length,
     unclaimed: breakdowns.filter((row) => !row.claimed_by_user_id).length,
@@ -320,7 +469,7 @@ export default function BreakdownsPage() {
       <div className="easy-page-narrow">
         <p className="easy-eyebrow">ROADSIDE OPERATIONS</p>
         <h1 className="easy-title">Breakdowns</h1>
-        <p className="easy-subtitle">Manage active roadside calls, view driver-submitted photos, and record who was used, ETA and cost. Service providers are filtered to the breakdown state automatically.</p>
+        <p className="easy-subtitle">Manage active roadside calls, select or add service providers, record ETA/cost, and clear reports that turn out not to be breakdowns.</p>
 
         {message && <div className="easy-notice">{message}</div>}
 
@@ -336,7 +485,7 @@ export default function BreakdownsPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <div>
                 <h2 className="easy-section-title">Active roadside calls</h2>
-                <p className="easy-section-copy">Choose from the provider directory for the breakdown state, or type a provider manually.</p>
+                <p className="easy-section-copy">Each call shows only providers from that breakdown state.</p>
               </div>
               <button type="button" className="easy-button" onClick={() => void load()} disabled={loading}>Refresh</button>
             </div>
@@ -353,6 +502,7 @@ export default function BreakdownsPage() {
                   const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
                   const draft = drafts[row.id] || draftFromRow(row);
                   const photos = photosByBreakdown[row.id] || [];
+
                   return (
                     <article key={row.id} className="easy-card" style={{ padding: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -380,20 +530,8 @@ export default function BreakdownsPage() {
                           <p className="easy-eyebrow" style={{ marginBottom: 9 }}>DRIVER PHOTOS</p>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,220px))', gap: 10 }}>
                             {photos.map((photo) => (
-                              <a
-                                key={photo.objectKey}
-                                href={photo.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={photo.fileName}
-                                style={{ display: 'block', border: '1px solid #d9e1e8', borderRadius: 10, overflow: 'hidden', background: '#f8fafc' }}
-                              >
-                                <img
-                                  src={photo.url}
-                                  alt={`Breakdown ${row.id} - ${photo.fileName}`}
-                                  loading="lazy"
-                                  style={{ display: 'block', width: '100%', height: 150, objectFit: 'cover' }}
-                                />
+                              <a key={photo.objectKey} href={photo.url} target="_blank" rel="noreferrer" title={photo.fileName} style={{ display: 'block', border: '1px solid #d9e1e8', borderRadius: 10, overflow: 'hidden', background: '#f8fafc' }}>
+                                <img src={photo.url} alt={`Breakdown ${row.id} - ${photo.fileName}`} loading="lazy" style={{ display: 'block', width: '100%', height: 150, objectFit: 'cover' }} />
                               </a>
                             ))}
                           </div>
@@ -403,50 +541,27 @@ export default function BreakdownsPage() {
                       <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}>
                         <p className="easy-eyebrow" style={{ marginBottom: 10 }}>WHO WE USED</p>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 10 }}>
-                          <ProviderPicker row={row} disabled={isBusy} onChoose={(provider) => chooseProvider(row.id, provider)} />
+                          <ProviderPicker
+                            row={row}
+                            disabled={isBusy}
+                            selectedName={draft.serviceProvider}
+                            selectedPhone={draft.serviceProviderPhone}
+                            onChoose={(provider) => chooseProvider(row.id, provider)}
+                            onClear={() => clearProvider(row.id)}
+                          />
 
-                          <label style={{ display: 'grid', gap: 5, fontSize: 12, fontWeight: 850, color: '#334155' }}>
-                            Service / Tow Company
-                            <input
-                              value={draft.serviceProvider}
-                              onChange={(event) => setDraftField(row.id, 'serviceProvider', event.target.value.slice(0, 160))}
-                              placeholder="Company name"
-                              style={inputStyle}
-                            />
-                          </label>
-                          <label style={{ display: 'grid', gap: 5, fontSize: 12, fontWeight: 850, color: '#334155' }}>
-                            Phone Number
-                            <input
-                              value={draft.serviceProviderPhone}
-                              onChange={(event) => setDraftField(row.id, 'serviceProviderPhone', event.target.value.slice(0, 40))}
-                              placeholder="Phone"
-                              inputMode="tel"
-                              style={inputStyle}
-                            />
-                          </label>
-                          <label style={{ display: 'grid', gap: 5, fontSize: 12, fontWeight: 850, color: '#334155' }}>
+                          <label style={labelStyle}>
                             ETA
-                            <input
-                              value={draft.eta}
-                              onChange={(event) => setDraftField(row.id, 'eta', event.target.value.slice(0, 80))}
-                              placeholder="Example: 45 min"
-                              style={inputStyle}
-                            />
+                            <input value={draft.eta} onChange={(event) => setDraftField(row.id, 'eta', event.target.value.slice(0, 80))} placeholder="Example: 45 min" style={inputStyle} />
                           </label>
-                          <label style={{ display: 'grid', gap: 5, fontSize: 12, fontWeight: 850, color: '#334155' }}>
+                          <label style={labelStyle}>
                             Cost
-                            <input
-                              value={draft.cost}
-                              onChange={(event) => setDraftField(row.id, 'cost', event.target.value.replace(/[^0-9.]/g, '').slice(0, 12))}
-                              placeholder="0.00"
-                              inputMode="decimal"
-                              style={inputStyle}
-                            />
+                            <input value={draft.cost} onChange={(event) => setDraftField(row.id, 'cost', event.target.value.replace(/[^0-9.]/g, '').slice(0, 12))} placeholder="0.00" inputMode="decimal" style={inputStyle} />
                           </label>
                         </div>
                         <div className="easy-actions" style={{ marginTop: 10 }}>
                           <button type="button" className="easy-button orange" disabled={isBusy} onClick={() => void saveDispatchDetails(row.id)}>
-                            {isBusy ? 'Saving...' : 'Save Who We Used'}
+                            {isBusy ? 'Saving...' : 'Save Provider / ETA'}
                           </button>
                         </div>
                       </section>
@@ -460,6 +575,17 @@ export default function BreakdownsPage() {
                         {row.stage < 5 && (
                           <button type="button" className="easy-button primary" disabled={isBusy} onClick={() => void advanceStage(row.id, row.stage + 1)}>
                             {isBusy ? 'Working...' : `Advance to ${STAGE_LABELS[row.stage + 1] ?? `Stage ${row.stage + 1}`}`}
+                          </button>
+                        )}
+                        {row.stage < 5 && (
+                          <button
+                            type="button"
+                            className="easy-button"
+                            disabled={isBusy}
+                            onClick={() => void clearNotBreakdown(row)}
+                            style={{ borderColor: '#b91c1c', color: '#991b1b', background: '#fff' }}
+                          >
+                            Clear — Not a Breakdown
                           </button>
                         )}
                       </div>
