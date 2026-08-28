@@ -23,22 +23,42 @@ test('driver follow-up uses an opaque hashed token and fixed public endpoint',as
   assert.match(submit,/driverToken/);
 });
 
-test('driver page has the exact three sequential roadside progress buttons',async()=>{
+test('driver second screen has only Tech Has Arrived, Upload Receipt, and Rolling controls',async()=>{
   const page=await read('app/report-breakdown/driver-followup.tsx');
+  assert.match(page,/BREAKDOWN SUBMITTED/);
   assert.match(page,/Tech Has Arrived/);
-  assert.match(page,/Repair Finished/);
+  assert.match(page,/Upload Receipt/);
   assert.match(page,/Rolling/);
-  assert.match(page,/disabled=\{busy!==''\|\|!arrived\|\|repaired/);
-  assert.match(page,/disabled=\{busy!==''\|\|!repaired\|\|rolling/);
-  assert.match(page,/Northern will review and close the breakdown/);
+  assert.doesNotMatch(page,/Repair Finished/);
+  assert.match(page,/receiptInputRef\.current\?\.click\(\)/);
+  assert.match(page,/onChange=\{\(event\)=>void uploadReceipt/);
+  assert.match(page,/disabled=\{busy!==''\|\|!arrived\|\|rolling/);
+  assert.match(page,/window\.setTimeout\(\(\)=>onReportAnother\(\),650\)/);
+  assert.match(page,/Receipt upload is optional/);
 });
 
-test('rolling is ready for review and does not directly complete the linked repair',async()=>{
+test('tech arrival and rolling send idempotent replies to the original breakdown email thread',async()=>{
   const lib=await read('lib/breakdown-driver-followup.ts');
-  assert.match(lib,/driver_status='rolling'/);
-  assert.match(lib,/status='ready_for_review'/);
-  assert.match(lib,/stage=CASE WHEN stage<4 THEN 4 ELSE stage END/);
-  const rollingSection=lib.slice(lib.indexOf("action==='rolling'"),lib.indexOf('return getDriverBreakdownFollowup',lib.indexOf("action==='rolling'")));
+  assert.match(lib,/notifyBreakdownEmailGroup/);
+  assert.match(lib,/TECH HAS ARRIVED/);
+  assert.match(lib,/DRIVER IS ROLLING/);
+  assert.match(lib,/`Breakdown - \$\{row\.driver_name\}`/);
+  assert.match(lib,/WHERE id=\? AND tech_arrived_at IS NULL/);
+  assert.match(lib,/WHERE id=\? AND rolling_at IS NULL/);
+  assert.match(lib,/Number\(result\.meta\.changes\|\|0\)===1/);
+  assert.match(lib,/sendDriverProgressEmail\(updated,'tech_arrived'\)/);
+  assert.match(lib,/sendDriverProgressEmail\(updated,'rolling'\)/);
+});
+
+test('rolling follows tech arrival, marks repair finished internally, and stays ready for office review',async()=>{
+  const lib=await read('lib/breakdown-driver-followup.ts');
+  assert.match(lib,/if\(!row\.tech_arrived_at\)throw new Error\('Tap Tech Has Arrived first\.'/);
+  const rollingSection=lib.slice(lib.indexOf("action==='rolling'"),lib.indexOf("}else{\n    throw new Error('Unknown driver breakdown action.')",lib.indexOf("action==='rolling'")));
+  assert.match(rollingSection,/repair_finished_at=COALESCE\(repair_finished_at,CURRENT_TIMESTAMP\)/);
+  assert.match(rollingSection,/driver_status='rolling'/);
+  assert.match(rollingSection,/status='ready_for_review'/);
+  assert.match(rollingSection,/stage=CASE WHEN stage<4 THEN 4 ELSE stage END/);
+  assert.doesNotMatch(rollingSection,/Tap Repair Finished first/);
   assert.doesNotMatch(rollingSection,/status='Completed'/);
   assert.doesNotMatch(rollingSection,/stage=5/);
 });
