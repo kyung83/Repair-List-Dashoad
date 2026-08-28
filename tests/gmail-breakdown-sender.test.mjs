@@ -11,10 +11,12 @@ const callback = readFileSync(new URL('../app/api/admin/gmail/callback/route.ts'
 const page = readFileSync(new URL('../app/admin/gmail/page.tsx', import.meta.url), 'utf8');
 const navigation = readFileSync(new URL('../app/navigation-config.ts', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0103_gmail_breakdown_sender.sql', import.meta.url), 'utf8');
+const recipient = readFileSync(new URL('../lib/breakdown-email-recipient.ts', import.meta.url), 'utf8');
 
-test('Gmail breakdown sender uses Jerry account with send-only Gmail permission and offline access', () => {
+test('Gmail breakdown sender uses Jerry account with send-only Gmail permission and default recipient', () => {
   assert.match(client, /GMAIL_BREAKDOWN_SENDER = 'Jtomaski@norloworld\.com'/);
   assert.match(client, /GMAIL_BREAKDOWN_RECIPIENT = 'breakdown@norloworld\.com'/);
+  assert.match(recipient, /DEFAULT_BREAKDOWN_EMAIL_RECIPIENT = 'breakdown@norloworld\.com'/);
   assert.match(client, /https:\/\/www\.googleapis\.com\/auth\/gmail\.send/);
   assert.match(client, /access_type', 'offline'/);
   assert.match(client, /prompt', 'consent'/);
@@ -59,4 +61,17 @@ test('Diagnostics exposes a one-time Connect Jtomaski Gmail workflow and test em
   assert.match(page, /Authorized redirect URI/);
   assert.match(page, /Google OAuth Client Secret/);
   assert.match(api, /Breakdown Email Test - Jerry Tomaski/);
+});
+
+test('admin can change the real breakdown email recipient for testing without changing Gmail credentials', () => {
+  assert.match(api, /action === 'save-recipient'/);
+  assert.match(api, /saveBreakdownEmailRecipient/);
+  assert.match(api, /getBreakdownEmailRecipient/);
+  assert.match(api, /to: recipient/);
+  assert.match(recipient, /Roadside Breakdown Mailbox/);
+  assert.match(recipient, /UPDATE notification_group_contacts/);
+  assert.match(page, /Save Email Recipient/);
+  assert.match(page, /TEST RECIPIENT ACTIVE/);
+  assert.match(page, /Restore \{defaultRecipient\}/);
+  assert.match(page, /Twilio texting and the Text Schedule are separate/);
 });
