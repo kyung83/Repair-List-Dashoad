@@ -83,6 +83,7 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
       { href: "/admin/geotab-review/connection", label: "Geotab Connection", exact: true, roles: adminRoles },
       { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
       { href: "/admin/twilio", label: "Breakdown Texting", exact: true, roles: adminRoles },
+      { href: "/admin/twilio/schedule", label: "Text Schedule", exact: true, roles: adminRoles },
       { href: "/admin/equipment-merge", label: "Duplicate Units", roles: adminRoles },
     ],
   },
