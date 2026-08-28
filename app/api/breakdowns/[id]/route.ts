@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import { clearBreakdownAsNotBreakdown } from '@/lib/breakdown-management';
 import { getBreakdown, updateBreakdown } from '@/lib/roadside-breakdowns';
 
 async function requireManager(request: Request) {
@@ -21,8 +22,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     await requireManager(request);
     const { id } = await params;
+    const breakdownId = Number(id);
     const body = await request.json<Record<string, unknown>>();
-    await updateBreakdown(Number(id), {
+
+    if (body.notBreakdown === true) {
+      const result = await clearBreakdownAsNotBreakdown(breakdownId);
+      return Response.json({ ok: true, ...result }, { headers: { 'cache-control': 'no-store' } });
+    }
+
+    await updateBreakdown(breakdownId, {
       stage: body.stage as any,
       status: body.status as any,
       serviceProvider: body.serviceProvider as any,
