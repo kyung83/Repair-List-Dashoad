@@ -23,13 +23,13 @@ test('driver follow-up uses an opaque hashed token and fixed public endpoint',as
   assert.match(submit,/driverToken/);
 });
 
-test('driver second screen has only Tech Has Arrived, Upload Receipt, and Rolling controls',async()=>{
+test('driver second screen has exactly Tech Has Arrived, Upload Receipt, and one combined Repair Finished Rolling control',async()=>{
   const page=await read('app/report-breakdown/driver-followup.tsx');
   assert.match(page,/BREAKDOWN SUBMITTED/);
   assert.match(page,/Tech Has Arrived/);
   assert.match(page,/Upload Receipt/);
-  assert.match(page,/Rolling/);
-  assert.doesNotMatch(page,/Repair Finished/);
+  assert.match(page,/Repair Finished \/ Rolling/);
+  assert.doesNotMatch(page,/action\('repair_finished'\)/);
   assert.match(page,/receiptInputRef\.current\?\.click\(\)/);
   assert.match(page,/onChange=\{\(event\)=>void uploadReceipt/);
   assert.match(page,/disabled=\{busy!==''\|\|!arrived\|\|rolling/);
