@@ -30,7 +30,8 @@ node --test \
   "${project_root}/tests/pm-kits-multi-fitment.test.mjs" \
   "${project_root}/tests/report-search-contract.test.mjs" \
   "${project_root}/tests/roadside-geotab-snapshot.test.mjs" \
-  "${project_root}/tests/breakdown-photo-visibility.test.mjs"
+  "${project_root}/tests/breakdown-photo-visibility.test.mjs" \
+  "${project_root}/tests/breakdown-twilio-admin.test.mjs"
 
 echo "Running local D1 integration scenarios..."
 bash "${project_root}/scripts/test-parts-inventory-v2-d1.sh"
