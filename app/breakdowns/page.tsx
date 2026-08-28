@@ -229,7 +229,7 @@ export default function BreakdownsPage() {
 
                 <div className="easy-actions" style={{ marginTop: 14 }}>
                   {!row.claimed_by_user_id && <button type="button" className="easy-button orange" disabled={isBusy} onClick={() => void claim(row.id)}>{isBusy ? 'Working...' : 'Claim'}</button>}
-                  {row.stage < 4 && <button type="button" className="easy-button primary" disabled={isBusy} onClick={() => void advanceStage(row.id, row.stage + 1)}>{isBusy ? 'Working...' : `Advance to ${STAGE_LABELS[row.stage + 1] ?? `Stage ${row.stage + 1}`}`}</button>}
+                  {row.stage >= 2 && row.stage < 4 && <button type="button" className="easy-button primary" disabled={isBusy} onClick={() => void advanceStage(row.id, row.stage + 1)}>{isBusy ? 'Working...' : `Advance to ${STAGE_LABELS[row.stage + 1] ?? `Stage ${row.stage + 1}`}`}</button>}
                   {row.stage < 5 && <button type="button" className="easy-button" disabled={isBusy} onClick={() => void clearNotBreakdown(row)} style={{ borderColor: '#b91c1c', color: '#991b1b', background: '#fff' }}>Clear — Not a Breakdown</button>}
                 </div>
               </article>;
