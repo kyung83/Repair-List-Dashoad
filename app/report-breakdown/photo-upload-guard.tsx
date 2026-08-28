@@ -91,6 +91,24 @@ export default function PhotoUploadGuard() {
     const preparedByForm = new WeakMap<HTMLFormElement, File[]>();
     const resubmitting = new WeakSet<HTMLFormElement>();
 
+    const onTouchEnd = (event: TouchEvent) => {
+      const input = event.target instanceof HTMLInputElement ? event.target : null;
+      if (!input || input.type !== 'file' || input.name !== 'photos') return;
+
+      event.preventDefault();
+      try {
+        const picker = (input as HTMLInputElement & { showPicker?: () => void }).showPicker;
+        if (typeof picker === 'function') picker.call(input);
+        else input.click();
+      } catch {
+        try {
+          input.click();
+        } catch {
+          // Safari will still get its normal click if the fallback is unavailable.
+        }
+      }
+    };
+
     const onFormData = (event: Event) => {
       const formEvent = event as FormDataEvent;
       const form = formEvent.target instanceof HTMLFormElement ? formEvent.target : null;
@@ -133,9 +151,11 @@ export default function PhotoUploadGuard() {
       });
     };
 
+    document.addEventListener('touchend', onTouchEnd, { capture: true, passive: false });
     document.addEventListener('formdata', onFormData, true);
     document.addEventListener('submit', onSubmit, true);
     return () => {
+      document.removeEventListener('touchend', onTouchEnd, true);
       document.removeEventListener('formdata', onFormData, true);
       document.removeEventListener('submit', onSubmit, true);
     };
