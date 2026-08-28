@@ -40,12 +40,16 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
       const response=await fetch(`/api/breakdowns/driver?${params.toString()}`,{cache:'no-store'});
       const payload=await response.json() as {breakdown?:DriverFollowupState;error?:string};
       if(!response.ok||!payload.breakdown)throw new Error(payload.error||'Breakdown follow-up could not be loaded.');
+      if(payload.breakdown.rollingAt||payload.breakdown.closed||payload.breakdown.status==='not_breakdown'||payload.breakdown.status==='complete'){
+        onReportAnother();
+        return;
+      }
       setState(payload.breakdown);
       setMessage('');
     }catch(error){
       setMessage(error instanceof Error?error.message:'Breakdown follow-up could not be loaded.');
     }
-  },[breakdownId,token]);
+  },[breakdownId,token,onReportAnother]);
 
   useEffect(()=>{void load();},[load]);
 
