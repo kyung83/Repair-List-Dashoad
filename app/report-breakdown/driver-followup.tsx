@@ -62,7 +62,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
       if(!response.ok||!payload.breakdown)throw new Error(payload.error||'Breakdown status could not be updated.');
       setState(payload.breakdown);
       if(name==='rolling'){
-        setMessage('Rolling recorded. Returning to the breakdown page...');
+        setMessage('Repair finished and rolling recorded. Returning to the breakdown page...');
         window.setTimeout(()=>onReportAnother(),650);
       }else{
         setMessage('Tech arrival recorded and emailed to the breakdown thread.');
@@ -155,13 +155,13 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
                 onClick={()=>void action('rolling')}
                 style={{width:'100%',minHeight:68,fontSize:18,justifyContent:'space-between'}}
               >
-                <span>{busy==='rolling'?'Sending Update...':rolling?'✓ Rolling':'Rolling'}</span>
+                <span>{busy==='rolling'?'Sending Update...':rolling?'✓ Repair Finished / Rolling':'Repair Finished / Rolling'}</span>
                 {rolling&&<small>{formatTime(state?.rollingAt||null)}</small>}
               </button>
             </div>
 
             {!arrived&&(
-              <p className="easy-section-copy" style={{marginTop:12}}>Rolling becomes available after you tap Tech Has Arrived. Receipt upload is optional.</p>
+              <p className="easy-section-copy" style={{marginTop:12}}>Repair Finished / Rolling becomes available after you tap Tech Has Arrived. Receipt upload is optional.</p>
             )}
 
             {message&&<div className="easy-notice" style={{marginTop:16}}>{message}</div>}
