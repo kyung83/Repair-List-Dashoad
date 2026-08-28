@@ -1,44 +1,70 @@
 import { env } from 'cloudflare:workers';
-import { claimBreakdown, findClaimableBreakdownFromSmsBody } from '@/lib/roadside-breakdowns';
 import { logInboundSms } from '@/lib/notifications';
+import { claimBreakdownFromSms } from '@/lib/breakdown-sms-claims';
+import {
+  findActiveBreakdownSmsContactByPhone,
+  loadTwilioRuntimeCredentials,
+  renderBreakdownSmsTemplate,
+  validateTwilioWebhook,
+} from '@/lib/twilio-runtime';
 
-/**
- * NOT YET LIVE. This route exists so the claim-by-SMS-reply flow (same
- * behavior as the current Apps Script doPost webhook) is ready to point
- * Twilio at once phone numbers and Twilio are actually connected.
- *
- * Until then, this route is not registered anywhere in the Twilio console
- * -- nothing calls it in production. When ready:
- *   1. Set NOTIFICATIONS_LIVE=true and configure Twilio secrets
- *      (see lib/notifications.ts).
- *   2. In the Twilio console, set this deployed URL as the
- *      Messaging Service's inbound webhook.
- *   3. Consider adding a check that the replying phone number belongs to
- *      an active notification_group_contacts row, so a wrong-number reply
- *      can't claim a breakdown (flagged as an open question, not yet built).
- */
+function xmlEscape(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function twiml(message = '', status = 200) {
+  const body = message.trim() ? `<Message>${xmlEscape(message.trim())}</Message>` : '';
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`, {
+    status,
+    headers: { 'content-type': 'text/xml; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
 export async function POST(request: Request) {
-  if (String((env as any).NOTIFICATIONS_LIVE ?? '').toLowerCase() !== 'true') {
-    return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
-      status: 200,
-      headers: { 'content-type': 'text/xml' },
-    });
-  }
+  const credentials = await loadTwilioRuntimeCredentials(env.DB, env).catch(() => null);
+  if (!credentials || !credentials.enabled) return twiml();
 
   const form = await request.formData();
-  const from = String(form.get('From') ?? '').trim();
-  const body = String(form.get('Body') ?? '').trim();
-
-  const breakdownId = await findClaimableBreakdownFromSmsBody(body);
-  if (breakdownId) {
-    await claimBreakdown(breakdownId, null, from);
-    await logInboundSms(breakdownId, from, body);
-  } else {
-    await logInboundSms(null, from, body);
+  if (!(await validateTwilioWebhook(request, form, credentials.authToken))) {
+    return twiml('', 403);
   }
 
-  return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
-    status: 200,
-    headers: { 'content-type': 'text/xml' },
-  });
+  const from = String(form.get('From') ?? '').trim();
+  const body = String(form.get('Body') ?? '').trim();
+  const contact = await findActiveBreakdownSmsContactByPhone(env.DB, from);
+
+  if (!contact) {
+    await logInboundSms(null, from, body);
+    return twiml();
+  }
+
+  const claim = await claimBreakdownFromSms(env.DB, body, contact);
+  await logInboundSms(claim.breakdownId, from, body);
+
+  if (claim.status === 'claimed') {
+    const reply = await renderBreakdownSmsTemplate(env.DB, 'claim_confirmed', {
+      breakdown_id: claim.breakdownId,
+      contact_label: contact.label,
+    }, `Breakdown #${claim.breakdownId} is assigned to ${contact.label}.`);
+    return twiml(reply);
+  }
+
+  if (claim.status === 'already_claimed') {
+    const reply = await renderBreakdownSmsTemplate(env.DB, 'claim_already', {
+      breakdown_id: claim.breakdownId,
+      contact_label: contact.label,
+    }, `Breakdown #${claim.breakdownId} was already claimed by someone else.`);
+    return twiml(reply);
+  }
+
+  const reply = await renderBreakdownSmsTemplate(env.DB, 'claim_invalid', {
+    breakdown_id: claim.breakdownId ?? '',
+    contact_label: contact.label,
+  }, 'Reply with only the breakdown number shown in the alert.');
+  return twiml(reply);
 }
