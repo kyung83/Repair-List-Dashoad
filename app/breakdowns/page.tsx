@@ -12,6 +12,16 @@ const STAGE_LABELS: Record<number, string> = {
   5: 'Complete',
 };
 
+const REPAIR_CATEGORIES = [
+  'AIR/CHAMBERS/GLADHANDS',
+  'TIRES',
+  'ELECTRICAL/Lights',
+  'MECHANICAL',
+  'Tow',
+  'Other',
+] as const;
+
+type RepairCategory = (typeof REPAIR_CATEGORIES)[number];
 type DispatchDraft = { serviceProvider: string; serviceProviderPhone: string; eta: string; cost: string };
 type BreakdownPhoto = { breakdownId: number; objectKey: string; fileName: string; contentType: string; url: string };
 type ServiceProvider = { id: number; name: string; phone: string; city: string; state: string; zip: string };
@@ -131,6 +141,7 @@ export default function BreakdownsPage() {
   const [breakdowns, setBreakdowns] = useState<BreakdownRow[]>([]);
   const [photosByBreakdown, setPhotosByBreakdown] = useState<Record<number, BreakdownPhoto[]>>({});
   const [drafts, setDrafts] = useState<Record<number, DispatchDraft>>({});
+  const [repairTypes, setRepairTypes] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
   const [message, setMessage] = useState('');
@@ -146,7 +157,7 @@ export default function BreakdownsPage() {
       const rows = Array.isArray(payload.breakdowns) ? payload.breakdowns : [];
       const photos = Array.isArray(photoPayload.photos) ? photoPayload.photos : [];
       const grouped = photos.reduce<Record<number, BreakdownPhoto[]>>((current, photo) => { const id = Number(photo.breakdownId); if (Number.isFinite(id)) (current[id] ||= []).push(photo); return current; }, {});
-      setBreakdowns(rows); setPhotosByBreakdown(grouped); setDrafts(Object.fromEntries(rows.map((row) => [row.id, draftFromRow(row)])));
+      setBreakdowns(rows); setPhotosByBreakdown(grouped); setDrafts(Object.fromEntries(rows.map((row) => [row.id, draftFromRow(row)]))); setRepairTypes(Object.fromEntries(rows.map((row) => [row.id, row.repair_category])));
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Failed to load breakdowns.'); }
     finally { setLoading(false); }
   }, []);
@@ -167,6 +178,19 @@ export default function BreakdownsPage() {
       if (!response.ok || !payload.ok) throw new Error(payload.error || 'Breakdown details could not be saved.');
       await load(); setMessage(`Breakdown #${id} provider details saved.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Breakdown details could not be saved.'); }
+    finally { setBusy(null); }
+  }
+
+  async function saveRepairType(id: number) {
+    const repairCategory = String(repairTypes[id] || '').trim();
+    if (!REPAIR_CATEGORIES.includes(repairCategory as RepairCategory)) { setMessage('Choose a valid repair type.'); return; }
+    setBusy(id); setMessage('');
+    try {
+      const response = await fetch(`/api/breakdowns/${id}/repair-type`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repairCategory }) });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error || 'Repair type could not be saved.');
+      await load(); setMessage(`Breakdown #${id} repair type changed to ${repairCategory}.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Repair type could not be saved.'); }
     finally { setBusy(null); }
   }
 
@@ -211,7 +235,7 @@ export default function BreakdownsPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}><div><h2 className="easy-section-title">Active roadside calls</h2><p className="easy-section-copy">Each call shows only providers from that breakdown state.</p></div><button type="button" className="easy-button" onClick={() => void load()} disabled={loading}>Refresh</button></div>
           {loading ? <div className="easy-empty">Loading breakdowns...</div> : breakdowns.length === 0 ? <div className="easy-empty">No open roadside breakdowns.</div> : (
             <div className="easy-list">{breakdowns.map((row) => {
-              const isBusy = busy === row.id; const stage = STAGE_LABELS[row.stage] ?? `Stage ${row.stage}`; const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck'; const draft = drafts[row.id] || draftFromRow(row); const photos = photosByBreakdown[row.id] || [];
+              const isBusy = busy === row.id; const stage = STAGE_LABELS[row.stage] ?? `Stage ${row.stage}`; const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck'; const draft = drafts[row.id] || draftFromRow(row); const repairType = repairTypes[row.id] || row.repair_category; const photos = photosByBreakdown[row.id] || [];
               return <article key={row.id} className="easy-card" style={{ padding: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0, flex: '1 1 360px' }}><div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span className="easy-badge orange">{type}</span><span className={`easy-badge ${row.stage >= 4 ? 'green' : row.stage === 1 ? 'red' : ''}`}>{stage}</span><span className="easy-badge">#{row.id}</span></div><h3 style={{ margin: '10px 0 0', color: '#0d1b2b', fontSize: 22 }}>{unitLabel(row)}</h3><p style={{ margin: '6px 0 0', color: '#334155', fontWeight: 800 }}>{row.driver_name} · {row.city}, {row.state}</p><p style={{ margin: '7px 0 0', color: '#64748b', lineHeight: 1.45 }}>{row.repair_category}: {row.description}</p></div>
@@ -220,6 +244,15 @@ export default function BreakdownsPage() {
                 {photos.length > 0 && <section style={{ marginTop: 14 }}><p className="easy-eyebrow" style={{ marginBottom: 9 }}>DRIVER PHOTOS</p><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,220px))', gap: 10 }}>{photos.map((photo) => <a key={photo.objectKey} href={photo.url} target="_blank" rel="noreferrer" title={photo.fileName} style={{ display: 'block', border: '1px solid #d9e1e8', borderRadius: 10, overflow: 'hidden', background: '#f8fafc' }}><img src={photo.url} alt={`Breakdown ${row.id} - ${photo.fileName}`} loading="lazy" style={{ display: 'block', width: '100%', height: 150, objectFit: 'cover' }} /></a>)}</div></section>}
 
                 <DriverReceiptReview breakdownId={row.id} onClosed={() => void load()} />
+
+                <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}>
+                  <p className="easy-eyebrow" style={{ marginBottom: 10 }}>DIAGNOSTICS</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10 }}>
+                    <label style={labelStyle}>Repair Type<select value={repairType} onChange={(e) => setRepairTypes((current) => ({ ...current, [row.id]: e.target.value }))} style={inputStyle} disabled={isBusy}>{REPAIR_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+                    <div style={{ padding: '9px 11px', border: '1px solid #d5dee8', borderRadius: 9, background: '#fff', color: '#334155', fontSize: 13, lineHeight: 1.45 }}><strong style={{ display: 'block', marginBottom: 4 }}>Reported Problem</strong>{row.description}</div>
+                  </div>
+                  <div className="easy-actions" style={{ marginTop: 10 }}><button type="button" className="easy-button orange" disabled={isBusy || repairType === row.repair_category} onClick={() => void saveRepairType(row.id)}>{isBusy ? 'Saving...' : 'Save Repair Type'}</button></div>
+                </section>
 
                 <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}><p className="easy-eyebrow" style={{ marginBottom: 10 }}>WHO WE USED</p><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 10 }}>
                   <ProviderPicker row={row} disabled={isBusy} selectedName={draft.serviceProvider} selectedPhone={draft.serviceProviderPhone} onChoose={(provider) => chooseProvider(row.id, provider)} onClear={() => clearProvider(row.id)} />
