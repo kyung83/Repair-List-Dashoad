@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import {
-  GMAIL_BREAKDOWN_RECIPIENT,
   GMAIL_BREAKDOWN_SENDER,
   revokeGmailRuntimeAccess,
   sendGmailRuntimeEmail,
@@ -12,6 +11,11 @@ import {
   getGmailRuntimeCredentialMetadata,
   saveGmailOAuthClient,
 } from '@/lib/gmail-runtime-credentials';
+import {
+  DEFAULT_BREAKDOWN_EMAIL_RECIPIENT,
+  getBreakdownEmailRecipient,
+  saveBreakdownEmailRecipient,
+} from '@/lib/breakdown-email-recipient';
 
 async function requireAdmin(request: Request) {
   const user = await getSessionUser(env.DB, request);
@@ -25,11 +29,15 @@ function redirectUri(request: Request) {
 }
 
 async function statusPayload(request: Request) {
-  const credentials = await getGmailRuntimeCredentialMetadata(env.DB);
+  const [credentials, recipient] = await Promise.all([
+    getGmailRuntimeCredentialMetadata(env.DB),
+    getBreakdownEmailRecipient(env.DB),
+  ]);
   return {
     ...credentials,
     sender: GMAIL_BREAKDOWN_SENDER,
-    recipient: GMAIL_BREAKDOWN_RECIPIENT,
+    recipient,
+    defaultRecipient: DEFAULT_BREAKDOWN_EMAIL_RECIPIENT,
     redirectUri: redirectUri(request),
   };
 }
@@ -49,6 +57,7 @@ type ActionBody = {
   action?: string;
   clientId?: string;
   clientSecret?: string;
+  recipient?: string;
 };
 
 export async function POST(request: Request) {
@@ -67,6 +76,11 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, message: 'Google OAuth client saved. Connect Gmail next.', status: await statusPayload(request) });
     }
 
+    if (action === 'save-recipient') {
+      const recipient = await saveBreakdownEmailRecipient(env.DB, String(body.recipient || ''));
+      return Response.json({ ok: true, message: `Breakdown email recipient changed to ${recipient}.`, status: await statusPayload(request) });
+    }
+
     if (action === 'disconnect') {
       await revokeGmailRuntimeAccess().catch(() => undefined);
       await clearGmailConnection(env.DB);
@@ -82,18 +96,19 @@ export async function POST(request: Request) {
     if (action === 'test') {
       const status = await getGmailRuntimeCredentialMetadata(env.DB);
       if (!status.connected) return Response.json({ error: 'Connect Gmail before sending a test.' }, { status: 400 });
+      const recipient = await getBreakdownEmailRecipient(env.DB);
       const sentAt = new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/Detroit',
         dateStyle: 'medium',
         timeStyle: 'long',
       }).format(new Date());
       await sendGmailRuntimeEmail({
-        to: GMAIL_BREAKDOWN_RECIPIENT,
+        to: recipient,
         subject: 'Breakdown Email Test - Jerry Tomaski',
-        text: `Norlow breakdown email is connected.\n\nFrom: ${GMAIL_BREAKDOWN_SENDER}\nTo: ${GMAIL_BREAKDOWN_RECIPIENT}\nSent: ${sentAt}`,
-        html: `<p><strong>Norlow breakdown email is connected.</strong></p><p>From: ${GMAIL_BREAKDOWN_SENDER}<br>To: ${GMAIL_BREAKDOWN_RECIPIENT}<br>Sent: ${sentAt}</p>`,
+        text: `Norlow breakdown email is connected.\n\nFrom: ${GMAIL_BREAKDOWN_SENDER}\nTo: ${recipient}\nSent: ${sentAt}`,
+        html: `<p><strong>Norlow breakdown email is connected.</strong></p><p>From: ${GMAIL_BREAKDOWN_SENDER}<br>To: ${recipient}<br>Sent: ${sentAt}</p>`,
       });
-      return Response.json({ ok: true, message: `Test email sent to ${GMAIL_BREAKDOWN_RECIPIENT}.` });
+      return Response.json({ ok: true, message: `Test email sent to ${recipient}.` });
     }
 
     return Response.json({ error: 'Unknown Gmail connection action.' }, { status: 400 });
