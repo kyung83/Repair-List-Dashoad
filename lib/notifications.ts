@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { sendGmailRuntimeEmail, type GmailRuntimeAttachment } from '@/lib/gmail-client';
 import { getGmailRuntimeCredentialMetadata } from '@/lib/gmail-runtime-credentials';
 import { sendTwilioRuntimeSms, twilioRuntimeReady } from '@/lib/twilio-runtime';
+import { buildNewBreakdownSms } from '@/lib/breakdown-sms-message';
 
 const BREAKDOWN_EMAIL_FROM = 'norlow-breakdowns@norloworld.com';
 
@@ -242,13 +243,14 @@ export async function notifyBreakdownGroup(
   const contacts = await activeGroupContacts(groupName);
   let contacted = 0;
   const seenPhones = new Set<string>();
+  const outboundMessage = await buildNewBreakdownSms(env.DB, breakdownId, message);
 
-  if (!message.trim()) return { contacted };
+  if (!outboundMessage.trim()) return { contacted };
   for (const contact of contacts) {
     const phone = String(contact.phone || '').trim();
     if (phone && !seenPhones.has(phone)) {
       seenPhones.add(phone);
-      await sendBreakdownSms(breakdownId, phone, message);
+      await sendBreakdownSms(breakdownId, phone, outboundMessage);
       contacted++;
     }
   }
