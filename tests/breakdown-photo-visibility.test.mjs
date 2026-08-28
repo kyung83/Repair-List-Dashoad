@@ -7,6 +7,8 @@ const photoListRoute = readFileSync(new URL('../app/api/breakdowns/photos/route.
 const photoReader = readFileSync(new URL('../app/api/photos/[...key]/route.ts', import.meta.url), 'utf8');
 const breakdownPage = readFileSync(new URL('../app/breakdowns/page.tsx', import.meta.url), 'utf8');
 const publicBreakdownPage = readFileSync(new URL('../app/report-breakdown/page.tsx', import.meta.url), 'utf8');
+const rootLayout = readFileSync(new URL('../app/layout.tsx', import.meta.url), 'utf8');
+const photoPrep = readFileSync(new URL('../public/breakdown-photo-prep.js', import.meta.url), 'utf8');
 const gmailClient = readFileSync(new URL('../lib/gmail-client.ts', import.meta.url), 'utf8');
 const notifications = readFileSync(new URL('../lib/notifications.ts', import.meta.url), 'utf8');
 
@@ -52,4 +54,18 @@ test('public breakdown photo upload avoids the forced iPhone camera capture path
   assert.doesNotMatch(publicBreakdownPage, /capture="environment"/);
   assert.match(publicBreakdownPage, /const responseText = await response\.text\(\)/);
   assert.match(publicBreakdownPage, /string did not match the expected pattern/i);
+});
+
+test('public breakdown page automatically compresses large phone photos before submit', () => {
+  assert.match(rootLayout, /<script src="\/breakdown-photo-prep\.js" defer/);
+  assert.match(photoPrep, /window\.location\.pathname !== '\/report-breakdown'/);
+  assert.match(photoPrep, /input\.name !== 'photos'/);
+  assert.match(photoPrep, /var MAX_EDGE = 1600/);
+  assert.match(photoPrep, /var TARGET_BYTES = 700000/);
+  assert.match(photoPrep, /canvas\.toBlob/);
+  assert.match(photoPrep, /'image\/jpeg'/);
+  assert.match(photoPrep, /new DataTransfer\(\)/);
+  assert.match(photoPrep, /input\.files = transfer\.files/);
+  assert.match(photoPrep, /setSubmitBusy\(input, true\)/);
+  assert.match(photoPrep, /setSubmitBusy\(input, false\)/);
 });
