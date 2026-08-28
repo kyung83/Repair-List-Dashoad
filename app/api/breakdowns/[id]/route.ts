@@ -30,6 +30,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       eta: body.eta as any,
       onLocation: body.onLocation as any,
       cost: body.cost as any,
+      notBreakdown: body.notBreakdown === true,
     });
     return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } });
   } catch (err) {
