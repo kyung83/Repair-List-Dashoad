@@ -37,6 +37,14 @@ test('driver second screen has exactly Tech Has Arrived, Upload Receipt, and one
   assert.match(page,/Receipt upload is optional/);
 });
 
+test('an already rolling or closed breakdown automatically returns to a fresh report form',async()=>{
+  const page=await read('app/report-breakdown/driver-followup.tsx');
+  assert.match(page,/payload\.breakdown\.rollingAt\|\|payload\.breakdown\.closed/);
+  assert.match(page,/payload\.breakdown\.status==='not_breakdown'/);
+  assert.match(page,/payload\.breakdown\.status==='complete'/);
+  assert.match(page,/onReportAnother\(\);\n\s+return;/);
+});
+
 test('tech arrival and rolling send idempotent replies to the original breakdown email thread',async()=>{
   const lib=await read('lib/breakdown-driver-followup.ts');
   assert.match(lib,/notifyBreakdownEmailGroup/);
