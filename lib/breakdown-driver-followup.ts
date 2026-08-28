@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { notifyBreakdownEmailGroup } from '@/lib/notifications';
 import {
   readOutsideWorkInvoice,
   OUTSIDE_WORK_MAX_IMAGES,
@@ -9,6 +10,8 @@ import {
 } from '@/lib/outside-work-ai-reader';
 
 type AiBinding={run:(model:string,input:unknown,options?:unknown)=>Promise<unknown>};
+
+const BREAKDOWN_ALERT_GROUP='Breakdown Alerts';
 
 export type DriverBreakdownAction='tech_arrived'|'repair_finished'|'rolling';
 
@@ -69,6 +72,52 @@ async function tokenHash(token:string){
   const bytes=new TextEncoder().encode(token);
   const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
   return Array.from(digest,byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+
+function escapeHtml(value:unknown){
+  return String(value??'')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+function easternTimestamp(value:string|null){
+  if(!value)return'';
+  const normalized=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)?`${value.replace(' ','T')}Z`:value;
+  const parsed=new Date(normalized);
+  if(Number.isNaN(parsed.getTime()))return value;
+  return new Intl.DateTimeFormat('en-US',{
+    timeZone:'America/Detroit',
+    month:'long',
+    day:'numeric',
+    year:'numeric',
+    hour:'numeric',
+    minute:'2-digit',
+    timeZoneName:'short',
+  }).format(parsed);
+}
+
+async function sendDriverProgressEmail(row:DriverAccessRow,action:'tech_arrived'|'rolling'){
+  const unitType=row.equipment_type==='trailer'?'Trailer':'Truck';
+  const eventTime=action==='tech_arrived'?row.tech_arrived_at:row.rolling_at;
+  const heading=action==='tech_arrived'?'TECH HAS ARRIVED':'DRIVER IS ROLLING';
+  const html=[
+    `<strong>${heading}</strong>`,
+    '',
+    `<strong>Driver:</strong> ${escapeHtml(row.driver_name)}`,
+    `<strong>${unitType}:</strong> ${escapeHtml(row.unit)}`,
+    `<strong>Time:</strong> ${escapeHtml(easternTimestamp(eventTime))}`,
+    `<strong>Breakdown #:</strong> ${row.id}`,
+    action==='rolling'?'<strong>Status:</strong> Ready for office review':'',
+  ].filter(Boolean).join('<br>');
+  await notifyBreakdownEmailGroup(
+    row.id,
+    BREAKDOWN_ALERT_GROUP,
+    `Breakdown - ${row.driver_name}`,
+    html,
+  );
 }
 
 async function driverRow(breakdownId:number){
@@ -142,16 +191,20 @@ export async function recordDriverBreakdownAction(breakdownId:number,token:strin
   if(row.stage>=5||row.status==='not_breakdown')throw new Error('This breakdown is already closed.');
 
   if(action==='tech_arrived'){
-    await env.DB.prepare(`
+    const result=await env.DB.prepare(`
       UPDATE roadside_breakdowns
-      SET driver_status=CASE WHEN rolling_at IS NOT NULL THEN 'rolling' WHEN repair_finished_at IS NOT NULL THEN 'repair_finished' ELSE 'tech_arrived' END,
-          tech_arrived_at=COALESCE(tech_arrived_at,CURRENT_TIMESTAMP),
+      SET driver_status='tech_arrived',
+          tech_arrived_at=CURRENT_TIMESTAMP,
           stage=CASE WHEN stage<4 THEN 4 ELSE stage END,
-          status=CASE WHEN rolling_at IS NOT NULL THEN 'ready_for_review' WHEN repair_finished_at IS NOT NULL THEN 'repair_finished' ELSE 'on_location' END,
+          status='on_location',
           on_location_at=COALESCE(on_location_at,CURRENT_TIMESTAMP),
           updated_at=CURRENT_TIMESTAMP
-      WHERE id=?
+      WHERE id=? AND tech_arrived_at IS NULL
     `).bind(breakdownId).run();
+    if(Number(result.meta.changes||0)===1){
+      const updated=await driverRow(breakdownId);
+      if(updated)await sendDriverProgressEmail(updated,'tech_arrived');
+    }
   }else if(action==='repair_finished'){
     if(!row.tech_arrived_at)throw new Error('Tap Tech Has Arrived first.');
     await env.DB.prepare(`
@@ -164,15 +217,21 @@ export async function recordDriverBreakdownAction(breakdownId:number,token:strin
       WHERE id=?
     `).bind(breakdownId).run();
   }else if(action==='rolling'){
-    if(!row.repair_finished_at)throw new Error('Tap Repair Finished first.');
-    await env.DB.prepare(`
+    if(!row.tech_arrived_at)throw new Error('Tap Tech Has Arrived first.');
+    const result=await env.DB.prepare(`
       UPDATE roadside_breakdowns
-      SET driver_status='rolling',rolling_at=COALESCE(rolling_at,CURRENT_TIMESTAMP),
+      SET driver_status='rolling',
+          repair_finished_at=COALESCE(repair_finished_at,CURRENT_TIMESTAMP),
+          rolling_at=CURRENT_TIMESTAMP,
           ready_for_review_at=COALESCE(ready_for_review_at,CURRENT_TIMESTAMP),
           stage=CASE WHEN stage<4 THEN 4 ELSE stage END,
           status='ready_for_review',updated_at=CURRENT_TIMESTAMP
-      WHERE id=?
+      WHERE id=? AND rolling_at IS NULL
     `).bind(breakdownId).run();
+    if(Number(result.meta.changes||0)===1){
+      const updated=await driverRow(breakdownId);
+      if(updated)await sendDriverProgressEmail(updated,'rolling');
+    }
   }else{
     throw new Error('Unknown driver breakdown action.');
   }
