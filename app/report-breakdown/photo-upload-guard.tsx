@@ -35,9 +35,11 @@ async function compressPhoto(file: File) {
   if (!file.type.startsWith('image/') || file.size <= TARGET_BYTES) return file;
 
   const image = await loadImage(file);
-  const scale = Math.min(1, MAX_DIMENSION / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
-  let width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
-  let height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const scale = Math.min(1, MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+  let width = Math.max(1, Math.round(sourceWidth * scale));
+  let height = Math.max(1, Math.round(sourceHeight * scale));
 
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d', { alpha: false });
@@ -62,72 +64,79 @@ async function compressPhoto(file: File) {
   }
 
   if (!best) return file;
-  const base = (file.name || 'breakdown-photo').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]+/g, '-');
-  return new File([best], `${base || 'breakdown-photo'}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
+  const base = (file.name || 'breakdown-photo')
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-');
+  return new File([best], `${base || 'breakdown-photo'}.jpg`, {
+    type: 'image/jpeg',
+    lastModified: Date.now(),
+  });
 }
 
-async function compressInput(input: HTMLInputElement) {
-  const files = Array.from(input.files || []).slice(0, 6);
-  if (!files.length) return;
-
-  const prepared = await Promise.all(files.map(async (file) => {
+async function prepareFiles(files: File[]) {
+  const prepared: File[] = [];
+  for (const file of files.slice(0, 6)) {
     try {
-      return await compressPhoto(file);
+      prepared.push(await compressPhoto(file));
     } catch (error) {
       console.warn('breakdown_photo_compress_failed', error);
-      return file;
+      prepared.push(file);
     }
-  }));
-
-  const transfer = new DataTransfer();
-  prepared.forEach((file) => transfer.items.add(file));
-  input.files = transfer.files;
+  }
+  return prepared;
 }
 
 export default function PhotoUploadGuard() {
   useEffect(() => {
-    const pending = new WeakMap<HTMLInputElement, Promise<void>>();
+    const preparedByForm = new WeakMap<HTMLFormElement, File[]>();
     const resubmitting = new WeakSet<HTMLFormElement>();
 
-    const startCompression = (input: HTMLInputElement) => {
-      const task = compressInput(input).finally(() => pending.delete(input));
-      pending.set(input, task);
-      return task;
-    };
+    const onFormData = (event: Event) => {
+      const formEvent = event as FormDataEvent;
+      const form = formEvent.target instanceof HTMLFormElement ? formEvent.target : null;
+      if (!form) return;
+      const prepared = preparedByForm.get(form);
+      if (!prepared) return;
 
-    const onChange = (event: Event) => {
-      const input = event.target instanceof HTMLInputElement ? event.target : null;
-      if (!input || input.type !== 'file' || input.name !== 'photos') return;
-      void startCompression(input);
+      formEvent.formData.delete('photos');
+      for (const file of prepared) {
+        formEvent.formData.append('photos', file, file.name);
+      }
+      preparedByForm.delete(form);
     };
 
     const onSubmit = (event: SubmitEvent) => {
       const form = event.target instanceof HTMLFormElement ? event.target : null;
-      if (!form || resubmitting.has(form)) {
-        if (form) resubmitting.delete(form);
+      if (!form) return;
+
+      if (resubmitting.has(form)) {
+        resubmitting.delete(form);
         return;
       }
-      const input = form.querySelector<HTMLInputElement>('input[type="file"][name="photos"]');
-      if (!input || !(input.files?.length)) return;
 
-      const task = pending.get(input) || startCompression(input);
+      const input = form.querySelector<HTMLInputElement>('input[type="file"][name="photos"]');
+      const files = Array.from(input?.files || []).slice(0, 6);
+      if (!files.length) return;
+
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      void task.then(() => {
+      void prepareFiles(files).then((prepared) => {
+        preparedByForm.set(form, prepared);
         resubmitting.add(form);
         form.requestSubmit();
       }).catch((error) => {
         console.warn('breakdown_photo_prepare_failed', error);
+        preparedByForm.set(form, files);
         resubmitting.add(form);
         form.requestSubmit();
       });
     };
 
-    document.addEventListener('change', onChange, true);
+    document.addEventListener('formdata', onFormData, true);
     document.addEventListener('submit', onSubmit, true);
     return () => {
-      document.removeEventListener('change', onChange, true);
+      document.removeEventListener('formdata', onFormData, true);
       document.removeEventListener('submit', onSubmit, true);
     };
   }, []);
