@@ -5,6 +5,7 @@ import test from 'node:test';
 const resolver = readFileSync(new URL('../lib/breakdown-geotab-snapshot.ts', import.meta.url), 'utf8');
 const geotabClient = readFileSync(new URL('../lib/geotab-client.ts', import.meta.url), 'utf8');
 const breakdowns = readFileSync(new URL('../lib/roadside-breakdowns.ts', import.meta.url), 'utf8');
+const smsMessage = readFileSync(new URL('../lib/breakdown-sms-message.ts', import.meta.url), 'utf8');
 const notifications = readFileSync(new URL('../lib/notifications.ts', import.meta.url), 'utf8');
 const route = readFileSync(new URL('../app/api/breakdowns/route.ts', import.meta.url), 'utf8');
 const previewRoute = readFileSync(new URL('../app/api/breakdowns/geotab-preview/route.ts', import.meta.url), 'utf8');
@@ -14,6 +15,7 @@ const tireMigration = readFileSync(new URL('../migrations/0099_breakdown_tire_de
 const sessionMigration = readFileSync(new URL('../migrations/0100_geotab_shared_sessions.sql', import.meta.url), 'utf8');
 const recipientMigration = readFileSync(new URL('../migrations/0101_breakdown_email_recipient.sql', import.meta.url), 'utf8');
 const threadMigration = readFileSync(new URL('../migrations/0102_breakdown_email_threads.sql', import.meta.url), 'utf8');
+const driverPhoneMigration = readFileSync(new URL('../migrations/0115_breakdown_driver_phone.sql', import.meta.url), 'utf8');
 const wranglerTemplate = readFileSync(new URL('../wrangler.template.jsonc', import.meta.url), 'utf8');
 
 const SNAPSHOT_COLUMNS = [
@@ -99,6 +101,27 @@ test('migration 0098 contains every breakdown Geotab snapshot field', () => {
     assert.match(migration, new RegExp(`ADD COLUMN ${column}\\b`));
     assert.match(breakdowns, new RegExp(`\\b${column}\\b`));
   }
+});
+
+test('Geotab driver phone is snapshotted without exposing it on the public preview', () => {
+  assert.match(resolver, /phoneNumber/);
+  assert.match(resolver, /phoneNumberExtension/);
+  assert.match(resolver, /driverPhone:\s*driver\.phone/);
+  assert.doesNotMatch(previewRoute, /driverPhone|driver_phone/);
+  assert.match(driverPhoneMigration, /ADD COLUMN driver_phone TEXT/);
+  assert.match(breakdowns, /b\.driver_name, b\.driver_phone/);
+  assert.match(breakdowns, /driverPhone = wantsCorrection \? ''/);
+  assert.match(breakdowns, /driverPhone \|\| null/);
+});
+
+test('Geotab driver phone is included in the initial breakdown email and SMS', () => {
+  assert.match(route, /actual\.driver_phone/);
+  assert.match(route, /Driver Phone:/);
+  assert.match(breakdowns, /Driver Phone:/);
+  assert.match(smsMessage, /b\.driver_phone/);
+  assert.match(smsMessage, /driver_phone_line/);
+  assert.match(smsMessage, /ensureDriverPhone/);
+  assert.match(driverPhoneMigration, /\{\{driver_phone_line\}\}/);
 });
 
 test('tire breakdown reporting stores structured positions and tire sizes', () => {
