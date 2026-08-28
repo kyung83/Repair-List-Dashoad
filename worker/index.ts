@@ -37,6 +37,7 @@ const PUBLIC_PATHS = new Set([
   '/api/breakdowns',
   '/api/breakdowns/driver',
   '/api/breakdowns/geotab-preview',
+  '/api/webhook/twilio-sms',
   '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/me',

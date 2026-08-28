@@ -1,6 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { sendGmailRuntimeEmail, type GmailRuntimeAttachment } from '@/lib/gmail-client';
 import { getGmailRuntimeCredentialMetadata } from '@/lib/gmail-runtime-credentials';
+import { sendTwilioRuntimeSms, twilioRuntimeReady } from '@/lib/twilio-runtime';
+import { buildNewBreakdownSms } from '@/lib/breakdown-sms-message';
 
 const BREAKDOWN_EMAIL_FROM = 'norlow-breakdowns@norloworld.com';
 
@@ -28,11 +30,6 @@ type EmailSendResult = {
   gmailThreadId: string;
   provider: 'gmail' | 'cloudflare';
 };
-
-/** SMS remains opt-in until Twilio is deliberately connected. */
-function smsNotificationsLive() {
-  return String((env as any).NOTIFICATIONS_LIVE ?? '').toLowerCase() === 'true';
-}
 
 function breakdownEmailBinding(): BreakdownEmailBinding | null {
   const binding = (env as any).BREAKDOWN_EMAIL as BreakdownEmailBinding | undefined;
@@ -105,9 +102,8 @@ async function getEmailThread(breakdownId: number, recipient: string) {
   `).bind(breakdownId, recipient).first<BreakdownEmailThread>();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function sendSmsLive(toPhone: string, message: string): Promise<void> {
-  throw new Error('sendSmsLive is not implemented yet -- Twilio is not connected.');
+  await sendTwilioRuntimeSms(env.DB, env, toPhone, message);
 }
 
 async function gmailConnected() {
@@ -171,7 +167,7 @@ async function sendEmailLive(
 
 export async function sendBreakdownSms(breakdownId: number, toPhone: string, message: string) {
   try {
-    if (smsNotificationsLive()) {
+    if (await twilioRuntimeReady(env.DB)) {
       await sendSmsLive(toPhone, message);
       await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'sent' });
     } else {
@@ -247,12 +243,14 @@ export async function notifyBreakdownGroup(
   const contacts = await activeGroupContacts(groupName);
   let contacted = 0;
   const seenPhones = new Set<string>();
+  const outboundMessage = await buildNewBreakdownSms(env.DB, breakdownId, message);
 
+  if (!outboundMessage.trim()) return { contacted };
   for (const contact of contacts) {
     const phone = String(contact.phone || '').trim();
     if (phone && !seenPhones.has(phone)) {
       seenPhones.add(phone);
-      await sendBreakdownSms(breakdownId, phone, message);
+      await sendBreakdownSms(breakdownId, phone, outboundMessage);
       contacted++;
     }
   }
