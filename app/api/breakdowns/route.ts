@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { issueDriverAccessToken } from '@/lib/breakdown-driver-followup';
+import { resolveBreakdownDriverDirectorySelection } from '@/lib/breakdown-driver-directory';
 import {
   createBreakdown,
   getBreakdown,
@@ -52,8 +53,8 @@ function easternTimestamp(value: unknown) {
 
 /**
  * PUBLIC endpoint -- no session required. The server resolves driver/location
- * from Geotab privately. The driver can verify the preview or correct it before
- * submit; the Geotab snapshot remains the evidence source when available.
+ * from Geotab privately. If Geotab cannot provide the driver, the public form
+ * submits only a cached-directory record id; the server resolves the full phone.
  */
 export async function POST(request: Request) {
   try {
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const unitType = safeText(form.get('unitType'), 10);
     const unitNumber = safeText(form.get('unitNumber'), 20);
-    const driverName = safeText(form.get('driverName'), 120);
+    const typedDriverName = safeText(form.get('driverName'), 120);
     const state = safeText(form.get('state'), 2).toUpperCase();
     const city = safeText(form.get('city'), 120);
     const repairCategory = safeText(form.get('repairCategory'), 60);
@@ -74,11 +75,31 @@ export async function POST(request: Request) {
     const snapshotVerification = VALID_SNAPSHOT_VERIFICATION.has(rawSnapshotVerification)
       ? rawSnapshotVerification as BreakdownSnapshotVerification
       : undefined;
+    const driverDirectoryId = Number(safeText(form.get('driverDirectoryId'), 20));
+    const driverNotListed = safeText(form.get('driverNotListed'), 4) === '1';
 
     if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
     if (!unitNumber) throw new Error('Unit # is required.');
     if (!repairCategory) throw new Error('Repair type is required.');
     if (!description) throw new Error('Description is required.');
+
+    const needsFallbackDriver = snapshotVerification === 'unavailable' || snapshotVerification === 'corrected';
+    const directoryDriver = Number.isInteger(driverDirectoryId) && driverDirectoryId > 0
+      ? await resolveBreakdownDriverDirectorySelection(env.DB, driverDirectoryId)
+      : null;
+    if (driverDirectoryId > 0 && !directoryDriver) {
+      throw new Error('That driver directory selection is no longer current. Search for the driver again.');
+    }
+    if (needsFallbackDriver && !directoryDriver && !driverNotListed) {
+      throw new Error('Search for and select the driver from Recruiting, or use Driver not listed.');
+    }
+    if (driverNotListed && !typedDriverName) {
+      throw new Error('Enter the driver name for Driver not listed.');
+    }
+
+    const driverName = directoryDriver?.name || typedDriverName;
+    const driverPhone = directoryDriver?.phone || '';
+    const driverSource = directoryDriver ? 'directory' as const : 'manual' as const;
 
     const tireDetails: ReportedTireDetail[] = [];
     if (repairCategory.toUpperCase() === 'TIRES') {
@@ -94,6 +115,8 @@ export async function POST(request: Request) {
       unitType: unitType as 'truck' | 'trailer',
       unitNumber,
       driverName,
+      driverPhone,
+      driverSource,
       state,
       city,
       snapshotVerification,
