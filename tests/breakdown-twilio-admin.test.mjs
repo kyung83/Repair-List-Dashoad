@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   breakdownSmsAnchorForCurrentWeek,
   currentBreakdownSmsWeekStart,
-  isBreakdownSmsCoverageAllowed,
   isBreakdownSmsScheduleAllowed,
   isBreakdownSmsWeekActive,
 } from '../lib/breakdown-sms-schedule-core.js';
@@ -22,10 +21,10 @@ const scheduleRuntime = readFileSync(new URL('../lib/breakdown-sms-schedule.ts',
 const scheduleCore = readFileSync(new URL('../lib/breakdown-sms-schedule-core.js', import.meta.url), 'utf8');
 const scheduleApi = readFileSync(new URL('../app/api/admin/twilio/schedule/route.ts', import.meta.url), 'utf8');
 const schedulePage = readFileSync(new URL('../app/admin/twilio/schedule/page.tsx', import.meta.url), 'utf8');
-const scheduleMigration = readFileSync(new URL('../migrations/0113_breakdown_sms_schedule.sql', import.meta.url), 'utf8');
 const contactScheduleMigration = readFileSync(new URL('../migrations/0116_breakdown_sms_contact_schedules.sql', import.meta.url), 'utf8');
 const biweeklyMigration = readFileSync(new URL('../migrations/0117_breakdown_sms_biweekly_rotation.sql', import.meta.url), 'utf8');
 const multipleWindowMigration = readFileSync(new URL('../migrations/0118_breakdown_sms_contact_schedule_windows.sql', import.meta.url), 'utf8');
+const individualScheduleMigration = readFileSync(new URL('../migrations/0119_breakdown_sms_individual_schedules.sql', import.meta.url), 'utf8');
 
 test('Twilio credentials are admin-managed and auth token is encrypted', () => {
   assert.match(api, /user\.role !== 'admin'/);
@@ -77,46 +76,50 @@ test('Twilio admin includes webhook URL, live pause, and test text controls', ()
   assert.match(page, /Send Test/);
 });
 
-test('Breakdown SMS schedule is admin-managed in Detroit time and gates texts only', () => {
-  assert.match(scheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_schedule/);
-  assert.match(scheduleMigration, /America\/Detroit/);
+test('Breakdown SMS recipient schedules are admin-managed in Detroit time and gate new alerts only', () => {
+  assert.match(contactScheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_contact_schedules/);
+  assert.match(contactScheduleMigration, /America\/Detroit/);
   assert.match(scheduleRuntime, /BREAKDOWN_SMS_TIMEZONE/);
   assert.match(scheduleCore, /Overnight window/);
   assert.match(scheduleCore, /previousDay/);
   assert.match(scheduleApi, /user\.role !== 'admin'/);
-  assert.match(scheduleApi, /saveBreakdownSmsSchedule/);
+  assert.match(scheduleApi, /saveBreakdownSmsContactSchedule/);
   assert.match(notifications, /breakdownSmsScheduleAllows/);
   assert.match(notifications, /Outside configured breakdown SMS schedule/);
   assert.match(schedulePage, /Breakdown email still sends immediately/);
-  assert.match(schedulePage, /Shared coverage is Always On/);
+  assert.match(schedulePage, /Individual Breakdown Text Schedules/);
   assert.match(schedulePage, /type="time"/);
+  assert.doesNotMatch(schedulePage, /SHARED OFFICE HOURS/);
   assert.match(navigation, /href: "\/admin\/twilio\/schedule", label: "Text Schedule"/);
 });
 
-test('Each breakdown text user can have personalized coverage or shared office hours only', () => {
-  assert.match(contactScheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_contact_schedules/);
+test('Each breakdown text user has an independent mode and independent coverage windows', () => {
   assert.match(contactScheduleMigration, /mode IN \('default','always','custom'\)/);
   assert.match(contactScheduleMigration, /REFERENCES notification_group_contacts\(id\) ON DELETE CASCADE/);
   assert.match(scheduleRuntime, /BreakdownSmsContactScheduleMode = 'default' \| 'always' \| 'custom'/);
   assert.match(scheduleRuntime, /getBreakdownSmsContactSchedules/);
   assert.match(scheduleRuntime, /saveBreakdownSmsContactSchedule/);
   assert.match(scheduleRuntime, /breakdownSmsScheduleAllows\(db: D1Database, contactId\?: number\)/);
-  assert.match(scheduleApi, /action === 'save-contact'/);
-  assert.match(schedulePage, /PERSONAL EARLY \/ LATE \/ ON-CALL COVERAGE/);
-  assert.match(schedulePage, /Shared office hours only/);
+  assert.match(scheduleApi, /action !== 'save-contact'/);
+  assert.match(schedulePage, /Pause scheduled breakdown texts/);
   assert.match(schedulePage, /Always text this person/);
-  assert.match(schedulePage, /Shared office hours \+ personal coverage windows/);
+  assert.match(schedulePage, /Use this person’s coverage windows/);
+  assert.match(schedulePage, /One person’s hours never change another person’s hours/);
   assert.match(notifications, /sendBreakdownSms\(breakdownId, phone, outboundMessage, contact\.id\)/);
 });
 
-test('Shared office hours remain active while personal coverage windows add coverage', () => {
-  assert.match(scheduleRuntime, /function contactScheduleAllowed/);
-  assert.match(scheduleRuntime, /isBreakdownSmsCoverageAllowed\(sharedCore, personalCores, date\)/);
-  assert.match(scheduleCore, /Shared office hours and personal windows are additive/);
-  assert.match(scheduleCore, /personalSchedules\.some/);
-  assert.match(schedulePage, /Every active text user gets these alerts/);
-  assert.match(schedulePage, /Shared office hours stay on/);
-  assert.match(schedulePage, /A text is sent when any one of the windows is active/);
+test('The old shared schedule is migrated into personal windows and then ignored', () => {
+  assert.match(individualScheduleMigration, /Office hours \(migrated\)/);
+  assert.match(individualScheduleMigration, /INSERT INTO breakdown_sms_contact_schedule_windows/);
+  assert.match(individualScheduleMigration, /SET mode = 'custom'/);
+  assert.match(individualScheduleMigration, /SET mode = 'always'/);
+  assert.match(scheduleRuntime, /if \(mode === 'default'\) return false/);
+  assert.match(scheduleRuntime, /personalCores\.some/);
+  assert.match(scheduleRuntime, /if \(!contactId\) return true/);
+  assert.match(scheduleApi, /action === 'save-default'/);
+  assert.match(scheduleApi, /The shared schedule was removed/);
+  assert.match(schedulePage, /There is no shared office-hours setting/);
+  assert.doesNotMatch(schedulePage, /Save Shared Office Hours/);
 });
 
 test('A person can save several separate personal coverage windows', () => {
@@ -128,15 +131,13 @@ test('A person can save several separate personal coverage windows', () => {
   assert.match(scheduleRuntime, /contactScheduleWindowRows/);
   assert.match(scheduleRuntime, /personalRows\.map\(windowCore\)/);
   assert.match(scheduleRuntime, /db\.batch\(statements\)/);
-  assert.match(scheduleApi, /windows: Array\.isArray\(body\.windows\)/);
+  assert.match(scheduleApi, /requestedWindows\(body\.windows\)/);
   assert.match(schedulePage, /Add Another Coverage Window/);
   assert.match(schedulePage, /Remove Window/);
-  assert.match(schedulePage, /different start times/);
+  assert.match(schedulePage, /Different start times/);
 });
 
-test('Default and personal schedules support a safe every-other-week rotation', () => {
-  assert.match(biweeklyMigration, /ALTER TABLE breakdown_sms_schedule[\s\S]*week_interval/);
-  assert.match(biweeklyMigration, /ALTER TABLE breakdown_sms_schedule[\s\S]*anchor_week_start/);
+test('Personal coverage windows support a safe every-other-week rotation', () => {
   assert.match(biweeklyMigration, /ALTER TABLE breakdown_sms_contact_schedules[\s\S]*week_interval/);
   assert.match(biweeklyMigration, /CHECK \(week_interval IN \(1,2\)\)/);
   assert.match(scheduleRuntime, /BreakdownSmsWeekInterval = 1 \| 2/);
@@ -186,22 +187,13 @@ test('Biweekly evaluator alternates Mondays in Detroit and keeps overnight work 
   assert.equal(isBreakdownSmsScheduleAllowed(everyWeek, new Date('2026-09-07T14:00:00Z')), true);
 });
 
-test('Multiple windows support a weekly early shift plus biweekly overnight on-call', () => {
+test('Independent windows support weekly office hours plus biweekly overnight on-call', () => {
   const weekdays = [1, 2, 3, 4, 5].reduce((mask, day) => mask | (1 << day), 0);
-  const sharedOfficeHours = {
-    enabled: true,
-    daysMask: weekdays,
-    startMinute: 8 * 60,
-    endMinute: 17 * 60,
-    weekInterval: 1,
-    anchorWeekStart: '',
-    timezone: 'America/Detroit',
-  };
-  const earlyShift = {
+  const officeHours = {
     enabled: true,
     daysMask: weekdays,
     startMinute: 7 * 60,
-    endMinute: 8 * 60,
+    endMinute: 16 * 60,
     weekInterval: 1,
     anchorWeekStart: '',
     timezone: 'America/Detroit',
@@ -209,16 +201,18 @@ test('Multiple windows support a weekly early shift plus biweekly overnight on-c
   const overnightOnCall = {
     enabled: true,
     daysMask: weekdays,
-    startMinute: 17 * 60,
+    startMinute: 16 * 60,
     endMinute: 7 * 60,
     weekInterval: 2,
     anchorWeekStart: '2026-08-31',
     timezone: 'America/Detroit',
   };
+  const windows = [officeHours, overnightOnCall];
+  const allowed = date => windows.some(window => isBreakdownSmsScheduleAllowed(window, date));
 
-  assert.equal(isBreakdownSmsCoverageAllowed(sharedOfficeHours, [earlyShift, overnightOnCall], new Date('2026-08-31T11:30:00Z')), true);
-  assert.equal(isBreakdownSmsCoverageAllowed(sharedOfficeHours, [earlyShift, overnightOnCall], new Date('2026-08-31T13:00:00Z')), true);
-  assert.equal(isBreakdownSmsCoverageAllowed(sharedOfficeHours, [earlyShift, overnightOnCall], new Date('2026-08-31T22:00:00Z')), true);
-  assert.equal(isBreakdownSmsCoverageAllowed(sharedOfficeHours, [earlyShift, overnightOnCall], new Date('2026-09-07T22:00:00Z')), false);
-  assert.equal(isBreakdownSmsCoverageAllowed(sharedOfficeHours, [earlyShift, overnightOnCall], new Date('2026-09-14T22:00:00Z')), true);
+  assert.equal(allowed(new Date('2026-08-31T11:30:00Z')), true);
+  assert.equal(allowed(new Date('2026-08-31T13:00:00Z')), true);
+  assert.equal(allowed(new Date('2026-08-31T22:00:00Z')), true);
+  assert.equal(allowed(new Date('2026-09-07T22:00:00Z')), false);
+  assert.equal(allowed(new Date('2026-09-14T22:00:00Z')), true);
 });
