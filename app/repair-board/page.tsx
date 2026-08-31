@@ -1,6 +1,6 @@
 import RepairBoardDashboard from "./dashboard-v2";
 import RepairBoardSelfAssignPanel from "./self-assign-panel";
-import OutsideVendorTransferPanel from "./outside-vendor-transfer-panel";
+import RepairCardOutsideVendor from "./repair-card-outside-vendor";
 import s from "./repair-board.module.css";
 import ModuleTabs from "../module-tabs";
 
@@ -16,9 +16,9 @@ export default function RepairBoardPage() {
         .${s.detailGrid} > div:nth-child(2) > select.${s.fieldSelect}:first-of-type { display: none !important; }
       `}</style>
       <div className="board-module-tabs"><ModuleTabs module="shop" /></div>
-      <OutsideVendorTransferPanel />
       <RepairBoardSelfAssignPanel />
       <RepairBoardDashboard />
+      <RepairCardOutsideVendor />
     </>
   );
 }
