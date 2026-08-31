@@ -6,6 +6,7 @@ import {
   saveBreakdownSmsContactSchedule,
   saveBreakdownSmsSchedule,
   type BreakdownSmsContactScheduleMode,
+  type BreakdownSmsWeekInterval,
 } from '@/lib/breakdown-sms-schedule';
 
 async function requireAdmin(request: Request) {
@@ -40,9 +41,15 @@ type ScheduleBody = {
   days?: number[];
   startTime?: string;
   endTime?: string;
+  weekInterval?: number;
+  activeThisWeek?: boolean;
   contactId?: number;
   mode?: BreakdownSmsContactScheduleMode;
 };
+
+function requestedWeekInterval(value: unknown): BreakdownSmsWeekInterval {
+  return Number(value) === 2 ? 2 : 1;
+}
 
 export async function POST(request: Request) {
   try {
@@ -58,6 +65,8 @@ export async function POST(request: Request) {
         days: Array.isArray(body.days) ? body.days.map(Number) : [],
         startTime: String(body.startTime || ''),
         endTime: String(body.endTime || ''),
+        weekInterval: requestedWeekInterval(body.weekInterval),
+        activeThisWeek: body.activeThisWeek !== false,
       }, auth.user.id);
       const status = await statusPayload();
       return Response.json({
@@ -76,6 +85,8 @@ export async function POST(request: Request) {
       days: Array.isArray(body.days) ? body.days.map(Number) : [],
       startTime: String(body.startTime || ''),
       endTime: String(body.endTime || ''),
+      weekInterval: requestedWeekInterval(body.weekInterval),
+      activeThisWeek: body.activeThisWeek !== false,
     }, auth.user.id);
     const status = await statusPayload();
     return Response.json({
