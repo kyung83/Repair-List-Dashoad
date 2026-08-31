@@ -1,14 +1,12 @@
 import {
   BREAKDOWN_SMS_TIMEZONE,
   breakdownSmsAnchorForCurrentWeek,
-  isBreakdownSmsCoverageAllowed,
   isBreakdownSmsScheduleAllowed,
   isBreakdownSmsWeekActive,
 } from './breakdown-sms-schedule-core.js';
 
 export {
   BREAKDOWN_SMS_TIMEZONE,
-  isBreakdownSmsCoverageAllowed,
   isBreakdownSmsScheduleAllowed,
 };
 export const BREAKDOWN_SMS_GROUP = 'Breakdown Alerts';
@@ -16,6 +14,10 @@ export const MAX_BREAKDOWN_SMS_PERSONAL_WINDOWS = 12;
 
 export type BreakdownSmsWeekInterval = 1 | 2;
 
+/**
+ * Legacy shared-schedule response kept only for rolling API compatibility.
+ * It is no longer used to decide whether any person receives a text.
+ */
 export type BreakdownSmsSchedule = {
   enabled: boolean;
   days: number[];
@@ -271,17 +273,16 @@ function legacyWindowResponse(row: ContactScheduleRow): BreakdownSmsContactSched
 function contactScheduleAllowed(
   row: ContactScheduleRow,
   personalRows: ContactScheduleWindowRow[],
-  sharedCore: ScheduleCore,
   date = new Date(),
 ) {
   const mode = contactMode(row.mode);
-  if (mode === 'default') return isBreakdownSmsScheduleAllowed(sharedCore, date);
+  if (mode === 'default') return false;
   if (mode === 'always') return true;
 
   const personalCores = personalRows.length
     ? personalRows.map(windowCore)
     : [legacyPersonalCore(row)];
-  return isBreakdownSmsCoverageAllowed(sharedCore, personalCores, date);
+  return personalCores.some(core => isBreakdownSmsScheduleAllowed(core, date));
 }
 
 function normalizeWindowInput(
@@ -337,6 +338,7 @@ async function contactScheduleWindowRows(db: D1Database, contactId: number) {
   return result.results;
 }
 
+/** Legacy API response only. Recipient eligibility no longer reads this row. */
 export async function getBreakdownSmsSchedule(db: D1Database): Promise<BreakdownSmsSchedule> {
   const row = await scheduleRow(db);
   const core = defaultScheduleCore(row);
@@ -356,13 +358,11 @@ export async function getBreakdownSmsSchedule(db: D1Database): Promise<Breakdown
 }
 
 export async function getBreakdownSmsContactSchedules(db: D1Database): Promise<BreakdownSmsContactSchedule[]> {
-  const [defaultRow, group] = await Promise.all([
-    scheduleRow(db),
-    db.prepare(`SELECT id FROM notification_groups WHERE name=?`).bind(BREAKDOWN_SMS_GROUP).first<{ id: number }>(),
-  ]);
+  const group = await db.prepare(`SELECT id FROM notification_groups WHERE name=?`)
+    .bind(BREAKDOWN_SMS_GROUP)
+    .first<{ id: number }>();
   if (!group) return [];
 
-  const defaultCore = defaultScheduleCore(defaultRow);
   const [contactsResult, windowsResult] = await Promise.all([
     db.prepare(`
       SELECT c.id AS contact_id,c.label,COALESCE(c.phone,'') AS phone,c.active,
@@ -417,13 +417,14 @@ export async function getBreakdownSmsContactSchedules(db: D1Database): Promise<B
       activeThisWeek: compatibility.activeThisWeek,
       anchorWeekStart: compatibility.anchorWeekStart,
       timezone: compatibility.timezone,
-      allowedNow: Boolean(row.active) && contactScheduleAllowed(row, personalRows, defaultCore),
+      allowedNow: Boolean(row.active) && contactScheduleAllowed(row, personalRows),
       updatedAt: row.updated_at || '',
       updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id),
     };
   });
 }
 
+/** Legacy write kept for rolling compatibility. The admin screen no longer calls it. */
 export async function saveBreakdownSmsSchedule(
   db: D1Database,
   input: {
@@ -441,7 +442,7 @@ export async function saveBreakdownSmsSchedule(
   const endMinute = timeToMinute(input.endTime);
   const interval = weekInterval(input.weekInterval);
   const anchor = scheduleAnchor(interval, input.activeThisWeek);
-  if (input.enabled && daysMask === 0) throw new Error('Select at least one day for the shared office-hours text schedule.');
+  if (input.enabled && daysMask === 0) throw new Error('Select at least one day for the legacy shared text schedule.');
   if (startMinute == null || endMinute == null) throw new Error('Enter a valid start and end time.');
 
   await db.prepare(`
@@ -582,14 +583,14 @@ export async function saveBreakdownSmsContactSchedule(
 }
 
 export async function breakdownSmsScheduleAllows(db: D1Database, contactId?: number) {
-  const defaultRow = await scheduleRow(db);
-  const defaultCore = defaultScheduleCore(defaultRow);
-  if (!contactId) return isBreakdownSmsScheduleAllowed(defaultCore);
+  // Direct operational texts that are not a group alert are never blocked by a
+  // person's alert schedule. New-breakdown group alerts always pass contactId.
+  if (!contactId) return true;
 
   const [row, personalRows] = await Promise.all([
     contactScheduleRow(db, contactId),
     contactScheduleWindowRows(db, contactId),
   ]);
-  if (!row) return isBreakdownSmsScheduleAllowed(defaultCore);
-  return contactScheduleAllowed(row, personalRows, defaultCore);
+  if (!row) return false;
+  return contactScheduleAllowed(row, personalRows);
 }
