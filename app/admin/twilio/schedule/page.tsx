@@ -104,7 +104,7 @@ export default function BreakdownTextSchedulePage() {
   async function saveDefault() {
     if (!schedule) return;
     if (schedule.enabled && schedule.days.length === 0) {
-      setMessage('Select at least one default day, or turn the default schedule off for Always On.');
+      setMessage('Select at least one shared office-hours day, or turn the shared window off.');
       return;
     }
     setBusy('default'); setMessage('');
@@ -124,19 +124,19 @@ export default function BreakdownTextSchedulePage() {
       });
       const result = await response.json() as ApiResult;
       if (!response.ok || !result.ok || !result.schedule || !Array.isArray(result.contacts)) {
-        throw new Error(result.error || 'Default breakdown text schedule could not be saved.');
+        throw new Error(result.error || 'Shared office-hours schedule could not be saved.');
       }
       setSchedule(result.schedule);
       setContacts(result.contacts);
-      setMessage(result.message || 'Default schedule saved.');
+      setMessage(result.message || 'Shared office-hours schedule saved.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Default breakdown text schedule could not be saved.');
+      setMessage(error instanceof Error ? error.message : 'Shared office-hours schedule could not be saved.');
     } finally { setBusy(''); }
   }
 
   async function saveContact(contact: ContactSchedule) {
     if (contact.mode === 'custom' && contact.days.length === 0) {
-      setMessage(`Select at least one day for ${contact.label}.`);
+      setMessage(`Select at least one personal on-call day for ${contact.label}.`);
       return;
     }
     const busyKey = `contact-${contact.contactId}`;
@@ -176,8 +176,8 @@ export default function BreakdownTextSchedulePage() {
     <div style={rowWrap}>
       <div>
         <div style={eyebrow}>DIAGNOSTICS · BREAKDOWN TEXTING</div>
-        <h2 style={heading}>Personalized Breakdown Text Schedules</h2>
-        <p style={copy}>Give each breakdown text user a different daily, weekly, or every-other-week schedule. When two schedules overlap, both people receive the alert. Breakdown email still sends immediately.</p>
+        <h2 style={heading}>Shared Office Hours & Personal On-Call Schedules</h2>
+        <p style={copy}>Set office hours once so every active breakdown text user receives those alerts every week. Then add a personal nights, weekends, or every-other-week on-call schedule for each person.</p>
       </div>
       <a href="/admin/twilio" style={linkButton}>Back to Breakdown Texting</a>
     </div>
@@ -187,28 +187,28 @@ export default function BreakdownTextSchedulePage() {
     <div style={{ ...card, marginTop: 16, borderColor: defaultEnabled ? (defaultAllowedNow ? '#a9d3b5' : '#e0ba73') : '#a9d3b5', background: defaultEnabled && !defaultAllowedNow ? '#fff9ed' : '#f5fbf6' }}>
       <div style={rowWrap}>
         <div>
-          <div style={eyebrow}>DEFAULT SCHEDULE</div>
-          <h3 style={subheading}>Used by anyone set to “Use default schedule”</h3>
-          <p style={copy}>This keeps one shared schedule available while allowing individual weekly or biweekly overrides below.</p>
+          <div style={eyebrow}>SHARED OFFICE HOURS</div>
+          <h3 style={subheading}>Every active text user gets these alerts</h3>
+          <p style={copy}>This window is shared by everyone and is added to each person’s personal on-call schedule. Set the rotation to Every week for normal office hours.</p>
         </div>
-        <div style={statusPill}><span>Right now</span><strong>{!defaultEnabled || defaultAllowedNow ? 'TEXTS ALLOWED' : 'EMAIL ONLY'}</strong></div>
+        <div style={statusPill}><span>Shared window now</span><strong>{!defaultEnabled || defaultAllowedNow ? 'TEXTS ALLOWED' : 'OUTSIDE OFFICE HOURS'}</strong></div>
       </div>
 
       <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(240px,.8fr) minmax(360px,1.2fr)', gap: 14, alignItems: 'start' }}>
         <div style={infoCard}>
-          <strong>Default behavior</strong>
+          <strong>Shared coverage</strong>
           <div style={detail}><span>Mode</span><strong>{defaultEnabled ? 'SCHEDULED' : 'ALWAYS ON'}</strong></div>
           <div style={detail}><span>Rotation</span><strong>{schedule?.weekInterval === 2 ? 'EVERY OTHER WEEK' : 'EVERY WEEK'}</strong></div>
           <div style={detail}><span>Time zone</span><strong>{schedule?.timezone || 'America/Detroit'}</strong></div>
-          <p style={smallCopy}>A person using a personal schedule ignores this default. Inactive text users never receive alerts.</p>
+          <p style={smallCopy}>Custom personal schedules add extra coverage outside this shared window; they no longer replace it. Inactive text users never receive alerts.</p>
         </div>
 
         <div style={formCard}>
           <label style={switchLabel}>
             <input type="checkbox" checked={defaultEnabled} onChange={(event: ChangeEvent<HTMLInputElement>) => patchDefault({ enabled: event.target.checked })} />
-            Use a default texting window
+            Use a shared office-hours window
           </label>
-          {!defaultEnabled && <div style={savedBox}><strong>Default is Always On</strong><p style={smallCopy}>Anyone using the default can receive a breakdown text at any time.</p></div>}
+          {!defaultEnabled && <div style={savedBox}><strong>Shared coverage is Always On</strong><p style={smallCopy}>Every active breakdown text user receives every new alert at all times. Enable the window to limit shared coverage to office hours.</p></div>}
 
           {defaultEnabled && <ScheduleFields
             days={schedule?.days || []}
@@ -223,15 +223,15 @@ export default function BreakdownTextSchedulePage() {
             onActiveThisWeek={value => patchDefault({ activeThisWeek: value })}
           />}
 
-          <button type="button" disabled={Boolean(busy) || !schedule} onClick={() => void saveDefault()} style={primaryButton}>{busy === 'default' ? 'Saving…' : 'Save Default Schedule'}</button>
+          <button type="button" disabled={Boolean(busy) || !schedule} onClick={() => void saveDefault()} style={primaryButton}>{busy === 'default' ? 'Saving…' : 'Save Shared Office Hours'}</button>
         </div>
       </div>
     </div>
 
     <div style={{ ...card, marginTop: 16, borderColor: '#d7e0e6', background: '#fff' }}>
-      <div style={eyebrow}>PERSONAL SCHEDULES</div>
-      <h3 style={subheading}>Choose exactly when each person gets breakdown texts</h3>
-      <p style={copy}>One person can cover this week and another person next week, or they can split days and hours during the same week.</p>
+      <div style={eyebrow}>PERSONAL AFTER-HOURS / ON-CALL</div>
+      <h3 style={subheading}>Add extra coverage for each person</h3>
+      <p style={copy}>Everyone still receives texts during shared office hours. Use the personal schedules below for nights, weekends, and alternating on-call weeks.</p>
 
       <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
         {contacts.map(contact => {
@@ -251,28 +251,31 @@ export default function BreakdownTextSchedulePage() {
             {!contact.active && <div style={inactiveNotice}>This person is inactive on the Breakdown Text Users page and will not receive texts until reactivated.</div>}
 
             <label style={{ ...label, marginTop: 12 }}>
-              Schedule for this person
+              Coverage for this person
               <select style={input} value={contact.mode} onChange={(event: ChangeEvent<HTMLSelectElement>) => patchContact(contact.contactId, { mode: event.target.value as ContactScheduleMode })}>
-                <option value="default">Use default schedule</option>
+                <option value="default">Shared office hours only</option>
                 <option value="always">Always text this person</option>
-                <option value="custom">Custom schedule</option>
+                <option value="custom">Shared office hours + personal on-call</option>
               </select>
             </label>
 
-            {contact.mode === 'default' && <div style={savedBox}><strong>Following the default</strong><p style={smallCopy}>Changes to the default schedule above automatically apply to this person.</p></div>}
+            {contact.mode === 'default' && <div style={savedBox}><strong>Shared office hours only</strong><p style={smallCopy}>This person receives all shared office-hour alerts and no extra personal on-call coverage.</p></div>}
             {contact.mode === 'always' && <div style={savedBox}><strong>Always text this person</strong><p style={smallCopy}>When Twilio is enabled and this user is active, this person receives every new breakdown alert.</p></div>}
-            {contact.mode === 'custom' && <ScheduleFields
-              days={contact.days}
-              startTime={contact.startTime}
-              endTime={contact.endTime}
-              weekInterval={contact.weekInterval}
-              activeThisWeek={contact.activeThisWeek}
-              onToggleDay={day => toggleContactDay(contact.contactId, day)}
-              onStartTime={value => patchContact(contact.contactId, { startTime: value })}
-              onEndTime={value => patchContact(contact.contactId, { endTime: value })}
-              onWeekInterval={value => patchContact(contact.contactId, { weekInterval: value })}
-              onActiveThisWeek={value => patchContact(contact.contactId, { activeThisWeek: value })}
-            />}
+            {contact.mode === 'custom' && <>
+              <div style={savedBox}><strong>Shared office hours stay on</strong><p style={smallCopy}>The personal schedule below adds nights, weekends, or alternating-week coverage. It does not remove the shared office-hours texts.</p></div>
+              <ScheduleFields
+                days={contact.days}
+                startTime={contact.startTime}
+                endTime={contact.endTime}
+                weekInterval={contact.weekInterval}
+                activeThisWeek={contact.activeThisWeek}
+                onToggleDay={day => toggleContactDay(contact.contactId, day)}
+                onStartTime={value => patchContact(contact.contactId, { startTime: value })}
+                onEndTime={value => patchContact(contact.contactId, { endTime: value })}
+                onWeekInterval={value => patchContact(contact.contactId, { weekInterval: value })}
+                onActiveThisWeek={value => patchContact(contact.contactId, { activeThisWeek: value })}
+              />
+            </>}
 
             <button type="button" disabled={Boolean(busy)} onClick={() => void saveContact(contact)} style={primaryButton}>{busy === busyKey ? 'Saving…' : `Save ${contact.label}'s Schedule`}</button>
           </article>;
