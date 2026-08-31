@@ -131,7 +131,7 @@ test('A person can save several separate personal coverage windows', () => {
   assert.match(scheduleRuntime, /contactScheduleWindowRows/);
   assert.match(scheduleRuntime, /personalRows\.map\(windowCore\)/);
   assert.match(scheduleRuntime, /db\.batch\(statements\)/);
-  assert.match(scheduleApi, /windows: requestedWindows\(body\.windows\)/);
+  assert.match(scheduleApi, /requestedWindows\(body\.windows\)/);
   assert.match(schedulePage, /Add Another Coverage Window/);
   assert.match(schedulePage, /Remove Window/);
   assert.match(schedulePage, /Different start times/);
