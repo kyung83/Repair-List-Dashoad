@@ -15,6 +15,7 @@ const scheduleRuntime = readFileSync(new URL('../lib/breakdown-sms-schedule.ts',
 const scheduleApi = readFileSync(new URL('../app/api/admin/twilio/schedule/route.ts', import.meta.url), 'utf8');
 const schedulePage = readFileSync(new URL('../app/admin/twilio/schedule/page.tsx', import.meta.url), 'utf8');
 const scheduleMigration = readFileSync(new URL('../migrations/0113_breakdown_sms_schedule.sql', import.meta.url), 'utf8');
+const contactScheduleMigration = readFileSync(new URL('../migrations/0116_breakdown_sms_contact_schedules.sql', import.meta.url), 'utf8');
 
 test('Twilio credentials are admin-managed and auth token is encrypted', () => {
   assert.match(api, /user\.role !== 'admin'/);
@@ -76,9 +77,24 @@ test('Breakdown SMS schedule is admin-managed in Detroit time and gates texts on
   assert.match(scheduleApi, /saveBreakdownSmsSchedule/);
   assert.match(notifications, /breakdownSmsScheduleAllows/);
   assert.match(notifications, /Outside configured breakdown SMS schedule/);
-  assert.match(schedulePage, /This schedule controls Twilio SMS only/);
-  assert.match(schedulePage, /Breakdown email continues to send immediately/);
-  assert.match(schedulePage, /Always On/);
+  assert.match(schedulePage, /Breakdown email still sends immediately/);
+  assert.match(schedulePage, /Default is Always On/);
   assert.match(schedulePage, /type="time"/);
   assert.match(navigation, /href: "\/admin\/twilio\/schedule", label: "Text Schedule"/);
+});
+
+test('Each breakdown text user can have a personalized schedule or follow the default', () => {
+  assert.match(contactScheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_contact_schedules/);
+  assert.match(contactScheduleMigration, /mode IN \('default','always','custom'\)/);
+  assert.match(contactScheduleMigration, /REFERENCES notification_group_contacts\(id\) ON DELETE CASCADE/);
+  assert.match(scheduleRuntime, /BreakdownSmsContactScheduleMode = 'default' \| 'always' \| 'custom'/);
+  assert.match(scheduleRuntime, /getBreakdownSmsContactSchedules/);
+  assert.match(scheduleRuntime, /saveBreakdownSmsContactSchedule/);
+  assert.match(scheduleRuntime, /breakdownSmsScheduleAllows\(db: D1Database, contactId\?: number\)/);
+  assert.match(scheduleApi, /action === 'save-contact'/);
+  assert.match(schedulePage, /PERSONAL SCHEDULES/);
+  assert.match(schedulePage, /Use default schedule/);
+  assert.match(schedulePage, /Always text this person/);
+  assert.match(schedulePage, /Custom schedule/);
+  assert.match(notifications, /sendBreakdownSms\(breakdownId, phone, outboundMessage, contact\.id\)/);
 });
