@@ -3,6 +3,10 @@
 import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react';
 
 type WeekInterval = 1 | 2;
+type ContactScheduleMode = 'default' | 'always' | 'custom';
+
+const MAX_PERSONAL_WINDOWS = 12;
+let nextTemporaryWindowId = -1;
 
 type Schedule = {
   enabled: boolean;
@@ -17,14 +21,9 @@ type Schedule = {
   updatedAt: string;
 };
 
-type ContactScheduleMode = 'default' | 'always' | 'custom';
-
-type ContactSchedule = {
-  contactId: number;
+type CoverageWindow = {
+  id: number;
   label: string;
-  phone: string;
-  active: boolean;
-  mode: ContactScheduleMode;
   days: number[];
   startTime: string;
   endTime: string;
@@ -36,9 +35,31 @@ type ContactSchedule = {
   updatedAt: string;
 };
 
+type ContactSchedule = {
+  contactId: number;
+  label: string;
+  phone: string;
+  active: boolean;
+  mode: ContactScheduleMode;
+  windows: CoverageWindow[];
+  days: number[];
+  startTime: string;
+  endTime: string;
+  weekInterval: WeekInterval;
+  activeThisWeek: boolean;
+  anchorWeekStart: string;
+  timezone: string;
+  allowedNow: boolean;
+  updatedAt: string;
+};
+
+type ApiContactSchedule = Omit<ContactSchedule, 'windows'> & {
+  windows?: CoverageWindow[];
+};
+
 type ApiResult = {
   schedule?: Schedule;
-  contacts?: ContactSchedule[];
+  contacts?: ApiContactSchedule[];
   ok?: boolean;
   message?: string;
   error?: string;
@@ -54,11 +75,56 @@ const DAYS = [
   { id: 6, label: 'Sat' },
 ];
 
+function newCoverageWindow(number: number): CoverageWindow {
+  return {
+    id: nextTemporaryWindowId--,
+    label: `Coverage window ${number}`,
+    days: [1, 2, 3, 4, 5],
+    startTime: '17:00',
+    endTime: '07:00',
+    weekInterval: 1,
+    activeThisWeek: true,
+    anchorWeekStart: '',
+    timezone: 'America/Detroit',
+    allowedNow: false,
+    updatedAt: '',
+  };
+}
+
+function hydrateContact(contact: ApiContactSchedule): ContactSchedule {
+  const savedWindows = Array.isArray(contact.windows) ? contact.windows : [];
+  const legacyWindow: CoverageWindow = {
+    id: 0,
+    label: 'Personal coverage',
+    days: Array.isArray(contact.days) ? contact.days : [],
+    startTime: contact.startTime || '17:00',
+    endTime: contact.endTime || '07:00',
+    weekInterval: contact.weekInterval === 2 ? 2 : 1,
+    activeThisWeek: contact.activeThisWeek !== false,
+    anchorWeekStart: contact.anchorWeekStart || '',
+    timezone: contact.timezone || 'America/Detroit',
+    allowedNow: false,
+    updatedAt: contact.updatedAt || '',
+  };
+  return {
+    ...contact,
+    windows: savedWindows.length
+      ? savedWindows
+      : contact.mode === 'custom'
+        ? [legacyWindow]
+        : [],
+  };
+}
+
 export default function BreakdownTextSchedulePage() {
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [contacts, setContacts] = useState<ContactSchedule[]>([]);
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+
+  function applyContacts(value: ApiContactSchedule[]) {
+    setContacts(value.map(hydrateContact));
+  }
 
   async function load() {
     const response = await fetch('/api/admin/twilio/schedule', { cache: 'no-store' });
@@ -68,7 +134,7 @@ export default function BreakdownTextSchedulePage() {
       throw new Error(result.error || 'Breakdown text schedules could not be loaded.');
     }
     setSchedule(result.schedule);
-    setContacts(result.contacts);
+    applyContacts(result.contacts);
   }
 
   useEffect(() => {
@@ -92,13 +158,55 @@ export default function BreakdownTextSchedulePage() {
     setContacts(current => current.map(contact => contact.contactId === contactId ? { ...contact, ...patchValue } : contact));
   }
 
-  function toggleContactDay(contactId: number, day: number) {
+  function changeContactMode(contactId: number, mode: ContactScheduleMode) {
     setContacts(current => current.map(contact => {
       if (contact.contactId !== contactId) return contact;
-      const exists = contact.days.includes(day);
-      const days = exists ? contact.days.filter(item => item !== day) : [...contact.days, day].sort((a, b) => a - b);
-      return { ...contact, days };
+      const windows = mode === 'custom' && contact.windows.length === 0
+        ? [newCoverageWindow(1)]
+        : contact.windows;
+      return { ...contact, mode, windows };
     }));
+  }
+
+  function patchWindow(contactId: number, windowId: number, patchValue: Partial<CoverageWindow>) {
+    setContacts(current => current.map(contact => contact.contactId === contactId ? {
+      ...contact,
+      windows: contact.windows.map(coverage => coverage.id === windowId ? { ...coverage, ...patchValue } : coverage),
+    } : contact));
+  }
+
+  function toggleWindowDay(contactId: number, windowId: number, day: number) {
+    setContacts(current => current.map(contact => {
+      if (contact.contactId !== contactId) return contact;
+      return {
+        ...contact,
+        windows: contact.windows.map(coverage => {
+          if (coverage.id !== windowId) return coverage;
+          const exists = coverage.days.includes(day);
+          const days = exists
+            ? coverage.days.filter(item => item !== day)
+            : [...coverage.days, day].sort((a, b) => a - b);
+          return { ...coverage, days };
+        }),
+      };
+    }));
+  }
+
+  function addWindow(contactId: number) {
+    setContacts(current => current.map(contact => {
+      if (contact.contactId !== contactId || contact.windows.length >= MAX_PERSONAL_WINDOWS) return contact;
+      return {
+        ...contact,
+        windows: [...contact.windows, newCoverageWindow(contact.windows.length + 1)],
+      };
+    }));
+  }
+
+  function removeWindow(contactId: number, windowId: number) {
+    setContacts(current => current.map(contact => contact.contactId === contactId ? {
+      ...contact,
+      windows: contact.windows.filter(coverage => coverage.id !== windowId),
+    } : contact));
   }
 
   async function saveDefault() {
@@ -127,7 +235,7 @@ export default function BreakdownTextSchedulePage() {
         throw new Error(result.error || 'Shared office-hours schedule could not be saved.');
       }
       setSchedule(result.schedule);
-      setContacts(result.contacts);
+      applyContacts(result.contacts);
       setMessage(result.message || 'Shared office-hours schedule saved.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Shared office-hours schedule could not be saved.');
@@ -135,10 +243,18 @@ export default function BreakdownTextSchedulePage() {
   }
 
   async function saveContact(contact: ContactSchedule) {
-    if (contact.mode === 'custom' && contact.days.length === 0) {
-      setMessage(`Select at least one personal on-call day for ${contact.label}.`);
+    if (contact.mode === 'custom' && contact.windows.length === 0) {
+      setMessage(`Add at least one personal coverage window for ${contact.label}.`);
       return;
     }
+    if (contact.mode === 'custom') {
+      const invalidWindow = contact.windows.findIndex(coverage => coverage.days.length === 0);
+      if (invalidWindow >= 0) {
+        setMessage(`Select at least one day for ${contact.label}'s coverage window ${invalidWindow + 1}.`);
+        return;
+      }
+    }
+
     const busyKey = `contact-${contact.contactId}`;
     setBusy(busyKey); setMessage('');
     try {
@@ -149,23 +265,25 @@ export default function BreakdownTextSchedulePage() {
           action: 'save-contact',
           contactId: contact.contactId,
           mode: contact.mode,
-          days: contact.days,
-          startTime: contact.startTime,
-          endTime: contact.endTime,
-          weekInterval: contact.weekInterval,
-          activeThisWeek: contact.activeThisWeek,
+          windows: contact.windows.map(coverage => ({
+            label: coverage.label,
+            days: coverage.days,
+            startTime: coverage.startTime,
+            endTime: coverage.endTime,
+            weekInterval: coverage.weekInterval,
+            activeThisWeek: coverage.activeThisWeek,
+          })),
         }),
       });
       const result = await response.json() as ApiResult;
       if (!response.ok || !result.ok || !Array.isArray(result.contacts)) {
-        throw new Error(result.error || `The schedule for ${contact.label} could not be saved.`);
+        throw new Error(result.error || `The coverage for ${contact.label} could not be saved.`);
       }
-      const saved = result.contacts.find(item => item.contactId === contact.contactId);
-      if (saved) patchContact(contact.contactId, saved);
+      applyContacts(result.contacts);
       if (result.schedule) setSchedule(result.schedule);
-      setMessage(result.message || `Schedule saved for ${contact.label}.`);
+      setMessage(result.message || `Coverage saved for ${contact.label}.`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : `The schedule for ${contact.label} could not be saved.`);
+      setMessage(error instanceof Error ? error.message : `The coverage for ${contact.label} could not be saved.`);
     } finally { setBusy(''); }
   }
 
@@ -176,8 +294,8 @@ export default function BreakdownTextSchedulePage() {
     <div style={rowWrap}>
       <div>
         <div style={eyebrow}>DIAGNOSTICS · BREAKDOWN TEXTING</div>
-        <h2 style={heading}>Shared Office Hours & Personal On-Call Schedules</h2>
-        <p style={copy}>Set office hours once so every active breakdown text user receives those alerts every week. Then add a personal nights, weekends, or every-other-week on-call schedule for each person. Breakdown email still sends immediately.</p>
+        <h2 style={heading}>Shared Office Hours & Personal Coverage Windows</h2>
+        <p style={copy}>Everyone receives office-hour alerts every week. Each person can also have several extra windows—for example an early shift every week plus overnight on-call every other week. Breakdown email still sends immediately.</p>
       </div>
       <a href="/admin/twilio" style={linkButton}>Back to Breakdown Texting</a>
     </div>
@@ -189,18 +307,18 @@ export default function BreakdownTextSchedulePage() {
         <div>
           <div style={eyebrow}>SHARED OFFICE HOURS</div>
           <h3 style={subheading}>Every active text user gets these alerts</h3>
-          <p style={copy}>This window is shared by everyone and is added to each person’s personal on-call schedule. Set the rotation to Every week for normal office hours.</p>
+          <p style={copy}>Set this to Every week for the hours when both people should always receive breakdown texts.</p>
         </div>
         <div style={statusPill}><span>Shared window now</span><strong>{!defaultEnabled || defaultAllowedNow ? 'TEXTS ALLOWED' : 'OUTSIDE OFFICE HOURS'}</strong></div>
       </div>
 
-      <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'minmax(240px,.8fr) minmax(360px,1.2fr)', gap: 14, alignItems: 'start' }}>
+      <div style={twoColumnGrid}>
         <div style={infoCard}>
           <strong>Shared coverage</strong>
           <div style={detail}><span>Mode</span><strong>{defaultEnabled ? 'SCHEDULED' : 'ALWAYS ON'}</strong></div>
           <div style={detail}><span>Rotation</span><strong>{schedule?.weekInterval === 2 ? 'EVERY OTHER WEEK' : 'EVERY WEEK'}</strong></div>
           <div style={detail}><span>Time zone</span><strong>{schedule?.timezone || 'America/Detroit'}</strong></div>
-          <p style={smallCopy}>Custom personal schedules add extra coverage outside this shared window; they no longer replace it. Inactive text users never receive alerts.</p>
+          <p style={smallCopy}>Personal windows add coverage outside these hours. They do not remove shared office-hour alerts.</p>
         </div>
 
         <div style={formCard}>
@@ -229,9 +347,9 @@ export default function BreakdownTextSchedulePage() {
     </div>
 
     <div style={{ ...card, marginTop: 16, borderColor: '#d7e0e6', background: '#fff' }}>
-      <div style={eyebrow}>PERSONAL AFTER-HOURS / ON-CALL</div>
-      <h3 style={subheading}>Add extra coverage for each person</h3>
-      <p style={copy}>Everyone still receives texts during shared office hours. Use the personal schedules below for nights, weekends, and alternating on-call weeks.</p>
+      <div style={eyebrow}>PERSONAL EARLY / LATE / ON-CALL COVERAGE</div>
+      <h3 style={subheading}>Give each person as many separate windows as needed</h3>
+      <p style={copy}>A person can have different start times, an every-week early or late shift, weekend coverage, and a separate alternating-week overnight schedule.</p>
 
       <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
         {contacts.map(contact => {
@@ -252,32 +370,64 @@ export default function BreakdownTextSchedulePage() {
 
             <label style={{ ...label, marginTop: 12 }}>
               Coverage for this person
-              <select style={input} value={contact.mode} onChange={(event: ChangeEvent<HTMLSelectElement>) => patchContact(contact.contactId, { mode: event.target.value as ContactScheduleMode })}>
+              <select style={input} value={contact.mode} onChange={(event: ChangeEvent<HTMLSelectElement>) => changeContactMode(contact.contactId, event.target.value as ContactScheduleMode)}>
                 <option value="default">Shared office hours only</option>
                 <option value="always">Always text this person</option>
-                <option value="custom">Shared office hours + personal on-call</option>
+                <option value="custom">Shared office hours + personal coverage windows</option>
               </select>
             </label>
 
-            {contact.mode === 'default' && <div style={savedBox}><strong>Shared office hours only</strong><p style={smallCopy}>This person receives all shared office-hour alerts and no extra personal on-call coverage.</p></div>}
+            {contact.mode === 'default' && <div style={savedBox}><strong>Shared office hours only</strong><p style={smallCopy}>This person receives all shared office-hour alerts and no extra personal coverage.</p></div>}
             {contact.mode === 'always' && <div style={savedBox}><strong>Always text this person</strong><p style={smallCopy}>When Twilio is enabled and this user is active, this person receives every new breakdown alert.</p></div>}
+
             {contact.mode === 'custom' && <>
-              <div style={savedBox}><strong>Shared office hours stay on</strong><p style={smallCopy}>The personal schedule below adds nights, weekends, or alternating-week coverage. It does not remove the shared office-hours texts.</p></div>
-              <ScheduleFields
-                days={contact.days}
-                startTime={contact.startTime}
-                endTime={contact.endTime}
-                weekInterval={contact.weekInterval}
-                activeThisWeek={contact.activeThisWeek}
-                onToggleDay={day => toggleContactDay(contact.contactId, day)}
-                onStartTime={value => patchContact(contact.contactId, { startTime: value })}
-                onEndTime={value => patchContact(contact.contactId, { endTime: value })}
-                onWeekInterval={value => patchContact(contact.contactId, { weekInterval: value })}
-                onActiveThisWeek={value => patchContact(contact.contactId, { activeThisWeek: value })}
-              />
+              <div style={savedBox}><strong>Shared office hours stay on</strong><p style={smallCopy}>Every personal window below is added to the shared office-hours coverage. A text is sent when any one of the windows is active.</p></div>
+
+              <div style={windowList}>
+                {contact.windows.map((coverage, index) => <div key={coverage.id} style={coverageCard}>
+                  <div style={windowHeader}>
+                    <label style={{ ...label, flex: '1 1 240px' }}>
+                      Coverage name
+                      <input
+                        type="text"
+                        maxLength={80}
+                        style={input}
+                        value={coverage.label}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => patchWindow(contact.contactId, coverage.id, { label: event.target.value })}
+                        placeholder={`Coverage window ${index + 1}`}
+                      />
+                    </label>
+                    <button type="button" disabled={Boolean(busy)} onClick={() => removeWindow(contact.contactId, coverage.id)} style={removeButton}>Remove Window</button>
+                  </div>
+
+                  <ScheduleFields
+                    days={coverage.days}
+                    startTime={coverage.startTime}
+                    endTime={coverage.endTime}
+                    weekInterval={coverage.weekInterval}
+                    activeThisWeek={coverage.activeThisWeek}
+                    onToggleDay={day => toggleWindowDay(contact.contactId, coverage.id, day)}
+                    onStartTime={value => patchWindow(contact.contactId, coverage.id, { startTime: value })}
+                    onEndTime={value => patchWindow(contact.contactId, coverage.id, { endTime: value })}
+                    onWeekInterval={value => patchWindow(contact.contactId, coverage.id, { weekInterval: value })}
+                    onActiveThisWeek={value => patchWindow(contact.contactId, coverage.id, { activeThisWeek: value })}
+                  />
+                </div>)}
+
+                {contact.windows.length === 0 && <div style={empty}>No personal windows yet. Add one for early, late, weekend, or on-call coverage.</div>}
+
+                <button
+                  type="button"
+                  disabled={Boolean(busy) || contact.windows.length >= MAX_PERSONAL_WINDOWS}
+                  onClick={() => addWindow(contact.contactId)}
+                  style={secondaryButton}
+                >
+                  {contact.windows.length >= MAX_PERSONAL_WINDOWS ? `Maximum ${MAX_PERSONAL_WINDOWS} Windows` : 'Add Another Coverage Window'}
+                </button>
+              </div>
             </>}
 
-            <button type="button" disabled={Boolean(busy)} onClick={() => void saveContact(contact)} style={primaryButton}>{busy === busyKey ? 'Saving…' : `Save ${contact.label}'s Schedule`}</button>
+            <button type="button" disabled={Boolean(busy)} onClick={() => void saveContact(contact)} style={primaryButton}>{busy === busyKey ? 'Saving…' : `Save ${contact.label}'s Coverage`}</button>
           </article>;
         })}
         {schedule && contacts.length === 0 && <div style={empty}>No breakdown text users have phone numbers yet. Add them on the Breakdown Texting page first.</div>}
@@ -311,7 +461,7 @@ function ScheduleFields({
 }) {
   return <>
     <div>
-      <div style={label}>Days the texting window starts</div>
+      <div style={label}>Days this window starts</div>
       <div style={dayGrid}>
         {DAYS.map(day => <label key={day.id} style={{ ...dayChip, borderColor: days.includes(day.id) ? '#4c7b5b' : '#d7e0e6', background: days.includes(day.id) ? '#edf7ef' : '#fff' }}>
           <input type="checkbox" checked={days.includes(day.id)} onChange={() => onToggleDay(day.id)} />
@@ -345,10 +495,10 @@ function ScheduleFields({
 
     {weekInterval === 2 && <div style={rotationNotice}>
       <strong>{activeThisWeek ? 'This week is an ON week.' : 'This week is an OFF week.'}</strong>
-      <p style={smallCopy}>The schedule flips automatically every Monday at midnight in America/Detroit time. Set one person ON this week and the other OFF this week to alternate them.</p>
+      <p style={smallCopy}>The window flips automatically every Monday at midnight in America/Detroit time.</p>
     </div>}
 
-    <p style={smallCopy}>Overnight windows work too—for example Monday 6:00 PM to 6:00 AM continues into Tuesday morning. Matching start and end times make the selected day open for 24 hours.</p>
+    <p style={smallCopy}>Overnight windows work too—for example Monday 5:00 PM to 7:00 AM continues into Tuesday morning. Matching start and end times make the selected day open for 24 hours.</p>
   </>;
 }
 
@@ -359,9 +509,13 @@ const eyebrow: CSSProperties = { fontSize: 11, fontWeight: 950, letterSpacing: '
 const copy: CSSProperties = { margin: '7px 0 0', color: '#586979', lineHeight: 1.55, fontSize: 14 };
 const smallCopy: CSSProperties = { margin: '5px 0 0', color: '#657482', lineHeight: 1.5, fontSize: 12 };
 const rowWrap: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' };
+const twoColumnGrid: CSSProperties = { marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 14, alignItems: 'start' };
 const infoCard: CSSProperties = { padding: 14, border: '1px solid #dce2e7', borderRadius: 10, background: 'white', display: 'grid', gap: 10 };
 const formCard: CSSProperties = { padding: 14, border: '1px solid #dce2e7', borderRadius: 10, background: 'white', display: 'grid', gap: 12 };
 const personCard: CSSProperties = { padding: 16, border: '1px solid #dce2e7', borderRadius: 12, background: '#fbfcfd', display: 'grid', gap: 12 };
+const windowList: CSSProperties = { display: 'grid', gap: 12 };
+const coverageCard: CSSProperties = { padding: 14, border: '1px solid #cbd8e3', borderRadius: 11, background: '#fff', display: 'grid', gap: 12 };
+const windowHeader: CSSProperties = { display: 'flex', gap: 10, alignItems: 'end', justifyContent: 'space-between', flexWrap: 'wrap' };
 const label: CSSProperties = { display: 'grid', gap: 5, color: '#485b6b', fontSize: 12, fontWeight: 900 };
 const input: CSSProperties = { minHeight: 44, padding: '0 10px', border: '1px solid #cbd5dd', borderRadius: 8, background: 'white', color: '#172536', fontSize: 16 };
 const switchLabel: CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', minHeight: 44, fontSize: 14, fontWeight: 900 };
@@ -376,4 +530,6 @@ const inactiveNotice: CSSProperties = { padding: '9px 10px', border: '1px solid 
 const notice: CSSProperties = { marginTop: 12, padding: '10px 11px', border: '1px solid #d8c17b', borderRadius: 8, background: '#fffdf2', fontSize: 13 };
 const empty: CSSProperties = { padding: 18, border: '1px dashed #cbd5dd', borderRadius: 10, color: '#64748b', textAlign: 'center' };
 const primaryButton: CSSProperties = { minHeight: 44, border: 0, borderRadius: 8, padding: '9px 13px', background: '#0d1b2b', color: 'white', fontWeight: 900, width: 'fit-content' };
+const secondaryButton: CSSProperties = { minHeight: 42, border: '1px solid #9fb3c4', borderRadius: 8, padding: '8px 12px', background: '#f7fafc', color: '#17324a', fontWeight: 900, width: 'fit-content' };
+const removeButton: CSSProperties = { minHeight: 42, border: '1px solid #d1a1a1', borderRadius: 8, padding: '8px 11px', background: '#fff7f7', color: '#8a2f2f', fontWeight: 900, width: 'fit-content' };
 const linkButton: CSSProperties = { display: 'inline-flex', alignItems: 'center', minHeight: 40, padding: '0 11px', border: '1px solid #cbd5dd', borderRadius: 8, color: '#17324a', background: 'white', textDecoration: 'none', fontWeight: 850, fontSize: 12 };
