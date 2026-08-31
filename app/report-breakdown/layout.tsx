@@ -5,6 +5,7 @@ export default function ReportBreakdownLayout({ children }: { children: ReactNod
   return (
     <>
       <BreakdownPhotoRequestCompressor />
+      <script src="/breakdown-driver-directory.js" defer />
       {children}
     </>
   );

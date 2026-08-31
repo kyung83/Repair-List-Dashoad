@@ -13,7 +13,7 @@ const BREAKDOWN_ALERT_GROUP = 'Breakdown Alerts';
 export class ManualBreakdownSnapshotRequiredError extends Error {
   readonly manualFallbackRequired = true;
   constructor() {
-    super('Geotab could not confirm a current driver and location. Enter the driver and location manually to continue.');
+    super('Geotab could not confirm a current driver and location. Select the driver and enter the location to continue.');
     this.name = 'ManualBreakdownSnapshotRequiredError';
   }
 }
@@ -132,6 +132,8 @@ export type CreateBreakdownInput = {
   unitType: UnitType;
   unitNumber: string;
   driverName?: string;
+  driverPhone?: string;
+  driverSource?: 'directory' | 'manual';
   state?: string;
   city?: string;
   snapshotVerification?: BreakdownSnapshotVerification;
@@ -180,6 +182,7 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   });
 
   const manualDriver = String(input.driverName ?? '').trim().slice(0, 120);
+  const manualPhone = String(input.driverPhone ?? '').trim().slice(0, 60);
   const manualState = String(input.state ?? '').trim().toUpperCase().slice(0, 2);
   const manualCity = String(input.city ?? '').trim().slice(0, 120);
   const wantsCorrection = input.snapshotVerification === 'corrected';
@@ -193,12 +196,14 @@ export async function createBreakdown(input: CreateBreakdownInput) {
   }
 
   const driverName = wantsCorrection ? manualDriver : (geotabSnapshot?.driverName || manualDriver);
-  const driverPhone = wantsCorrection ? '' : String(geotabSnapshot?.driverPhone || '').trim().slice(0, 60);
+  const driverPhone = wantsCorrection
+    ? manualPhone
+    : String(geotabSnapshot?.driverPhone || manualPhone).trim().slice(0, 60);
   const state = wantsCorrection ? manualState : (geotabSnapshot?.state || manualState);
   const city = wantsCorrection ? manualCity : (geotabSnapshot?.city || manualCity);
   const snapshotSource = geotabSnapshot
     ? (wantsCorrection ? 'geotab-corrected' : 'geotab')
-    : 'manual-fallback';
+    : (input.driverSource === 'directory' ? 'directory-fallback' : 'manual-fallback');
   const snapshotCapturedAt = geotabSnapshot?.capturedAt || new Date().toISOString();
   const tireDetails = validatedTireDetails(input);
 

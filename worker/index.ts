@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from 'vinext/server/image-optimization';
 import handler from 'vinext/server/app-router-entry';
 import { appUserCount, authenticateUser, createSession, getSessionUser, sessionCookie, type AppUser } from '../lib/auth';
+import { syncBreakdownDriverDirectory } from '../lib/breakdown-driver-directory';
 import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 import { syncGeotabGpsFeed, syncGeotabLocationMirror } from '../lib/geotab-gps-feed';
@@ -36,6 +37,7 @@ const PUBLIC_PATHS = new Set([
   '/api/equipment/search',
   '/api/breakdowns',
   '/api/breakdowns/driver',
+  '/api/breakdowns/driver-search',
   '/api/breakdowns/geotab-preview',
   '/api/webhook/twilio-sms',
   '/api/auth/login',
@@ -183,6 +185,7 @@ const worker = {
       let feed: unknown = null;
       let recovery: unknown = null;
       let mirror: unknown = null;
+      let driverDirectory: unknown = null;
       try {
         feed = await syncGeotabGpsFeed(env);
       } catch (error) {
@@ -190,6 +193,11 @@ const worker = {
       }
       const minute = new Date(controller.scheduledTime).getUTCMinutes();
       if (minute % 5 === 0) {
+        try {
+          driverDirectory = await syncBreakdownDriverDirectory(env);
+        } catch (error) {
+          console.error(JSON.stringify({ event: 'breakdown_driver_directory_sync_failed', error: String(error) }));
+        }
         try {
           const trailerBucket = minute % 15 === 0 ? (Math.floor(minute / 15) % 2) as 0 | 1 : null;
           recovery = await recoverStaleGeotabGps(env, { trailerBucket });
@@ -202,7 +210,7 @@ const worker = {
       } catch (error) {
         console.error(JSON.stringify({ event: 'geotab_location_mirror_failed', error: String(error) }));
       }
-      console.log(JSON.stringify({ event: 'geotab_minute_location_sync', feed, recovery, mirror }));
+      console.log(JSON.stringify({ event: 'geotab_minute_location_sync', feed, recovery, mirror, driverDirectory }));
       return;
     }
 
