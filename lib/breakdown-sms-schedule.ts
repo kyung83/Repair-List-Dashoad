@@ -176,6 +176,19 @@ function contactScheduleCore(row: ContactScheduleRow, defaultCore: ScheduleCore)
   };
 }
 
+function contactScheduleAllowed(row: ContactScheduleRow, sharedCore: ScheduleCore, date = new Date()) {
+  const mode = contactMode(row.mode);
+  const sharedAllowed = isBreakdownSmsScheduleAllowed(sharedCore, date);
+  if (mode === 'default') return sharedAllowed;
+  if (mode === 'always') return true;
+
+  // A custom personal schedule adds on-call coverage; it does not remove the
+  // shared office-hours window. This lets everyone receive office-hour alerts
+  // every week while personal after-hours schedules alternate by week.
+  const personalAllowed = isBreakdownSmsScheduleAllowed(contactScheduleCore(row, sharedCore), date);
+  return sharedAllowed || personalAllowed;
+}
+
 async function scheduleRow(db: D1Database) {
   return db.prepare(`
     SELECT enabled,days_mask,start_minute,end_minute,week_interval,anchor_week_start,
@@ -234,7 +247,6 @@ export async function getBreakdownSmsContactSchedules(db: D1Database): Promise<B
 
   return result.results.map(row => {
     const mode = contactMode(row.mode);
-    const core = contactScheduleCore(row, defaultCore);
     const storedDaysMask = row.days_mask == null ? 127 : Number(row.days_mask);
     const storedStartMinute = row.start_minute == null ? 0 : Number(row.start_minute);
     const storedEndMinute = row.end_minute == null ? 0 : Number(row.end_minute);
@@ -261,7 +273,7 @@ export async function getBreakdownSmsContactSchedules(db: D1Database): Promise<B
       }),
       anchorWeekStart: storedAnchorWeekStart,
       timezone: String(row.timezone || BREAKDOWN_SMS_TIMEZONE),
-      allowedNow: Boolean(row.active) && isBreakdownSmsScheduleAllowed(core),
+      allowedNow: Boolean(row.active) && contactScheduleAllowed(row, defaultCore),
       updatedAt: row.updated_at || '',
       updatedByUserId: row.updated_by_user_id == null ? null : Number(row.updated_by_user_id),
     };
@@ -285,7 +297,7 @@ export async function saveBreakdownSmsSchedule(
   const endMinute = timeToMinute(input.endTime);
   const interval = weekInterval(input.weekInterval);
   const anchor = scheduleAnchor(interval, input.activeThisWeek);
-  if (input.enabled && daysMask === 0) throw new Error('Select at least one day for the default breakdown text schedule.');
+  if (input.enabled && daysMask === 0) throw new Error('Select at least one day for the shared office-hours text schedule.');
   if (startMinute == null || endMinute == null) throw new Error('Enter a valid start and end time.');
 
   await db.prepare(`
@@ -382,5 +394,5 @@ export async function breakdownSmsScheduleAllows(db: D1Database, contactId?: num
 
   const row = await contactScheduleRow(db, contactId);
   if (!row) return isBreakdownSmsScheduleAllowed(defaultCore);
-  return isBreakdownSmsScheduleAllowed(contactScheduleCore(row, defaultCore));
+  return contactScheduleAllowed(row, defaultCore);
 }
