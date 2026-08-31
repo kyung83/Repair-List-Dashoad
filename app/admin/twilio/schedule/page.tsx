@@ -2,11 +2,16 @@
 
 import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react';
 
+type WeekInterval = 1 | 2;
+
 type Schedule = {
   enabled: boolean;
   days: number[];
   startTime: string;
   endTime: string;
+  weekInterval: WeekInterval;
+  activeThisWeek: boolean;
+  anchorWeekStart: string;
   timezone: string;
   allowedNow: boolean;
   updatedAt: string;
@@ -23,6 +28,9 @@ type ContactSchedule = {
   days: number[];
   startTime: string;
   endTime: string;
+  weekInterval: WeekInterval;
+  activeThisWeek: boolean;
+  anchorWeekStart: string;
   timezone: string;
   allowedNow: boolean;
   updatedAt: string;
@@ -110,6 +118,8 @@ export default function BreakdownTextSchedulePage() {
           days: schedule.days,
           startTime: schedule.startTime,
           endTime: schedule.endTime,
+          weekInterval: schedule.weekInterval,
+          activeThisWeek: schedule.activeThisWeek,
         }),
       });
       const result = await response.json() as ApiResult;
@@ -142,6 +152,8 @@ export default function BreakdownTextSchedulePage() {
           days: contact.days,
           startTime: contact.startTime,
           endTime: contact.endTime,
+          weekInterval: contact.weekInterval,
+          activeThisWeek: contact.activeThisWeek,
         }),
       });
       const result = await response.json() as ApiResult;
@@ -165,7 +177,7 @@ export default function BreakdownTextSchedulePage() {
       <div>
         <div style={eyebrow}>DIAGNOSTICS · BREAKDOWN TEXTING</div>
         <h2 style={heading}>Personalized Breakdown Text Schedules</h2>
-        <p style={copy}>Give each breakdown text user a different schedule. When two personal schedules overlap, both people receive the alert. Breakdown email still sends immediately.</p>
+        <p style={copy}>Give each breakdown text user a different daily, weekly, or every-other-week schedule. When two schedules overlap, both people receive the alert. Breakdown email still sends immediately.</p>
       </div>
       <a href="/admin/twilio" style={linkButton}>Back to Breakdown Texting</a>
     </div>
@@ -177,7 +189,7 @@ export default function BreakdownTextSchedulePage() {
         <div>
           <div style={eyebrow}>DEFAULT SCHEDULE</div>
           <h3 style={subheading}>Used by anyone set to “Use default schedule”</h3>
-          <p style={copy}>This keeps the old one-schedule-for-everyone behavior available, while allowing individual overrides below.</p>
+          <p style={copy}>This keeps one shared schedule available while allowing individual weekly or biweekly overrides below.</p>
         </div>
         <div style={statusPill}><span>Right now</span><strong>{!defaultEnabled || defaultAllowedNow ? 'TEXTS ALLOWED' : 'EMAIL ONLY'}</strong></div>
       </div>
@@ -186,6 +198,7 @@ export default function BreakdownTextSchedulePage() {
         <div style={infoCard}>
           <strong>Default behavior</strong>
           <div style={detail}><span>Mode</span><strong>{defaultEnabled ? 'SCHEDULED' : 'ALWAYS ON'}</strong></div>
+          <div style={detail}><span>Rotation</span><strong>{schedule?.weekInterval === 2 ? 'EVERY OTHER WEEK' : 'EVERY WEEK'}</strong></div>
           <div style={detail}><span>Time zone</span><strong>{schedule?.timezone || 'America/Detroit'}</strong></div>
           <p style={smallCopy}>A person using a personal schedule ignores this default. Inactive text users never receive alerts.</p>
         </div>
@@ -201,9 +214,13 @@ export default function BreakdownTextSchedulePage() {
             days={schedule?.days || []}
             startTime={schedule?.startTime || '00:00'}
             endTime={schedule?.endTime || '00:00'}
+            weekInterval={schedule?.weekInterval || 1}
+            activeThisWeek={schedule?.activeThisWeek !== false}
             onToggleDay={toggleDefaultDay}
             onStartTime={value => patchDefault({ startTime: value })}
             onEndTime={value => patchDefault({ endTime: value })}
+            onWeekInterval={value => patchDefault({ weekInterval: value })}
+            onActiveThisWeek={value => patchDefault({ activeThisWeek: value })}
           />}
 
           <button type="button" disabled={Boolean(busy) || !schedule} onClick={() => void saveDefault()} style={primaryButton}>{busy === 'default' ? 'Saving…' : 'Save Default Schedule'}</button>
@@ -214,7 +231,7 @@ export default function BreakdownTextSchedulePage() {
     <div style={{ ...card, marginTop: 16, borderColor: '#d7e0e6', background: '#fff' }}>
       <div style={eyebrow}>PERSONAL SCHEDULES</div>
       <h3 style={subheading}>Choose exactly when each person gets breakdown texts</h3>
-      <p style={copy}>Example: one person can cover daytime, another can cover nights, and both can receive alerts during any overlapping hours.</p>
+      <p style={copy}>One person can cover this week and another person next week, or they can split days and hours during the same week.</p>
 
       <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
         {contacts.map(contact => {
@@ -248,9 +265,13 @@ export default function BreakdownTextSchedulePage() {
               days={contact.days}
               startTime={contact.startTime}
               endTime={contact.endTime}
+              weekInterval={contact.weekInterval}
+              activeThisWeek={contact.activeThisWeek}
               onToggleDay={day => toggleContactDay(contact.contactId, day)}
               onStartTime={value => patchContact(contact.contactId, { startTime: value })}
               onEndTime={value => patchContact(contact.contactId, { endTime: value })}
+              onWeekInterval={value => patchContact(contact.contactId, { weekInterval: value })}
+              onActiveThisWeek={value => patchContact(contact.contactId, { activeThisWeek: value })}
             />}
 
             <button type="button" disabled={Boolean(busy)} onClick={() => void saveContact(contact)} style={primaryButton}>{busy === busyKey ? 'Saving…' : `Save ${contact.label}'s Schedule`}</button>
@@ -262,13 +283,28 @@ export default function BreakdownTextSchedulePage() {
   </section>;
 }
 
-function ScheduleFields({ days, startTime, endTime, onToggleDay, onStartTime, onEndTime }: {
+function ScheduleFields({
+  days,
+  startTime,
+  endTime,
+  weekInterval,
+  activeThisWeek,
+  onToggleDay,
+  onStartTime,
+  onEndTime,
+  onWeekInterval,
+  onActiveThisWeek,
+}: {
   days: number[];
   startTime: string;
   endTime: string;
+  weekInterval: WeekInterval;
+  activeThisWeek: boolean;
   onToggleDay: (day: number) => void;
   onStartTime: (value: string) => void;
   onEndTime: (value: string) => void;
+  onWeekInterval: (value: WeekInterval) => void;
+  onActiveThisWeek: (value: boolean) => void;
 }) {
   return <>
     <div>
@@ -285,7 +321,31 @@ function ScheduleFields({ days, startTime, endTime, onToggleDay, onStartTime, on
       <label style={label}>Start time<input type="time" style={input} value={startTime} onChange={(event: ChangeEvent<HTMLInputElement>) => onStartTime(event.target.value)} /></label>
       <label style={label}>End time<input type="time" style={input} value={endTime} onChange={(event: ChangeEvent<HTMLInputElement>) => onEndTime(event.target.value)} /></label>
     </div>
-    <p style={smallCopy}>Times use America/Detroit. Overnight windows work too—for example Monday 6:00 PM to 6:00 AM continues into Tuesday morning. Matching start and end times make the selected day open for 24 hours.</p>
+
+    <div style={timeGrid}>
+      <label style={label}>
+        Week rotation
+        <select style={input} value={weekInterval} onChange={(event: ChangeEvent<HTMLSelectElement>) => onWeekInterval(Number(event.target.value) === 2 ? 2 : 1)}>
+          <option value={1}>Every week</option>
+          <option value={2}>Every other week</option>
+        </select>
+      </label>
+
+      {weekInterval === 2 && <label style={label}>
+        Start the two-week rotation
+        <select style={input} value={activeThisWeek ? 'on' : 'off'} onChange={(event: ChangeEvent<HTMLSelectElement>) => onActiveThisWeek(event.target.value === 'on')}>
+          <option value="on">This week ON, next week OFF</option>
+          <option value="off">This week OFF, next week ON</option>
+        </select>
+      </label>}
+    </div>
+
+    {weekInterval === 2 && <div style={rotationNotice}>
+      <strong>{activeThisWeek ? 'This week is an ON week.' : 'This week is an OFF week.'}</strong>
+      <p style={smallCopy}>The schedule flips automatically every Monday at midnight in America/Detroit time. Set one person ON this week and the other OFF this week to alternate them.</p>
+    </div>}
+
+    <p style={smallCopy}>Overnight windows work too—for example Monday 6:00 PM to 6:00 AM continues into Tuesday morning. Matching start and end times make the selected day open for 24 hours.</p>
   </>;
 }
 
@@ -308,6 +368,7 @@ const timeGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(
 const detail: CSSProperties = { display: 'grid', gridTemplateColumns: '100px 1fr', gap: 8, fontSize: 12, alignItems: 'baseline' };
 const statusPill: CSSProperties = { display: 'grid', gap: 2, minWidth: 132, padding: '8px 10px', border: '1px solid #9fcfb0', borderRadius: 9, background: '#f1faf4', fontSize: 11 };
 const savedBox: CSSProperties = { padding: 12, border: '1px solid #d6e0e7', borderRadius: 9, background: '#f9fbfc' };
+const rotationNotice: CSSProperties = { padding: 12, border: '1px solid #b9cde0', borderRadius: 9, background: '#f2f7fb', color: '#27445d' };
 const inactiveNotice: CSSProperties = { padding: '9px 10px', border: '1px solid #e2bd73', borderRadius: 8, background: '#fff8e8', color: '#76530d', fontSize: 12 };
 const notice: CSSProperties = { marginTop: 12, padding: '10px 11px', border: '1px solid #d8c17b', borderRadius: 8, background: '#fffdf2', fontSize: 13 };
 const empty: CSSProperties = { padding: 18, border: '1px dashed #cbd5dd', borderRadius: 10, color: '#64748b', textAlign: 'center' };
