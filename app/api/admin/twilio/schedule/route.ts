@@ -6,6 +6,7 @@ import {
   saveBreakdownSmsContactSchedule,
   saveBreakdownSmsSchedule,
   type BreakdownSmsContactScheduleMode,
+  type BreakdownSmsContactScheduleWindowInput,
   type BreakdownSmsWeekInterval,
 } from '@/lib/breakdown-sms-schedule';
 
@@ -35,6 +36,15 @@ export async function GET(request: Request) {
   }
 }
 
+type ScheduleWindowBody = {
+  label?: string;
+  days?: number[];
+  startTime?: string;
+  endTime?: string;
+  weekInterval?: number;
+  activeThisWeek?: boolean;
+};
+
 type ScheduleBody = {
   action?: string;
   enabled?: boolean;
@@ -45,10 +55,22 @@ type ScheduleBody = {
   activeThisWeek?: boolean;
   contactId?: number;
   mode?: BreakdownSmsContactScheduleMode;
+  windows?: ScheduleWindowBody[];
 };
 
 function requestedWeekInterval(value: unknown): BreakdownSmsWeekInterval {
   return Number(value) === 2 ? 2 : 1;
+}
+
+function requestedWindow(value: ScheduleWindowBody): BreakdownSmsContactScheduleWindowInput {
+  return {
+    label: String(value?.label || ''),
+    days: Array.isArray(value?.days) ? value.days.map(Number) : [],
+    startTime: String(value?.startTime || ''),
+    endTime: String(value?.endTime || ''),
+    weekInterval: requestedWeekInterval(value?.weekInterval),
+    activeThisWeek: value?.activeThisWeek !== false,
+  };
 }
 
 export async function POST(request: Request) {
@@ -62,6 +84,8 @@ export async function POST(request: Request) {
       await saveBreakdownSmsContactSchedule(env.DB, {
         contactId: Number(body.contactId),
         mode: body.mode === 'always' || body.mode === 'custom' ? body.mode : 'default',
+        windows: Array.isArray(body.windows) ? body.windows.map(requestedWindow) : undefined,
+        // Legacy one-window fields remain accepted during rolling deployment.
         days: Array.isArray(body.days) ? body.days.map(Number) : [],
         startTime: String(body.startTime || ''),
         endTime: String(body.endTime || ''),
@@ -71,7 +95,7 @@ export async function POST(request: Request) {
       const status = await statusPayload();
       return Response.json({
         ok: true,
-        message: 'Personal breakdown text schedule saved.',
+        message: 'Personal breakdown text coverage saved.',
         ...status,
       });
     }
@@ -91,7 +115,7 @@ export async function POST(request: Request) {
     const status = await statusPayload();
     return Response.json({
       ok: true,
-      message: body.enabled ? 'Default breakdown text schedule saved.' : 'Default breakdown texts set to Always On.',
+      message: body.enabled ? 'Shared office-hours schedule saved.' : 'Shared breakdown texts set to Always On.',
       ...status,
     });
   } catch (error) {
