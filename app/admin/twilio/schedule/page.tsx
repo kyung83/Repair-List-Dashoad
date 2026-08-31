@@ -177,7 +177,7 @@ export default function BreakdownTextSchedulePage() {
       <div>
         <div style={eyebrow}>DIAGNOSTICS · BREAKDOWN TEXTING</div>
         <h2 style={heading}>Shared Office Hours & Personal On-Call Schedules</h2>
-        <p style={copy}>Set office hours once so every active breakdown text user receives those alerts every week. Then add a personal nights, weekends, or every-other-week on-call schedule for each person.</p>
+        <p style={copy}>Set office hours once so every active breakdown text user receives those alerts every week. Then add a personal nights, weekends, or every-other-week on-call schedule for each person. Breakdown email still sends immediately.</p>
       </div>
       <a href="/admin/twilio" style={linkButton}>Back to Breakdown Texting</a>
     </div>
