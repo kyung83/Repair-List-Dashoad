@@ -1,99 +1,12 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
-
-type VendorRow = {
-  id:number;
-  name:string;
-  phone:string|null;
-  email:string|null;
-  address:string|null;
-};
-
-async function requireManager(request:Request):Promise<AppUser>{
-  const user=await getSessionUser(env.DB,request);
-  if(!user)throw new Error('Authentication required.');
-  if(user.role!=='manager'&&user.role!=='admin')throw new Error('Manager or administrator access is required for Outside Work Intake.');
-  return user;
-}
-
-function normalizeVendor(value:string){
-  let normalized=value
-    .toUpperCase()
-    .replace(/&/g,' AND ')
-    .replace(/[^A-Z0-9]+/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-  normalized=normalized
-    .replace(/\s+(?:INCORPORATED|INC|LLC|LTD|CORPORATION|CORP|COMPANY|CO)$/,'')
-    .replace(/\s+(?:TRUCKS|TRUCK|TRACTORS|TRACTOR)$/,'')
-    .trim();
-  return normalized;
-}
-
-async function activeVendors(){
-  const result=await env.DB.prepare(`
-    SELECT id,name,phone,email,address
-    FROM outside_work_vendors
-    WHERE COALESCE(active,1)=1
-    ORDER BY name,id
-  `).all<VendorRow>();
-  return result.results;
-}
-
-function errorStatus(message:string){
-  if(message==='Authentication required.')return 401;
-  if(message.includes('Manager or administrator'))return 403;
-  return 400;
-}
-
-export async function GET(request:Request){
-  try{
-    await requireManager(request);
-    const vendors=await activeVendors();
-    return Response.json({
-      vendors:vendors.map(row=>({
-        id:Number(row.id),name:row.name,phone:row.phone??'',email:row.email??'',address:row.address??'',
-        lookupKey:normalizeVendor(row.name),
-      })),
-    },{headers:{'cache-control':'no-store'}});
-  }catch(error){
-    const message=error instanceof Error?error.message:'Outside Work vendors could not be loaded.';
-    return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});
-  }
-}
-
-export async function POST(request:Request){
-  try{
-    await requireManager(request);
-    const body=await request.json() as Record<string,unknown>;
-    const name=String(body.name??'').replace(/\s+/g,' ').trim().slice(0,180);
-    if(name.length<2)throw new Error('Enter the vendor company name.');
-    if(name.length>180)throw new Error('Vendor name is too long.');
-    if(/[.!?].*[.!?]/.test(name)||name.split(/\s+/).length>12)throw new Error('Vendor name looks like invoice prose. Enter only the company name.');
-    const key=normalizeVendor(name);
-    if(key.length<2)throw new Error('Enter the vendor company name.');
-
-    const vendors=await activeVendors();
-    const matches=vendors.filter(row=>normalizeVendor(row.name)===key);
-    if(matches.length===1){
-      const existing=matches[0];
-      return Response.json({ok:true,created:false,vendor:{id:Number(existing.id),name:existing.name,phone:existing.phone??'',email:existing.email??'',address:existing.address??'',lookupKey:key}},{headers:{'cache-control':'no-store'}});
-    }
-    if(matches.length>1)throw new Error('More than one existing Outside Work vendor matches this name. Choose the correct existing vendor instead of creating another.');
-
-    const phone=String(body.phone??'').trim().slice(0,80);
-    const email=String(body.email??'').trim().slice(0,180);
-    const address=String(body.address??'').replace(/\s+/g,' ').trim().slice(0,300);
-    const notes='Created from Outside Work invoice intake. May be a one-time over-the-road repair vendor.';
-    const inserted=await env.DB.prepare(`
-      INSERT INTO outside_work_vendors (name,phone,email,address,notes,active)
-      VALUES (?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,1)
-    `).bind(name,phone,email,address,notes).run();
-    const id=Number(inserted.meta.last_row_id??0);
-    if(!id)throw new Error('Outside Work vendor could not be created.');
-    return Response.json({ok:true,created:true,vendor:{id,name,phone,email,address,lookupKey:key}},{headers:{'cache-control':'no-store'}});
-  }catch(error){
-    const message=error instanceof Error?error.message:'Outside Work vendor could not be saved.';
-    return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});
-  }
-}
+type VendorRow={id:number;name:string;phone:string|null;email:string|null;address:string|null};
+async function requireManager(request:Request):Promise<AppUser>{const user=await getSessionUser(env.DB,request);if(!user)throw new Error('Authentication required.');if(user.role!=='manager'&&user.role!=='admin')throw new Error('Manager or administrator access is required for Outside Work Intake.');return user;}
+function normalizeVendor(value:string){return value.toUpperCase().replace(/&/g,' AND ').replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim().replace(/\s+(?:INCORPORATED|INC|LLC|LTD|CORPORATION|CORP|COMPANY|CO)$/,'').replace(/\s+(?:TRUCKS|TRUCK|TRACTORS|TRACTOR)$/,'').trim();}
+async function activeVendors(){return (await env.DB.prepare(`SELECT id,name,phone,email,address FROM outside_work_vendors WHERE COALESCE(active,1)=1 ORDER BY name,id`).all<VendorRow>()).results;}
+function errorStatus(message:string){if(message==='Authentication required.')return 401;if(message.includes('Manager or administrator'))return 403;return 400;}
+function fields(body:Record<string,unknown>){const raw=String(body.name??'').replace(/\s+/g,' ').trim();if(raw.length<2)throw new Error('Enter the vendor company name.');if(raw.length>180)throw new Error('Vendor name is too long.');if(/[.!?].*[.!?]/.test(raw)||raw.split(/\s+/).length>12)throw new Error('Vendor name looks like invoice prose. Enter only the company name.');const key=normalizeVendor(raw);if(key.length<2)throw new Error('Enter the vendor company name.');return{name:raw,key,phone:String(body.phone??'').trim().slice(0,80),email:String(body.email??'').trim().slice(0,180),address:String(body.address??'').replace(/\s+/g,' ').trim().slice(0,300)};}
+function jsonVendor(row:VendorRow){return{id:Number(row.id),name:row.name,phone:row.phone??'',email:row.email??'',address:row.address??'',lookupKey:normalizeVendor(row.name)};}
+export async function GET(request:Request){try{await requireManager(request);return Response.json({vendors:(await activeVendors()).map(jsonVendor)},{headers:{'cache-control':'no-store'}});}catch(error){const message=error instanceof Error?error.message:'Outside Work vendors could not be loaded.';return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});}}
+export async function POST(request:Request){try{await requireManager(request);const body=await request.json() as Record<string,unknown>,f=fields(body),vendors=await activeVendors(),matches=vendors.filter(row=>normalizeVendor(row.name)===f.key);if(matches.length===1)return Response.json({ok:true,created:false,vendor:jsonVendor(matches[0])},{headers:{'cache-control':'no-store'}});if(matches.length>1)throw new Error('More than one existing Outside Work vendor matches this name. Choose the correct existing vendor instead of creating another.');const inserted=await env.DB.prepare(`INSERT INTO outside_work_vendors (name,phone,email,address,notes,active) VALUES (?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),'Created from Outside Work vendor manager.',1)`).bind(f.name,f.phone,f.email,f.address).run();const id=Number(inserted.meta.last_row_id??0);if(!id)throw new Error('Outside Work vendor could not be created.');return Response.json({ok:true,created:true,vendor:{id,...f,lookupKey:f.key}},{headers:{'cache-control':'no-store'}});}catch(error){const message=error instanceof Error?error.message:'Outside Work vendor could not be saved.';return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});}}
+export async function PATCH(request:Request){try{await requireManager(request);const body=await request.json() as Record<string,unknown>,id=Number(body.id??0);if(!Number.isInteger(id)||id<=0)throw new Error('Choose a valid outside vendor.');const current=await env.DB.prepare(`SELECT id,name,phone,email,address FROM outside_work_vendors WHERE id=?`).bind(id).first<VendorRow>();if(!current)throw new Error('Outside vendor was not found.');if(body.active===false){await env.DB.prepare(`UPDATE outside_work_vendors SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(id).run();return Response.json({ok:true,id,active:false},{headers:{'cache-control':'no-store'}});}const f=fields(body);const duplicate=(await activeVendors()).find(row=>row.id!==id&&normalizeVendor(row.name)===f.key);if(duplicate)throw new Error('Another active Outside Work vendor already uses this company name.');await env.DB.prepare(`UPDATE outside_work_vendors SET name=?,phone=NULLIF(?,''),email=NULLIF(?,''),address=NULLIF(?,''),active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(f.name,f.phone,f.email,f.address,id).run();return Response.json({ok:true,vendor:{id,...f,lookupKey:f.key}},{headers:{'cache-control':'no-store'}});}catch(error){const message=error instanceof Error?error.message:'Outside Work vendor could not be updated.';return Response.json({error:message},{status:errorStatus(message),headers:{'cache-control':'no-store'}});}}
