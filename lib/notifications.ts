@@ -166,10 +166,15 @@ async function sendEmailLive(
   };
 }
 
-export async function sendBreakdownSms(breakdownId: number, toPhone: string, message: string) {
+export async function sendBreakdownSms(
+  breakdownId: number,
+  toPhone: string,
+  message: string,
+  contactId?: number,
+) {
   try {
     const twilioReady = await twilioRuntimeReady(env.DB);
-    const scheduleAllowed = await breakdownSmsScheduleAllows(env.DB);
+    const scheduleAllowed = await breakdownSmsScheduleAllows(env.DB, contactId);
     if (twilioReady && scheduleAllowed) {
       await sendSmsLive(toPhone, message);
       await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'sent' });
@@ -181,7 +186,7 @@ export async function sendBreakdownSms(breakdownId: number, toPhone: string, mes
         recipient: toPhone,
         body: message,
         status: 'stubbed',
-        error: twilioReady ? 'Outside configured breakdown SMS schedule.' : 'Twilio breakdown texting is not enabled.',
+        error: twilioReady ? 'Outside configured breakdown SMS schedule for this user.' : 'Twilio breakdown texting is not enabled.',
       });
     }
   } catch (err) {
@@ -232,10 +237,13 @@ export async function logInboundSms(breakdownId: number | null, fromPhone: strin
 
 async function activeGroupContacts(groupName: string) {
   const group = await env.DB.prepare(`SELECT id FROM notification_groups WHERE name = ? AND active = 1`).bind(groupName).first<{ id: number }>();
-  if (!group) return [] as { phone: string | null; email: string | null }[];
+  if (!group) return [] as { id: number; phone: string | null; email: string | null }[];
   const contacts = await env.DB.prepare(`
-    SELECT phone, email FROM notification_group_contacts WHERE group_id = ? AND active = 1
-  `).bind(group.id).all<{ phone: string | null; email: string | null }>();
+    SELECT id, phone, email
+    FROM notification_group_contacts
+    WHERE group_id = ? AND active = 1
+    ORDER BY id
+  `).bind(group.id).all<{ id: number; phone: string | null; email: string | null }>();
   return contacts.results;
 }
 
@@ -261,7 +269,7 @@ export async function notifyBreakdownGroup(
     const phone = String(contact.phone || '').trim();
     if (phone && !seenPhones.has(phone)) {
       seenPhones.add(phone);
-      await sendBreakdownSms(breakdownId, phone, outboundMessage);
+      await sendBreakdownSms(breakdownId, phone, outboundMessage, contact.id);
       contacted++;
     }
   }
