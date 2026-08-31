@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS outside_repair_assignments (
   status TEXT NOT NULL DEFAULT 'waiting_vendor'
     CHECK (status IN ('waiting_vendor','waiting_invoice','completed','returned_shop')),
   previous_repair_status TEXT NOT NULL DEFAULT 'New',
+  previous_technician_id INTEGER,
   notes TEXT NOT NULL DEFAULT '',
   assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   vendor_finished_at TEXT,
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS outside_repair_assignments (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (repair_id) REFERENCES repairs(id) ON DELETE CASCADE,
   FOREIGN KEY (outside_vendor_id) REFERENCES outside_work_vendors(id),
+  FOREIGN KEY (previous_technician_id) REFERENCES technicians(id) ON DELETE SET NULL,
   FOREIGN KEY (assigned_by_user_id) REFERENCES app_users(id) ON DELETE SET NULL,
   FOREIGN KEY (updated_by_user_id) REFERENCES app_users(id) ON DELETE SET NULL
 );
