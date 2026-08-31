@@ -2,9 +2,7 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import {
   getBreakdownSmsContactSchedules,
-  getBreakdownSmsSchedule,
   saveBreakdownSmsContactSchedule,
-  saveBreakdownSmsSchedule,
   type BreakdownSmsContactScheduleMode,
   type BreakdownSmsContactScheduleWindowInput,
   type BreakdownSmsWeekInterval,
@@ -18,11 +16,7 @@ async function requireAdmin(request: Request) {
 }
 
 async function statusPayload() {
-  const [schedule, contacts] = await Promise.all([
-    getBreakdownSmsSchedule(env.DB),
-    getBreakdownSmsContactSchedules(env.DB),
-  ]);
-  return { schedule, contacts };
+  return { contacts: await getBreakdownSmsContactSchedules(env.DB) };
 }
 
 export async function GET(request: Request) {
@@ -36,7 +30,7 @@ export async function GET(request: Request) {
   }
 }
 
-type ScheduleWindowBody = {
+type WindowBody = {
   label?: string;
   days?: number[];
   startTime?: string;
@@ -47,30 +41,28 @@ type ScheduleWindowBody = {
 
 type ScheduleBody = {
   action?: string;
-  enabled?: boolean;
-  days?: number[];
-  startTime?: string;
-  endTime?: string;
-  weekInterval?: number;
-  activeThisWeek?: boolean;
   contactId?: number;
   mode?: BreakdownSmsContactScheduleMode;
-  windows?: ScheduleWindowBody[];
+  windows?: WindowBody[];
 };
 
 function requestedWeekInterval(value: unknown): BreakdownSmsWeekInterval {
   return Number(value) === 2 ? 2 : 1;
 }
 
-function requestedWindow(value: ScheduleWindowBody): BreakdownSmsContactScheduleWindowInput {
-  return {
-    label: String(value?.label || ''),
-    days: Array.isArray(value?.days) ? value.days.map(Number) : [],
-    startTime: String(value?.startTime || ''),
-    endTime: String(value?.endTime || ''),
-    weekInterval: requestedWeekInterval(value?.weekInterval),
-    activeThisWeek: value?.activeThisWeek !== false,
-  };
+function requestedWindows(value: unknown): BreakdownSmsContactScheduleWindowInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => {
+    const window = item && typeof item === 'object' ? item as WindowBody : {};
+    return {
+      label: String(window.label || ''),
+      days: Array.isArray(window.days) ? window.days.map(Number) : [],
+      startTime: String(window.startTime || ''),
+      endTime: String(window.endTime || ''),
+      weekInterval: requestedWeekInterval(window.weekInterval),
+      activeThisWeek: window.activeThisWeek !== false,
+    };
+  });
 }
 
 export async function POST(request: Request) {
@@ -78,46 +70,36 @@ export async function POST(request: Request) {
     const auth = await requireAdmin(request);
     if (auth.response || !auth.user) return auth.response!;
     const body = await request.json().catch(() => ({})) as ScheduleBody;
-    const action = String(body.action || 'save-default');
+    const action = String(body.action || 'save-contact');
 
-    if (action === 'save-contact') {
-      await saveBreakdownSmsContactSchedule(env.DB, {
-        contactId: Number(body.contactId),
-        mode: body.mode === 'always' || body.mode === 'custom' ? body.mode : 'default',
-        windows: Array.isArray(body.windows) ? body.windows.map(requestedWindow) : undefined,
-        // Legacy one-window fields remain accepted during rolling deployment.
-        days: Array.isArray(body.days) ? body.days.map(Number) : [],
-        startTime: String(body.startTime || ''),
-        endTime: String(body.endTime || ''),
-        weekInterval: requestedWeekInterval(body.weekInterval),
-        activeThisWeek: body.activeThisWeek !== false,
-      }, auth.user.id);
-      const status = await statusPayload();
+    if (action === 'save-default') {
       return Response.json({
-        ok: true,
-        message: 'Personal breakdown text coverage saved.',
-        ...status,
-      });
+        error: 'The shared schedule was removed. Refresh this page and set each person’s coverage windows instead.',
+      }, { status: 409 });
     }
 
-    if (action !== 'save-default') {
+    if (action !== 'save-contact') {
       return Response.json({ error: 'Unknown breakdown text schedule action.' }, { status: 400 });
     }
 
-    await saveBreakdownSmsSchedule(env.DB, {
-      enabled: Boolean(body.enabled),
-      days: Array.isArray(body.days) ? body.days.map(Number) : [],
-      startTime: String(body.startTime || ''),
-      endTime: String(body.endTime || ''),
-      weekInterval: requestedWeekInterval(body.weekInterval),
-      activeThisWeek: body.activeThisWeek !== false,
+    const mode: BreakdownSmsContactScheduleMode = body.mode === 'always' || body.mode === 'custom'
+      ? body.mode
+      : 'default';
+
+    await saveBreakdownSmsContactSchedule(env.DB, {
+      contactId: Number(body.contactId),
+      mode,
+      windows: requestedWindows(body.windows),
     }, auth.user.id);
+
     const status = await statusPayload();
-    return Response.json({
-      ok: true,
-      message: body.enabled ? 'Shared office-hours schedule saved.' : 'Shared breakdown texts set to Always On.',
-      ...status,
-    });
+    const message = mode === 'always'
+      ? 'This person will receive every new breakdown text.'
+      : mode === 'custom'
+        ? 'This person’s coverage windows were saved.'
+        : 'Scheduled breakdown texts are paused for this person.';
+
+    return Response.json({ ok: true, message, ...status });
   } catch (error) {
     console.error(JSON.stringify({ event: 'breakdown_sms_schedule_save_failed', error: String(error) }));
     return Response.json({ error: error instanceof Error ? error.message : 'Breakdown text schedule could not be saved.' }, { status: 500 });
