@@ -110,7 +110,7 @@ test('Geotab driver phone is snapshotted without exposing it on the public previ
   assert.doesNotMatch(previewRoute, /driverPhone|driver_phone/);
   assert.match(driverPhoneMigration, /ADD COLUMN driver_phone TEXT/);
   assert.match(breakdowns, /b\.driver_name, b\.driver_phone/);
-  assert.match(breakdowns, /driverPhone = wantsCorrection \? ''/);
+  assert.match(breakdowns, /const driverPhone = wantsCorrection[\s\S]{0,160}manualPhone/);
   assert.match(breakdowns, /driverPhone \|\| null/);
 });
 
