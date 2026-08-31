@@ -44,6 +44,13 @@ type ScheduleBody = {
   contactId?: number;
   mode?: BreakdownSmsContactScheduleMode;
   windows?: WindowBody[];
+  // Accepted only so a browser left open during deployment can still save one
+  // personal window after refreshing. The shared/default save is retired.
+  days?: number[];
+  startTime?: string;
+  endTime?: string;
+  weekInterval?: number;
+  activeThisWeek?: boolean;
 };
 
 function requestedWeekInterval(value: unknown): BreakdownSmsWeekInterval {
@@ -85,11 +92,17 @@ export async function POST(request: Request) {
     const mode: BreakdownSmsContactScheduleMode = body.mode === 'always' || body.mode === 'custom'
       ? body.mode
       : 'default';
+    const hasWindowList = Array.isArray(body.windows);
 
     await saveBreakdownSmsContactSchedule(env.DB, {
       contactId: Number(body.contactId),
       mode,
-      windows: requestedWindows(body.windows),
+      windows: hasWindowList ? requestedWindows(body.windows) : undefined,
+      days: Array.isArray(body.days) ? body.days.map(Number) : undefined,
+      startTime: body.startTime == null ? undefined : String(body.startTime),
+      endTime: body.endTime == null ? undefined : String(body.endTime),
+      weekInterval: requestedWeekInterval(body.weekInterval),
+      activeThisWeek: body.activeThisWeek !== false,
     }, auth.user.id);
 
     const status = await statusPayload();
