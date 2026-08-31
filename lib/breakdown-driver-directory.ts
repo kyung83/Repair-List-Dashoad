@@ -192,16 +192,17 @@ export async function syncBreakdownDriverDirectory(env: Env) {
       WHERE id=1
     `).bind(generation, attemptAt, drivers.length).run();
 
+    // Keep the current and immediately previous generation. A driver who taps a
+    // result just before a five-minute refresh can still submit without re-searching.
     await env.DB.prepare(`
       DELETE FROM breakdown_driver_directory
-      WHERE generation <> ?
-        AND generation NOT IN (
-          SELECT generation FROM breakdown_driver_directory
-          GROUP BY generation
-          ORDER BY MAX(synced_at) DESC
-          LIMIT 1
-        )
-    `).bind(generation).run();
+      WHERE generation NOT IN (
+        SELECT generation FROM breakdown_driver_directory
+        GROUP BY generation
+        ORDER BY MAX(synced_at) DESC
+        LIMIT 2
+      )
+    `).run();
 
     return { ok: true as const, rowCount: drivers.length, generation };
   } catch (error) {
@@ -255,13 +256,11 @@ export async function searchBreakdownDrivers(db: D1Database, rawQuery: string) {
 
 export async function resolveBreakdownDriverDirectorySelection(db: D1Database, id: number) {
   if (!Number.isInteger(id) || id <= 0) return null;
-  const generation = await activeGeneration(db);
-  if (!generation) return null;
   const row = await db.prepare(`
     SELECT id, first_name, last_name, full_name, phone_e164, phone_display, phone_last4
     FROM breakdown_driver_directory
-    WHERE id=? AND generation=?
-  `).bind(id, generation).first<DirectoryRow>();
+    WHERE id=?
+  `).bind(id).first<DirectoryRow>();
   if (!row) return null;
   return {
     id: row.id,
