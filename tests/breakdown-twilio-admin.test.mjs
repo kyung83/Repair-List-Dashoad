@@ -86,12 +86,12 @@ test('Breakdown SMS schedule is admin-managed in Detroit time and gates texts on
   assert.match(notifications, /breakdownSmsScheduleAllows/);
   assert.match(notifications, /Outside configured breakdown SMS schedule/);
   assert.match(schedulePage, /Breakdown email still sends immediately/);
-  assert.match(schedulePage, /Default is Always On/);
+  assert.match(schedulePage, /Shared coverage is Always On/);
   assert.match(schedulePage, /type="time"/);
   assert.match(navigation, /href: "\/admin\/twilio\/schedule", label: "Text Schedule"/);
 });
 
-test('Each breakdown text user can have a personalized schedule or follow the default', () => {
+test('Each breakdown text user can have personalized coverage or shared office hours only', () => {
   assert.match(contactScheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_contact_schedules/);
   assert.match(contactScheduleMigration, /mode IN \('default','always','custom'\)/);
   assert.match(contactScheduleMigration, /REFERENCES notification_group_contacts\(id\) ON DELETE CASCADE/);
@@ -100,11 +100,22 @@ test('Each breakdown text user can have a personalized schedule or follow the de
   assert.match(scheduleRuntime, /saveBreakdownSmsContactSchedule/);
   assert.match(scheduleRuntime, /breakdownSmsScheduleAllows\(db: D1Database, contactId\?: number\)/);
   assert.match(scheduleApi, /action === 'save-contact'/);
-  assert.match(schedulePage, /PERSONAL SCHEDULES/);
-  assert.match(schedulePage, /Use default schedule/);
+  assert.match(schedulePage, /PERSONAL AFTER-HOURS \/ ON-CALL/);
+  assert.match(schedulePage, /Shared office hours only/);
   assert.match(schedulePage, /Always text this person/);
-  assert.match(schedulePage, /Custom schedule/);
+  assert.match(schedulePage, /Shared office hours \+ personal on-call/);
   assert.match(notifications, /sendBreakdownSms\(breakdownId, phone, outboundMessage, contact\.id\)/);
+});
+
+test('Shared office hours remain active while personal on-call schedules add coverage', () => {
+  assert.match(scheduleRuntime, /function contactScheduleAllowed/);
+  assert.match(scheduleRuntime, /const sharedAllowed = isBreakdownSmsScheduleAllowed/);
+  assert.match(scheduleRuntime, /const personalAllowed = isBreakdownSmsScheduleAllowed/);
+  assert.match(scheduleRuntime, /return sharedAllowed \|\| personalAllowed/);
+  assert.match(scheduleRuntime, /custom personal schedule adds on-call coverage/);
+  assert.match(schedulePage, /Every active text user gets these alerts/);
+  assert.match(schedulePage, /Shared office hours stay on/);
+  assert.match(schedulePage, /does not remove the shared office-hours texts/);
 });
 
 test('Default and personal schedules support a safe every-other-week rotation', () => {
