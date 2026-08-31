@@ -2,6 +2,8 @@
 
 import OutsideWorkIntakeV2 from "./intake-v2";
 import AiReadingBridge from "./ai-reading-bridge";
+import LiveOutsideRepairs from "./live-outside-repairs";
+import ExistingRepairInvoiceBridge from "./existing-repair-invoice-bridge";
 
 export default function OutsideWorkIntakeV3(){
   return <div data-outside-work-ai-enabled="true">
@@ -10,6 +12,8 @@ export default function OutsideWorkIntakeV3(){
       [data-outside-work-ai-enabled="true"] > main > div > header + div { display: none !important; }
     `}</style>
     <AiReadingBridge/>
+    <LiveOutsideRepairs/>
+    <ExistingRepairInvoiceBridge/>
     <OutsideWorkIntakeV2/>
   </div>;
 }

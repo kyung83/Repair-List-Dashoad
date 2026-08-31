@@ -27,6 +27,10 @@ function deferred(status: unknown) {
   return String(status ?? '').toLowerCase().startsWith('deferred to next');
 }
 
+function outsideRepair(status: unknown) {
+  return String(status ?? '').toLowerCase().startsWith('outside - waiting on');
+}
+
 function conciseMaintenanceIssue(repair: BoardRepair) {
   if (repair.source === 'pm') return { ...repair, issue: 'PM' };
   if (repair.source === 'annual') return { ...repair, issue: 'Annual' };
@@ -258,14 +262,14 @@ export async function GET(request: Request) {
     [key:string]: unknown;
   };
   const repairs = (payload.repairs ?? [])
-    .filter((repair) => !deferred(repair.status))
+    .filter((repair) => !deferred(repair.status) && !outsideRepair(repair.status))
     .map(conciseMaintenanceIssue);
   payload.repairs = repairs;
   if (Array.isArray(payload.oosUnits)) {
     payload.oosUnits = payload.oosUnits.map((unit) => ({
       ...unit,
       openWork: Array.isArray(unit.openWork)
-        ? unit.openWork.filter((work) => !deferred(work.status))
+        ? unit.openWork.filter((work) => !deferred(work.status) && !outsideRepair(work.status))
         : unit.openWork,
     }));
   }
