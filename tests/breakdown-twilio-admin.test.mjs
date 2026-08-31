@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import {
+  breakdownSmsAnchorForCurrentWeek,
+  currentBreakdownSmsWeekStart,
+  isBreakdownSmsScheduleAllowed,
+  isBreakdownSmsWeekActive,
+} from '../lib/breakdown-sms-schedule-core.js';
 
 const runtime = readFileSync(new URL('../lib/twilio-runtime.ts', import.meta.url), 'utf8');
 const notifications = readFileSync(new URL('../lib/notifications.ts', import.meta.url), 'utf8');
@@ -12,10 +18,12 @@ const navigation = readFileSync(new URL('../app/navigation-config.ts', import.me
 const worker = readFileSync(new URL('../worker/index.ts', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0112_breakdown_twilio_admin.sql', import.meta.url), 'utf8');
 const scheduleRuntime = readFileSync(new URL('../lib/breakdown-sms-schedule.ts', import.meta.url), 'utf8');
+const scheduleCore = readFileSync(new URL('../lib/breakdown-sms-schedule-core.js', import.meta.url), 'utf8');
 const scheduleApi = readFileSync(new URL('../app/api/admin/twilio/schedule/route.ts', import.meta.url), 'utf8');
 const schedulePage = readFileSync(new URL('../app/admin/twilio/schedule/page.tsx', import.meta.url), 'utf8');
 const scheduleMigration = readFileSync(new URL('../migrations/0113_breakdown_sms_schedule.sql', import.meta.url), 'utf8');
 const contactScheduleMigration = readFileSync(new URL('../migrations/0116_breakdown_sms_contact_schedules.sql', import.meta.url), 'utf8');
+const biweeklyMigration = readFileSync(new URL('../migrations/0117_breakdown_sms_biweekly_rotation.sql', import.meta.url), 'utf8');
 
 test('Twilio credentials are admin-managed and auth token is encrypted', () => {
   assert.match(api, /user\.role !== 'admin'/);
@@ -70,9 +78,9 @@ test('Twilio admin includes webhook URL, live pause, and test text controls', ()
 test('Breakdown SMS schedule is admin-managed in Detroit time and gates texts only', () => {
   assert.match(scheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_schedule/);
   assert.match(scheduleMigration, /America\/Detroit/);
-  assert.match(scheduleRuntime, /BREAKDOWN_SMS_TIMEZONE = 'America\/Detroit'/);
-  assert.match(scheduleRuntime, /Overnight window/);
-  assert.match(scheduleRuntime, /previousDay/);
+  assert.match(scheduleRuntime, /BREAKDOWN_SMS_TIMEZONE/);
+  assert.match(scheduleCore, /Overnight window/);
+  assert.match(scheduleCore, /previousDay/);
   assert.match(scheduleApi, /user\.role !== 'admin'/);
   assert.match(scheduleApi, /saveBreakdownSmsSchedule/);
   assert.match(notifications, /breakdownSmsScheduleAllows/);
@@ -97,4 +105,56 @@ test('Each breakdown text user can have a personalized schedule or follow the de
   assert.match(schedulePage, /Always text this person/);
   assert.match(schedulePage, /Custom schedule/);
   assert.match(notifications, /sendBreakdownSms\(breakdownId, phone, outboundMessage, contact\.id\)/);
+});
+
+test('Default and personal schedules support a safe every-other-week rotation', () => {
+  assert.match(biweeklyMigration, /ALTER TABLE breakdown_sms_schedule[\s\S]*week_interval/);
+  assert.match(biweeklyMigration, /ALTER TABLE breakdown_sms_schedule[\s\S]*anchor_week_start/);
+  assert.match(biweeklyMigration, /ALTER TABLE breakdown_sms_contact_schedules[\s\S]*week_interval/);
+  assert.match(biweeklyMigration, /CHECK \(week_interval IN \(1,2\)\)/);
+  assert.match(scheduleRuntime, /BreakdownSmsWeekInterval = 1 \| 2/);
+  assert.match(scheduleRuntime, /activeThisWeek/);
+  assert.match(scheduleRuntime, /breakdownSmsAnchorForCurrentWeek/);
+  assert.match(scheduleApi, /weekInterval/);
+  assert.match(scheduleApi, /activeThisWeek/);
+  assert.match(schedulePage, /Every other week/);
+  assert.match(schedulePage, /This week ON, next week OFF/);
+  assert.match(schedulePage, /This week OFF, next week ON/);
+  assert.match(schedulePage, /flips automatically every Monday/);
+});
+
+test('Biweekly evaluator alternates Mondays in Detroit and keeps overnight work in the starting week', () => {
+  const firstMonday = new Date('2026-08-31T14:00:00Z');
+  assert.equal(currentBreakdownSmsWeekStart(firstMonday, 'America/Detroit'), '2026-08-31');
+  assert.equal(breakdownSmsAnchorForCurrentWeek(true, firstMonday, 'America/Detroit'), '2026-08-31');
+  assert.equal(breakdownSmsAnchorForCurrentWeek(false, firstMonday, 'America/Detroit'), '2026-09-07');
+
+  const mondayDaytime = {
+    enabled: true,
+    daysMask: 1 << 1,
+    startMinute: 6 * 60,
+    endMinute: 18 * 60,
+    weekInterval: 2,
+    anchorWeekStart: '2026-08-31',
+    timezone: 'America/Detroit',
+  };
+  assert.equal(isBreakdownSmsWeekActive(mondayDaytime, firstMonday), true);
+  assert.equal(isBreakdownSmsScheduleAllowed(mondayDaytime, firstMonday), true);
+  assert.equal(isBreakdownSmsScheduleAllowed(mondayDaytime, new Date('2026-09-07T14:00:00Z')), false);
+  assert.equal(isBreakdownSmsScheduleAllowed(mondayDaytime, new Date('2026-09-14T14:00:00Z')), true);
+
+  const sundayOvernight = {
+    enabled: true,
+    daysMask: 1 << 0,
+    startMinute: 18 * 60,
+    endMinute: 6 * 60,
+    weekInterval: 2,
+    anchorWeekStart: '2026-08-24',
+    timezone: 'America/Detroit',
+  };
+  assert.equal(isBreakdownSmsScheduleAllowed(sundayOvernight, new Date('2026-08-31T05:30:00Z')), true);
+  assert.equal(isBreakdownSmsScheduleAllowed(sundayOvernight, new Date('2026-09-07T05:30:00Z')), false);
+
+  const everyWeek = { ...mondayDaytime, weekInterval: 1 };
+  assert.equal(isBreakdownSmsScheduleAllowed(everyWeek, new Date('2026-09-07T14:00:00Z')), true);
 });
