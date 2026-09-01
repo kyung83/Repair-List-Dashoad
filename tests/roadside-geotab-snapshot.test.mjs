@@ -93,7 +93,7 @@ test('breakdown create snapshots Geotab evidence and falls back to manual fields
   assert.match(route, /ManualBreakdownSnapshotRequiredError/);
   assert.match(route, /manualFallbackRequired:\s*true/);
   assert.match(route, /status:\s*422/);
-  assert.match(page, /manualFallback && selectedUnit/);
+  assert.match(page, /manualFallback\s*&&\s*selectedUnit/);
 });
 
 test('migration 0098 contains every breakdown Geotab snapshot field', () => {
