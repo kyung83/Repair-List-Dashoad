@@ -2,6 +2,8 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { issueDriverAccessToken } from '@/lib/breakdown-driver-followup';
 import { resolveBreakdownDriverDirectorySelection } from '@/lib/breakdown-driver-directory';
+import { validateBreakdownCategorySelection } from '@/lib/breakdown-categories';
+import { normalizeBreakdownPositions } from '@/lib/breakdown-position-rules.js';
 import {
   createBreakdown,
   getBreakdown,
@@ -69,7 +71,8 @@ export async function POST(request: Request) {
     const typedDriverName = safeText(form.get('driverName'), 120);
     const state = safeText(form.get('state'), 2).toUpperCase();
     const city = safeText(form.get('city'), 120);
-    const repairCategory = safeText(form.get('repairCategory'), 60);
+    const submittedCategory = safeText(form.get('repairCategory'), 120);
+    const submittedSubcategory = safeText(form.get('repairSubcategory'), 120);
     const description = safeText(form.get('description'), 2000);
     const rawSnapshotVerification = safeText(form.get('snapshotVerification'), 20).toLowerCase();
     const snapshotVerification = VALID_SNAPSHOT_VERIFICATION.has(rawSnapshotVerification)
@@ -80,8 +83,12 @@ export async function POST(request: Request) {
 
     if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
     if (!unitNumber) throw new Error('Unit # is required.');
-    if (!repairCategory) throw new Error('Repair type is required.');
+    if (!submittedCategory) throw new Error('Repair type is required.');
     if (!description) throw new Error('Description is required.');
+
+    const categoryConfig = await validateBreakdownCategorySelection(env.DB, submittedCategory, submittedSubcategory);
+    const repairCategory = categoryConfig.name;
+    const repairSubcategory = categoryConfig.subcategory;
 
     const needsFallbackDriver = snapshotVerification === 'unavailable' || snapshotVerification === 'corrected';
     const directoryDriver = Number.isInteger(driverDirectoryId) && driverDirectoryId > 0
@@ -102,13 +109,26 @@ export async function POST(request: Request) {
     const driverSource = directoryDriver ? 'directory' as const : 'manual' as const;
 
     const tireDetails: ReportedTireDetail[] = [];
-    if (repairCategory.toUpperCase() === 'TIRES') {
+    if (categoryConfig.requiresTireSize) {
       for (const entry of form.getAll('tirePosition')) {
         const positionCode = safeText(entry, 10).toUpperCase();
         if (!positionCode) continue;
         const tireSize = safeText(form.get(`tireSize_${positionCode}`), 40);
         tireDetails.push({ positionCode, tireSize });
       }
+      if (!tireDetails.length) throw new Error('Choose at least one tire position.');
+      if (tireDetails.some((item) => !item.tireSize)) throw new Error('Enter the tire size for every selected tire.');
+    }
+
+    let positionCodes: string[] = [];
+    if (categoryConfig.requiresPosition && !categoryConfig.requiresTireSize) {
+      const normalized = normalizeBreakdownPositions(
+        form.getAll('positionCode').map((entry) => safeText(entry, 10)),
+        unitType,
+      );
+      if (normalized.invalid.length) throw new Error(`Invalid position: ${normalized.invalid.join(', ')}.`);
+      if (!normalized.positions.length) throw new Error(`Choose at least one ${repairCategory} position.`);
+      positionCodes = normalized.positions;
     }
 
     const { breakdownId, repairId, snapshotSource } = await createBreakdown({
@@ -124,6 +144,13 @@ export async function POST(request: Request) {
       description,
       tireDetails,
     });
+
+    await env.DB.prepare(`
+      UPDATE roadside_breakdowns
+      SET repair_subcategory=?, position_codes=?, updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(repairSubcategory || null, positionCodes.length ? JSON.stringify(positionCodes) : null, breakdownId).run();
+
     const driverToken = await issueDriverAccessToken(breakdownId);
 
     const files = form.getAll('photos').filter((f): f is File => f instanceof File && f.size > 0);
@@ -152,6 +179,12 @@ export async function POST(request: Request) {
       const tireHtml = tireDetails.length
         ? `<br><strong>Tires:</strong> ${escapeHtml(tireDetails.map((item) => `${item.positionCode} - ${item.tireSize}`).join(', '))}`
         : '';
+      const subcategoryHtml = repairSubcategory
+        ? `<br><strong>Issue:</strong> ${escapeHtml(repairSubcategory)}`
+        : '';
+      const positionHtml = positionCodes.length
+        ? `<br><strong>Position:</strong> ${escapeHtml(positionCodes.join(', '))}`
+        : '';
       const emailHtml = [
         '<strong>ROADSIDE BREAKDOWN</strong>',
         '',
@@ -160,7 +193,7 @@ export async function POST(request: Request) {
         ...(actual.driver_phone ? [`<strong>Driver Phone:</strong> ${escapeHtml(actual.driver_phone)}`] : []),
         `<strong>${unitLabel}:</strong> ${escapeHtml(actual.unit)}`,
         `<strong>Location:</strong> ${escapeHtml(`${actual.city}, ${actual.state}`)}`,
-        `<strong>Category:</strong> ${escapeHtml(actual.repair_category)}${tireHtml}`,
+        `<strong>Category:</strong> ${escapeHtml(repairCategory)}${subcategoryHtml}${positionHtml}${tireHtml}`,
         `<strong>Description:</strong> ${escapeHtml(actual.description)}`,
         `<strong>Breakdown #:</strong> ${breakdownId}`,
       ].join('<br>');
@@ -197,5 +230,21 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const openOnly = url.searchParams.get('open') === '1';
   const breakdowns = await listBreakdowns({ openOnly });
-  return Response.json({ breakdowns }, { headers: { 'cache-control': 'no-store' } });
+  if (!breakdowns.length) return Response.json({ breakdowns }, { headers: { 'cache-control': 'no-store' } });
+
+  const ids = breakdowns.map((row) => row.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const detailRows = await env.DB.prepare(`
+    SELECT id,repair_subcategory,position_codes
+    FROM roadside_breakdowns
+    WHERE id IN (${placeholders})
+  `).bind(...ids).all<{ id:number; repair_subcategory:string|null; position_codes:string|null }>();
+  const details = new Map(detailRows.results.map((row) => [row.id, row]));
+  const enriched = breakdowns.map((row) => {
+    const detail = details.get(row.id);
+    let positions: string[] = [];
+    try { positions = detail?.position_codes ? JSON.parse(detail.position_codes) : []; } catch { positions = []; }
+    return { ...row, repair_subcategory: detail?.repair_subcategory || null, position_codes: positions };
+  });
+  return Response.json({ breakdowns: enriched }, { headers: { 'cache-control': 'no-store' } });
 }
