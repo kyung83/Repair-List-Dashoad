@@ -1,9 +1,5 @@
-import ModuleTabs from "../module-tabs";
-
+// System and Geotab destinations now live under Settings in the sidebar.
+// Keep this no-op component while existing admin layouts still import it.
 export default function DiagnosticsTabs() {
-  return (
-    <div style={{ background: "#f3f5f7", padding: "26px clamp(16px,4vw,46px) 0" }}>
-      <ModuleTabs module="diagnostics" />
-    </div>
-  );
+  return null;
 }
