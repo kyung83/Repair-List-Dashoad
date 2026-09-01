@@ -16,6 +16,14 @@ export type ModuleTab = {
   view?: string;
 };
 
+export type SidebarGroup = {
+  key: "repairs" | "breakdowns" | "maintenance" | "units" | "parts" | "reports" | "settings";
+  label: string;
+  href: string;
+  roles: Role[];
+  links: Array<NavLink & { roles: Role[] }>;
+};
+
 const allRoles: Role[] = ["viewer", "mechanic", "manager", "admin"];
 const adminRoles: Role[] = ["admin"];
 const managerRoles: Role[] = ["manager", "admin"];
@@ -24,7 +32,7 @@ const officeRoles: Role[] = ["viewer", "manager", "admin"];
 
 export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[] }> = {
   shop: {
-    label: "Shop",
+    label: "Repairs",
     tabs: [
       { href: "/shop", label: "My Jobs", roles: workingRoles },
       { href: "/repair-board", label: "Shop Board", roles: workingRoles },
@@ -76,7 +84,7 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
     ],
   },
   diagnostics: {
-    label: "Diagnostics",
+    label: "Settings",
     tabs: [
       { href: "/admin/geotab-review/health", label: "Fleet Health", exact: true, roles: adminRoles },
       { href: "/admin/geotab-review/assignments", label: "Device Assignments", exact: true, roles: adminRoles },
@@ -90,45 +98,129 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
   },
 };
 
-const managerPrimary: NavLink[] = [
-  { href: "/", label: "Today", exact: true },
-  { href: "/repair-board", label: "Shop", activeFor: ["/shop", "/breakdowns", "/outside-work", "/work-orders"] },
-  { href: "/unit", label: "Units", activeFor: ["/equipment"] },
-  { href: "/pm-schedules", label: "Maintenance", activeFor: ["/annual-schedules", "/annual-inspections", "/next-pm-repairs"] },
-  { href: "/parts-desk", label: "Parts", activeFor: ["/inventory", "/pm-kits", "/inventory-controls"] },
-  { href: "/invoices", label: "Billing" },
-  { href: "/reports", label: "Reports" },
+const sidebarGroups: SidebarGroup[] = [
+  {
+    key: "repairs",
+    label: "Repairs",
+    href: "/repair-board",
+    roles: allRoles,
+    links: [
+      { href: "/repair-board", label: "Repair Board", roles: workingRoles },
+      { href: "/shop", label: "My Jobs", roles: workingRoles },
+      { href: "/outside-work", label: "Outside Repairs", exact: true, roles: managerRoles },
+      { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
+    ],
+  },
+  {
+    key: "breakdowns",
+    label: "Breakdowns",
+    href: "/breakdowns",
+    roles: managerRoles,
+    links: [
+      { href: "/breakdowns", label: "Active Breakdowns", exact: true, roles: managerRoles },
+      { href: "/reports/breakdowns", label: "Breakdown Reports", exact: true, roles: managerRoles },
+      { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
+    ],
+  },
+  {
+    key: "maintenance",
+    label: "Maintenance",
+    href: "/pm-schedules",
+    roles: allRoles,
+    links: [
+      { href: "/pm-schedules", label: "PM Schedule", roles: managerRoles },
+      { href: "/annual-schedules", label: "Annual Schedule", roles: managerRoles },
+      { href: "/next-pm-repairs", label: "Planned Repairs", roles: managerRoles },
+      { href: "/annual-inspections", label: "Annual Records / Forms", roles: allRoles },
+    ],
+  },
+  {
+    key: "units",
+    label: "Units",
+    href: "/unit",
+    roles: allRoles,
+    links: [
+      { href: "/unit", label: "Unit Hub", roles: allRoles },
+      { href: "/equipment", label: "Master Equipment", roles: officeRoles },
+    ],
+  },
+  {
+    key: "parts",
+    label: "Parts",
+    href: "/parts-desk",
+    roles: managerRoles,
+    links: [
+      { href: "/parts-desk", label: "Parts Desk", roles: managerRoles },
+      { href: "/inventory", label: "Inventory", exact: true, roles: managerRoles },
+      { href: "/pm-kits", label: "PM Kits", roles: managerRoles },
+      { href: "/inventory-controls", label: "Inventory Controls", roles: managerRoles },
+    ],
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    href: "/reports",
+    roles: officeRoles,
+    links: [
+      { href: "/reports", label: "Fleet Summary", exact: true, roles: officeRoles },
+      { href: "/reports/search", label: "Unit Cost / Search", exact: true, roles: officeRoles },
+      { href: "/reports/breakdowns", label: "Breakdown Reports", exact: true, roles: officeRoles },
+      { href: "/reports/history", label: "Repair History", roles: officeRoles },
+    ],
+  },
+  {
+    key: "settings",
+    label: "Settings",
+    href: "/invoices?view=settings",
+    roles: managerRoles,
+    links: [
+      { href: "/invoices?view=settings", label: "Customers & Rates", roles: managerRoles },
+      { href: "/admin/users", label: "Users & Access", roles: adminRoles },
+      { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
+      { href: "/admin/twilio", label: "Breakdown Texting", exact: true, roles: adminRoles },
+      { href: "/admin/twilio/schedule", label: "Text Schedule", exact: true, roles: adminRoles },
+      { href: "/admin/geotab-review/health", label: "Fleet / Geotab Health", exact: true, roles: adminRoles },
+      { href: "/admin/geotab-review/assignments", label: "Device Assignments", exact: true, roles: adminRoles },
+      { href: "/admin/geotab-review", label: "Identity & Mileage", exact: true, roles: adminRoles },
+      { href: "/admin/geotab-review/connection", label: "Geotab Connection", exact: true, roles: adminRoles },
+      { href: "/admin/equipment-merge", label: "Duplicate Units", roles: adminRoles },
+      { href: "/admin/history-import", label: "History Import", roles: adminRoles },
+    ],
+  },
 ];
 
-const adminPrimary: NavLink[] = [
-  ...managerPrimary,
-  { href: "/admin/geotab-review/health", label: "Diagnostics", activeFor: ["/admin/geotab-review", "/admin/gmail", "/admin/twilio", "/admin/equipment-merge"] },
-];
+function defaultHrefForRole(group: SidebarGroup, role: Role) {
+  if (group.key === "repairs") {
+    if (role === "viewer") return "/work-orders";
+    if (role === "mechanic") return "/shop";
+  }
+  if (group.key === "maintenance" && (role === "viewer" || role === "mechanic")) return "/annual-inspections";
+  return group.href;
+}
 
-const mechanicPrimary: NavLink[] = [
-  { href: "/shop", label: "My Jobs" },
-  { href: "/repair-board", label: "Shop Board" },
-  { href: "/unit", label: "Find Unit" },
-  { href: "/annual-inspections", label: "Forms" },
-];
+export function sidebarGroupsForRole(role: Role | null): SidebarGroup[] {
+  if (!role) return [];
+  return sidebarGroups
+    .filter((group) => group.roles.includes(role))
+    .map((group) => ({
+      ...group,
+      href: defaultHrefForRole(group, role),
+      links: group.links.filter((link) => link.roles.includes(role)),
+    }))
+    .filter((group) => group.links.length > 0);
+}
 
-const viewerPrimary: NavLink[] = [
-  { href: "/", label: "Today", exact: true },
-  { href: "/unit", label: "Units", activeFor: ["/equipment"] },
-  { href: "/work-orders", label: "Completed Work" },
-  { href: "/annual-inspections", label: "Annual Forms" },
-  { href: "/reports", label: "Reports" },
-];
+// Kept for compatibility with older callers/tests. The visible application shell now
+// uses sidebarGroupsForRole. "Today" is intentionally not part of primary navigation.
+export function primaryLinksForRole(role: Role | null): NavLink[] {
+  return sidebarGroupsForRole(role).map((group) => ({
+    href: group.href,
+    label: group.label,
+    activeFor: group.links.map((link) => link.href.split("?")[0]),
+  }));
+}
 
 export const adminMoreLinks: NavLink[] = [
   { href: "/admin/users", label: "Users & Access" },
   { href: "/admin/history-import", label: "History Import" },
 ];
-
-export function primaryLinksForRole(role: Role | null): NavLink[] {
-  if (role === "admin") return adminPrimary;
-  if (role === "manager") return managerPrimary;
-  if (role === "mechanic") return mechanicPrimary;
-  if (role === "viewer") return viewerPrimary;
-  return [];
-}
