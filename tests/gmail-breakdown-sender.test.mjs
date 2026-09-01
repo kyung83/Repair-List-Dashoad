@@ -16,6 +16,7 @@ const recipient = readFileSync(new URL('../lib/breakdown-email-recipient.ts', im
 test('Gmail breakdown sender uses Jerry account with send-only Gmail permission and default recipient', () => {
   assert.match(client, /GMAIL_BREAKDOWN_SENDER = 'Jtomaski@norloworld\.com'/);
   assert.match(client, /GMAIL_BREAKDOWN_RECIPIENT = 'breakdown@norloworld\.com'/);
+  assert.match(client, /GMAIL_BREAKDOWN_BCC = GMAIL_BREAKDOWN_SENDER/);
   assert.match(recipient, /DEFAULT_BREAKDOWN_EMAIL_RECIPIENT = 'breakdown@norloworld\.com'/);
   assert.match(client, /https:\/\/www\.googleapis\.com\/auth\/gmail\.send/);
   assert.match(client, /access_type', 'offline'/);
@@ -23,6 +24,13 @@ test('Gmail breakdown sender uses Jerry account with send-only Gmail permission 
   assert.match(client, /login_hint', GMAIL_BREAKDOWN_SENDER/);
   assert.match(client, /gmail\/v1\/users\/me\/messages\/send/);
   assert.doesNotMatch(client, /gmail\.readonly|gmail\.modify|mail\.google\.com/);
+});
+
+test('every Gmail breakdown message BCCs the sender mailbox without changing the visible recipient', () => {
+  assert.match(client, /bcc\?: string/);
+  assert.match(client, /`Bcc: \$\{bcc\}`/);
+  assert.match(client, /bcc: GMAIL_BREAKDOWN_BCC/);
+  assert.match(client, /`To: \$\{to\}`/);
 });
 
 test('Gmail OAuth secrets and refresh token are encrypted before D1 storage', () => {
