@@ -6,6 +6,7 @@ export type NavLink = {
   label: string;
   exact?: boolean;
   activeFor?: string[];
+  view?: string;
 };
 
 export type ModuleTab = {
@@ -30,6 +31,8 @@ const managerRoles: Role[] = ["manager", "admin"];
 const workingRoles: Role[] = ["mechanic", "manager", "admin"];
 const officeRoles: Role[] = ["viewer", "manager", "admin"];
 
+// Legacy metadata is retained for compatibility with older source assertions.
+// The visible application navigation is now exclusively sidebarGroups below.
 export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[] }> = {
   shop: {
     label: "Repairs",
@@ -109,6 +112,8 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/shop", label: "My Jobs", roles: workingRoles },
       { href: "/outside-work", label: "Outside Repairs", exact: true, roles: managerRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
+      { href: "/invoices?view=invoices", label: "Invoices", view: "invoices", roles: managerRoles },
+      { href: "/invoices?view=ready", label: "Create Invoice", view: "ready", roles: managerRoles },
     ],
   },
   {
@@ -174,7 +179,7 @@ const sidebarGroups: SidebarGroup[] = [
     href: "/invoices?view=settings",
     roles: managerRoles,
     links: [
-      { href: "/invoices?view=settings", label: "Customers & Rates", roles: managerRoles },
+      { href: "/invoices?view=settings", label: "Customers & Rates", view: "settings", roles: managerRoles },
       { href: "/admin/users", label: "Users & Access", roles: adminRoles },
       { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
       { href: "/admin/twilio", label: "Breakdown Texting", exact: true, roles: adminRoles },
