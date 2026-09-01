@@ -14,15 +14,18 @@ type GeotabHealth = {
 type IconName = SidebarGroup["key"];
 
 function pathOnly(href:string){return href.split("?")[0].split("#")[0];}
-function linkActive(pathname:string,link:NavLink){
+function linkActive(pathname:string,currentView:string,link:NavLink){
   const href=pathOnly(link.href);
+  if(link.view)return pathname===href&&currentView===link.view;
   if(link.exact)return pathname===href;
   return pathname===href||pathname.startsWith(`${href}/`);
 }
-function groupActive(pathname:string,group:SidebarGroup){
+function groupActive(pathname:string,currentView:string,group:SidebarGroup){
   // Breakdown reporting belongs to the Breakdown workflow even though its URL lives under /reports.
   if(pathname.startsWith("/reports/breakdowns"))return group.key==="breakdowns";
-  return pathname===pathOnly(group.href)||group.links.some(link=>linkActive(pathname,link));
+  const rootLink=group.links.find(link=>link.href===group.href);
+  const rootActive=rootLink?linkActive(pathname,currentView,rootLink):pathname===pathOnly(group.href);
+  return rootActive||group.links.some(link=>linkActive(pathname,currentView,link));
 }
 function initials(name:string){
   const parts=name.trim().split(/\s+/).filter(Boolean);
@@ -46,6 +49,7 @@ export default function AppNav(){
   const [health,setHealth]=useState<GeotabHealth|null>(null);
   const [collapsed,setCollapsed]=useState(()=>pathname.startsWith("/repair-board"));
   const [openGroups,setOpenGroups]=useState<Set<string>>(()=>new Set());
+  const [currentView,setCurrentView]=useState("");
   const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/report-breakdown")||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print")||pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print");
 
   useEffect(()=>{
@@ -67,6 +71,13 @@ export default function AppNav(){
   },[hidden]);
 
   useEffect(()=>{
+    if(hidden){setCurrentView("");return;}
+    if(pathname!=="/invoices"){setCurrentView("");return;}
+    const value=new URLSearchParams(window.location.search).get("view");
+    setCurrentView(value==="ready"||value==="settings"?value:"invoices");
+  },[hidden,pathname]);
+
+  useEffect(()=>{
     if(!user||(user.role!=="manager"&&user.role!=="admin")){setHealth(null);return;}
     let cancelled=false;
     async function loadHealth(){
@@ -86,13 +97,13 @@ export default function AppNav(){
 
   const groups=useMemo(()=>sidebarGroupsForRole(user?.role??null),[user?.role]);
   useEffect(()=>{
-    const active=groups.find(group=>groupActive(pathname,group));
+    const active=groups.find(group=>groupActive(pathname,currentView,group));
     if(!active)return;
     setOpenGroups(current=>{
       if(current.has(active.key))return current;
       const next=new Set(current);next.add(active.key);return next;
     });
-  },[groups,pathname]);
+  },[groups,pathname,currentView]);
 
   async function signOut(){
     await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
@@ -129,7 +140,7 @@ export default function AppNav(){
 
     <nav className="app-sidebar-nav">
       {groups.map(group=>{
-        const active=groupActive(pathname,group);
+        const active=groupActive(pathname,currentView,group);
         const open=!collapsed&&openGroups.has(group.key);
         return <div className={`app-sidebar-group ${active?'active':''}`} key={group.key}>
           <div className="app-sidebar-main-row">
@@ -140,7 +151,7 @@ export default function AppNav(){
             {!collapsed&&group.links.length>1&&<button className="app-sidebar-chevron" type="button" onClick={()=>toggleGroup(group.key)} aria-label={`${open?'Collapse':'Expand'} ${group.label}`}>{open?'⌄':'›'}</button>}
           </div>
           {open&&<div className="app-sidebar-subnav">
-            {group.links.map(link=><a key={link.href} href={link.href} className={linkActive(pathname,link)?'active':''}>{link.label}</a>)}
+            {group.links.map(link=><a key={link.href} href={link.href} className={linkActive(pathname,currentView,link)?'active':''}>{link.label}</a>)}
           </div>}
         </div>;
       })}
