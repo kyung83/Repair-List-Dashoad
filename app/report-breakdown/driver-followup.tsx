@@ -14,6 +14,10 @@ type DriverFollowupState={
   readyForReviewAt:string|null;
   closed:boolean;
   status:string;
+  serviceProvider:string;
+  serviceProviderPhone:string;
+  eta:string;
+  dispatchUpdatedAt:string|null;
   receipt:{uploaded:boolean;aiStatus:string;reviewStatus:string};
 };
 
@@ -29,12 +33,16 @@ function formatTime(value:string|null){
   return Number.isNaN(parsed.getTime())?'':parsed.toLocaleString();
 }
 
+function phoneHref(value:string){
+  return `tel:${value.replace(/[^0-9+]/g,'')}`;
+}
+
 export default function DriverFollowup({breakdownId,token,onReportAnother}:Props){
   const [state,setState]=useState<DriverFollowupState|null>(null);
   const [busy,setBusy]=useState('');
   const [message,setMessage]=useState('');
 
-  const load=useCallback(async()=>{
+  const load=useCallback(async(quiet=false)=>{
     try{
       const params=new URLSearchParams({breakdownId:String(breakdownId),token});
       const response=await fetch(`/api/breakdowns/driver?${params.toString()}`,{cache:'no-store'});
@@ -45,13 +53,22 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
         return;
       }
       setState(payload.breakdown);
-      setMessage('');
+      if(!quiet)setMessage('');
     }catch(error){
-      setMessage(error instanceof Error?error.message:'Breakdown follow-up could not be loaded.');
+      if(!quiet)setMessage(error instanceof Error?error.message:'Breakdown follow-up could not be loaded.');
     }
   },[breakdownId,token,onReportAnother]);
 
-  useEffect(()=>{void load();},[load]);
+  useEffect(()=>{
+    void load();
+    const interval=window.setInterval(()=>void load(true),10000);
+    const refreshWhenVisible=()=>{if(document.visibilityState==='visible')void load(true);};
+    document.addEventListener('visibilitychange',refreshWhenVisible);
+    return()=>{
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange',refreshWhenVisible);
+    };
+  },[load]);
 
   async function action(name:'tech_arrived'|'rolling'){
     setBusy(name);
@@ -110,6 +127,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
   const arrived=completed(state?.techArrivedAt||null);
   const rolling=completed(state?.rollingAt||null);
   const receiptUploaded=Boolean(state?.receipt.uploaded);
+  const hasDispatchUpdate=Boolean(state?.serviceProvider||state?.eta);
 
   return(
     <main className="easy-page">
@@ -125,7 +143,26 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
 
           <div className="easy-card-body">
             <h2 className="easy-section-title">Roadside Updates</h2>
-            <p className="easy-section-copy">This is your breakdown update screen. Use the three controls below while you are stopped.</p>
+            <p className="easy-section-copy">Keep this screen open while you are stopped. Dispatch updates appear here automatically.</p>
+
+            {hasDispatchUpdate?(
+              <div className="easy-notice" style={{marginTop:16,padding:18,border:'2px solid #75b98a',background:'#edf9f0',color:'#173b24'}}>
+                <p style={{margin:0,fontSize:12,fontWeight:950,letterSpacing:'.12em'}}>SERVICE UPDATE</p>
+                <h3 style={{margin:'7px 0 12px',fontSize:22}}>Roadside help is on the way</h3>
+                <div style={{display:'grid',gap:8,fontSize:17}}>
+                  <div><strong>Service Provider:</strong> {state?.serviceProvider||'Assigned'}</div>
+                  <div><strong>ETA:</strong> {state?.eta||'Being confirmed'}</div>
+                  {state?.serviceProviderPhone&&(
+                    <div><strong>Provider Phone:</strong> <a href={phoneHref(state.serviceProviderPhone)} style={{color:'#0b5d2a',fontWeight:850}}>{state.serviceProviderPhone}</a></div>
+                  )}
+                </div>
+                <small style={{display:'block',marginTop:12,color:'#476451'}}>This screen checks for new dispatch information every 10 seconds.</small>
+              </div>
+            ):!arrived?(
+              <div className="easy-notice" style={{marginTop:16}}>
+                Northern is arranging roadside service. Keep this screen open — the service provider and ETA will appear here automatically when they are assigned.
+              </div>
+            ):null}
 
             <div style={{display:'grid',gap:14,marginTop:20}}>
               <button

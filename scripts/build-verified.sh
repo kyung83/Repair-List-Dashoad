@@ -33,6 +33,7 @@ node --test \
   "${project_root}/tests/roadside-geotab-snapshot.test.mjs" \
   "${project_root}/tests/breakdown-driver-directory.test.mjs" \
   "${project_root}/tests/breakdown-photo-visibility.test.mjs" \
+  "${project_root}/tests/breakdown-driver-dispatch-notice.test.mjs" \
   "${project_root}/tests/breakdown-twilio-admin.test.mjs"
 
 echo "Running local D1 integration scenarios..."
