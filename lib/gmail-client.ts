@@ -7,6 +7,7 @@ import {
 
 export const GMAIL_BREAKDOWN_SENDER = 'Jtomaski@norloworld.com';
 export const GMAIL_BREAKDOWN_RECIPIENT = 'breakdown@norloworld.com';
+export const GMAIL_BREAKDOWN_BCC = GMAIL_BREAKDOWN_SENDER;
 const EXPECTED_EMAIL = GMAIL_BREAKDOWN_SENDER.toLowerCase();
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -99,6 +100,7 @@ function alternativeBody(boundary: string, text: string, html: string) {
 function buildMime(input: {
   from: string;
   to: string;
+  bcc?: string;
   subject: string;
   html: string;
   text: string;
@@ -110,12 +112,14 @@ function buildMime(input: {
   const mixedBoundary = `norlow_mixed_${randomToken(10)}`;
   const from = safeAddress(input.from);
   const to = safeAddress(input.to);
+  const bcc = input.bcc ? safeAddress(input.bcc) : '';
   const messageId = normalizedMessageId(input.messageId);
   const replyTo = normalizedMessageId(input.replyToMessageId || '');
   const attachments = Array.isArray(input.attachments) ? input.attachments.filter((item) => item?.data instanceof ArrayBuffer) : [];
   const headers = [
     `From: ${from}`,
     `To: ${to}`,
+    ...(bcc ? [`Bcc: ${bcc}`] : []),
     `Subject: ${mimeHeader(input.subject)}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: ${messageId}`,
@@ -253,6 +257,7 @@ export async function sendGmailRuntimeEmail(input: {
   const raw = buildMime({
     from: GMAIL_BREAKDOWN_SENDER,
     to: input.to,
+    bcc: GMAIL_BREAKDOWN_BCC,
     subject: input.subject,
     html: input.html,
     text: input.text,
