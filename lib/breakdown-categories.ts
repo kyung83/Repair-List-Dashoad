@@ -76,6 +76,7 @@ export async function validateBreakdownCategorySelection(
   db: D1Database,
   categoryName: string,
   subcategoryName = '',
+  requireSubcategory = true,
 ) {
   const category = await db.prepare(`
     SELECT id,name,requires_position,requires_tire_size,active,sort_order
@@ -93,11 +94,12 @@ export async function validateBreakdownCategorySelection(
 
   const submittedSub = subcategoryName.trim();
   let subcategory = '';
-  if (activeSubs.results.length) {
-    if (!submittedSub) throw new Error(`Choose an ${category.name} issue.`);
+  if (submittedSub) {
     const match = activeSubs.results.find((row) => row.name.toLowerCase() === submittedSub.toLowerCase());
     if (!match) throw new Error(`Choose a valid ${category.name} issue.`);
     subcategory = match.name;
+  } else if (requireSubcategory && activeSubs.results.length) {
+    throw new Error(`Choose an ${category.name} issue.`);
   }
 
   return {
