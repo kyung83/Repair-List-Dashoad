@@ -49,14 +49,16 @@ test('missing current assignment is explicitly unmapped',()=>{
   assert.equal(result.actuallyNotTracking,false);
 });
 
-test('worker uses LogRecord feed and no longer schedules the destructive legacy yard writer',async()=>{
+test('worker uses LogRecord feed on the two-hour schedule and no longer schedules the destructive legacy yard writer',async()=>{
   const worker=await readFile(new URL('../worker/index.ts',import.meta.url),'utf8');
   const wrangler=await readFile(new URL('../wrangler.template.jsonc',import.meta.url),'utf8');
   assert.match(worker,/syncGeotabGpsFeed/);
   assert.doesNotMatch(worker,/syncGeotabGpsShadow/);
   assert.doesNotMatch(worker,/syncGeotabYardPresence/);
-  assert.match(worker,/controller\.cron === '\* \* \* \* \*'/);
-  assert.match(wrangler,/"\* \* \* \* \*"/);
+  assert.match(worker,/controller\.cron === '0 \*\/2 \* \* \*'/);
+  assert.match(wrangler,/"0 \*\/2 \* \* \*"/);
+  assert.doesNotMatch(worker,/controller\.cron === '\* \* \* \* \*'/);
+  assert.doesNotMatch(wrangler,/"\* \* \* \* \*"/);
 });
 
 test('feed mirrors persistent state without clearing every yard first',async()=>{
