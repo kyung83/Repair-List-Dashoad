@@ -36,6 +36,7 @@ const PUBLIC_PATHS = new Set([
   '/report-breakdown',
   '/api/equipment/search',
   '/api/breakdowns',
+  '/api/breakdown-categories',
   '/api/breakdowns/driver',
   '/api/breakdowns/driver-search',
   '/api/breakdowns/geotab-preview',
