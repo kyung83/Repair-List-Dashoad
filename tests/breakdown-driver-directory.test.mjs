@@ -18,9 +18,10 @@ test('Recruiting A-C is cached instead of queried from the browser hot path', ()
   assert.doesNotMatch(browser, /docs\.google\.com|spreadsheets\/d\//);
 });
 
-test('driver directory sync runs every five minutes without replacing a good cache on read failure', () => {
-  assert.match(worker, /minute % 5 === 0/);
+test('driver directory sync runs once daily without replacing a good cache on read failure', () => {
+  assert.match(worker, /controller\.cron === '15 6 \* \* \*'/);
   assert.match(worker, /syncBreakdownDriverDirectory/);
+  assert.doesNotMatch(worker, /minute % 5 === 0/);
   assert.match(directory, /active_generation/);
   assert.match(directory, /keeping the previous cache/);
   assert.match(migration, /breakdown_driver_directory_sync/);

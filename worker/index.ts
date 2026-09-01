@@ -182,43 +182,58 @@ const worker = {
     return handler.fetch(request, env, ctx);
   },
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    if (controller.cron === '* * * * *') {
+    if (controller.cron === '15 6 * * *') {
+      try {
+        const driverDirectory = await syncBreakdownDriverDirectory(env);
+        console.log(JSON.stringify({ event: 'breakdown_driver_directory_daily_sync', driverDirectory }));
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'breakdown_driver_directory_sync_failed', error: String(error) }));
+      }
+      return;
+    }
+
+    if (controller.cron === '0 */2 * * *') {
       let feed: unknown = null;
       let recovery: unknown = null;
       let mirror: unknown = null;
-      let driverDirectory: unknown = null;
+      let fleet: unknown = null;
+      let dvir: unknown = null;
+
       try {
         feed = await syncGeotabGpsFeed(env);
       } catch (error) {
         console.error(JSON.stringify({ event: 'geotab_gps_feed_schedule_failed', error: String(error) }));
       }
-      const minute = new Date(controller.scheduledTime).getUTCMinutes();
-      if (minute % 5 === 0) {
-        try {
-          driverDirectory = await syncBreakdownDriverDirectory(env);
-        } catch (error) {
-          console.error(JSON.stringify({ event: 'breakdown_driver_directory_sync_failed', error: String(error) }));
-        }
-        try {
-          const trailerBucket = minute % 15 === 0 ? (Math.floor(minute / 15) % 2) as 0 | 1 : null;
-          recovery = await recoverStaleGeotabGps(env, { trailerBucket });
-        } catch (error) {
-          console.error(JSON.stringify({ event: 'geotab_targeted_gps_recovery_failed', error: String(error) }));
-        }
+
+      try {
+        const hour = new Date(controller.scheduledTime).getUTCHours();
+        const trailerBucket = (Math.floor(hour / 2) % 2) as 0 | 1;
+        recovery = await recoverStaleGeotabGps(env, { trailerBucket });
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'geotab_targeted_gps_recovery_failed', error: String(error) }));
       }
+
       try {
         mirror = await syncGeotabLocationMirror(env.DB);
       } catch (error) {
         console.error(JSON.stringify({ event: 'geotab_location_mirror_failed', error: String(error) }));
       }
-      console.log(JSON.stringify({ event: 'geotab_minute_location_sync', feed, recovery, mirror, driverDirectory }));
-      return;
-    }
 
-    const fleet = await syncGeotabFleetMaster(env);
-    const dvir = await syncGeotabDvir(env);
-    await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
-    console.log(JSON.stringify({ event: 'geotab_two_hour_sync', dvir, fleet }));
+      try {
+        fleet = await syncGeotabFleetMaster(env);
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'geotab_fleet_sync_failed', error: String(error) }));
+      }
+
+      try {
+        dvir = await syncGeotabDvir(env);
+        await env.DB.prepare('DELETE FROM dvir_defects WHERE repaired = 1').run();
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'geotab_dvir_sync_failed', error: String(error) }));
+      }
+
+      console.log(JSON.stringify({ event: 'geotab_two_hour_sync', feed, recovery, mirror, fleet, dvir }));
+    }
   },
 };
 export default worker;
