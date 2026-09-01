@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { issueDriverAccessToken } from '@/lib/breakdown-driver-followup';
 import { resolveBreakdownDriverDirectorySelection } from '@/lib/breakdown-driver-directory';
-import { validateBreakdownCategorySelection } from '@/lib/breakdown-categories';
+import { listBreakdownCategoryConfigs, validateBreakdownCategorySelection } from '@/lib/breakdown-categories';
 import { normalizeBreakdownPositions } from '@/lib/breakdown-position-rules.js';
 import {
   createBreakdown,
@@ -221,13 +221,18 @@ export async function POST(request: Request) {
   }
 }
 
-/** ADMIN-ONLY: list breakdowns for the dashboard tab. */
+/** PUBLIC categories query or manager-only breakdown list. */
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  if (url.searchParams.get('categories') === '1') {
+    const categories = await listBreakdownCategoryConfigs(env.DB, false);
+    return Response.json({ categories }, { headers: { 'cache-control': 'no-store' } });
+  }
+
   const user = await getSessionUser(env.DB, request);
   if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
   if (user.role !== 'manager' && user.role !== 'admin') return Response.json({ error: 'Manager or administrator access is required.' }, { status: 403 });
 
-  const url = new URL(request.url);
   const openOnly = url.searchParams.get('open') === '1';
   const breakdowns = await listBreakdowns({ openOnly });
   if (!breakdowns.length) return Response.json({ breakdowns }, { headers: { 'cache-control': 'no-store' } });
