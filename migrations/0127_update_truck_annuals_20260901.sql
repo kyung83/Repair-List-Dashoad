@@ -310,8 +310,14 @@ INSERT INTO _truck_annual_matches_20260901 (source_unit, equipment_id, annual_da
 SELECT s.unit, e.id, s.annual_date
 FROM _truck_annual_snapshot_20260901 s
 JOIN equipment e
-  ON e.active = 1
- AND e.archived_at IS NULL
+  ON (
+      (e.active = 1 AND e.archived_at IS NULL)
+      OR (
+        s.unit IN ('370', '379')
+        AND e.active = 0
+        AND e.archived_at IS NOT NULL
+      )
+    )
  AND lower(COALESCE(e.equipment_type, '')) <> 'trailer'
  AND e.geotab_trailer_id IS NULL
  AND (
@@ -339,7 +345,9 @@ CREATE TABLE _truck_annual_guard_20260901 (
 );
 
 -- 287 named source units, 277 dated rows, 10 explicitly blank rows.
--- Every dated row must resolve to one active non-trailer equipment record.
+-- Every dated row must resolve to one non-trailer equipment record.
+-- 370 (TERMED) and 379 (Selling) are intentionally allowed to match their archived
+-- historical equipment rows, but are never re-enabled for annual scheduling.
 INSERT INTO _truck_annual_guard_20260901 (ok)
 SELECT CASE WHEN
   (SELECT COUNT(*) FROM _truck_annual_snapshot_20260901) = 287
@@ -365,9 +373,12 @@ THEN 1 ELSE 0 END;
 -- overriding any existing custom annual interval or intentionally paused row.
 INSERT OR IGNORE INTO equipment_annual_settings
   (equipment_id, interval_days, active, updated_at)
-SELECT equipment_id, 365, 1, CURRENT_TIMESTAMP
-FROM _truck_annual_matches_20260901
-WHERE annual_date IS NOT NULL;
+SELECT m.equipment_id, 365, 1, CURRENT_TIMESTAMP
+FROM _truck_annual_matches_20260901 m
+JOIN equipment e ON e.id = m.equipment_id
+WHERE m.annual_date IS NOT NULL
+  AND e.active = 1
+  AND e.archived_at IS NULL;
 
 INSERT INTO pm_status (equipment_id, annual_date, updated_at)
 SELECT equipment_id, annual_date, CURRENT_TIMESTAMP
