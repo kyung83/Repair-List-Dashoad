@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { adminMoreLinks, primaryLinksForRole, type NavLink, type Role } from "./navigation-config";
+import { sidebarGroupsForRole, type NavLink, type Role, type SidebarGroup } from "./navigation-config";
 
 type User = { id:number; username:string; email:string; displayName:string; role:Role };
 type GeotabHealth = {
@@ -11,17 +11,41 @@ type GeotabHealth = {
   summary:{ expected:number; structured:number; live:number; recent:number; stale:number; noData:number; offline:number; identityErrors:number; regression:number };
 };
 
+type IconName = SidebarGroup["key"];
+
 function pathOnly(href:string){return href.split("?")[0].split("#")[0];}
-function isActive(pathname:string,link:NavLink){
+function linkActive(pathname:string,link:NavLink){
   const href=pathOnly(link.href);
   if(link.exact)return pathname===href;
-  return [href,...(link.activeFor??[])].some(path=>pathname===path||pathname.startsWith(`${path}/`));
+  return pathname===href||pathname.startsWith(`${href}/`);
+}
+function groupActive(pathname:string,group:SidebarGroup){
+  // Breakdown reporting belongs to the Breakdown workflow even though its URL lives under /reports.
+  if(pathname.startsWith("/reports/breakdowns"))return group.key==="breakdowns";
+  return pathname===pathOnly(group.href)||group.links.some(link=>linkActive(pathname,link));
+}
+function initials(name:string){
+  const parts=name.trim().split(/\s+/).filter(Boolean);
+  return (parts.length>1?`${parts[0][0]}${parts[parts.length-1][0]}`:parts[0]?.slice(0,2)||"NL").toUpperCase();
+}
+
+function SidebarIcon({name}:{name:IconName}){
+  const common={width:22,height:22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round" as const,strokeLinejoin:"round" as const,"aria-hidden":true};
+  if(name==="repairs")return <svg {...common}><path d="M14.7 6.3a4 4 0 0 0-5-5L7.4 3.6l3 3-3.8 3.8-3-3L1.3 9.7a4 4 0 0 0 5 5l6.4 6.4a2 2 0 0 0 2.8-2.8l-6.4-6.4"/><path d="m16 16 2 2"/></svg>;
+  if(name==="breakdowns")return <svg {...common}><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>;
+  if(name==="maintenance")return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="m9 16 2 2 4-4"/></svg>;
+  if(name==="units")return <svg {...common}><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>;
+  if(name==="parts")return <svg {...common}><path d="m12 2 8 4-8 4-8-4 8-4Z"/><path d="m4 10 8 4 8-4M4 14l8 4 8-4"/></svg>;
+  if(name==="reports")return <svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>;
+  return <svg {...common}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
 }
 
 export default function AppNav(){
   const pathname=usePathname();
   const [user,setUser]=useState<User|null>(null);
   const [health,setHealth]=useState<GeotabHealth|null>(null);
+  const [collapsed,setCollapsed]=useState(()=>pathname.startsWith("/repair-board"));
+  const [openGroups,setOpenGroups]=useState<Set<string>>(()=>new Set());
   const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/report-breakdown")||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print")||pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print");
 
   useEffect(()=>{
@@ -30,6 +54,17 @@ export default function AppNav(){
       .then(async response=>response.ok?(await response.json() as{user:User}).user:null)
       .then(setUser).catch(()=>setUser(null));
   },[hidden,pathname]);
+
+  useEffect(()=>{
+    if(hidden)return;
+    try{
+      const saved=window.localStorage.getItem("northern-sidebar-collapsed");
+      if(saved==="1"||saved==="0")setCollapsed(saved==="1");
+      else setCollapsed(pathname.startsWith("/repair-board"));
+    }catch{
+      setCollapsed(pathname.startsWith("/repair-board"));
+    }
+  },[hidden]);
 
   useEffect(()=>{
     if(!user||(user.role!=="manager"&&user.role!=="admin")){setHealth(null);return;}
@@ -49,36 +84,78 @@ export default function AppNav(){
     return()=>{cancelled=true;window.clearInterval(timer);};
   },[user]);
 
+  const groups=useMemo(()=>sidebarGroupsForRole(user?.role??null),[user?.role]);
+  useEffect(()=>{
+    const active=groups.find(group=>groupActive(pathname,group));
+    if(!active)return;
+    setOpenGroups(current=>{
+      if(current.has(active.key))return current;
+      const next=new Set(current);next.add(active.key);return next;
+    });
+  },[groups,pathname]);
+
   async function signOut(){
     await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
     window.location.assign('/login');
   }
+  function toggleCollapsed(){
+    setCollapsed(current=>{
+      const next=!current;
+      try{window.localStorage.setItem("northern-sidebar-collapsed",next?"1":"0");}catch{}
+      return next;
+    });
+  }
+  function toggleGroup(key:string){
+    setOpenGroups(current=>{
+      const next=new Set(current);next.has(key)?next.delete(key):next.add(key);return next;
+    });
+  }
 
   if(hidden)return null;
-  const primary=primaryLinksForRole(user?.role??null);
-  const more=user?.role==='admin'?adminMoreLinks:[];
-  const healthTitle=health
-    ? `Geotab ${health.status}. Structured results ${health.summary.structured}/${health.summary.expected}. Live ${health.summary.live}, recent ${health.summary.recent}, stale ${health.summary.stale}, no data ${health.summary.noData}, offline ${health.summary.offline}, identity issues ${health.summary.identityErrors}. GPS reliability pilot is in shadow mode.`
-    : '';
-  const healthPill=health?<span style={{display:'inline-flex',alignItems:'center',gap:5,padding:'5px 8px',borderRadius:999,fontSize:11,fontWeight:800,letterSpacing:'.03em',whiteSpace:'nowrap',background:health.status==='healthy'?'#eaf7ef':'#fff4dd',border:`1px solid ${health.status==='healthy'?'#9fd2b0':'#e6bd69'}`,color:health.status==='healthy'?'#215c38':'#79540c'}} title={healthTitle}>GEOTAB {health.status==='healthy'?'✓':'⚠'}{health.summary.expected>0?<small style={{fontSize:10,fontWeight:700}}>{health.summary.structured}/{health.summary.expected}</small>:null}</span>:null;
 
-  return <header className="easy-nav">
-    <a className="app-brand" href={user?.role==='mechanic'?'/shop':'/'} aria-label="Northern Logistics fleet operations home">
-      <img className="app-brand-logo" src="/northern-logistics-logo-exact.svg?v=1" alt="Northern Logistics Worldwide" />
-    </a>
-    <nav className="easy-nav-main" aria-label="Main navigation">
-      {primary.map(link=><a key={link.href} href={link.href} className={`easy-nav-link ${isActive(pathname,link)?'active':''}`}>{link.label}</a>)}
-      {more.length>0&&<details className="easy-more">
-        <summary className="easy-nav-link">Admin ▾</summary>
-        <div className="easy-more-menu">
-          {more.map(link=><a key={link.href} href={link.href}>{link.label}</a>)}
-        </div>
-      </details>}
+  const home=user?.role==='mechanic'?'/shop':'/repair-board';
+  const healthTitle=health
+    ? `Geotab ${health.status}. Structured results ${health.summary.structured}/${health.summary.expected}. Live ${health.summary.live}, recent ${health.summary.recent}, stale ${health.summary.stale}, no data ${health.summary.noData}, offline ${health.summary.offline}, identity issues ${health.summary.identityErrors}.`
+    : '';
+
+  return <aside className={`app-sidebar ${collapsed?'collapsed':'expanded'}`} aria-label="Northern Logistics navigation">
+    <div className="app-sidebar-head">
+      <a className="app-sidebar-brand" href={home} title="Northern Logistics Fleet Operations">
+        <span className="app-sidebar-mark">N</span>
+        {!collapsed&&<span className="app-sidebar-brand-copy"><strong>Northern Logistics</strong><small>Fleet Operations</small></span>}
+      </a>
+      <button className="app-sidebar-collapse" type="button" onClick={toggleCollapsed} aria-label={collapsed?'Expand navigation':'Collapse navigation'} title={collapsed?'Expand navigation':'Collapse navigation'}>{collapsed?'›':'‹'}</button>
+    </div>
+
+    <nav className="app-sidebar-nav">
+      {groups.map(group=>{
+        const active=groupActive(pathname,group);
+        const open=!collapsed&&openGroups.has(group.key);
+        return <div className={`app-sidebar-group ${active?'active':''}`} key={group.key}>
+          <div className="app-sidebar-main-row">
+            <a className={`app-sidebar-main-link ${active?'active':''}`} href={group.href} title={collapsed?group.label:undefined} aria-current={active?'page':undefined}>
+              <span className="app-sidebar-icon"><SidebarIcon name={group.key}/></span>
+              {!collapsed&&<span className="app-sidebar-label">{group.label}</span>}
+            </a>
+            {!collapsed&&group.links.length>1&&<button className="app-sidebar-chevron" type="button" onClick={()=>toggleGroup(group.key)} aria-label={`${open?'Collapse':'Expand'} ${group.label}`}>{open?'⌄':'›'}</button>}
+          </div>
+          {open&&<div className="app-sidebar-subnav">
+            {group.links.map(link=><a key={link.href} href={link.href} className={linkActive(pathname,link)?'active':''}>{link.label}</a>)}
+          </div>}
+        </div>;
+      })}
     </nav>
-    {user&&<div className="app-user-area">
-      {healthPill&&(user.role==='admin'?<a href="/admin/geotab-review/health" style={{textDecoration:'none'}} aria-label="Open Geotab diagnostics">{healthPill}</a>:healthPill)}
-      <span className="app-user-name" title={user.username||user.email}>{user.displayName}<small className="easy-role">{user.role}</small></span>
-      <button type="button" onClick={()=>void signOut()}>Sign out</button>
-    </div>}
-  </header>;
+
+    <div className="app-sidebar-footer">
+      {health&&!collapsed&&<a className={`app-sidebar-health ${health.status==='healthy'?'healthy':'attention'}`} href={user?.role==='admin'?'/admin/geotab-review/health':'/repair-board'} title={healthTitle}>
+        <span>GEOTAB {health.status==='healthy'?'✓':'⚠'}</span>
+        {health.summary.expected>0&&<small>{health.summary.structured}/{health.summary.expected} structured</small>}
+      </a>}
+      {user&&<div className="app-sidebar-user" title={`${user.displayName} · ${user.role}`}>
+        <span className="app-sidebar-avatar">{initials(user.displayName)}</span>
+        {!collapsed&&<span className="app-sidebar-user-copy"><strong>{user.displayName}</strong><small>{user.role}</small></span>}
+      </div>}
+      {user&&<button className="app-sidebar-signout" type="button" onClick={()=>void signOut()} title="Sign out"><span aria-hidden="true">↪</span>{!collapsed&&<span>Sign out</span>}</button>}
+    </div>
+  </aside>;
 }
