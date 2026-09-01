@@ -9,6 +9,10 @@ async function requireManager(request: Request) {
   return user;
 }
 
+function rejectCrossSite(request: Request) {
+  return String(request.headers.get('sec-fetch-site') || '').trim().toLowerCase() === 'cross-site';
+}
+
 function text(value: unknown, max = 120) {
   return String(value ?? '').trim().slice(0, max);
 }
@@ -35,6 +39,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    if (rejectCrossSite(request)) throw new Error('Cross-site breakdown setup request rejected.');
     await requireManager(request);
     const body = await request.json<Record<string, unknown>>();
     const action = text(body.action, 40);
@@ -70,6 +75,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    if (rejectCrossSite(request)) throw new Error('Cross-site breakdown setup request rejected.');
     await requireManager(request);
     const body = await request.json<Record<string, unknown>>();
     const action = text(body.action, 40);
