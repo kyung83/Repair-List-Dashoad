@@ -93,9 +93,15 @@ if (config.ai?.binding !== "AI") {
 if (!emailBindings.some((entry) => String(entry?.name || '') === 'BREAKDOWN_EMAIL')) {
   throw new Error("Roadside breakdown email alerts require Cloudflare Email Service binding `BREAKDOWN_EMAIL`.");
 }
-if (!crons.includes("* * * * *")) {
-  throw new Error("Geotab LogRecord feed must run every minute.");
+if (!crons.includes("0 */2 * * *")) {
+  throw new Error("Geotab location/fleet synchronization must run every two hours.");
+}
+if (!crons.includes("15 6 * * *")) {
+  throw new Error("Breakdown driver directory must run once daily.");
+}
+if (crons.includes("* * * * *")) {
+  throw new Error("The legacy every-minute Geotab schedule must stay disabled to control D1 writes.");
 }
 NODE
 
-echo "Validated Cloudflare Worker bundle, AI handwriting binding, breakdown email binding, and minute Geotab feed schedule."
+echo "Validated Cloudflare Worker bundle, AI handwriting binding, breakdown email binding, two-hour Geotab schedule, and daily driver directory schedule."
