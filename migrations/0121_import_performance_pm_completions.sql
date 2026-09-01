@@ -1,5 +1,14 @@
 PRAGMA foreign_keys = ON;
 
+-- D1 does not authorize TEMP schema objects in remote migrations. Keep the
+-- scratch tables in the main schema for this migration only and drop them at
+-- the end. DROP IF EXISTS also makes a retry safe if a prior failed attempt
+-- reached any scratch-table creation before rollback.
+DROP TABLE IF EXISTS _performance_pm_assigned_20260901;
+DROP TABLE IF EXISTS _performance_pm_validation_20260901;
+DROP TABLE IF EXISTS _performance_pm_resolution_20260901;
+DROP TABLE IF EXISTS _performance_pm_stage_20260901;
+
 -- Bring production PM history forward from the live Performance PM inspection
 -- workbook. The prior legacy Truck PMS import ended on 2026-08-17. This batch
 -- contains the 29 unique completed truck inspections from 2026-08-19 through
@@ -39,7 +48,7 @@ CREATE TABLE IF NOT EXISTS performance_pm_import_receipts (
   applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TEMP TABLE _performance_pm_stage_20260901 (
+CREATE TABLE _performance_pm_stage_20260901 (
   pm_id TEXT PRIMARY KEY,
   source_unit TEXT NOT NULL,
   vin TEXT NOT NULL,
@@ -81,7 +90,7 @@ VALUES
   ('NL-PM-411-1787950539821', '411', '3HSDWTZR5MN691727', '2026-08-28', 498043, 'Dennis ison'),
   ('NL-PM-419-1787966536369', '419', '3HSDZAPR7MN434728', '2026-08-28', 776080, 'Dennis ison');
 
-CREATE TEMP TABLE _performance_pm_resolution_20260901 (
+CREATE TABLE _performance_pm_resolution_20260901 (
   pm_id TEXT PRIMARY KEY,
   equipment_id INTEGER,
   match_kind TEXT NOT NULL,
@@ -136,7 +145,7 @@ INSERT INTO _performance_pm_resolution_20260901
 SELECT pm_id,equipment_id,match_kind,candidate_count
 FROM resolved;
 
-CREATE TEMP TABLE _performance_pm_validation_20260901 (
+CREATE TABLE _performance_pm_validation_20260901 (
   ok INTEGER NOT NULL CHECK (ok = 1)
 );
 
@@ -149,7 +158,7 @@ SELECT CASE WHEN COUNT(*)=0 THEN 1 ELSE 0 END FROM _performance_pm_resolution_20
 
 -- Derive the PM performed by each generic Performance PM form from the most
 -- recent prior PM and the unit's configured sequence.
-CREATE TEMP TABLE _performance_pm_assigned_20260901 AS
+CREATE TABLE _performance_pm_assigned_20260901 AS
 WITH source AS (
   SELECT s.*,r.equipment_id,
     (SELECT me.pm_type
