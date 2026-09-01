@@ -1,0 +1,52 @@
+name: Prepare truck annual archived-record fix
+
+on:
+  push:
+    branches:
+      - agent/diagnose-truck-annuals-20260901
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Create fix branch from main
+        run: |
+          git fetch origin main
+          git checkout -B agent/fix-truck-annual-archived-matches origin/main
+      - name: Keep archived 370 and 379 historical without reactivating annual schedules
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = 'migrations/0127_update_truck_annuals_20260901.sql';
+          let text = fs.readFileSync(path, 'utf8');
+
+          const oldJoin = `JOIN equipment e\n  ON e.active = 1\n AND e.archived_at IS NULL\n AND lower(COALESCE(e.equipment_type, '')) <> 'trailer'`;
+          const newJoin = `JOIN equipment e\n  ON (\n      (e.active = 1 AND e.archived_at IS NULL)\n      OR (\n        s.unit IN ('370', '379')\n        AND e.active = 0\n        AND e.archived_at IS NOT NULL\n      )\n    )\n AND lower(COALESCE(e.equipment_type, '')) <> 'trailer'`;
+          if (!text.includes(oldJoin)) throw new Error('Expected truck annual equipment join was not found.');
+          text = text.replace(oldJoin, newJoin);
+
+          const oldComment = `-- Every dated row must resolve to one active non-trailer equipment record.`;
+          const newComment = `-- Every dated row must resolve to one non-trailer equipment record.\n-- 370 (TERMED) and 379 (Selling) are intentionally allowed to match their archived\n-- historical equipment rows, but are never re-enabled for annual scheduling.`;
+          if (!text.includes(oldComment)) throw new Error('Expected guard comment was not found.');
+          text = text.replace(oldComment, newComment);
+
+          const oldSchedule = `SELECT equipment_id, 365, 1, CURRENT_TIMESTAMP\nFROM _truck_annual_matches_20260901\nWHERE annual_date IS NOT NULL;`;
+          const newSchedule = `SELECT m.equipment_id, 365, 1, CURRENT_TIMESTAMP\nFROM _truck_annual_matches_20260901 m\nJOIN equipment e ON e.id = m.equipment_id\nWHERE m.annual_date IS NOT NULL\n  AND e.active = 1\n  AND e.archived_at IS NULL;`;
+          if (!text.includes(oldSchedule)) throw new Error('Expected annual schedule insert was not found.');
+          text = text.replace(oldSchedule, newSchedule);
+
+          fs.writeFileSync(path, text);
+          NODE
+      - name: Commit fix branch
+        run: |
+          git config user.name "kyung83"
+          git config user.email "161100189+kyung83@users.noreply.github.com"
+          git add migrations/0127_update_truck_annuals_20260901.sql
+          git commit -m "Allow archived truck annual history records"
+          git push --force-with-lease origin agent/fix-truck-annual-archived-matches
