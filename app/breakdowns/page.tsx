@@ -3,294 +3,359 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BreakdownRow } from '@/lib/roadside-breakdowns';
 import DriverReceiptReview from './driver-receipt-review';
+import s from './breakdown-flow.module.css';
 
-const STAGE_LABELS: Record<number, string> = {
-  1: 'Reported',
-  2: 'Diagnostics',
-  3: 'En Route',
-  4: 'On Location',
-  5: 'Complete',
-};
-
-type BreakdownSubcategory = { id:number; categoryId:number; name:string; active:boolean; sortOrder:number };
-type BreakdownCategory = { id:number; name:string; requiresPosition:boolean; requiresTireSize:boolean; active:boolean; sortOrder:number; subcategories:BreakdownSubcategory[] };
+type BreakdownCategory = { id:number; name:string; active:boolean; sortOrder:number; requiresPosition:boolean; requiresTireSize:boolean };
 type BreakdownViewRow = BreakdownRow & { repair_subcategory?:string|null; position_codes?:string[] };
-type DispatchDraft = { serviceProvider: string; serviceProviderPhone: string; eta: string; cost: string };
-type BreakdownPhoto = { breakdownId: number; objectKey: string; fileName: string; contentType: string; url: string };
-type ServiceProvider = { id: number; name: string; phone: string; city: string; state: string; zip: string };
-type NewProviderDraft = { name: string; phone: string; city: string; state: string; zip: string };
+type BreakdownPhoto = { breakdownId:number; objectKey:string; fileName:string; contentType:string; url:string };
+type ServiceProvider = { id:number; name:string; phone:string; city:string; state:string; zip:string };
+type DiagnosticDraft = { category:string; notes:string };
+type DispatchDraft = { serviceProvider:string; serviceProviderPhone:string; eta:string };
+type NewProviderDraft = { name:string; phone:string; city:string; state:string; zip:string };
+type StageFilter = 'all'|'reported'|'diagnostics'|'enroute'|'onlocation';
 
-function unitLabel(row: BreakdownRow) {
-  const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
+const STAGE_LABELS:Record<number,string>={1:'Reported',2:'Diagnostics',3:'En Route',4:'On Location',5:'Complete'};
+
+function unitLabel(row:BreakdownRow){
+  const type=String(row.equipment_type||'').toLowerCase()==='trailer'?'Trailer':'Truck';
   return `${type} ${row.unit}`;
 }
-function money(value: number | null) { return value == null ? '—' : value.toLocaleString('en-US', { style: 'currency', currency: 'USD' }); }
-function draftFromRow(row: BreakdownRow): DispatchDraft {
-  return { serviceProvider: row.service_provider || '', serviceProviderPhone: row.service_provider_phone || '', eta: row.eta || '', cost: row.cost == null ? '' : String(row.cost) };
+function money(value:number|null){return value==null?'—':value.toLocaleString('en-US',{style:'currency',currency:'USD'});}
+function dateTime(value:string){
+  if(!value)return'—';
+  const normalized=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)?`${value.replace(' ','T')}Z`:value;
+  const parsed=new Date(normalized);
+  return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();
 }
+function stageBadge(stage:number){
+  if(stage===4)return s.badgeGreen;
+  if(stage===1)return s.badgeRed;
+  return s.badgeOrange;
+}
+function initialDiagnostic(row:BreakdownViewRow):DiagnosticDraft{return{category:row.repair_category||'',notes:row.description||''};}
+function initialDispatch(row:BreakdownRow):DispatchDraft{return{serviceProvider:row.service_provider||'',serviceProviderPhone:row.service_provider_phone||'',eta:row.eta||''};}
 
-const inputStyle: React.CSSProperties = { width: '100%', minHeight: 44, padding: '9px 11px', border: '1px solid #cbd5e1', borderRadius: 9, background: '#fff', color: '#172033', fontSize: 14, boxSizing: 'border-box' };
-const labelStyle: React.CSSProperties = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 850, color: '#334155' };
+function ProviderPicker({row,value,disabled,onChange}:{row:BreakdownRow;value:DispatchDraft;disabled:boolean;onChange:(next:DispatchDraft)=>void}){
+  const state=String(row.state||'').trim().toUpperCase();
+  const city=String(row.city||'').trim();
+  const[providers,setProviders]=useState<ServiceProvider[]>([]);
+  const[search,setSearch]=useState('');
+  const[loading,setLoading]=useState(true);
+  const[error,setError]=useState('');
+  const[showAdd,setShowAdd]=useState(false);
+  const[addBusy,setAddBusy]=useState(false);
+  const[addError,setAddError]=useState('');
+  const[newProvider,setNewProvider]=useState<NewProviderDraft>({name:'',phone:'',city,state,zip:''});
 
-function ProviderPicker({ row, disabled, selectedName, selectedPhone, onChoose, onClear }: {
-  row: BreakdownRow; disabled: boolean; selectedName: string; selectedPhone: string;
-  onChoose: (provider: ServiceProvider) => void; onClear: () => void;
-}) {
-  const state = String(row.state || '').trim().toUpperCase();
-  const city = String(row.city || '').trim();
-  const [providers, setProviders] = useState<ServiceProvider[]>([]);
-  const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [addBusy, setAddBusy] = useState(false);
-  const [addError, setAddError] = useState('');
-  const [newProvider, setNewProvider] = useState<NewProviderDraft>({ name: '', phone: '', city, state, zip: '' });
+  const loadProviders=useCallback(async()=>{
+    if(!state){setProviders([]);setLoading(false);return;}
+    setLoading(true);setError('');
+    try{
+      const params=new URLSearchParams({state});
+      if(city)params.set('city',city);
+      const response=await fetch(`/api/breakdown-service-providers?${params.toString()}`,{cache:'no-store'});
+      const payload=await response.json() as {providers?:ServiceProvider[];error?:string};
+      if(!response.ok)throw new Error(payload.error||'Provider directory could not be loaded.');
+      setProviders(Array.isArray(payload.providers)?payload.providers:[]);
+    }catch(reason){setError(reason instanceof Error?reason.message:'Provider directory could not be loaded.');}
+    finally{setLoading(false);}
+  },[city,state]);
 
-  const loadProviders = useCallback(async () => {
-    if (!state) { setProviders([]); setLoading(false); return; }
-    setLoading(true); setError('');
-    try {
-      const params = new URLSearchParams({ state });
-      if (city) params.set('city', city);
-      const response = await fetch(`/api/breakdown-service-providers?${params.toString()}`, { cache: 'no-store' });
-      const payload = await response.json() as { providers?: ServiceProvider[]; error?: string };
-      if (!response.ok) throw new Error(payload.error || 'Provider directory could not be loaded.');
-      setProviders(Array.isArray(payload.providers) ? payload.providers : []);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Provider directory could not be loaded.'); }
-    finally { setLoading(false); }
-  }, [city, state]);
+  useEffect(()=>{setNewProvider(current=>({...current,city,state}));void loadProviders();},[city,state,loadProviders]);
 
-  useEffect(() => { setNewProvider((current) => ({ ...current, city, state })); void loadProviders(); }, [city, state, loadProviders]);
+  const filtered=useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    if(!q)return providers;
+    const digits=q.replace(/\D/g,'');
+    return providers.filter(provider=>{
+      const text=`${provider.name} ${provider.city} ${provider.state} ${provider.zip} ${provider.phone}`.toLowerCase();
+      return text.includes(q)||Boolean(digits&&provider.phone.replace(/\D/g,'').includes(digits));
+    }).slice(0,80);
+  },[providers,search]);
 
-  const filteredProviders = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return providers;
-    const digits = q.replace(/\D/g, '');
-    return providers.filter((provider) => {
-      const text = `${provider.name} ${provider.city} ${provider.state} ${provider.zip} ${provider.phone}`.toLowerCase();
-      return text.includes(q) || Boolean(digits && provider.phone.replace(/\D/g, '').includes(digits));
-    });
-  }, [providers, search]);
-
-  function setNewProviderField(field: keyof NewProviderDraft, value: string) { setNewProvider((current) => ({ ...current, [field]: value })); }
-  async function addProvider() {
-    setAddBusy(true); setAddError('');
-    try {
-      const response = await fetch('/api/breakdown-service-providers', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: newProvider.name.trim(), phone: newProvider.phone.trim(), city: newProvider.city.trim(), state: newProvider.state.trim().toUpperCase(), zip: newProvider.zip.trim() }),
-      });
-      const payload = await response.json() as { provider?: ServiceProvider; error?: string };
-      if (!response.ok || !payload.provider) throw new Error(payload.error || 'Provider could not be saved.');
-      if (payload.provider.state === state) onChoose(payload.provider);
-      setShowAdd(false); setSearch(''); setNewProvider({ name: '', phone: '', city, state, zip: '' });
+  async function addProvider(){
+    if(!newProvider.name.trim()){setAddError('Enter the company name.');return;}
+    setAddBusy(true);setAddError('');
+    try{
+      const response=await fetch('/api/breakdown-service-providers',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+        name:newProvider.name.trim(),phone:newProvider.phone.trim(),city:newProvider.city.trim(),state:newProvider.state.trim().toUpperCase(),zip:newProvider.zip.trim(),
+      })});
+      const payload=await response.json() as {provider?:ServiceProvider;error?:string};
+      if(!response.ok||!payload.provider)throw new Error(payload.error||'Provider could not be saved.');
+      onChange({...value,serviceProvider:payload.provider.name,serviceProviderPhone:payload.provider.phone});
+      setShowAdd(false);setSearch('');setNewProvider({name:'',phone:'',city,state,zip:''});
       await loadProviders();
-    } catch (reason) { setAddError(reason instanceof Error ? reason.message : 'Provider could not be saved.'); }
-    finally { setAddBusy(false); }
+    }catch(reason){setAddError(reason instanceof Error?reason.message:'Provider could not be saved.');}
+    finally{setAddBusy(false);}
   }
 
-  return (
-    <div style={{ gridColumn: '1 / -1', padding: 12, border: '1px solid #d5dee8', borderRadius: 10, background: '#fff' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-        <div><strong style={{ color: '#172033', fontSize: 14 }}>Service Provider</strong><div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>Showing {state || 'state'} providers only. {city ? `${city} locations are listed first.` : ''}</div></div>
-        <button type="button" className="easy-button" disabled={disabled} onClick={() => { setShowAdd((current) => !current); setAddError(''); }}>{showAdd ? 'Cancel Add' : '+ Add Service Provider'}</button>
+  return <div className={s.providerBox}>
+    {value.serviceProvider?<div className={s.providerSelected}>
+      <div><strong>{value.serviceProvider}</strong><small>{value.serviceProviderPhone||'No phone on file'}</small></div>
+      <button type="button" className={s.button} disabled={disabled} onClick={()=>onChange({...value,serviceProvider:'',serviceProviderPhone:''})}>Change</button>
+    </div>:null}
+    {!showAdd?<>
+      <label className={s.field}>Find service provider
+        <input className={s.input} value={search} onChange={event=>setSearch(event.target.value.slice(0,100))} placeholder={`Search ${state||'state'} company, city, ZIP or phone`} disabled={disabled}/>
+      </label>
+      {loading?<div className={s.muted}>Loading providers…</div>:error?<div className={s.notice}>{error}</div>:search.trim()?<div className={s.providerResults}>
+        {filtered.map(provider=><button type="button" key={provider.id} className={s.providerResult} disabled={disabled} onClick={()=>{onChange({...value,serviceProvider:provider.name,serviceProviderPhone:provider.phone});setSearch('');}}><strong>{provider.name}</strong><small>{provider.city}, {provider.state}{provider.zip?` ${provider.zip}`:''}{provider.phone?` · ${provider.phone}`:''}</small></button>)}
+        {!filtered.length?<div className={s.muted}>No matching provider.</div>:null}
+      </div>:null}
+      <div className={s.actions} style={{marginTop:8}}><button type="button" className={s.button} disabled={disabled} onClick={()=>setShowAdd(true)}>+ Add Service Provider</button></div>
+    </>:<div className={s.providerAdd}>
+      <div className={s.twoCol}>
+        <label className={s.field}>Company<input className={s.input} value={newProvider.name} onChange={event=>setNewProvider(current=>({...current,name:event.target.value.slice(0,160)}))}/></label>
+        <label className={s.field}>Phone<input className={s.input} inputMode="tel" value={newProvider.phone} onChange={event=>setNewProvider(current=>({...current,phone:event.target.value.slice(0,40)}))}/></label>
+        <label className={s.field}>City<input className={s.input} value={newProvider.city} onChange={event=>setNewProvider(current=>({...current,city:event.target.value.slice(0,120)}))}/></label>
+        <label className={s.field}>State<input className={s.input} value={newProvider.state} onChange={event=>setNewProvider(current=>({...current,state:event.target.value.replace(/[^A-Za-z]/g,'').toUpperCase().slice(0,2)}))}/></label>
+      </div>
+      <label className={s.field}>ZIP<input className={s.input} value={newProvider.zip} onChange={event=>setNewProvider(current=>({...current,zip:event.target.value.slice(0,20)}))}/></label>
+      {addError?<div className={s.notice}>{addError}</div>:null}
+      <div className={s.actions}><button type="button" className={s.orangeButton} disabled={disabled||addBusy} onClick={()=>void addProvider()}>{addBusy?'Saving…':'Save Provider'}</button><button type="button" className={s.button} disabled={addBusy} onClick={()=>setShowAdd(false)}>Cancel</button></div>
+    </div>}
+  </div>;
+}
+
+export default function BreakdownsPage(){
+  const[breakdowns,setBreakdowns]=useState<BreakdownViewRow[]>([]);
+  const[photosByBreakdown,setPhotosByBreakdown]=useState<Record<number,BreakdownPhoto[]>>({});
+  const[categories,setCategories]=useState<BreakdownCategory[]>([]);
+  const[diagnostics,setDiagnostics]=useState<Record<number,DiagnosticDraft>>({});
+  const[dispatches,setDispatches]=useState<Record<number,DispatchDraft>>({});
+  const[selectedId,setSelectedId]=useState<number|null>(null);
+  const[filter,setFilter]=useState<StageFilter>('all');
+  const[categoryFilter,setCategoryFilter]=useState('');
+  const[query,setQuery]=useState('');
+  const[loading,setLoading]=useState(true);
+  const[busy,setBusy]=useState<number|null>(null);
+  const[message,setMessage]=useState('');
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const[breakdownResponse,photoResponse,categoryResponse]=await Promise.all([
+        fetch('/api/breakdowns?open=1',{cache:'no-store'}),
+        fetch('/api/breakdowns/photos?open=1',{cache:'no-store'}),
+        fetch('/api/breakdown-categories',{cache:'no-store'}),
+      ]);
+      const payload=await breakdownResponse.json() as {breakdowns?:BreakdownViewRow[];error?:string};
+      const photoPayload=await photoResponse.json() as {photos?:BreakdownPhoto[];error?:string};
+      const categoryPayload=await categoryResponse.json() as {categories?:BreakdownCategory[];error?:string};
+      if(!breakdownResponse.ok)throw new Error(payload.error||'Failed to load breakdowns.');
+      if(!photoResponse.ok)throw new Error(photoPayload.error||'Failed to load breakdown photos.');
+      if(!categoryResponse.ok)throw new Error(categoryPayload.error||'Failed to load breakdown categories.');
+      const rows=Array.isArray(payload.breakdowns)?payload.breakdowns:[];
+      const photos=Array.isArray(photoPayload.photos)?photoPayload.photos:[];
+      const grouped=photos.reduce<Record<number,BreakdownPhoto[]>>((current,photo)=>{const id=Number(photo.breakdownId);if(Number.isFinite(id))(current[id]||=[]).push(photo);return current;},{});
+      setBreakdowns(rows);setPhotosByBreakdown(grouped);setCategories(Array.isArray(categoryPayload.categories)?categoryPayload.categories:[]);
+      setDiagnostics(Object.fromEntries(rows.map(row=>[row.id,initialDiagnostic(row)])));
+      setDispatches(Object.fromEntries(rows.map(row=>[row.id,initialDispatch(row)])));
+      setMessage('');
+      const requested=Number(new URLSearchParams(window.location.search).get('id')||0);
+      setSelectedId(current=>{
+        if(current&&rows.some(row=>row.id===current))return current;
+        if(Number.isInteger(requested)&&requested>0&&rows.some(row=>row.id===requested))return requested;
+        if(rows.length===1)return rows[0].id;
+        return null;
+      });
+    }catch(error){setMessage(error instanceof Error?error.message:'Failed to load breakdowns.');}
+    finally{setLoading(false);}
+  },[]);
+
+  useEffect(()=>{void load();},[load]);
+  useEffect(()=>{
+    const pop=()=>{const id=Number(new URLSearchParams(window.location.search).get('id')||0);setSelectedId(Number.isInteger(id)&&id>0?id:null);};
+    window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);
+  },[]);
+
+  const selected=useMemo(()=>breakdowns.find(row=>row.id===selectedId)||null,[breakdowns,selectedId]);
+  const summary=useMemo(()=>({
+    open:breakdowns.length,
+    reported:breakdowns.filter(row=>row.stage===1).length,
+    enRoute:breakdowns.filter(row=>row.stage===3).length,
+    onLocation:breakdowns.filter(row=>row.stage===4).length,
+  }),[breakdowns]);
+
+  const visible=useMemo(()=>{
+    const needle=query.trim().toLowerCase();
+    return breakdowns.filter(row=>{
+      if(filter==='reported'&&row.stage!==1)return false;
+      if(filter==='diagnostics'&&row.stage!==2)return false;
+      if(filter==='enroute'&&row.stage!==3)return false;
+      if(filter==='onlocation'&&row.stage!==4)return false;
+      if(categoryFilter&&row.repair_category!==categoryFilter)return false;
+      if(!needle)return true;
+      return [row.id,row.unit,row.driver_name,row.city,row.state,row.repair_category,row.description,row.service_provider,row.eta].join(' ').toLowerCase().includes(needle);
+    });
+  },[breakdowns,filter,categoryFilter,query]);
+
+  function openBreakdown(id:number){
+    setSelectedId(id);setMessage('');
+    const url=new URL(window.location.href);url.searchParams.set('id',String(id));window.history.pushState(null,'',url);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function backToList(){
+    setSelectedId(null);setMessage('');
+    const url=new URL(window.location.href);url.searchParams.delete('id');window.history.pushState(null,'',url);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function updateDiagnostic(id:number,patch:Partial<DiagnosticDraft>){setDiagnostics(current=>({...current,[id]:{...(current[id]||{category:'',notes:''}),...patch}}));}
+  function updateDispatch(id:number,next:DispatchDraft){setDispatches(current=>({...current,[id]:next}));}
+
+  async function saveDiagnostics(row:BreakdownViewRow){
+    const draft=diagnostics[row.id]||initialDiagnostic(row);
+    if(!draft.category.trim()){setMessage('Choose the repair category.');return;}
+    if(!draft.notes.trim()){setMessage('Add a short note describing the issue or what was found.');return;}
+    setBusy(row.id);setMessage('');
+    try{
+      const response=await fetch(`/api/breakdowns/${row.id}/repair-type`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({repairCategory:draft.category.trim(),notes:draft.notes.trim()})});
+      const payload=await response.json() as {ok?:boolean;error?:string};
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Diagnostics could not be saved.');
+      await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} diagnostics saved.`);
+    }catch(error){setMessage(error instanceof Error?error.message:'Diagnostics could not be saved.');}
+    finally{setBusy(null);}
+  }
+
+  async function claim(row:BreakdownViewRow){
+    setBusy(row.id);setMessage('');
+    try{
+      const response=await fetch(`/api/breakdowns/${row.id}/claim`,{method:'POST'});const payload=await response.json() as {ok?:boolean;error?:string};
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown could not be claimed.');
+      await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} claimed.`);
+    }catch(error){setMessage(error instanceof Error?error.message:'Breakdown could not be claimed.');}
+    finally{setBusy(null);}
+  }
+
+  async function saveProvider(row:BreakdownViewRow){
+    const draft=dispatches[row.id]||initialDispatch(row);
+    if(!draft.serviceProvider.trim()){setMessage('Choose the service provider first.');return;}
+    if(!draft.eta.trim()){setMessage('Enter the ETA before dispatching.');return;}
+    setBusy(row.id);setMessage('');
+    try{
+      const body:Record<string,unknown>={serviceProvider:draft.serviceProvider.trim(),serviceProviderPhone:draft.serviceProviderPhone.trim(),eta:draft.eta.trim()};
+      if(row.stage<3){body.stage=3;body.status='en_route';}
+      const response=await fetch(`/api/breakdowns/${row.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+      const payload=await response.json() as {ok?:boolean;error?:string};
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Provider and ETA could not be saved.');
+      await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} provider and ETA saved. Driver screen updated.`);
+    }catch(error){setMessage(error instanceof Error?error.message:'Provider and ETA could not be saved.');}
+    finally{setBusy(null);}
+  }
+
+  async function markOnLocation(row:BreakdownViewRow){
+    setBusy(row.id);setMessage('');
+    try{
+      const response=await fetch(`/api/breakdowns/${row.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({stage:4,status:'on_location',onLocation:true})});
+      const payload=await response.json() as {ok?:boolean;error?:string};
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown could not be marked on location.');
+      await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} marked On Location.`);
+    }catch(error){setMessage(error instanceof Error?error.message:'Breakdown could not be updated.');}
+    finally{setBusy(null);}
+  }
+
+  async function clearNotBreakdown(row:BreakdownViewRow){
+    if(!window.confirm(`Clear ${unitLabel(row)} for ${row.driver_name} as NOT A BREAKDOWN?\n\nThis closes the linked repair as Cancelled. The history is kept.`))return;
+    setBusy(row.id);setMessage('');
+    try{
+      const response=await fetch(`/api/breakdowns/${row.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({notBreakdown:true})});const payload=await response.json() as {ok?:boolean;error?:string};
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown could not be cleared.');
+      backToList();await load();setMessage(`Breakdown #${row.id} cleared as not a breakdown.`);
+    }catch(error){setMessage(error instanceof Error?error.message:'Breakdown could not be cleared.');}
+    finally{setBusy(null);}
+  }
+
+  if(selected){
+    const diagnostic=diagnostics[selected.id]||initialDiagnostic(selected);
+    const dispatch=dispatches[selected.id]||initialDispatch(selected);
+    const photos=photosByBreakdown[selected.id]||[];
+    const isBusy=busy===selected.id;
+    const categoryOptions=categories.some(item=>item.name===diagnostic.category)?categories:[{id:-1,name:diagnostic.category,active:false,sortOrder:9999,requiresPosition:false,requiresTireSize:false},...categories].filter(item=>item.name);
+    return <main className={s.page}><div className={s.shell}>
+      <div className={s.detailHeader}>
+        <div>
+          <button type="button" className={s.back} onClick={backToList}>← Back to Active Breakdowns</button>
+          <h1 className={s.detailTitle}>Breakdown #{selected.id} <span className={stageBadge(selected.stage)}>{STAGE_LABELS[selected.stage]||selected.status}</span></h1>
+          <div className={s.detailMeta}>{unitLabel(selected)} · {selected.driver_name} · {selected.city}, {selected.state}</div>
+        </div>
+        <div className={s.summaryCard}>
+          <div className={s.summaryItem}><span>Claimed by</span><strong>{selected.claimed_by||'Unclaimed'}</strong></div>
+          <div className={s.summaryItem}><span>Reported</span><strong>{dateTime(selected.created_at)}</strong></div>
+          <div className={s.summaryItem}><span>Provider</span><strong>{selected.service_provider||'Not assigned'}</strong></div>
+          <div className={s.summaryItem}><span>Final cost</span><strong>{money(selected.cost)}</strong></div>
+        </div>
       </div>
 
-      {selectedName && (
-        <div style={{ marginBottom: 10, padding: '9px 11px', borderRadius: 9, background: '#f8fafc', border: '1px solid #dfe6ee', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div><strong style={{ color: '#172033' }}>{selectedName}</strong><div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>{selectedPhone || 'No phone on file'}</div></div>
-          <button type="button" className="easy-button" disabled={disabled} onClick={onClear}>Clear Selection</button>
-        </div>
-      )}
+      {message?<div className={s.notice}>{message}</div>:null}
 
-      {showAdd ? (
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
-            <label style={labelStyle}>Company Name<input value={newProvider.name} onChange={(e) => setNewProviderField('name', e.target.value.slice(0, 160))} style={inputStyle} placeholder="Company name" /></label>
-            <label style={labelStyle}>Phone Number<input value={newProvider.phone} onChange={(e) => setNewProviderField('phone', e.target.value.slice(0, 40))} style={inputStyle} placeholder="Phone" inputMode="tel" /></label>
-            <label style={labelStyle}>City<input value={newProvider.city} onChange={(e) => setNewProviderField('city', e.target.value.slice(0, 120))} style={inputStyle} placeholder="City" /></label>
-            <label style={labelStyle}>State<input value={newProvider.state} onChange={(e) => setNewProviderField('state', e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 2))} style={inputStyle} placeholder="IN" maxLength={2} /></label>
-            <label style={labelStyle}>ZIP<input value={newProvider.zip} onChange={(e) => setNewProviderField('zip', e.target.value.slice(0, 20))} style={inputStyle} placeholder="ZIP" inputMode="numeric" /></label>
-          </div>
-          {addError && <div style={{ color: '#9f1239', fontSize: 12 }}>{addError}</div>}
-          <div className="easy-actions"><button type="button" className="easy-button orange" disabled={disabled || addBusy} onClick={() => void addProvider()}>{addBusy ? 'Saving Provider...' : 'Save Provider'}</button></div>
-        </div>
-      ) : error ? <div style={{ color: '#9f1239', fontSize: 12 }}>{error}</div>
-        : loading ? <div style={{ color: '#64748b', fontSize: 12 }}>Loading {state} providers...</div>
-        : <div style={{ display: 'grid', gap: 8 }}>
-            <input value={search} onChange={(e) => setSearch(e.target.value.slice(0, 80))} placeholder={`Search ${state} by company, city, ZIP or phone`} style={inputStyle} disabled={disabled} />
-            <select defaultValue="" onChange={(e) => { const provider = providers.find((item) => item.id === Number(e.target.value)); if (provider) onChoose(provider); e.currentTarget.value = ''; }} style={inputStyle} disabled={disabled || filteredProviders.length === 0}>
-              <option value="">{filteredProviders.length ? `Choose a ${state} service provider...` : `No matching ${state} providers`}</option>
-              {filteredProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} — {provider.city}, {provider.state}{provider.zip ? ` ${provider.zip}` : ''}{provider.phone ? ` — ${provider.phone}` : ''}</option>)}
-            </select>
-            <small style={{ color: '#64748b', lineHeight: 1.4 }}>{providers.length} provider{providers.length === 1 ? '' : 's'} on file for {state}. If the company is missing, use Add Service Provider above.</small>
-          </div>}
-    </div>
-  );
-}
+      <div className={s.progress}>
+        {[1,3,4,5].map((stage,index)=>{
+          const done=selected.stage>=stage;const current=selected.stage===stage||(stage===1&&selected.stage===2);
+          const labels=['Reported / Diagnose','Provider En Route','On Location','Closed'];
+          return <div key={stage} className={`${s.step} ${done?s.stepDone:''} ${current?s.stepCurrent:''}`}><span className={s.stepDot}>{done?'✓':index+1}</span><span>{labels[index]}</span></div>;
+        })}
+      </div>
 
-export default function BreakdownsPage() {
-  const [breakdowns, setBreakdowns] = useState<BreakdownViewRow[]>([]);
-  const [photosByBreakdown, setPhotosByBreakdown] = useState<Record<number, BreakdownPhoto[]>>({});
-  const [categories, setCategories] = useState<BreakdownCategory[]>([]);
-  const [drafts, setDrafts] = useState<Record<number, DispatchDraft>>({});
-  const [repairTypes, setRepairTypes] = useState<Record<number, string>>({});
-  const [repairSubcategories, setRepairSubcategories] = useState<Record<number, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<number | null>(null);
-  const [message, setMessage] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true); setMessage('');
-    try {
-      const [breakdownResponse, photoResponse, categoryResponse] = await Promise.all([
-        fetch('/api/breakdowns?open=1', { cache: 'no-store' }),
-        fetch('/api/breakdowns/photos?open=1', { cache: 'no-store' }),
-        fetch('/api/breakdown-categories', { cache: 'no-store' }),
-      ]);
-      const payload = await breakdownResponse.json() as { breakdowns?: BreakdownViewRow[]; error?: string };
-      const photoPayload = await photoResponse.json() as { photos?: BreakdownPhoto[]; error?: string };
-      const categoryPayload = await categoryResponse.json() as { categories?: BreakdownCategory[]; error?: string };
-      if (!breakdownResponse.ok) throw new Error(payload.error || 'Failed to load breakdowns.');
-      if (!photoResponse.ok) throw new Error(photoPayload.error || 'Failed to load breakdown photos.');
-      if (!categoryResponse.ok) throw new Error(categoryPayload.error || 'Failed to load breakdown categories.');
-      const rows = Array.isArray(payload.breakdowns) ? payload.breakdowns : [];
-      const photos = Array.isArray(photoPayload.photos) ? photoPayload.photos : [];
-      const grouped = photos.reduce<Record<number, BreakdownPhoto[]>>((current, photo) => { const id = Number(photo.breakdownId); if (Number.isFinite(id)) (current[id] ||= []).push(photo); return current; }, {});
-      setBreakdowns(rows);
-      setPhotosByBreakdown(grouped);
-      setCategories(Array.isArray(categoryPayload.categories) ? categoryPayload.categories : []);
-      setDrafts(Object.fromEntries(rows.map((row) => [row.id, draftFromRow(row)])));
-      setRepairTypes(Object.fromEntries(rows.map((row) => [row.id, row.repair_category])));
-      setRepairSubcategories(Object.fromEntries(rows.map((row) => [row.id, row.repair_subcategory || ''])));
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Failed to load breakdowns.'); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-  function setDraftField(id: number, field: keyof DispatchDraft, value: string) { setDrafts((current) => ({ ...current, [id]: { ...(current[id] || { serviceProvider: '', serviceProviderPhone: '', eta: '', cost: '' }), [field]: value } })); }
-  function chooseProvider(id: number, provider: ServiceProvider) { setDrafts((current) => ({ ...current, [id]: { ...(current[id] || { serviceProvider: '', serviceProviderPhone: '', eta: '', cost: '' }), serviceProvider: provider.name, serviceProviderPhone: provider.phone } })); }
-  function clearProvider(id: number) { setDrafts((current) => ({ ...current, [id]: { ...(current[id] || { serviceProvider: '', serviceProviderPhone: '', eta: '', cost: '' }), serviceProvider: '', serviceProviderPhone: '' } })); }
-
-  async function saveDispatchDetails(id: number) {
-    const draft = drafts[id]; if (!draft) return;
-    const trimmedCost = draft.cost.trim(); const parsedCost = trimmedCost === '' ? null : Number(trimmedCost);
-    if (parsedCost !== null && (!Number.isFinite(parsedCost) || parsedCost < 0)) { setMessage('Cost must be a valid positive dollar amount.'); return; }
-    setBusy(id); setMessage('');
-    try {
-      const response = await fetch(`/api/breakdowns/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ serviceProvider: draft.serviceProvider.trim(), serviceProviderPhone: draft.serviceProviderPhone.trim(), eta: draft.eta.trim(), cost: parsedCost }) });
-      const payload = await response.json() as { ok?: boolean; error?: string };
-      if (!response.ok || !payload.ok) throw new Error(payload.error || 'Breakdown details could not be saved.');
-      await load(); setMessage(`Breakdown #${id} provider details saved.`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Breakdown details could not be saved.'); }
-    finally { setBusy(null); }
-  }
-
-  async function saveRepairType(id: number) {
-    const repairCategory = String(repairTypes[id] || '').trim();
-    const category = categories.find((item) => item.name === repairCategory);
-    if (!category) { setMessage('Choose a valid repair type.'); return; }
-    const repairSubcategory = String(repairSubcategories[id] || '').trim();
-    if (category.subcategories.length && !repairSubcategory) { setMessage(`Choose an ${repairCategory} issue.`); return; }
-    setBusy(id); setMessage('');
-    try {
-      const response = await fetch(`/api/breakdowns/${id}/repair-type`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repairCategory, repairSubcategory }) });
-      const payload = await response.json() as { ok?: boolean; error?: string };
-      if (!response.ok || !payload.ok) throw new Error(payload.error || 'Repair type could not be saved.');
-      await load(); setMessage(`Breakdown #${id} repair type changed to ${repairCategory}${repairSubcategory ? ` / ${repairSubcategory}` : ''}.`);
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Repair type could not be saved.'); }
-    finally { setBusy(null); }
-  }
-
-  async function claim(id: number) {
-    setBusy(id); setMessage('');
-    try { const response = await fetch(`/api/breakdowns/${id}/claim`, { method: 'POST' }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || 'Breakdown could not be claimed.'); await load(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'Breakdown could not be claimed.'); }
-    finally { setBusy(null); }
-  }
-
-  async function advanceStage(id: number, stage: number) {
-    setBusy(id); setMessage('');
-    try { const response = await fetch(`/api/breakdowns/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stage }) }); const payload = await response.json() as { ok?: boolean; error?: string }; if (!response.ok || !payload.ok) throw new Error(payload.error || 'Breakdown stage could not be updated.'); await load(); }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'Breakdown stage could not be updated.'); }
-    finally { setBusy(null); }
-  }
-
-  async function clearNotBreakdown(row: BreakdownRow) {
-    if (!window.confirm(`Clear ${unitLabel(row)} for ${row.driver_name} as NOT A BREAKDOWN?\n\nThis removes it from active breakdowns and closes the linked repair as Cancelled. The history is kept.`)) return;
-    setBusy(row.id); setMessage('');
-    try { const response = await fetch(`/api/breakdowns/${row.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ notBreakdown: true }) }); const payload = await response.json() as { ok?: boolean; error?: string }; if (!response.ok || !payload.ok) throw new Error(payload.error || 'Breakdown could not be cleared.'); await load(); setMessage(`Breakdown #${row.id} cleared as not a breakdown.`); }
-    catch (error) { setMessage(error instanceof Error ? error.message : 'Breakdown could not be cleared.'); }
-    finally { setBusy(null); }
-  }
-
-  const summary = useMemo(() => ({ open: breakdowns.length, unclaimed: breakdowns.filter((row) => !row.claimed_by_user_id).length, enRoute: breakdowns.filter((row) => row.stage === 3).length, onLocation: breakdowns.filter((row) => row.stage === 4).length }), [breakdowns]);
-
-  return (
-    <main className="easy-page">
-      <div className="easy-page-narrow">
-        <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start', flexWrap:'wrap' }}>
-          <div><p className="easy-eyebrow">ROADSIDE OPERATIONS</p><h1 className="easy-title">Breakdowns</h1><p className="easy-subtitle">Manage active roadside calls, provider/ETA, driver progress, and receipt review. A driver marking Rolling leaves the call open for office confirmation.</p></div>
-          <a className="easy-button" href="/breakdowns/setup">Breakdown Setup</a>
-        </div>
-        {message && <div className="easy-notice">{message}</div>}
-        <section className="easy-grid">
-          <article className="easy-card easy-metric"><span>Open breakdowns</span><strong>{summary.open}</strong><small>Stage 1–4</small></article>
-          <article className="easy-card easy-metric"><span>Unclaimed</span><strong>{summary.unclaimed}</strong><small>Needs an owner</small></article>
-          <article className="easy-card easy-metric"><span>En route</span><strong>{summary.enRoute}</strong><small>Provider traveling</small></article>
-          <article className="easy-card easy-metric"><span>On location</span><strong>{summary.onLocation}</strong><small>Repair / review</small></article>
+      <div className={s.workflow}>
+        <section className={s.card}>
+          <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>1</span><div><h2 className={s.cardTitle}>Diagnostics</h2><p className={s.cardHelp}>Choose the main repair category and keep the detail in Notes. No office subcategory is required.</p></div></div></div>
+          <label className={s.field}>Repair Category<select className={s.select} value={diagnostic.category} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{category:event.target.value})}>{categoryOptions.map(category=><option key={`${category.id}-${category.name}`} value={category.name}>{category.name}{category.active?'':' (inactive)'}</option>)}</select></label>
+          <label className={s.field}>Notes<textarea className={s.textarea} value={diagnostic.notes} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{notes:event.target.value.slice(0,2000)})} placeholder="What happened / what did we find?"/></label>
+          {selected.position_codes?.length?<div className={s.reported}><strong>Position reported by driver:</strong> {selected.position_codes.join(', ')}</div>:null}
+          {selected.repair_subcategory?<div className={s.reported}><strong>Original driver selection:</strong> {selected.repair_subcategory}. This stays in history but is no longer required for office closeout.</div>:null}
+          {photos.length?<div className={s.photoGrid}>{photos.map(photo=><a className={s.photo} key={photo.objectKey} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.fileName} loading="lazy"/></a>)}</div>:null}
+          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={isBusy} onClick={()=>void saveDiagnostics(selected)}>{isBusy?'Saving…':'Save Diagnostics'}</button>{!selected.claimed_by_user_id?<button type="button" className={s.button} disabled={isBusy} onClick={()=>void claim(selected)}>Claim Breakdown</button>:null}</div>
         </section>
 
-        <section className="easy-card" style={{ marginTop: 18 }}><div className="easy-card-body">
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}><div><h2 className="easy-section-title">Active roadside calls</h2><p className="easy-section-copy">Each call shows only providers from that breakdown state.</p></div><button type="button" className="easy-button" onClick={() => void load()} disabled={loading}>Refresh</button></div>
-          {loading ? <div className="easy-empty">Loading breakdowns...</div> : breakdowns.length === 0 ? <div className="easy-empty">No open roadside breakdowns.</div> : (
-            <div className="easy-list">{breakdowns.map((row) => {
-              const isBusy = busy === row.id;
-              const stage = STAGE_LABELS[row.stage] ?? `Stage ${row.stage}`;
-              const type = String(row.equipment_type || '').toLowerCase() === 'trailer' ? 'Trailer' : 'Truck';
-              const draft = drafts[row.id] || draftFromRow(row);
-              const repairType = repairTypes[row.id] || row.repair_category;
-              const repairSubcategory = repairSubcategories[row.id] || '';
-              const selectedCategory = categories.find((item) => item.name === repairType);
-              const options = categories.some((item) => item.name === repairType) ? categories : [{ id:-1, name:repairType, requiresPosition:false, requiresTireSize:false, active:false, sortOrder:9999, subcategories:[] }, ...categories];
-              const photos = photosByBreakdown[row.id] || [];
-              const detailBits = [row.repair_category, row.repair_subcategory || '', row.position_codes?.length ? `Position ${row.position_codes.join(', ')}` : ''].filter(Boolean).join(' · ');
-              return <article key={row.id} className="easy-card" style={{ padding: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                  <div style={{ minWidth: 0, flex: '1 1 360px' }}><div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span className="easy-badge orange">{type}</span><span className={`easy-badge ${row.stage >= 4 ? 'green' : row.stage === 1 ? 'red' : ''}`}>{stage}</span><span className="easy-badge">#{row.id}</span></div><h3 style={{ margin: '10px 0 0', color: '#0d1b2b', fontSize: 22 }}>{unitLabel(row)}</h3><p style={{ margin: '6px 0 0', color: '#334155', fontWeight: 800 }}>{row.driver_name} · {row.city}, {row.state}</p><p style={{ margin: '7px 0 0', color: '#64748b', lineHeight: 1.45 }}>{detailBits}: {row.description}</p></div>
-                  <div style={{ minWidth: 220, flex: '0 1 300px', display: 'grid', gap: 7 }}><div className="easy-form-row"><strong>Claimed by</strong><span>{row.claimed_by || 'Unclaimed'}</span></div><div className="easy-form-row"><strong>Service provider</strong><span>{row.service_provider || 'Not set'}</span></div><div className="easy-form-row"><strong>ETA</strong><span>{row.eta || 'Not set'}</span></div><div className="easy-form-row"><strong>Cost</strong><span>{money(row.cost)}</span></div></div>
-                </div>
-                {photos.length > 0 && <section style={{ marginTop: 14 }}><p className="easy-eyebrow" style={{ marginBottom: 9 }}>DRIVER PHOTOS</p><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,220px))', gap: 10 }}>{photos.map((photo) => <a key={photo.objectKey} href={photo.url} target="_blank" rel="noreferrer" title={photo.fileName} style={{ display: 'block', border: '1px solid #d9e1e8', borderRadius: 10, overflow: 'hidden', background: '#f8fafc' }}><img src={photo.url} alt={`Breakdown ${row.id} - ${photo.fileName}`} loading="lazy" style={{ display: 'block', width: '100%', height: 150, objectFit: 'cover' }} /></a>)}</div></section>}
+        <section className={s.card}>
+          <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>2</span><div><h2 className={s.cardTitle}>Service Provider & ETA</h2><p className={s.cardHelp}>Dispatch information only. Final cost is intentionally not entered here.</p></div></div></div>
+          <ProviderPicker row={selected} value={dispatch} disabled={isBusy} onChange={next=>updateDispatch(selected.id,next)}/>
+          <label className={s.field}>ETA<input className={s.input} value={dispatch.eta} disabled={isBusy} onChange={event=>updateDispatch(selected.id,{...dispatch,eta:event.target.value.slice(0,80)})} placeholder="Example: 40 min or 1:30 PM"/></label>
+          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={isBusy} onClick={()=>void saveProvider(selected)}>{isBusy?'Saving…':selected.stage<3?'Save & Mark En Route':'Save Provider / ETA'}</button></div>
+        </section>
 
-                <DriverReceiptReview breakdownId={row.id} onClosed={() => void load()} />
+        <section className={s.card}>
+          <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>3</span><div><h2 className={s.cardTitle}>Status</h2><p className={s.cardHelp}>The driver can update arrival and rolling from their phone. Office can still move the call forward.</p></div></div></div>
+          <div className={s.statusBox}>
+            <div className={s.statusRow}><span>Current stage</span><strong>{STAGE_LABELS[selected.stage]||selected.status}</strong></div>
+            <div className={s.statusRow}><span>Provider</span><strong>{selected.service_provider||'Not assigned'}</strong></div>
+            <div className={s.statusRow}><span>ETA</span><strong>{selected.eta||'Not set'}</strong></div>
+            <div className={s.statusRow}><span>On location</span><strong>{selected.on_location_at?dateTime(selected.on_location_at):'Not confirmed'}</strong></div>
+          </div>
+          {selected.stage<4?<div className={s.actions} style={{marginTop:11}}><button type="button" className={s.button} disabled={isBusy} onClick={()=>void markOnLocation(selected)}>{isBusy?'Saving…':'Mark On Location'}</button></div>:null}
+        </section>
 
-                <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}>
-                  <p className="easy-eyebrow" style={{ marginBottom: 10 }}>DIAGNOSTICS</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 10 }}>
-                    <label style={labelStyle}>Repair Type<select value={repairType} onChange={(e) => { setRepairTypes((current) => ({ ...current, [row.id]: e.target.value })); setRepairSubcategories((current) => ({ ...current, [row.id]: '' })); }} style={inputStyle} disabled={isBusy}>{options.map((category) => <option key={`${category.id}-${category.name}`} value={category.name}>{category.name}{category.active ? '' : ' (inactive)'}</option>)}</select></label>
-                    {selectedCategory?.subcategories.length ? <label style={labelStyle}>{selectedCategory.name} Issue<select value={repairSubcategory} onChange={(e) => setRepairSubcategories((current) => ({ ...current, [row.id]: e.target.value }))} style={inputStyle} disabled={isBusy}><option value="">Select issue</option>{selectedCategory.subcategories.map((subcategory) => <option key={subcategory.id} value={subcategory.name}>{subcategory.name}</option>)}</select></label> : null}
-                    <div style={{ padding: '9px 11px', border: '1px solid #d5dee8', borderRadius: 9, background: '#fff', color: '#334155', fontSize: 13, lineHeight: 1.45 }}><strong style={{ display: 'block', marginBottom: 4 }}>Reported Problem</strong>{row.description}</div>
-                  </div>
-                  <div className="easy-actions" style={{ marginTop: 10 }}><button type="button" className="easy-button orange" disabled={isBusy || (repairType === row.repair_category && repairSubcategory === String(row.repair_subcategory || ''))} onClick={() => void saveRepairType(row.id)}>{isBusy ? 'Saving...' : 'Save Repair Type'}</button></div>
-                </section>
-
-                <section style={{ marginTop: 16, padding: 14, background: '#f8fafc', border: '1px solid #dfe6ee', borderRadius: 12 }}><p className="easy-eyebrow" style={{ marginBottom: 10 }}>WHO WE USED</p><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 10 }}>
-                  <ProviderPicker row={row} disabled={isBusy} selectedName={draft.serviceProvider} selectedPhone={draft.serviceProviderPhone} onChoose={(provider) => chooseProvider(row.id, provider)} onClear={() => clearProvider(row.id)} />
-                  <label style={labelStyle}>ETA<input value={draft.eta} onChange={(e) => setDraftField(row.id, 'eta', e.target.value.slice(0, 80))} placeholder="Example: 45 min" style={inputStyle} /></label>
-                  <label style={labelStyle}>Cost<input value={draft.cost} onChange={(e) => setDraftField(row.id, 'cost', e.target.value.replace(/[^0-9.]/g, '').slice(0, 12))} placeholder="0.00" inputMode="decimal" style={inputStyle} /></label>
-                </div><div className="easy-actions" style={{ marginTop: 10 }}><button type="button" className="easy-button orange" disabled={isBusy} onClick={() => void saveDispatchDetails(row.id)}>{isBusy ? 'Saving...' : 'Save Provider / ETA'}</button></div></section>
-
-                <div className="easy-actions" style={{ marginTop: 14 }}>
-                  {!row.claimed_by_user_id && <button type="button" className="easy-button orange" disabled={isBusy} onClick={() => void claim(row.id)}>{isBusy ? 'Working...' : 'Claim'}</button>}
-                  {row.stage >= 2 && row.stage < 4 && <button type="button" className="easy-button primary" disabled={isBusy} onClick={() => void advanceStage(row.id, row.stage + 1)}>{isBusy ? 'Working...' : `Advance to ${STAGE_LABELS[row.stage + 1] ?? `Stage ${row.stage + 1}`}`}</button>}
-                  {row.stage < 5 && <button type="button" className="easy-button" disabled={isBusy} onClick={() => void clearNotBreakdown(row)} style={{ borderColor: '#b91c1c', color: '#991b1b', background: '#fff' }}>Clear — Not a Breakdown</button>}
-                </div>
-              </article>;
-            })}</div>
-          )}
-        </div></section>
+        <section className={`${s.card} ${s.cardWide}`}>
+          <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>4</span><div><h2 className={s.cardTitle}>Closeout / Payment</h2><p className={s.cardHelp}>Enter the final total after the repair is complete. Driver Rolling is tracked, but it does not block office closeout.</p></div></div></div>
+          <DriverReceiptReview breakdownId={selected.id} initialCost={selected.cost} providerName={selected.service_provider} onClosed={()=>{backToList();void load();}}/>
+        </section>
       </div>
-    </main>
-  );
+
+      <div className={s.bottomBar}><button type="button" className={s.button} disabled={loading} onClick={()=>void load()}>Refresh Status</button><button type="button" className={s.dangerButton} disabled={isBusy} onClick={()=>void clearNotBreakdown(selected)}>Clear — Not a Breakdown</button></div>
+    </div></main>;
+  }
+
+  const stageChips:Array<{key:StageFilter;label:string;count:number}>=[
+    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},
+  ];
+
+  return <main className={s.page}><div className={s.shell}>
+    <div className={s.header}><div><p className={s.eyebrow}>ROADSIDE OPERATIONS</p><h1 className={s.title}>Active Breakdowns</h1><p className={s.subtitle}>Multiple calls stay in one compact board. Open a call to update diagnostics, provider/ETA, status, final cost and closeout in one card.</p></div><div className={s.actions}><a className={s.button} href="/breakdowns/setup">Breakdown Setup</a><button className={s.button} type="button" onClick={()=>void load()} disabled={loading}>Refresh</button></div></div>
+    {message?<div className={s.notice}>{message}</div>:null}
+    <section className={s.metrics}><article className={s.metric}><span>Open</span><strong>{summary.open}</strong><small>All active roadside calls</small></article><article className={s.metric}><span>Reported</span><strong>{summary.reported}</strong><small>Needs diagnostics / dispatch</small></article><article className={s.metric}><span>En Route</span><strong>{summary.enRoute}</strong><small>Provider traveling</small></article><article className={s.metric}><span>On Location</span><strong>{summary.onLocation}</strong><small>Repair underway / closeout</small></article></section>
+
+    <section className={s.panel}>
+      <div className={s.panelHead}><div><h2 className={s.sectionTitle}>Breakdown Board</h2><p className={s.sectionCopy}>Tap or click one breakdown to open its single working card.</p></div><span className={s.badge}>{visible.length} shown</span></div>
+      <div className={s.filters}>
+        <input className={s.input} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search unit, driver, provider, category…"/>
+        <select className={s.select} value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)}><option value="">All Categories</option>{categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
+        <div className={s.chips}>{stageChips.map(item=><button type="button" key={item.key} className={filter===item.key?s.chipActive:s.chip} onClick={()=>setFilter(item.key)}>{item.label} {item.count}</button>)}</div>
+      </div>
+
+      {loading?<div className={s.empty}>Loading breakdowns…</div>:!visible.length?<div className={s.empty}>No open breakdowns match this view.</div>:<>
+        <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Breakdown</th><th>Unit</th><th>Category / Notes</th><th>Status</th><th>Driver</th><th>Provider / ETA</th><th>Final Cost</th><th>Updated</th><th></th></tr></thead><tbody>{visible.map(row=><tr key={row.id} onClick={()=>openBreakdown(row.id)}><td><strong>#{row.id}</strong></td><td><span className={s.unit}>{unitLabel(row)}</span><span className={s.muted}>{row.city}, {row.state}</span></td><td><strong>{row.repair_category}</strong><span className={s.muted}>{row.description}</span></td><td><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></td><td>{row.driver_name}<span className={s.muted}>{row.claimed_by?`Claimed by ${row.claimed_by}`:'Unclaimed'}</span></td><td>{row.service_provider||'Not assigned'}<span className={s.muted}>ETA {row.eta||'—'}</span></td><td><strong>{money(row.cost)}</strong></td><td>{dateTime(row.updated_at)}</td><td><button type="button" className={s.button} onClick={event=>{event.stopPropagation();openBreakdown(row.id);}}>Open</button></td></tr>)}</tbody></table></div>
+        <div className={s.mobileList}>{visible.map(row=><button type="button" key={row.id} className={s.mobileCard} style={{width:'100%',textAlign:'left',cursor:'pointer'}} onClick={()=>openBreakdown(row.id)}><div className={s.mobileTop}><div><span className={s.unit}>#{row.id} · {unitLabel(row)}</span><span className={s.muted}>{row.repair_category}</span></div><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></div><div className={s.mobileMeta}><span>{row.description}</span><span>{row.service_provider||'No provider'} · ETA {row.eta||'—'}</span><span>{row.driver_name} · {dateTime(row.updated_at)}</span></div></button>)}</div>
+      </>}
+    </section>
+  </div></main>;
 }
