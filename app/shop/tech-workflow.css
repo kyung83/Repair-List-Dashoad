@@ -1,0 +1,76 @@
+.tech-shop-shell{min-height:100vh}
+
+.tech-maintenance-header{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.tech-maintenance-status{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.tech-maintenance-tabs{margin-top:16px;padding:5px;border:1px solid #d8e1e8;border-radius:12px;background:#eef3f7;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+.tech-maintenance-tabs button{min-height:48px;padding:7px 9px;border:0;border-radius:9px;background:transparent;color:#566776;font:inherit;font-size:12px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.tech-maintenance-tabs button.active{background:#0d3156;color:#fff;box-shadow:0 2px 8px #0d315622}
+.tech-maintenance-tabs button:disabled{opacity:.5;cursor:default}
+.tech-maintenance-tabs b{min-width:21px;height:21px;padding:0 5px;border-radius:999px;background:#ffffffd9;color:#0d3156;display:inline-grid;place-items:center;font-size:10px}
+.tech-maintenance-tabs button.active b{background:#fff;color:#0d3156}
+.tech-section-strip{margin-top:12px;display:flex;gap:7px;overflow-x:auto;padding:2px 1px 7px;scrollbar-width:thin}
+.tech-section-strip button{flex:0 0 auto;min-height:42px;padding:6px 11px;border:1px solid #cbd7e0;border-radius:10px;background:#fff;color:#425566;font:inherit;font-size:11px;font-weight:900;cursor:pointer;display:grid;gap:2px;text-align:left}
+.tech-section-strip button.active{border-color:#f47b20;background:#fff4eb;color:#9f4b10;box-shadow:inset 0 0 0 1px #f47b20}
+.tech-section-strip button span{font-size:9px;font-weight:800;color:#778692}
+.tech-section-strip button.active span{color:#a65b25}
+.tech-maintenance-phase{scroll-margin-top:16px}
+.tech-inspection-progress{margin-top:14px;padding:11px 12px;border:1px solid #dde5eb;border-radius:11px;background:#f8fafb}
+.tech-inspection-progress-line{display:flex;justify-content:space-between;gap:12px;align-items:center;color:#52616e;font-size:12px;font-weight:900}
+.tech-inspection-progress-line strong{color:#173a5d}
+
+@media(max-width:900px){
+  .tech-shop-shell main{padding:14px 10px 118px!important}
+  .tech-shop-shell main>header{align-items:flex-start!important;gap:8px!important}
+  .tech-shop-shell main>header h1{font-size:27px!important;margin-top:4px!important}
+  .tech-shop-shell main>header p{line-height:1.35}
+  .tech-shop-shell button,.tech-shop-shell input,.tech-shop-shell select,.tech-shop-shell textarea{font-size:16px}
+  .tech-shop-shell button{touch-action:manipulation}
+
+  .tech-shop-shell .easy-checklist{margin-top:14px;padding:13px;border-radius:14px}
+  .tech-maintenance-header .easy-section-title{font-size:22px!important}
+  .tech-maintenance-header .easy-section-copy{font-size:12px}
+  .tech-maintenance-status{width:100%}
+  .tech-maintenance-status .easy-badge{flex:1;justify-content:center;min-height:38px}
+  .tech-maintenance-tabs{position:sticky;top:5px;z-index:45;margin-left:-5px;margin-right:-5px;background:#eef3f7f2;backdrop-filter:blur(12px)}
+  .tech-maintenance-tabs button{min-height:50px;font-size:11px;padding:5px}
+  .tech-maintenance-tabs b{min-width:19px;height:19px;font-size:9px}
+  .tech-section-strip{margin-left:-2px;margin-right:-2px}
+  .tech-section-strip button{min-height:46px}
+
+  .tech-shop-shell .easy-question{margin-top:12px;padding:14px;border-radius:13px}
+  .tech-shop-shell .easy-question h4{font-size:20px;line-height:1.28}
+  .tech-shop-shell .easy-result-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:7px}
+  .tech-shop-shell .easy-result{min-height:60px;padding:4px;font-size:14px}
+  .tech-shop-shell .easy-note{min-height:104px;font-size:16px}
+  .tech-shop-shell .easy-photo-line{display:grid;grid-template-columns:1fr 1fr;align-items:stretch}
+  .tech-shop-shell .easy-photo-line>.easy-button{width:100%;min-height:50px}
+  .tech-shop-shell .easy-photo-thumb{width:82px;height:82px}
+  .tech-shop-shell .easy-photo-thumb img{width:82px;height:82px}
+
+  .tech-shop-shell .easy-check-nav{position:sticky;bottom:82px;z-index:44;margin:12px -4px 0;padding:7px;border:1px solid #d4dee6;border-radius:12px;background:#fffffff2;backdrop-filter:blur(12px);box-shadow:0 8px 24px #07111d18}
+  .tech-shop-shell .easy-check-nav .easy-button{min-width:90px;min-height:48px}
+  .tech-shop-shell .easy-review{padding:10px;border:1px solid #e1e7eb;border-radius:10px;background:#f9fbfc}
+  .tech-shop-shell .easy-chip{min-width:42px;height:42px}
+
+  .tech-shop-shell .easy-finish{padding:13px}
+  .tech-shop-shell .easy-finish .easy-row{align-items:stretch!important;flex-direction:column!important}
+  .tech-shop-shell .easy-finish .easy-row>div:last-child{min-width:0!important;width:100%}
+  .tech-shop-shell .easy-finish .easy-row>div:last-child>div{grid-template-columns:minmax(0,1fr) 70px!important}
+  .tech-shop-shell .easy-finish .easy-row>div:last-child>div .easy-button{grid-column:1/-1}
+  .tech-shop-shell .easy-search-input{min-height:48px;font-size:16px}
+}
+
+@media(max-width:560px){
+  .tech-maintenance-tabs{grid-template-columns:repeat(4,minmax(72px,1fr));overflow-x:auto}
+  .tech-maintenance-tabs button{white-space:nowrap}
+  .tech-maintenance-tabs button span{display:none}
+  .tech-shop-shell .easy-result-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  .tech-shop-shell .easy-result{min-height:58px;font-size:13px}
+  .tech-shop-shell .easy-photo-line{grid-template-columns:1fr}
+  .tech-shop-shell .easy-check-nav span{font-size:11px!important;text-align:center}
+}
+
+@media(min-width:901px) and (max-width:1250px){
+  .tech-shop-shell .easy-checklist{padding:18px}
+  .tech-section-strip{flex-wrap:wrap;overflow:visible}
+}
