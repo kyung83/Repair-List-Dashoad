@@ -13,6 +13,7 @@ type DiagnosticDraft = { category:string; notes:string };
 type DispatchDraft = { serviceProvider:string; serviceProviderPhone:string; eta:string };
 type NewProviderDraft = { name:string; phone:string; city:string; state:string; zip:string };
 type StageFilter = 'all'|'reported'|'diagnostics'|'enroute'|'onlocation';
+type BusyAction = 'diagnostics'|'claim'|'provider'|'onLocation'|'clear'|null;
 
 const STAGE_LABELS:Record<number,string>={1:'Reported',2:'Diagnostics',3:'En Route',4:'On Location',5:'Complete'};
 const OFFICE_CATEGORY_DEFAULTS=['Fuel Issue'];
@@ -140,7 +141,7 @@ export default function BreakdownsPage(){
   const[categoryFilter,setCategoryFilter]=useState('');
   const[query,setQuery]=useState('');
   const[loading,setLoading]=useState(true);
-  const[busy,setBusy]=useState<number|null>(null);
+  const[busyAction,setBusyAction]=useState<BusyAction>(null);
   const[message,setMessage]=useState('');
   const initialLoadDone=useRef(false);
 
@@ -238,31 +239,31 @@ export default function BreakdownsPage(){
     const draft=diagnostics[row.id]||initialDiagnostic(row);
     if(!draft.category.trim()){setMessage('Choose our repair category.');return;}
     if(!draft.notes.trim()){setMessage('Add our diagnostic notes.');return;}
-    setBusy(row.id);setMessage('');
+    setBusyAction('diagnostics');setMessage('');
     try{
       const response=await fetch(`/api/breakdowns/${row.id}/repair-type`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({repairCategory:draft.category.trim(),notes:draft.notes.trim()})});
       const payload=await response.json() as {ok?:boolean;error?:string};
       if(!response.ok||!payload.ok)throw new Error(payload.error||'Our diagnosis could not be saved.');
       await load();setSelectedId(row.id);setDiagnostics(current=>({...current,[row.id]:draft}));setMessage(`Breakdown #${row.id} diagnosis saved.`);
     }catch(error){setMessage(error instanceof Error?error.message:'Our diagnosis could not be saved.');}
-    finally{setBusy(null);}
+    finally{setBusyAction(null);}
   }
 
   async function claim(row:BreakdownViewRow){
-    setBusy(row.id);setMessage('');
+    setBusyAction('claim');setMessage('');
     try{
       const response=await fetch(`/api/breakdowns/${row.id}/claim`,{method:'POST'});const payload=await response.json() as {ok?:boolean;error?:string};
       if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown could not be claimed.');
       await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} claimed.`);
     }catch(error){setMessage(error instanceof Error?error.message:'Breakdown could not be claimed.');}
-    finally{setBusy(null);}
+    finally{setBusyAction(null);}
   }
 
   async function saveProvider(row:BreakdownViewRow){
     const draft=dispatches[row.id]||initialDispatch(row);
     if(!draft.serviceProvider.trim()){setMessage('Choose the service provider first.');return;}
     if(!draft.eta.trim()){setMessage('Enter the ETA before dispatching.');return;}
-    setBusy(row.id);setMessage('');
+    setBusyAction('provider');setMessage('');
     try{
       const body:Record<string,unknown>={serviceProvider:draft.serviceProvider.trim(),serviceProviderPhone:draft.serviceProviderPhone.trim(),eta:draft.eta.trim()};
       if(row.stage<3){body.stage=3;body.status='en_route';}
@@ -271,36 +272,41 @@ export default function BreakdownsPage(){
       if(!response.ok||!payload.ok)throw new Error(payload.error||'Provider and ETA could not be saved.');
       await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} provider and ETA saved. Driver screen updated.`);
     }catch(error){setMessage(error instanceof Error?error.message:'Provider and ETA could not be saved.');}
-    finally{setBusy(null);}
+    finally{setBusyAction(null);}
   }
 
   async function markOnLocation(row:BreakdownViewRow){
-    setBusy(row.id);setMessage('');
+    setBusyAction('onLocation');setMessage('');
     try{
       const response=await fetch(`/api/breakdowns/${row.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({stage:4,status:'on_location',onLocation:true})});
       const payload=await response.json() as {ok?:boolean;error?:string};
       if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown could not be marked on location.');
       await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} marked On Location.`);
     }catch(error){setMessage(error instanceof Error?error.message:'Breakdown could not be updated.');}
-    finally{setBusy(null);}
+    finally{setBusyAction(null);}
   }
 
   async function clearNotBreakdown(row:BreakdownViewRow){
     if(!window.confirm(`Clear ${unitLabel(row)} for ${row.driver_name} as NOT A BREAKDOWN?\n\nThis closes the linked repair as Cancelled. The history is kept.`))return;
-    setBusy(row.id);setMessage('');
+    setBusyAction('clear');setMessage('');
     try{
       const response=await fetch(`/api/breakdowns/${row.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({notBreakdown:true})});const payload=await response.json() as {ok?:boolean;error?:string};
       if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown could not be cleared.');
       backToList();await load();setMessage(`Breakdown #${row.id} cleared as not a breakdown.`);
     }catch(error){setMessage(error instanceof Error?error.message:'Breakdown could not be cleared.');}
-    finally{setBusy(null);}
+    finally{setBusyAction(null);}
   }
 
   if(selected){
     const diagnostic=diagnostics[selected.id]||initialDiagnostic(selected);
     const dispatch=dispatches[selected.id]||initialDispatch(selected);
     const photos=photosByBreakdown[selected.id]||[];
-    const isBusy=busy===selected.id;
+    const diagnosticsBusy=busyAction==='diagnostics';
+    const claimBusy=busyAction==='claim';
+    const providerBusy=busyAction==='provider';
+    const onLocationBusy=busyAction==='onLocation';
+    const clearBusy=busyAction==='clear';
+    const anyActionBusy=busyAction!==null;
     const categoryOptions=uniqueNames([diagnostic.category,...officeCategoryNames]);
     return <main className={s.page}><div className={s.shell}>
       <div className={s.detailHeader}>
@@ -338,16 +344,16 @@ export default function BreakdownsPage(){
             <b>Driver notes:</b> {selected.description||'No notes entered.'}
           </div>
           {photos.length?<div className={s.photoGrid}>{photos.map(photo=><a className={s.photo} key={photo.objectKey} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.fileName} loading="lazy"/></a>)}</div>:null}
-          <label className={s.field}>Our Repair Category<select className={s.select} value={diagnostic.category} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{category:event.target.value})}><option value="">Choose our diagnosis…</option>{categoryOptions.map(category=><option key={category} value={category}>{category}</option>)}</select></label>
-          <label className={s.field}>Our Notes<textarea className={s.textarea} value={diagnostic.notes} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{notes:event.target.value.slice(0,2000)})} placeholder="Example: Fuel issue — suspect fuel pump; engine sputters and dies."/></label>
-          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={isBusy} onClick={()=>void saveDiagnostics(selected)}>{isBusy?'Saving…':'Save Our Diagnosis'}</button>{!selected.claimed_by_user_id?<button type="button" className={s.button} disabled={isBusy} onClick={()=>void claim(selected)}>Claim Breakdown</button>:null}</div>
+          <label className={s.field}>Our Repair Category<select className={s.select} value={diagnostic.category} disabled={diagnosticsBusy} onChange={event=>updateDiagnostic(selected.id,{category:event.target.value})}><option value="">Choose our diagnosis…</option>{categoryOptions.map(category=><option key={category} value={category}>{category}</option>)}</select></label>
+          <label className={s.field}>Our Notes<textarea className={s.textarea} value={diagnostic.notes} disabled={diagnosticsBusy} onChange={event=>updateDiagnostic(selected.id,{notes:event.target.value.slice(0,2000)})} placeholder="Example: Fuel issue — suspect fuel pump; engine sputters and dies."/></label>
+          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={anyActionBusy} onClick={()=>void saveDiagnostics(selected)}>{diagnosticsBusy?'Saving…':'Save Our Diagnosis'}</button>{!selected.claimed_by_user_id?<button type="button" className={s.button} disabled={anyActionBusy} onClick={()=>void claim(selected)}>{claimBusy?'Claiming…':'Claim Breakdown'}</button>:null}</div>
         </section>
 
         <section className={s.card}>
           <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>2</span><div><h2 className={s.cardTitle}>Service Provider & ETA</h2><p className={s.cardHelp}>Dispatch information only. Final cost is intentionally not entered here.</p></div></div></div>
-          <ProviderPicker row={selected} value={dispatch} disabled={isBusy} onChange={next=>updateDispatch(selected.id,next)}/>
-          <label className={s.field}>ETA<input className={s.input} value={dispatch.eta} disabled={isBusy} onChange={event=>updateDispatch(selected.id,{...dispatch,eta:event.target.value.slice(0,80)})} placeholder="Example: 40 min or 1:30 PM"/></label>
-          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={isBusy} onClick={()=>void saveProvider(selected)}>{isBusy?'Saving…':selected.stage<3?'Save & Mark En Route':'Save Provider / ETA'}</button></div>
+          <ProviderPicker row={selected} value={dispatch} disabled={providerBusy} onChange={next=>updateDispatch(selected.id,next)}/>
+          <label className={s.field}>ETA<input className={s.input} value={dispatch.eta} disabled={providerBusy} onChange={event=>updateDispatch(selected.id,{...dispatch,eta:event.target.value.slice(0,80)})} placeholder="Example: 40 min or 1:30 PM"/></label>
+          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={anyActionBusy} onClick={()=>void saveProvider(selected)}>{providerBusy?'Saving…':selected.stage<3?'Save & Mark En Route':'Save Provider / ETA'}</button></div>
         </section>
 
         <section className={s.card}>
@@ -358,7 +364,7 @@ export default function BreakdownsPage(){
             <div className={s.statusRow}><span>ETA</span><strong>{selected.eta||'Not set'}</strong></div>
             <div className={s.statusRow}><span>On location</span><strong>{selected.on_location_at?dateTime(selected.on_location_at):'Not confirmed'}</strong></div>
           </div>
-          {selected.stage<4?<div className={s.actions} style={{marginTop:11}}><button type="button" className={s.button} disabled={isBusy} onClick={()=>void markOnLocation(selected)}>{isBusy?'Saving…':'Mark On Location'}</button></div>:null}
+          {selected.stage<4?<div className={s.actions} style={{marginTop:11}}><button type="button" className={s.button} disabled={anyActionBusy} onClick={()=>void markOnLocation(selected)}>{onLocationBusy?'Saving…':'Mark On Location'}</button></div>:null}
         </section>
 
         <section className={`${s.card} ${s.cardWide}`}>
@@ -367,7 +373,7 @@ export default function BreakdownsPage(){
         </section>
       </div>
 
-      <div className={s.bottomBar}><button type="button" className={s.button} disabled={loading} onClick={()=>void load()}>Refresh Status</button><button type="button" className={s.dangerButton} disabled={isBusy} onClick={()=>void clearNotBreakdown(selected)}>Clear — Not a Breakdown</button></div>
+      <div className={s.bottomBar}><button type="button" className={s.button} disabled={loading} onClick={()=>void load()}>Refresh Status</button><button type="button" className={s.dangerButton} disabled={anyActionBusy} onClick={()=>void clearNotBreakdown(selected)}>{clearBusy?'Clearing…':'Clear — Not a Breakdown'}</button></div>
     </div></main>;
   }
 
