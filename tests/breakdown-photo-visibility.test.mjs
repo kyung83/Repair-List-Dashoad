@@ -21,7 +21,7 @@ test('roadside photos remain private but are readable by breakdown managers', ()
 
 test('breakdown dashboard loads and renders driver photos', () => {
   assert.match(breakdownPage, /\/api\/breakdowns\/photos\?open=1/);
-  assert.match(breakdownPage, /DRIVER PHOTOS/);
+  assert.match(breakdownPage, /photos\.length\?<div className=\{s\.photoGrid\}/);
   assert.match(breakdownPage, /src=\{photo\.url\}/);
   assert.match(breakdownPage, /href=\{photo\.url\}/);
 });
