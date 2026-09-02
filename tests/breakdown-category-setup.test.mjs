@@ -55,19 +55,21 @@ test('manager setup page can add, edit, order and deactivate categories and subc
   assert.match(route,/requireManager/);
 });
 
-test('office breakdown dashboard uses configured categories with notes instead of a required subcategory',async()=>{
+test('office breakdown dashboard preserves driver report and stores a separate office diagnosis',async()=>{
   const [page,repairTypeRoute]=await Promise.all([
     read('app/breakdowns/page.tsx'),
     read('app/api/breakdowns/[id]/repair-type/route.ts'),
   ]);
-  assert.match(page,/fetch\('\/api\/breakdown-categories'/);
-  assert.match(page,/href="\/breakdowns\/setup"/);
-  assert.match(page,/Repair Category/);
-  assert.match(page,/>Notes</);
-  assert.match(page,/Original driver selection/);
-  assert.doesNotMatch(page,/Select issue/);
-  assert.match(repairTypeRoute,/validateBreakdownCategorySelection\(env\.DB, requestedCategory, '', false\)/);
-  assert.match(repairTypeRoute,/repair_subcategory = NULL/);
-  assert.match(repairTypeRoute,/position_codes = \?/);
-  assert.match(repairTypeRoute,/description = \?/);
+  assert.match(page,/Driver Report — Read Only/);
+  assert.match(page,/Our Repair Category/);
+  assert.match(page,/Our Notes/);
+  assert.match(page,/Fuel Issue/);
+  assert.match(page,/row\.repair_needed/);
+  assert.match(page,/selected\.repair_category/);
+  assert.match(page,/selected\.description/);
+  assert.match(repairTypeRoute,/SELECT b\.repair_needed, r\.description AS diagnostic_notes/);
+  assert.match(repairTypeRoute,/SET repair_needed = \?/);
+  assert.match(repairTypeRoute,/UPDATE repairs[\s\S]*SET title = \?, description = \?/);
+  assert.doesNotMatch(repairTypeRoute,/SET repair_category = \?/);
+  assert.doesNotMatch(repairTypeRoute,/SET repair_category = \?, repair_subcategory/);
 });
