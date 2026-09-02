@@ -55,16 +55,19 @@ test('manager setup page can add, edit, order and deactivate categories and subc
   assert.match(route,/requireManager/);
 });
 
-test('office breakdown dashboard uses the same configured category directory',async()=>{
+test('office breakdown dashboard uses configured categories with notes instead of a required subcategory',async()=>{
   const [page,repairTypeRoute]=await Promise.all([
     read('app/breakdowns/page.tsx'),
     read('app/api/breakdowns/[id]/repair-type/route.ts'),
   ]);
   assert.match(page,/fetch\('\/api\/breakdown-categories'/);
   assert.match(page,/href="\/breakdowns\/setup"/);
-  assert.match(page,/repair_subcategory/);
-  assert.match(page,/position_codes/);
-  assert.doesNotMatch(page,/const REPAIR_CATEGORIES/);
-  assert.match(repairTypeRoute,/validateBreakdownCategorySelection/);
-  assert.match(repairTypeRoute,/position_codes = NULL/);
+  assert.match(page,/Repair Category/);
+  assert.match(page,/>Notes</);
+  assert.match(page,/Original driver selection/);
+  assert.doesNotMatch(page,/Select issue/);
+  assert.match(repairTypeRoute,/validateBreakdownCategorySelection\(env\.DB, requestedCategory, '', false\)/);
+  assert.match(repairTypeRoute,/repair_subcategory = NULL/);
+  assert.match(repairTypeRoute,/position_codes = \?/);
+  assert.match(repairTypeRoute,/description = \?/);
 });
