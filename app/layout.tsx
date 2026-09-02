@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import AppNav from "./app-nav";
+import TechnicianMobileDock from "./technician-mobile-dock";
 import "./globals.css";
 import "./professional-shell.css";
 import "./northern-brand.css";
 import "./easy-ui.css";
 import "./sidebar-shell.css";
+import "./technician-mobile-dock.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -23,6 +25,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AppNav />
         <div className="app-shell-content">{children}</div>
+        <TechnicianMobileDock />
         <script src="/breakdown-photo-prep.js" defer />
         <script dangerouslySetInnerHTML={{ __html: `(function(){
           var APP_TIME_ZONE='America/Detroit';
