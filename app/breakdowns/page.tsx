@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BreakdownRow } from '@/lib/roadside-breakdowns';
 import DriverReceiptReview from './driver-receipt-review';
 import s from './breakdown-flow.module.css';
@@ -130,6 +130,7 @@ export default function BreakdownsPage(){
   const[loading,setLoading]=useState(true);
   const[busy,setBusy]=useState<number|null>(null);
   const[message,setMessage]=useState('');
+  const initialLoadDone=useRef(false);
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -152,13 +153,15 @@ export default function BreakdownsPage(){
       setDiagnostics(Object.fromEntries(rows.map(row=>[row.id,initialDiagnostic(row)])));
       setDispatches(Object.fromEntries(rows.map(row=>[row.id,initialDispatch(row)])));
       setMessage('');
+      const firstLoad=!initialLoadDone.current;
       const requested=Number(new URLSearchParams(window.location.search).get('id')||0);
       setSelectedId(current=>{
         if(current&&rows.some(row=>row.id===current))return current;
         if(Number.isInteger(requested)&&requested>0&&rows.some(row=>row.id===requested))return requested;
-        if(rows.length===1)return rows[0].id;
+        if(firstLoad&&rows.length===1)return rows[0].id;
         return null;
       });
+      initialLoadDone.current=true;
     }catch(error){setMessage(error instanceof Error?error.message:'Failed to load breakdowns.');}
     finally{setLoading(false);}
   },[]);
