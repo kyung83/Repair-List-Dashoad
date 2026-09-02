@@ -88,20 +88,22 @@ test('optional receipt uses the same Outside Work AI reader and preserves the or
   assert.match(migration,/review_status TEXT NOT NULL DEFAULT 'pending'/);
 });
 
-test('office must confirm before the breakdown and linked repair close',async()=>{
-  const [lib,panel,page]=await Promise.all([
-    read('lib/breakdown-driver-followup.ts'),
+test('office closeout requires final cost but does not require driver rolling',async()=>{
+  const [route,panel,page]=await Promise.all([
+    read('app/api/breakdowns/receipts/route.ts'),
     read('app/breakdowns/driver-receipt-review.tsx'),
     read('app/breakdowns/page.tsx'),
   ]);
-  assert.match(lib,/if\(!row\.rolling_at\)throw new Error\('The driver has not marked Rolling yet\.'/);
-  assert.match(lib,/review_status='confirmed'/);
-  assert.match(lib,/UPDATE roadside_breakdowns SET stage=5,status='complete'/);
-  assert.match(lib,/UPDATE repairs SET status='Completed'/);
+  assert.doesNotMatch(route,/driver has not marked Rolling/i);
+  assert.match(route,/Enter the final total cost/);
+  assert.match(route,/UPDATE roadside_breakdowns[\s\S]*stage=5,status='complete'/);
+  assert.match(route,/UPDATE repairs[\s\S]*outside_cost=\?/);
+  assert.match(panel,/Rolling is optional for office closeout/);
+  assert.match(panel,/Final Total Cost/);
   assert.match(panel,/Confirm & Close Breakdown/);
-  assert.match(panel,/Receipt Review/);
+  assert.match(page,/Closeout \/ Payment/);
   assert.match(page,/DriverReceiptReview/);
-  assert.doesNotMatch(page,/row\.stage < 5 && <button[^>]*Advance to/s);
+  assert.doesNotMatch(page,/label[^>]*>Cost<input/);
 });
 
 test('driver follow-up survives refresh without storing a raw token in D1',async()=>{
