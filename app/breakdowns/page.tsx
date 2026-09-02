@@ -15,6 +15,7 @@ type NewProviderDraft = { name:string; phone:string; city:string; state:string; 
 type StageFilter = 'all'|'reported'|'diagnostics'|'enroute'|'onlocation';
 
 const STAGE_LABELS:Record<number,string>={1:'Reported',2:'Diagnostics',3:'En Route',4:'On Location',5:'Complete'};
+const OFFICE_CATEGORY_DEFAULTS=['Fuel Issue'];
 
 function unitLabel(row:BreakdownRow){
   const type=String(row.equipment_type||'').toLowerCase()==='trailer'?'Trailer':'Truck';
@@ -32,7 +33,18 @@ function stageBadge(stage:number){
   if(stage===1)return s.badgeRed;
   return s.badgeOrange;
 }
-function initialDiagnostic(row:BreakdownViewRow):DiagnosticDraft{return{category:row.repair_category||'',notes:row.description||''};}
+function uniqueNames(values:string[]){
+  const seen=new Set<string>();
+  const result:string[]=[];
+  for(const raw of values){
+    const name=String(raw||'').trim();
+    const key=name.toLowerCase();
+    if(!name||seen.has(key))continue;
+    seen.add(key);result.push(name);
+  }
+  return result;
+}
+function initialDiagnostic(row:BreakdownViewRow):DiagnosticDraft{return{category:row.repair_needed||'',notes:''};}
 function initialDispatch(row:BreakdownRow):DispatchDraft{return{serviceProvider:row.service_provider||'',serviceProviderPhone:row.service_provider_phone||'',eta:row.eta||''};}
 
 function ProviderPicker({row,value,disabled,onChange}:{row:BreakdownRow;value:DispatchDraft;disabled:boolean;onChange:(next:DispatchDraft)=>void}){
@@ -150,7 +162,7 @@ export default function BreakdownsPage(){
       const photos=Array.isArray(photoPayload.photos)?photoPayload.photos:[];
       const grouped=photos.reduce<Record<number,BreakdownPhoto[]>>((current,photo)=>{const id=Number(photo.breakdownId);if(Number.isFinite(id))(current[id]||=[]).push(photo);return current;},{});
       setBreakdowns(rows);setPhotosByBreakdown(grouped);setCategories(Array.isArray(categoryPayload.categories)?categoryPayload.categories:[]);
-      setDiagnostics(Object.fromEntries(rows.map(row=>[row.id,initialDiagnostic(row)])));
+      setDiagnostics(current=>Object.fromEntries(rows.map(row=>[row.id,current[row.id]||initialDiagnostic(row)])));
       setDispatches(Object.fromEntries(rows.map(row=>[row.id,initialDispatch(row)])));
       setMessage('');
       const firstLoad=!initialLoadDone.current;
@@ -166,13 +178,28 @@ export default function BreakdownsPage(){
     finally{setLoading(false);}
   },[]);
 
+  const loadDiagnostic=useCallback(async(id:number)=>{
+    try{
+      const response=await fetch(`/api/breakdowns/${id}/repair-type`,{cache:'no-store'});
+      const payload=await response.json() as {repairCategory?:string;notes?:string;error?:string};
+      if(!response.ok)throw new Error(payload.error||'Our diagnosis could not be loaded.');
+      setDiagnostics(current=>({...current,[id]:{category:String(payload.repairCategory||''),notes:String(payload.notes||'')}}));
+    }catch(error){setMessage(error instanceof Error?error.message:'Our diagnosis could not be loaded.');}
+  },[]);
+
   useEffect(()=>{void load();},[load]);
   useEffect(()=>{
     const pop=()=>{const id=Number(new URLSearchParams(window.location.search).get('id')||0);setSelectedId(Number.isInteger(id)&&id>0?id:null);};
     window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);
   },[]);
+  useEffect(()=>{if(selectedId)void loadDiagnostic(selectedId);},[selectedId,loadDiagnostic]);
 
   const selected=useMemo(()=>breakdowns.find(row=>row.id===selectedId)||null,[breakdowns,selectedId]);
+  const officeCategoryNames=useMemo(()=>uniqueNames([
+    ...OFFICE_CATEGORY_DEFAULTS,
+    ...categories.map(category=>category.name),
+    ...breakdowns.map(row=>row.repair_needed||''),
+  ]),[categories,breakdowns]);
   const summary=useMemo(()=>({
     open:breakdowns.length,
     reported:breakdowns.filter(row=>row.stage===1).length,
@@ -187,9 +214,10 @@ export default function BreakdownsPage(){
       if(filter==='diagnostics'&&row.stage!==2)return false;
       if(filter==='enroute'&&row.stage!==3)return false;
       if(filter==='onlocation'&&row.stage!==4)return false;
-      if(categoryFilter&&row.repair_category!==categoryFilter)return false;
+      const displayCategory=row.repair_needed||row.repair_category;
+      if(categoryFilter&&displayCategory!==categoryFilter)return false;
       if(!needle)return true;
-      return [row.id,row.unit,row.driver_name,row.city,row.state,row.repair_category,row.description,row.service_provider,row.eta].join(' ').toLowerCase().includes(needle);
+      return [row.id,row.unit,row.driver_name,row.city,row.state,row.repair_category,row.repair_needed,row.description,row.service_provider,row.eta].join(' ').toLowerCase().includes(needle);
     });
   },[breakdowns,filter,categoryFilter,query]);
 
@@ -208,15 +236,15 @@ export default function BreakdownsPage(){
 
   async function saveDiagnostics(row:BreakdownViewRow){
     const draft=diagnostics[row.id]||initialDiagnostic(row);
-    if(!draft.category.trim()){setMessage('Choose the repair category.');return;}
-    if(!draft.notes.trim()){setMessage('Add a short note describing the issue or what was found.');return;}
+    if(!draft.category.trim()){setMessage('Choose our repair category.');return;}
+    if(!draft.notes.trim()){setMessage('Add our diagnostic notes.');return;}
     setBusy(row.id);setMessage('');
     try{
       const response=await fetch(`/api/breakdowns/${row.id}/repair-type`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({repairCategory:draft.category.trim(),notes:draft.notes.trim()})});
       const payload=await response.json() as {ok?:boolean;error?:string};
-      if(!response.ok||!payload.ok)throw new Error(payload.error||'Diagnostics could not be saved.');
-      await load();setSelectedId(row.id);setMessage(`Breakdown #${row.id} diagnostics saved.`);
-    }catch(error){setMessage(error instanceof Error?error.message:'Diagnostics could not be saved.');}
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Our diagnosis could not be saved.');
+      await load();setSelectedId(row.id);setDiagnostics(current=>({...current,[row.id]:draft}));setMessage(`Breakdown #${row.id} diagnosis saved.`);
+    }catch(error){setMessage(error instanceof Error?error.message:'Our diagnosis could not be saved.');}
     finally{setBusy(null);}
   }
 
@@ -273,7 +301,7 @@ export default function BreakdownsPage(){
     const dispatch=dispatches[selected.id]||initialDispatch(selected);
     const photos=photosByBreakdown[selected.id]||[];
     const isBusy=busy===selected.id;
-    const categoryOptions=categories.some(item=>item.name===diagnostic.category)?categories:[{id:-1,name:diagnostic.category,active:false,sortOrder:9999,requiresPosition:false,requiresTireSize:false},...categories].filter(item=>item.name);
+    const categoryOptions=uniqueNames([diagnostic.category,...officeCategoryNames]);
     return <main className={s.page}><div className={s.shell}>
       <div className={s.detailHeader}>
         <div>
@@ -301,13 +329,18 @@ export default function BreakdownsPage(){
 
       <div className={s.workflow}>
         <section className={s.card}>
-          <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>1</span><div><h2 className={s.cardTitle}>Diagnostics</h2><p className={s.cardHelp}>Choose the main repair category and keep the detail in Notes. No office subcategory is required.</p></div></div></div>
-          <label className={s.field}>Repair Category<select className={s.select} value={diagnostic.category} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{category:event.target.value})}>{categoryOptions.map(category=><option key={`${category.id}-${category.name}`} value={category.name}>{category.name}{category.active?'':' (inactive)'}</option>)}</select></label>
-          <label className={s.field}>Notes<textarea className={s.textarea} value={diagnostic.notes} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{notes:event.target.value.slice(0,2000)})} placeholder="What happened / what did we find?"/></label>
-          {selected.position_codes?.length?<div className={s.reported}><strong>Position reported by driver:</strong> {selected.position_codes.join(', ')}</div>:null}
-          {selected.repair_subcategory?<div className={s.reported}><strong>Original driver selection:</strong> {selected.repair_subcategory}. This stays in history but is no longer required for office closeout.</div>:null}
+          <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>1</span><div><h2 className={s.cardTitle}>Driver Report & Our Diagnosis</h2><p className={s.cardHelp}>The driver report stays read-only. Choose our repair category and write our own notes below it.</p></div></div></div>
+          <div className={s.reported}>
+            <strong>Driver Report — Read Only</strong><br/>
+            <b>Category:</b> {selected.repair_category||'Not entered'}
+            {selected.repair_subcategory?<> · <b>Issue:</b> {selected.repair_subcategory}</>:null}<br/>
+            {selected.position_codes?.length?<><b>Position:</b> {selected.position_codes.join(', ')}<br/></>:null}
+            <b>Driver notes:</b> {selected.description||'No notes entered.'}
+          </div>
           {photos.length?<div className={s.photoGrid}>{photos.map(photo=><a className={s.photo} key={photo.objectKey} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.fileName} loading="lazy"/></a>)}</div>:null}
-          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={isBusy} onClick={()=>void saveDiagnostics(selected)}>{isBusy?'Saving…':'Save Diagnostics'}</button>{!selected.claimed_by_user_id?<button type="button" className={s.button} disabled={isBusy} onClick={()=>void claim(selected)}>Claim Breakdown</button>:null}</div>
+          <label className={s.field}>Our Repair Category<select className={s.select} value={diagnostic.category} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{category:event.target.value})}><option value="">Choose our diagnosis…</option>{categoryOptions.map(category=><option key={category} value={category}>{category}</option>)}</select></label>
+          <label className={s.field}>Our Notes<textarea className={s.textarea} value={diagnostic.notes} disabled={isBusy} onChange={event=>updateDiagnostic(selected.id,{notes:event.target.value.slice(0,2000)})} placeholder="Example: Fuel issue — suspect fuel pump; engine sputters and dies."/></label>
+          <div className={s.actions} style={{marginTop:11}}><button type="button" className={s.orangeButton} disabled={isBusy} onClick={()=>void saveDiagnostics(selected)}>{isBusy?'Saving…':'Save Our Diagnosis'}</button>{!selected.claimed_by_user_id?<button type="button" className={s.button} disabled={isBusy} onClick={()=>void claim(selected)}>Claim Breakdown</button>:null}</div>
         </section>
 
         <section className={s.card}>
@@ -343,7 +376,7 @@ export default function BreakdownsPage(){
   ];
 
   return <main className={s.page}><div className={s.shell}>
-    <div className={s.header}><div><p className={s.eyebrow}>ROADSIDE OPERATIONS</p><h1 className={s.title}>Active Breakdowns</h1><p className={s.subtitle}>Multiple calls stay in one compact board. Open a call to update diagnostics, provider/ETA, status, final cost and closeout in one card.</p></div><div className={s.actions}><a className={s.button} href="/breakdowns/setup">Breakdown Setup</a><button className={s.button} type="button" onClick={()=>void load()} disabled={loading}>Refresh</button></div></div>
+    <div className={s.header}><div><p className={s.eyebrow}>ROADSIDE OPERATIONS</p><h1 className={s.title}>Active Breakdowns</h1><p className={s.subtitle}>Multiple calls stay in one compact board. The driver report is preserved separately from our diagnosis, provider/ETA, status, final cost and closeout.</p></div><div className={s.actions}><a className={s.button} href="/breakdowns/setup">Breakdown Setup</a><button className={s.button} type="button" onClick={()=>void load()} disabled={loading}>Refresh</button></div></div>
     {message?<div className={s.notice}>{message}</div>:null}
     <section className={s.metrics}><article className={s.metric}><span>Open</span><strong>{summary.open}</strong><small>All active roadside calls</small></article><article className={s.metric}><span>Reported</span><strong>{summary.reported}</strong><small>Needs diagnostics / dispatch</small></article><article className={s.metric}><span>En Route</span><strong>{summary.enRoute}</strong><small>Provider traveling</small></article><article className={s.metric}><span>On Location</span><strong>{summary.onLocation}</strong><small>Repair underway / closeout</small></article></section>
 
@@ -351,13 +384,13 @@ export default function BreakdownsPage(){
       <div className={s.panelHead}><div><h2 className={s.sectionTitle}>Breakdown Board</h2><p className={s.sectionCopy}>Tap or click one breakdown to open its single working card.</p></div><span className={s.badge}>{visible.length} shown</span></div>
       <div className={s.filters}>
         <input className={s.input} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search unit, driver, provider, category…"/>
-        <select className={s.select} value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)}><option value="">All Categories</option>{categories.map(category=><option key={category.id} value={category.name}>{category.name}</option>)}</select>
+        <select className={s.select} value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)}><option value="">All Categories</option>{officeCategoryNames.map(category=><option key={category} value={category}>{category}</option>)}</select>
         <div className={s.chips}>{stageChips.map(item=><button type="button" key={item.key} className={filter===item.key?s.chipActive:s.chip} onClick={()=>setFilter(item.key)}>{item.label} {item.count}</button>)}</div>
       </div>
 
       {loading?<div className={s.empty}>Loading breakdowns…</div>:!visible.length?<div className={s.empty}>No open breakdowns match this view.</div>:<>
-        <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Breakdown</th><th>Unit</th><th>Category / Notes</th><th>Status</th><th>Driver</th><th>Provider / ETA</th><th>Final Cost</th><th>Updated</th><th></th></tr></thead><tbody>{visible.map(row=><tr key={row.id} onClick={()=>openBreakdown(row.id)}><td><strong>#{row.id}</strong></td><td><span className={s.unit}>{unitLabel(row)}</span><span className={s.muted}>{row.city}, {row.state}</span></td><td><strong>{row.repair_category}</strong><span className={s.muted}>{row.description}</span></td><td><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></td><td>{row.driver_name}<span className={s.muted}>{row.claimed_by?`Claimed by ${row.claimed_by}`:'Unclaimed'}</span></td><td>{row.service_provider||'Not assigned'}<span className={s.muted}>ETA {row.eta||'—'}</span></td><td><strong>{money(row.cost)}</strong></td><td>{dateTime(row.updated_at)}</td><td><button type="button" className={s.button} onClick={event=>{event.stopPropagation();openBreakdown(row.id);}}>Open</button></td></tr>)}</tbody></table></div>
-        <div className={s.mobileList}>{visible.map(row=><button type="button" key={row.id} className={s.mobileCard} style={{width:'100%',textAlign:'left',cursor:'pointer'}} onClick={()=>openBreakdown(row.id)}><div className={s.mobileTop}><div><span className={s.unit}>#{row.id} · {unitLabel(row)}</span><span className={s.muted}>{row.repair_category}</span></div><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></div><div className={s.mobileMeta}><span>{row.description}</span><span>{row.service_provider||'No provider'} · ETA {row.eta||'—'}</span><span>{row.driver_name} · {dateTime(row.updated_at)}</span></div></button>)}</div>
+        <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Breakdown</th><th>Unit</th><th>Our Diagnosis / Driver Report</th><th>Status</th><th>Driver</th><th>Provider / ETA</th><th>Final Cost</th><th>Updated</th><th></th></tr></thead><tbody>{visible.map(row=><tr key={row.id} onClick={()=>openBreakdown(row.id)}><td><strong>#{row.id}</strong></td><td><span className={s.unit}>{unitLabel(row)}</span><span className={s.muted}>{row.city}, {row.state}</span></td><td><strong>{row.repair_needed||'Diagnosis not entered'}</strong><span className={s.muted}>Driver: {row.repair_category}{row.description?` — ${row.description}`:''}</span></td><td><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></td><td>{row.driver_name}<span className={s.muted}>{row.claimed_by?`Claimed by ${row.claimed_by}`:'Unclaimed'}</span></td><td>{row.service_provider||'Not assigned'}<span className={s.muted}>ETA {row.eta||'—'}</span></td><td><strong>{money(row.cost)}</strong></td><td>{dateTime(row.updated_at)}</td><td><button type="button" className={s.button} onClick={event=>{event.stopPropagation();openBreakdown(row.id);}}>Open</button></td></tr>)}</tbody></table></div>
+        <div className={s.mobileList}>{visible.map(row=><button type="button" key={row.id} className={s.mobileCard} style={{width:'100%',textAlign:'left',cursor:'pointer'}} onClick={()=>openBreakdown(row.id)}><div className={s.mobileTop}><div><span className={s.unit}>#{row.id} · {unitLabel(row)}</span><span className={s.muted}>{row.repair_needed||'Diagnosis not entered'}</span></div><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></div><div className={s.mobileMeta}><span>Driver: {row.repair_category}{row.description?` — ${row.description}`:''}</span><span>{row.service_provider||'No provider'} · ETA {row.eta||'—'}</span><span>{row.driver_name} · {dateTime(row.updated_at)}</span></div></button>)}</div>
       </>}
     </section>
   </div></main>;
