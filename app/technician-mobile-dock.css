@@ -1,17 +1,19 @@
 .tech-mobile-dock,.tech-active-work-ribbon,.tech-mobile-more{display:none}
 
 @media(max-width:900px){
+  body:has(.tech-shop-shell) .app-sidebar{display:none!important}
+  body:has(.tech-shop-shell) .app-shell-content{margin-left:0!important;padding-bottom:calc(84px + env(safe-area-inset-bottom))!important}
   body.technician-mobile-enabled .app-sidebar{display:none!important}
-  body.technician-mobile-enabled .app-shell-content{margin-left:0!important;padding-bottom:76px}
+  body.technician-mobile-enabled .app-shell-content{margin-left:0!important;padding-bottom:calc(84px + env(safe-area-inset-bottom))!important}
 
-  .tech-mobile-dock{position:fixed;left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom));z-index:180;min-height:64px;padding:5px;border:1px solid #cbd7e0;border-radius:16px;background:#ffffffee;backdrop-filter:blur(14px);box-shadow:0 12px 34px #07111d35;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px}
-  .tech-mobile-dock a,.tech-mobile-dock button{position:relative;min-width:0;min-height:54px;border:0;border-radius:12px;background:transparent;color:#687786;text-decoration:none;display:grid;place-items:center;align-content:center;gap:3px;font:inherit;cursor:pointer}
+  .tech-mobile-dock{position:fixed;left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom));z-index:180;min-height:64px;padding:5px;border:1px solid #cbd7e0;border-radius:16px;background:#ffffffee;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);box-shadow:0 12px 34px #07111d35;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;transform:translateZ(0)}
+  .tech-mobile-dock a,.tech-mobile-dock button{position:relative;min-width:0;min-height:54px;border:0;border-radius:12px;background:transparent;color:#687786;text-decoration:none;display:grid;place-items:center;align-content:center;gap:3px;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
   .tech-mobile-dock svg{width:21px;height:21px}
   .tech-mobile-dock span{max-width:100%;font-size:10px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tech-mobile-dock .active{background:#eaf2f9;color:#0d3156;box-shadow:inset 0 -3px #f47b20}
   .tech-mobile-dock i{position:absolute;right:21%;top:7px;width:8px;height:8px;border-radius:50%;background:#25a15f;box-shadow:0 0 0 2px #fff}
 
-  .tech-active-work-ribbon{position:fixed;left:8px;right:8px;bottom:82px;z-index:175;padding:10px 12px;border:1px solid #284a6b;border-radius:13px;background:#0d2742;color:#fff;text-decoration:none;box-shadow:0 8px 28px #07111d32;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .tech-active-work-ribbon{position:fixed;left:8px;right:8px;bottom:calc(82px + env(safe-area-inset-bottom));z-index:175;padding:10px 12px;border:1px solid #284a6b;border-radius:13px;background:#0d2742;color:#fff;text-decoration:none;box-shadow:0 8px 28px #07111d32;display:flex;align-items:center;justify-content:space-between;gap:12px;transform:translateZ(0)}
   .tech-active-work-ribbon span{min-width:0;display:grid;gap:2px}
   .tech-active-work-ribbon strong{color:#ff9a4c;font-size:9px;letter-spacing:.12em}
   .tech-active-work-ribbon b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
@@ -19,7 +21,7 @@
 
   .tech-mobile-more{position:fixed;inset:0;z-index:190;display:block}
   .tech-mobile-more-backdrop{position:absolute;inset:0;border:0;background:#07111d72}
-  .tech-mobile-more-sheet{position:absolute;left:8px;right:8px;bottom:82px;padding:10px;border:1px solid #d0d9e0;border-radius:17px;background:#fff;box-shadow:0 18px 55px #07111d45;display:grid;gap:5px}
+  .tech-mobile-more-sheet{position:absolute;left:8px;right:8px;bottom:calc(82px + env(safe-area-inset-bottom));padding:10px;border:1px solid #d0d9e0;border-radius:17px;background:#fff;box-shadow:0 18px 55px #07111d45;display:grid;gap:5px}
   .tech-mobile-more-head{min-height:44px;padding:0 8px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #e8edf1}
   .tech-mobile-more-head strong{font-size:17px;color:#10243a}
   .tech-mobile-more-head button{min-height:34px;border:1px solid #d5dde4;border-radius:8px;background:#f7f9fa;color:#53616e;font-weight:850}
@@ -30,5 +32,5 @@
 @media(max-width:420px){
   .tech-mobile-dock{left:5px;right:5px;bottom:max(5px,env(safe-area-inset-bottom))}
   .tech-mobile-dock span{font-size:9px}
-  .tech-active-work-ribbon{left:5px;right:5px;bottom:78px}
+  .tech-active-work-ribbon{left:5px;right:5px;bottom:calc(78px + env(safe-area-inset-bottom))}
 }
