@@ -121,32 +121,41 @@ export async function uploadAndReadDriverBreakdownReceipt(breakdownId:number,tok
     if(file.size<=0||file.size>RECEIPT_UPLOAD_MAX_FILE_BYTES)throw new Error('Each receipt image must be 20 MB or smaller.');
   }
 
-  await env.DB.prepare(`
-    INSERT INTO roadside_breakdown_receipts(breakdown_id,repair_id,ai_status,review_status,updated_at)
-    VALUES(?,?,'uploading','pending',CURRENT_TIMESTAMP)
-    ON CONFLICT(breakdown_id) DO UPDATE SET
-      repair_id=excluded.repair_id,
-      ai_status='uploading',ai_model='',ai_vendor='',ai_invoice_number='',ai_invoice_date='',ai_unit='',ai_mileage='',
-      ai_total_amount='',ai_service_summary='',ai_costs_json='{}',ai_uncertain_json='[]',ai_error='',
-      review_status='pending',reviewed_vendor='',reviewed_invoice_number='',reviewed_invoice_date='',reviewed_total_amount='',
-      reviewed_service_summary='',reviewed_at=NULL,reviewed_by_user_id=NULL,updated_at=CURRENT_TIMESTAMP
-  `).bind(breakdownId,row.repair_id).run();
-
-  const receipt=await receiptForBreakdown(breakdownId);
+  let receipt=await receiptForBreakdown(breakdownId);
+  const createdNewReceipt=!receipt;
+  if(!receipt){
+    await env.DB.prepare(`
+      INSERT INTO roadside_breakdown_receipts(breakdown_id,repair_id,ai_status,review_status,updated_at)
+      VALUES(?,?,'uploading','pending',CURRENT_TIMESTAMP)
+    `).bind(breakdownId,row.repair_id).run();
+    receipt=await receiptForBreakdown(breakdownId);
+  }
   if(!receipt)throw new Error('Receipt record could not be created.');
 
   try{
     // The upload is not considered successful until the new R2 objects and D1 page rows both exist.
+    // Existing receipt rows are left untouched until this replacement succeeds.
     await replaceReceiptPages(receipt.id,breakdownId,files);
   }catch(error){
-    const message=error instanceof Error?error.message:String(error);
-    await env.DB.prepare(`
-      UPDATE roadside_breakdown_receipts
-      SET ai_status='upload_failed',ai_error=?,review_status='pending',updated_at=CURRENT_TIMESTAMP
-      WHERE id=?
-    `).bind(message.slice(0,1000),receipt.id).run();
+    if(createdNewReceipt){
+      const message=error instanceof Error?error.message:String(error);
+      await env.DB.prepare(`
+        UPDATE roadside_breakdown_receipts
+        SET ai_status='upload_failed',ai_error=?,review_status='pending',updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).bind(message.slice(0,1000),receipt.id).run();
+    }
     throw new Error('Receipt could not be saved. Please try the upload again before leaving this screen.');
   }
+
+  await env.DB.prepare(`
+    UPDATE roadside_breakdown_receipts
+    SET repair_id=?,ai_status='uploaded',ai_model='',ai_vendor='',ai_invoice_number='',ai_invoice_date='',ai_unit='',ai_mileage='',
+        ai_total_amount='',ai_service_summary='',ai_costs_json='{}',ai_uncertain_json='[]',ai_error='',
+        review_status='pending',reviewed_vendor='',reviewed_invoice_number='',reviewed_invoice_date='',reviewed_total_amount='',
+        reviewed_service_summary='',reviewed_at=NULL,reviewed_by_user_id=NULL,updated_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `).bind(row.repair_id,receipt.id).run();
 
   const aiReadable=files.every(file=>{
     const type=String(file.type||'').toLowerCase();
