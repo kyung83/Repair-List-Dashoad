@@ -58,6 +58,7 @@ type Data = {
   filterOptions: { equipment: Array<{ id: number; unit: string }>; categories: string[]; providers: string[]; statuses: string[]; locations: string[] };
   truncated: boolean;
   updatedAt: string;
+  permissions: { canDeleteRecords: boolean };
 };
 
 type Filters = { start: string; end: string; unit: string; category: string; provider: string; status: string; location: string; q: string };
@@ -67,6 +68,7 @@ const panel = { background: "white", border: "1px solid #dce2e7", borderRadius: 
 const input = { width: "100%", boxSizing: "border-box", padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white" } as const;
 const button = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#0d1b2b", color: "white", fontWeight: 850, cursor: "pointer" } as const;
 const lightButton = { ...button, background: "#e8edf2", color: "#172033" } as const;
+const deleteButton = { padding: "8px 10px", border: "1px solid #dc2626", borderRadius: 7, background: "#fff1f2", color: "#b91c1c", fontWeight: 850, cursor: "pointer", whiteSpace: "nowrap" } as const;
 const label = { display: "grid", gap: 5, fontWeight: 750, fontSize: 13 } as const;
 const th = { textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7", whiteSpace: "nowrap", fontSize: 12 } as const;
 const td = { padding: 8, borderBottom: "1px solid #eef2f5", verticalAlign: "top", fontSize: 13 } as const;
@@ -122,6 +124,7 @@ export default function BreakdownReportsPage() {
   const [message, setMessage] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function load(next = filters) {
     setLoading(true); setMessage("");
@@ -158,6 +161,24 @@ export default function BreakdownReportsPage() {
   }
   function sort(key: SortKey) { if (sortKey === key) setSortDir((current) => current === "asc" ? "desc" : "asc"); else { setSortKey(key); setSortDir("asc"); } }
   function sortHead(title: string, key: SortKey) { return <button type="button" onClick={() => sort(key)} style={{ border: 0, background: "transparent", padding: 0, font: "inherit", fontWeight: 850, cursor: "pointer", whiteSpace: "nowrap" }}>{title}{sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}</button>; }
+  async function deleteRecord(row: BreakdownRow) {
+    if (!data?.permissions.canDeleteRecords || deletingId !== null) return;
+    const confirmed = window.confirm(`Permanently delete breakdown #${row.id} for Unit ${row.unit} and its linked repair record?\n\nUse this only for test records. This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingId(row.id);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/reports/breakdowns/${row.id}`, { method: "DELETE" });
+      const payload = await response.json() as { deleted?: boolean; error?: string };
+      if (!response.ok || !payload.deleted) throw new Error(payload.error || "Breakdown record could not be deleted.");
+      await load(filters);
+      setMessage(`Deleted test breakdown #${row.id} for Unit ${row.unit}. The linked repair record was removed too.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Breakdown record could not be deleted.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading breakdown reports…</main>;
   if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>{message || "Breakdown reports are unavailable."}</main>;
@@ -182,6 +203,7 @@ export default function BreakdownReportsPage() {
 
       {message && <div style={{ ...panel, marginTop: 16, borderColor: "#f2c66d", background: "#fff8e6" }}>{message}</div>}
       <div style={{ ...panel, marginTop: 16, background: "#f8fafc" }}><strong>Unit-cost connection:</strong> Parts + labor + outside breakdown invoices shown here are the same repair costs already counted on that truck or trailer in Reports Summary and Search Reports.</div>
+      {data.permissions.canDeleteRecords && <div style={{ ...panel, marginTop: 12, borderColor: "#fecaca", background: "#fff7f7" }}><strong>Test cleanup:</strong> Managers and admins can permanently delete a test breakdown from the Detail table below. This removes both the breakdown and its linked roadside repair. Records with applied inventory activity are blocked until the stock operation is undone.</div>}
 
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(185px,1fr))", gap: 10 }}>
@@ -210,9 +232,9 @@ export default function BreakdownReportsPage() {
 
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#64748b" }}>Click a column heading to sort this breakdown data on its own.</small></div><strong>{num(data.summary.breakdownCount)} breakdowns</strong></div>
-        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1700 }}><thead><tr>
-          <th style={th}>{sortHead("Date", "createdAt")}</th><th style={th}>{sortHead("Unit", "unit")}</th><th style={th}>Driver</th><th style={th}>{sortHead("Category", "category")}</th><th style={th}>{sortHead("Provider", "serviceProvider")}</th><th style={th}>{sortHead("Location", "location")}</th><th style={th}>{sortHead("Status", "status")}</th><th style={th}>{sortHead("Arrival", "arrivalMinutes")}</th><th style={th}>{sortHead("Downtime", "downtimeMinutes")}</th><th style={th}>Parts</th><th style={th}>Labor</th><th style={th}>Outside</th><th style={th}>{sortHead("Total", "totalCost")}</th><th style={th}>Repair Needed / Description</th>
-        </tr></thead><tbody>{sorted.map((row) => <tr key={row.id}><td style={td}>{shortDateTime(row.createdAt)}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.driverName || "—"}</td><td style={td}>{row.category || "—"}</td><td style={td}>{row.serviceProvider || "Unassigned"}</td><td style={td}>{row.location || "—"}</td><td style={td}>{row.status}</td><td style={td}>{hoursFromMinutes(row.arrivalMinutes)}</td><td style={td}>{hoursFromMinutes(row.downtimeMinutes)}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td><td style={{ ...td, minWidth: 300 }}>{row.repairNeeded || row.description || "—"}</td></tr>)}</tbody></table></div>
+        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: data.permissions.canDeleteRecords ? 1840 : 1700 }}><thead><tr>
+          <th style={th}>{sortHead("Date", "createdAt")}</th><th style={th}>{sortHead("Unit", "unit")}</th><th style={th}>Driver</th><th style={th}>{sortHead("Category", "category")}</th><th style={th}>{sortHead("Provider", "serviceProvider")}</th><th style={th}>{sortHead("Location", "location")}</th><th style={th}>{sortHead("Status", "status")}</th><th style={th}>{sortHead("Arrival", "arrivalMinutes")}</th><th style={th}>{sortHead("Downtime", "downtimeMinutes")}</th><th style={th}>Parts</th><th style={th}>Labor</th><th style={th}>Outside</th><th style={th}>{sortHead("Total", "totalCost")}</th><th style={th}>Repair Needed / Description</th>{data.permissions.canDeleteRecords && <th style={th}>Actions</th>}
+        </tr></thead><tbody>{sorted.map((row) => <tr key={row.id}><td style={td}>{shortDateTime(row.createdAt)}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.driverName || "—"}</td><td style={td}>{row.category || "—"}</td><td style={td}>{row.serviceProvider || "Unassigned"}</td><td style={td}>{row.location || "—"}</td><td style={td}>{row.status}</td><td style={td}>{hoursFromMinutes(row.arrivalMinutes)}</td><td style={td}>{hoursFromMinutes(row.downtimeMinutes)}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td><td style={{ ...td, minWidth: 300 }}>{row.repairNeeded || row.description || "—"}</td>{data.permissions.canDeleteRecords && <td style={td}><button type="button" style={{ ...deleteButton, opacity: deletingId === row.id ? .6 : 1 }} disabled={deletingId !== null} onClick={() => void deleteRecord(row)}>{deletingId === row.id ? "Deleting…" : "Delete Record"}</button></td>}</tr>)}</tbody></table></div>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))", gap: 18, marginTop: 18 }}>
