@@ -12,6 +12,7 @@ export type AppUser = {
   role: AppRole;
   active: boolean;
   technicianId: number | null;
+  dispatchAccess: boolean;
 };
 
 const SESSION_COOKIE = '__Host-norlow_session';
@@ -107,12 +108,12 @@ export async function getSessionUser(db: D1Database, request: Request): Promise<
   const token = sessionTokenFromRequest(request); if (!token) return null;
   const tokenHash = bytesToBase64Url(await sha256(token));
   const row = await db.prepare(`
-    SELECT u.id,u.username,u.email,u.display_name,u.role,u.active,u.technician_id
+    SELECT u.id,u.username,u.email,u.display_name,u.role,u.active,u.technician_id,COALESCE(u.dispatch_access,0) AS dispatch_access
     FROM app_sessions s JOIN app_users u ON u.id=s.user_id
     WHERE s.token_hash=? AND s.expires_at>CURRENT_TIMESTAMP AND u.active=1
-  `).bind(tokenHash).first<{id:number;username:string|null;email:string;display_name:string;role:AppRole;active:number;technician_id:number|null}>();
+  `).bind(tokenHash).first<{id:number;username:string|null;email:string;display_name:string;role:AppRole;active:number;technician_id:number|null;dispatch_access:number}>();
   if (!row || !isAppRole(row.role)) return null;
-  return { id:Number(row.id), username:row.username??'', email:row.email, displayName:row.display_name, role:row.role, active:Boolean(row.active), technicianId:row.technician_id===null?null:Number(row.technician_id) };
+  return { id:Number(row.id), username:row.username??'', email:row.email, displayName:row.display_name, role:row.role, active:Boolean(row.active), technicianId:row.technician_id===null?null:Number(row.technician_id), dispatchAccess:Boolean(row.dispatch_access) };
 }
 export async function appUserCount(db: D1Database) { const row=await db.prepare('SELECT COUNT(*) AS count FROM app_users').first<{count:number}>(); return Number(row?.count??0); }
 async function loginAttemptKey(login: string, ip: string) { return bytesToBase64Url(await sha256(`${login}\u0000${ip}`)); }
@@ -125,12 +126,12 @@ async function recordLoginFailure(db:D1Database,attemptKey:string){await db.prep
 export async function authenticateUser(db:D1Database, loginValue:unknown, passwordValue:unknown, ipAddress=''):Promise<{user:AppUser|null;blocked:boolean}> {
   const login=normalizeUsername(loginValue); const password=String(passwordValue??'');
   const attemptKey=await loginAttemptKey(login||'[blank]',ipAddress||'[unknown]'); if(await loginBlocked(db,attemptKey))return{user:null,blocked:true};
-  const row=login?await db.prepare(`SELECT id,username,email,display_name,role,password_hash,password_salt,password_iterations,password_algorithm,active,technician_id FROM app_users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE LIMIT 1`).bind(login,login).first<{id:number;username:string|null;email:string;display_name:string;role:AppRole;password_hash:string;password_salt:string;password_iterations:number;password_algorithm:string;active:number;technician_id:number|null}>():null;
+  const row=login?await db.prepare(`SELECT id,username,email,display_name,role,password_hash,password_salt,password_iterations,password_algorithm,active,technician_id,COALESCE(dispatch_access,0) AS dispatch_access FROM app_users WHERE username=? COLLATE NOCASE OR email=? COLLATE NOCASE LIMIT 1`).bind(login,login).first<{id:number;username:string|null;email:string;display_name:string;role:AppRole;password_hash:string;password_salt:string;password_iterations:number;password_algorithm:string;active:number;technician_id:number|null;dispatch_access:number}>():null;
   let valid=false;
   if(row?.active&&isAppRole(row.role)) valid=await verifyPassword(password,row.password_hash,row.password_salt,Number(row.password_iterations),row.password_algorithm); else deriveScrypt(password||'invalid-password',new Uint8Array(16));
   if(!row||!row.active||!isAppRole(row.role)||!valid){await recordLoginFailure(db,attemptKey);return{user:null,blocked:false};}
   await db.batch([db.prepare('DELETE FROM app_login_attempts WHERE attempt_key=?').bind(attemptKey),db.prepare('UPDATE app_users SET last_login_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(row.id)]);
-  return {user:{id:Number(row.id),username:row.username??'',email:row.email,displayName:row.display_name,role:row.role,active:true,technicianId:row.technician_id===null?null:Number(row.technician_id)},blocked:false};
+  return {user:{id:Number(row.id),username:row.username??'',email:row.email,displayName:row.display_name,role:row.role,active:true,technicianId:row.technician_id===null?null:Number(row.technician_id),dispatchAccess:Boolean(row.dispatch_access)},blocked:false};
 }
 
 export function canWritePath(role:AppRole,pathname:string){if(role==='admin')return true;if(pathname.startsWith('/api/admin')||pathname.startsWith('/api/internal'))return false;if(pathname==='/api/inventory')return role==='manager';if(pathname==='/api/work-orders'||pathname==='/api/repairs')return role==='mechanic'||role==='manager';return role==='manager';}
