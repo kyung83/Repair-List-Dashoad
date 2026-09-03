@@ -43,7 +43,17 @@ test('breakdown category reporting uses office analysis before the driver catego
   assert.match(service, /AS report_category/);
   assert.match(service, /category: row\.report_category/);
   assert.match(service, /GROUP BY COALESCE\(NULLIF\(trim\(report_category\),''\),'Uncategorized'\)/);
-  assert.match(service, /SELECT DISTINCT \$\{REPORT_CATEGORY_SQL\} AS value/);
+});
+
+test('breakdown report category options come from active setup plus historical categories', async () => {
+  const service = await read('lib/breakdown-reports.ts');
+  assert.match(service, /REPORT_CATEGORY_OPTION_SQL/);
+  assert.match(service, /FROM breakdown_categories/);
+  assert.match(service, /active=1/);
+  assert.match(service, /UNION ALL/);
+  assert.match(service, /FROM roadside_breakdowns b/);
+  assert.match(service, /GROUP BY lower\(trim\(value\)\)/);
+  assert.match(service, /distinctValues\(db, REPORT_CATEGORY_OPTION_SQL\)/);
 });
 
 test('breakdown reporting API is protected and office-report compatible', async () => {
