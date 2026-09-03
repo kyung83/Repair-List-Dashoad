@@ -35,6 +35,17 @@ test('breakdown report provides unit category provider location and monthly anal
   assert.match(service, /total_downtime_hours/);
 });
 
+test('breakdown category reporting uses office analysis before the driver category', async () => {
+  const service = await read('lib/breakdown-reports.ts');
+  assert.match(service, /REPORT_CATEGORY_SQL/);
+  assert.match(service, /b\.repair_needed/);
+  assert.match(service, /b\.repair_category/);
+  assert.match(service, /AS report_category/);
+  assert.match(service, /category: row\.report_category/);
+  assert.match(service, /GROUP BY COALESCE\(NULLIF\(trim\(report_category\),''\),'Uncategorized'\)/);
+  assert.match(service, /SELECT DISTINCT \$\{REPORT_CATEGORY_SQL\} AS value/);
+});
+
 test('breakdown reporting API is protected and office-report compatible', async () => {
   const route = await read('app/api/reports/breakdowns/route.ts');
   assert.match(route, /getSessionUser/);
