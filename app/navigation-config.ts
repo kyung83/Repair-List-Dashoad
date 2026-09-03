@@ -1,4 +1,4 @@
-export type Role = "viewer" | "mechanic" | "manager" | "admin";
+export type Role = "viewer" | "mechanic" | "dispatch" | "manager" | "admin";
 export type ModuleName = "shop" | "units" | "maintenance" | "parts" | "billing" | "reports" | "diagnostics";
 
 export type NavLink = {
@@ -30,6 +30,9 @@ const adminRoles: Role[] = ["admin"];
 const managerRoles: Role[] = ["manager", "admin"];
 const workingRoles: Role[] = ["mechanic", "manager", "admin"];
 const officeRoles: Role[] = ["viewer", "manager", "admin"];
+const repairBoardRoles: Role[] = ["mechanic", "dispatch", "manager", "admin"];
+const breakdownOperatorRoles: Role[] = ["dispatch", "manager", "admin"];
+const repairGroupRoles: Role[] = ["viewer", "mechanic", "dispatch", "manager", "admin"];
 
 // Legacy metadata is retained for compatibility with older source assertions.
 // The visible application navigation is now exclusively sidebarGroups below.
@@ -38,8 +41,8 @@ export const moduleConfig: Record<ModuleName, { label: string; tabs: ModuleTab[]
     label: "Repairs",
     tabs: [
       { href: "/shop", label: "My Jobs", roles: workingRoles },
-      { href: "/repair-board", label: "Shop Board", roles: workingRoles },
-      { href: "/breakdowns", label: "Breakdowns", exact: true, roles: managerRoles },
+      { href: "/repair-board", label: "Shop Board", roles: repairBoardRoles },
+      { href: "/breakdowns", label: "Breakdowns", exact: true, roles: breakdownOperatorRoles },
       { href: "/outside-work", label: "Outside Work", exact: true, roles: managerRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
     ],
@@ -106,9 +109,9 @@ const sidebarGroups: SidebarGroup[] = [
     key: "repairs",
     label: "Repairs",
     href: "/repair-board",
-    roles: allRoles,
+    roles: repairGroupRoles,
     links: [
-      { href: "/repair-board", label: "Repair Board", roles: workingRoles },
+      { href: "/repair-board", label: "Repair Board", roles: repairBoardRoles },
       { href: "/shop", label: "My Jobs", roles: workingRoles },
       { href: "/outside-work", label: "Outside Repairs", exact: true, roles: managerRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
@@ -120,9 +123,9 @@ const sidebarGroups: SidebarGroup[] = [
     key: "breakdowns",
     label: "Breakdowns",
     href: "/breakdowns",
-    roles: managerRoles,
+    roles: breakdownOperatorRoles,
     links: [
-      { href: "/breakdowns", label: "Active Breakdowns", exact: true, roles: managerRoles },
+      { href: "/breakdowns", label: "Active Breakdowns", exact: true, roles: breakdownOperatorRoles },
       { href: "/reports/breakdowns", label: "Breakdown Reports", exact: true, roles: managerRoles },
       { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
     ],
