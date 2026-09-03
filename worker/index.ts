@@ -79,6 +79,15 @@ const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/remove-applied-part',
   '/api/shop/repair-review',
 ]);
+const DISPATCH_READ_PATHS = new Set([
+  '/repair-board',
+  '/breakdowns',
+  '/api/repair-board',
+  '/api/repair-board/eta',
+  '/api/repair-board/order',
+  '/api/yard-status',
+  '/api/breakdown-service-providers',
+]);
 
 function isStaticAsset(pathname: string) {
   return pathname.startsWith('/_next/') || pathname.startsWith('/_vinext/') || pathname.startsWith('/assets/') || pathname.startsWith('/static/') || /\.(?:css|js|mjs|map|woff2?|ttf|otf|ico|svg|png|jpe?g|gif|webp|avif)$/i.test(pathname);
@@ -98,6 +107,36 @@ function accessDenied(url: URL, message = 'Your clearance does not allow this ac
   return isApi(url.pathname)
     ? Response.json({ error: message }, { status: 403 })
     : new Response(message, { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+}
+function publicUser(user: AppUser) {
+  return user.dispatchAccess ? { ...user, role:'dispatch' as const } : user;
+}
+
+async function dispatchCanAccess(request: Request, url: URL) {
+  const pathname = url.pathname;
+  const method = request.method.toUpperCase();
+  const read = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+
+  if (read) {
+    if (DISPATCH_READ_PATHS.has(pathname)) return true;
+    if (pathname.startsWith('/api/breakdowns/')) return true;
+    if (pathname.startsWith('/api/photos/')) return true;
+    if (pathname === '/api/geotab-photo-ids' || pathname.startsWith('/api/geotab-media/')) return true;
+    return false;
+  }
+
+  if (pathname === '/api/repair-board' && method === 'POST') {
+    try {
+      const body = await request.clone().json() as Record<string, unknown>;
+      return String(body.action ?? '') === 'createRepair' && Number(body.technicianId ?? 0) <= 0;
+    } catch {
+      return false;
+    }
+  }
+
+  if (pathname.startsWith('/api/breakdowns/')) return true;
+  if (pathname === '/api/breakdown-service-providers') return true;
+  return false;
 }
 
 async function mechanicCanWrite(request: Request, pathname: string) {
@@ -119,6 +158,7 @@ async function mechanicCanWrite(request: Request, pathname: string) {
 
 async function userCanAccess(request: Request, user: AppUser, url: URL) {
   const pathname = url.pathname;
+  if (user.dispatchAccess) return dispatchCanAccess(request, url);
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin') || pathname.startsWith('/api/internal')) return user.role === 'admin';
   if (pathname === '/pm-kits' || pathname.startsWith('/pm-kits/') || pathname === '/api/pm-kits' || pathname.startsWith('/api/pm-kits/')) return user.role === 'manager' || user.role === 'admin';
   if (pathname === '/next-pm-repairs' || pathname.startsWith('/next-pm-repairs/')) return user.role === 'mechanic' || user.role === 'manager' || user.role === 'admin';
@@ -141,7 +181,7 @@ async function handleLogin(request: Request, env: Env, url: URL) {
     if (result.blocked) return Response.json({ error: 'Too many failed sign-in attempts. Try again in about 15 minutes.' }, { status: 429, headers: { 'retry-after': '900', 'cache-control': 'no-store' } });
     if (!result.user) return Response.json({ error: 'Username or password is incorrect.' }, { status: 401, headers: { 'cache-control': 'no-store' } });
     const token = await createSession(env.DB, result.user.id);
-    return Response.json({ ok: true, user: result.user }, { headers: { 'set-cookie': sessionCookie(token, request.url), 'cache-control': 'no-store' } });
+    return Response.json({ ok: true, user: publicUser(result.user) }, { headers: { 'set-cookie': sessionCookie(token, request.url), 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'worker_login_failed', error: String(error) }));
     return Response.json({ error: 'Sign in could not be completed.' }, { status: 500, headers: { 'cache-control': 'no-store' } });
@@ -162,6 +202,22 @@ async function enforceDashboardAccess(request: Request, env: Env, url: URL): Pro
   return null;
 }
 
+async function restrictDispatchRepairBoard(request: Request, env: Env, response: Response, url: URL) {
+  if (url.pathname !== '/api/repair-board' || request.method.toUpperCase() !== 'GET' || !response.ok) return response;
+  const user = await getSessionUser(env.DB, request);
+  if (!user?.dispatchAccess) return response;
+  try {
+    const payload = await response.json() as Record<string, unknown>;
+    payload.canManage = false;
+    payload.technicians = [];
+    const boardUser = payload.user && typeof payload.user === 'object' ? payload.user as Record<string, unknown> : null;
+    if (boardUser) boardUser.role = 'dispatch';
+    return Response.json(payload, { status:response.status, headers:{ 'cache-control':'no-store' } });
+  } catch {
+    return response;
+  }
+}
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -179,7 +235,8 @@ const worker = {
     }
     const denied = await enforceDashboardAccess(request, env, url);
     if (denied) return denied;
-    return handler.fetch(request, env, ctx);
+    const response = await handler.fetch(request, env, ctx);
+    return restrictDispatchRepairBoard(request, env, response, url);
   },
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     if (controller.cron === '15 6 * * *') {
