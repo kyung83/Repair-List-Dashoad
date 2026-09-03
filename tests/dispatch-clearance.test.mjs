@@ -22,11 +22,16 @@ test('Dispatch is a first-class visible clearance with only Repair Board and Act
 test('Dispatch is hard limited at the Worker boundary',async()=>{
   const worker=await read('worker/index.ts');
   assert.match(worker,/if \(user\.dispatchAccess\) return dispatchCanAccess\(request, url\)/);
-  assert.match(worker,/DISPATCH_READ_PATHS/);
   assert.match(worker,/String\(body\.action \?\? ''\) === 'createRepair'/);
   assert.match(worker,/Number\(body\.technicianId \?\? 0\) <= 0/);
   assert.match(worker,/pathname\.startsWith\('\/api\/breakdowns\/'\)/);
-  assert.doesNotMatch(worker,/DISPATCH_READ_PATHS[\s\S]*?'\/shop'/);
+  const dispatchReads=worker.match(/const DISPATCH_READ_PATHS = new Set\(\[([\s\S]*?)\]\);/);
+  assert.ok(dispatchReads);
+  assert.match(dispatchReads[1],/'\/repair-board'/);
+  assert.match(dispatchReads[1],/'\/breakdowns'/);
+  assert.doesNotMatch(dispatchReads[1],/'\/shop'/);
+  assert.doesNotMatch(dispatchReads[1],/'\/unit'/);
+  assert.doesNotMatch(dispatchReads[1],/'\/reports'/);
 });
 
 test('Dispatch Repair Board is view plus unassigned repair entry only',async()=>{
