@@ -78,6 +78,24 @@ type EquipmentOption = { id: number; unit: string };
 
 const MAX_ROWS = 5000;
 const REPORT_CATEGORY_SQL = "COALESCE(NULLIF(trim(b.repair_needed),''),NULLIF(trim(b.repair_category),''),'')";
+const REPORT_CATEGORY_OPTION_SQL = `
+  WITH category_options AS (
+    SELECT name AS value,0 AS priority,sort_order
+    FROM breakdown_categories
+    WHERE active=1 AND trim(COALESCE(name,''))<>''
+    UNION ALL
+    SELECT ${REPORT_CATEGORY_SQL} AS value,1 AS priority,1000000 AS sort_order
+    FROM roadside_breakdowns b
+    WHERE trim(${REPORT_CATEGORY_SQL})<>''
+  )
+  SELECT CASE
+    WHEN MIN(priority)=0 THEN MAX(CASE WHEN priority=0 THEN value END)
+    ELSE MAX(value)
+  END AS value
+  FROM category_options
+  GROUP BY lower(trim(value))
+  ORDER BY MIN(priority),MIN(sort_order),value COLLATE NOCASE
+`;
 
 function text(value: unknown, max = 160) {
   return String(value ?? '').trim().slice(0, max);
@@ -253,7 +271,7 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
   `).all<EquipmentOption>();
 
   const optionPromise = Promise.all([
-    distinctValues(db, `SELECT DISTINCT ${REPORT_CATEGORY_SQL} AS value FROM roadside_breakdowns b WHERE trim(${REPORT_CATEGORY_SQL})<>'' ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, REPORT_CATEGORY_OPTION_SQL),
     distinctValues(db, `SELECT DISTINCT service_provider AS value FROM roadside_breakdowns WHERE trim(COALESCE(service_provider,''))<>'' ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT status AS value FROM roadside_breakdowns WHERE trim(COALESCE(status,''))<>'' ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT trim(COALESCE(city,'') || ', ' || COALESCE(state,'')) AS value FROM roadside_breakdowns WHERE trim(COALESCE(city,'') || COALESCE(state,''))<>'' ORDER BY value COLLATE NOCASE`),
