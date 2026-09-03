@@ -19,7 +19,10 @@ export async function GET(request: Request) {
       location: params.get('location'),
       query: params.get('q'),
     });
-    return Response.json(data, { headers: { 'cache-control': 'no-store' } });
+    return Response.json({
+      ...data,
+      permissions: { canDeleteRecords: user.role === 'manager' || user.role === 'admin' },
+    }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'breakdown_report_failed', error: String(error) }));
     return Response.json({ error: error instanceof Error ? error.message : 'Breakdown reports could not be loaded.' }, { status: 500 });

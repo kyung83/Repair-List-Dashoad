@@ -40,10 +40,22 @@ test('breakdown reporting API is protected and office-report compatible', async 
   assert.match(route, /getSessionUser/);
   assert.match(route, /user\.role === 'mechanic'/);
   assert.match(route, /getBreakdownReportData/);
+  assert.match(route, /canDeleteRecords/);
   assert.match(route, /cache-control': 'no-store'/);
 });
 
-test('reports UI exposes dedicated sortable breakdown reports and CSV export', async () => {
+test('breakdown test-record purge is manager protected and stock safe', async () => {
+  const route = await read('app/api/reports/breakdowns/[id]/route.ts');
+  assert.match(route, /export async function DELETE/);
+  assert.match(route, /user\.role !== 'manager' && user\.role !== 'admin'/);
+  assert.match(route, /inventory_operations/);
+  assert.match(route, /status='applied'/);
+  assert.match(route, /DELETE FROM roadside_breakdowns/);
+  assert.match(route, /DELETE FROM repairs WHERE id=\? AND source='roadside-breakdown'/);
+  assert.match(route, /env\.DB\.batch/);
+});
+
+test('reports UI exposes dedicated sortable breakdown reports CSV export and protected test cleanup', async () => {
   const [page, nav] = await Promise.all([
     read('app/reports/breakdowns/page.tsx'),
     read('app/navigation-config.ts'),
@@ -56,6 +68,10 @@ test('reports UI exposes dedicated sortable breakdown reports and CSV export', a
   assert.match(page, /Monthly Breakdown Trend/);
   assert.match(page, /By Service Provider/);
   assert.match(page, /Unit-cost connection/);
+  assert.match(page, /Delete Record/);
+  assert.match(page, /canDeleteRecords/);
+  assert.match(page, /api\/reports\/breakdowns\/\$\{row\.id\}/);
+  assert.match(page, /This cannot be undone/);
 });
 
 test('general report search continues to include roadside breakdown repair costs', async () => {
