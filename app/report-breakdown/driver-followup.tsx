@@ -126,7 +126,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
 
   const arrived=completed(state?.techArrivedAt||null);
   const rolling=completed(state?.rollingAt||null);
-  const receiptUploaded=Boolean(state?.receipt.uploaded);
+  const receiptUploaded=Boolean(state?.receipt.uploaded&&state.receipt.aiStatus!=='upload_failed'&&state.receipt.aiStatus!=='uploading');
   const hasDispatchUpdate=Boolean(state?.serviceProvider||state?.eta);
 
   return(
