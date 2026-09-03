@@ -5,7 +5,7 @@ import { listBreakdownCategoryConfigs } from '@/lib/breakdown-categories';
 async function requireManager(request: Request) {
   const user = await getSessionUser(env.DB, request);
   if (!user) throw new Error('Authentication required.');
-  if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required.');
+  if (user.dispatchAccess || (user.role !== 'manager' && user.role !== 'admin')) throw new Error('Manager or administrator access is required.');
   return user;
 }
 
