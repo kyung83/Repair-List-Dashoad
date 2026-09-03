@@ -16,6 +16,7 @@ type BreakdownDataRow = {
   unit: string;
   equipment_type: string;
   driver_name: string;
+  report_category: string;
   repair_category: string;
   repair_needed: string | null;
   description: string;
@@ -76,6 +77,7 @@ type MonthSummaryRow = GroupSummaryRow & { month: string };
 type EquipmentOption = { id: number; unit: string };
 
 const MAX_ROWS = 5000;
+const REPORT_CATEGORY_SQL = "COALESCE(NULLIF(trim(b.repair_needed),''),NULLIF(trim(b.repair_category),''),'')";
 
 function text(value: unknown, max = 160) {
   return String(value ?? '').trim().slice(0, max);
@@ -127,7 +129,7 @@ function filterSql(input: ReturnType<typeof normalizeInput>) {
   const clauses = [`substr(b.created_at,1,10) BETWEEN ? AND ?`];
   const binds: unknown[] = [input.startDate, input.endDate];
   if (input.equipmentId) { clauses.push(`b.equipment_id=?`); binds.push(input.equipmentId); }
-  if (input.category) { clauses.push(`lower(trim(COALESCE(b.repair_category,'')))=lower(trim(?))`); binds.push(input.category); }
+  if (input.category) { clauses.push(`lower(trim(${REPORT_CATEGORY_SQL}))=lower(trim(?))`); binds.push(input.category); }
   if (input.provider) { clauses.push(`lower(trim(COALESCE(b.service_provider,'')))=lower(trim(?))`); binds.push(input.provider); }
   if (input.status) { clauses.push(`lower(trim(COALESCE(b.status,'')))=lower(trim(?))`); binds.push(input.status); }
   if (input.location) { clauses.push(`lower(trim(COALESCE(b.city,'') || ', ' || COALESCE(b.state,'')))=lower(trim(?))`); binds.push(input.location); }
@@ -147,7 +149,7 @@ function dataCte(clauses: string[]) {
     WITH breakdown_data AS (
       SELECT
         b.id,b.repair_id,b.equipment_id,COALESCE(e.unit,'') AS unit,COALESCE(e.equipment_type,'') AS equipment_type,
-        COALESCE(b.driver_name,'') AS driver_name,COALESCE(b.repair_category,'') AS repair_category,
+        COALESCE(b.driver_name,'') AS driver_name,${REPORT_CATEGORY_SQL} AS report_category,COALESCE(b.repair_category,'') AS repair_category,
         b.repair_needed,COALESCE(b.description,'') AS description,COALESCE(b.status,'') AS status,b.stage,
         b.service_provider,COALESCE(b.city,'') AS city,COALESCE(b.state,'') AS state,b.created_at,b.claimed_at,
         COALESCE(b.tech_arrived_at,b.on_location_at) AS arrival_at,b.repair_finished_at,b.rolling_at,r.completed_at,
@@ -214,10 +216,10 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
   `).bind(...binds).all<UnitSummaryRow>();
 
   const categoryPromise = db.prepare(`${cte}
-    SELECT COALESCE(NULLIF(trim(repair_category),''),'Uncategorized') AS label,COUNT(*) AS breakdown_count,
+    SELECT COALESCE(NULLIF(trim(report_category),''),'Uncategorized') AS label,COUNT(*) AS breakdown_count,
       COALESCE(SUM(total_cost),0) AS total_cost,CASE WHEN COUNT(*)=0 THEN 0 ELSE COALESCE(SUM(total_cost),0)/COUNT(*) END AS average_cost,
       AVG(arrival_minutes) AS average_arrival_minutes,AVG(downtime_minutes) AS average_downtime_minutes
-    FROM breakdown_data GROUP BY COALESCE(NULLIF(trim(repair_category),''),'Uncategorized')
+    FROM breakdown_data GROUP BY COALESCE(NULLIF(trim(report_category),''),'Uncategorized')
     ORDER BY breakdown_count DESC,total_cost DESC,label COLLATE NOCASE
   `).bind(...binds).all<GroupSummaryRow>();
 
@@ -251,7 +253,7 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
   `).all<EquipmentOption>();
 
   const optionPromise = Promise.all([
-    distinctValues(db, `SELECT DISTINCT repair_category AS value FROM roadside_breakdowns WHERE trim(COALESCE(repair_category,''))<>'' ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, `SELECT DISTINCT ${REPORT_CATEGORY_SQL} AS value FROM roadside_breakdowns b WHERE trim(${REPORT_CATEGORY_SQL})<>'' ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT service_provider AS value FROM roadside_breakdowns WHERE trim(COALESCE(service_provider,''))<>'' ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT status AS value FROM roadside_breakdowns WHERE trim(COALESCE(status,''))<>'' ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT trim(COALESCE(city,'') || ', ' || COALESCE(state,'')) AS value FROM roadside_breakdowns WHERE trim(COALESCE(city,'') || COALESCE(state,''))<>'' ORDER BY value COLLATE NOCASE`),
@@ -298,7 +300,7 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
       unit: row.unit,
       equipmentType: row.equipment_type,
       driverName: row.driver_name,
-      category: row.repair_category,
+      category: row.report_category,
       repairNeeded: row.repair_needed ?? '',
       description: row.description,
       status: row.status,
