@@ -12,6 +12,7 @@ type Props={
   technicians:Technician[];
   initialEquipmentId:number|null;
   lockEquipment?:boolean;
+  allowTechnicianAssignment?:boolean;
   onClose:()=>void;
   onSaved:()=>Promise<void>|void;
 };
@@ -26,7 +27,7 @@ function kind(value:string):EquipmentKind{
 
 function searchable(value:string){return value.trim().toLowerCase()}
 
-export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,onClose,onSaved}:Props){
+export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,onClose,onSaved}:Props){
   const initial=equipment.find(item=>item.id===initialEquipmentId)??null;
   const[selected,setSelected]=useState<Equipment|null>(initial);
   const[search,setSearch]=useState(initial?.unit??"");
@@ -96,7 +97,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
           issue:repair,
           parts:parts.trim(),
           priority,
-          technicianId:technicianId?Number(technicianId):0,
+          technicianId:allowTechnicianAssignment&&technicianId?Number(technicianId):0,
         }),
       });
       const result=await response.json() as CreateResult;
@@ -139,7 +140,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
       <label>Repair<input className={s.fieldSelect} value={issue} onChange={event=>setIssue(event.target.value)} placeholder="What needs repaired?"/></label>
       <label>Parts<input className={s.fieldSelect} value={parts} onChange={event=>setParts(event.target.value)} placeholder="Optional"/></label>
       <label>Priority<select className={s.fieldSelect} value={priority} onChange={event=>setPriority(Number(event.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select></label>
-      <label>Tech<select className={s.fieldSelect} value={technicianId} onChange={event=>setTechnicianId(event.target.value)}><option value="">Unassigned</option>{technicians.map(technician=><option key={technician.id} value={technician.id}>{technician.name}</option>)}</select></label>
+      {allowTechnicianAssignment&&<label>Tech<select className={s.fieldSelect} value={technicianId} onChange={event=>setTechnicianId(event.target.value)}><option value="">Unassigned</option>{technicians.map(technician=><option key={technician.id} value={technician.id}>{technician.name}</option>)}</select></label>}
     </div>
     <footer><button type="button" className={s.darkButton} onClick={onClose}>Close</button><button type="button" className={s.addButton} disabled={busy} onClick={()=>void createRepair()}>{busy?"Saving…":lastSavedUnit?"+ Add another repair for this unit":"Add Repair"}</button></footer>
   </section>;
