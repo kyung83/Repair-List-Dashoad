@@ -35,6 +35,7 @@ export default function TechnicianMobileDock(){
   const[now,setNow]=useState(Date.now());
   const[moreOpen,setMoreOpen]=useState(false);
   const hidden=hiddenRoute(pathname);
+  const shopRoute=pathname==="/shop"||pathname.startsWith("/shop/");
 
   useEffect(()=>{
     if(hidden){setUser(null);setTimer(null);return;}
@@ -58,7 +59,7 @@ export default function TechnicianMobileDock(){
 
   useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id);},[]);
 
-  const enabled=Boolean(user&&(user.role==="mechanic"||user.technicianId));
+  const enabled=Boolean(shopRoute||user&&(user.role==="mechanic"||user.technicianId));
   useEffect(()=>{
     if(enabled&&!hidden)document.body.classList.add("technician-mobile-enabled");
     else document.body.classList.remove("technician-mobile-enabled");
@@ -78,7 +79,7 @@ export default function TechnicianMobileDock(){
 
   if(hidden||!enabled)return null;
   const boardActive=pathname.startsWith("/repair-board");
-  const workActive=pathname==="/shop"||pathname.startsWith("/shop/");
+  const workActive=shopRoute;
   const unitActive=pathname==="/unit"||pathname.startsWith("/unit/");
 
   return <>
