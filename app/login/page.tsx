@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 
-type LoginUser = { role?: "viewer" | "mechanic" | "manager" | "admin" };
+type LoginUser = { role?: "viewer" | "mechanic" | "dispatch" | "manager" | "admin" };
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
