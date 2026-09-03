@@ -31,7 +31,7 @@
   .tech-maintenance-header .easy-section-copy{font-size:12px}
   .tech-maintenance-status{width:100%}
   .tech-maintenance-status .easy-badge{flex:1;justify-content:center;min-height:38px}
-  .tech-maintenance-tabs{position:sticky;top:5px;z-index:45;margin-left:-5px;margin-right:-5px;background:#eef3f7f2;backdrop-filter:blur(12px)}
+  .tech-maintenance-tabs{position:sticky;top:5px;z-index:45;margin-left:-5px;margin-right:-5px;background:#eef3f7}
   .tech-maintenance-tabs button{min-height:50px;font-size:11px;padding:5px}
   .tech-maintenance-tabs b{min-width:19px;height:19px;font-size:9px}
   .tech-section-strip{margin-left:-2px;margin-right:-2px}
@@ -47,7 +47,7 @@
   .tech-shop-shell .easy-photo-thumb{width:82px;height:82px}
   .tech-shop-shell .easy-photo-thumb img{width:82px;height:82px}
 
-  .tech-shop-shell .easy-check-nav{position:sticky;bottom:82px;z-index:44;margin:12px -4px 0;padding:7px;border:1px solid #d4dee6;border-radius:12px;background:#fffffff2;backdrop-filter:blur(12px);box-shadow:0 8px 24px #07111d18}
+  .tech-shop-shell .easy-check-nav{position:sticky;bottom:82px;z-index:44;margin:12px -4px 0;padding:7px;border:1px solid #d4dee6;border-radius:12px;background:#fff;box-shadow:0 8px 24px #07111d18}
   .tech-shop-shell .easy-check-nav .easy-button{min-width:90px;min-height:48px}
   .tech-shop-shell .easy-review{padding:10px;border:1px solid #e1e7eb;border-radius:10px;background:#f9fbfc}
   .tech-shop-shell .easy-chip{min-width:42px;height:42px}
@@ -61,12 +61,13 @@
 }
 
 @media(max-width:560px){
-  .tech-maintenance-tabs{grid-template-columns:repeat(4,minmax(72px,1fr));overflow-x:auto}
+  .tech-maintenance-tabs{position:static;grid-template-columns:repeat(4,minmax(72px,1fr));overflow-x:auto}
   .tech-maintenance-tabs button{white-space:nowrap}
   .tech-maintenance-tabs button span{display:none}
   .tech-shop-shell .easy-result-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
   .tech-shop-shell .easy-result{min-height:58px;font-size:13px}
   .tech-shop-shell .easy-photo-line{grid-template-columns:1fr}
+  .tech-shop-shell .easy-check-nav{position:static}
   .tech-shop-shell .easy-check-nav span{font-size:11px!important;text-align:center}
 }
 
