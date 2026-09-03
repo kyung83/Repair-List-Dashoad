@@ -13,6 +13,7 @@ type DispatchRow={
   service_provider_phone:string|null;
   eta:string|null;
   updated_at:string|null;
+  receipt_page_count:number|null;
 };
 
 type FollowupBase=Awaited<ReturnType<typeof getDriverBreakdownFollowup>>;
@@ -29,12 +30,22 @@ function safeId(value:unknown){
 
 async function withDispatch(breakdownId:number,breakdown:FollowupBase){
   const dispatch=await env.DB.prepare(`
-    SELECT service_provider,service_provider_phone,eta,updated_at
+    SELECT service_provider,service_provider_phone,eta,updated_at,
+           (
+             SELECT COUNT(*)
+             FROM roadside_breakdown_receipt_pages p
+             JOIN roadside_breakdown_receipts r ON r.id=p.receipt_id
+             WHERE r.breakdown_id=roadside_breakdowns.id
+           ) AS receipt_page_count
     FROM roadside_breakdowns
     WHERE id=?
   `).bind(breakdownId).first<DispatchRow>();
   return{
     ...breakdown,
+    receipt:{
+      ...breakdown.receipt,
+      uploaded:Number(dispatch?.receipt_page_count||0)>0,
+    },
     serviceProvider:String(dispatch?.service_provider||'').trim(),
     serviceProviderPhone:String(dispatch?.service_provider_phone||'').trim(),
     eta:String(dispatch?.eta||'').trim(),
@@ -80,6 +91,9 @@ export async function POST(request:Request){
     const files=form.getAll('receipt').filter((entry):entry is File=>entry instanceof File&&entry.size>0);
     const updated=await uploadAndReadDriverBreakdownReceipt(breakdownId,token,files);
     const breakdown=await withDispatch(breakdownId,updated);
+    if(!breakdown.receipt.uploaded){
+      throw new Error('Receipt could not be verified after upload. Please try again before leaving this screen.');
+    }
     return Response.json({ok:true,breakdown},{headers:{'cache-control':'no-store'}});
   }catch(error){
     const message=error instanceof Error?error.message:String(error);
