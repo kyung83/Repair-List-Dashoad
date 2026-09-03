@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import AppNav from "./app-nav";
 import TechnicianMobileDock from "./technician-mobile-dock";
+import ShopMobileRouteStyle from "./shop-mobile-route-style";
 import "./globals.css";
 import "./professional-shell.css";
 import "./northern-brand.css";
@@ -19,10 +20,17 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <ShopMobileRouteStyle />
         <AppNav />
         <div className="app-shell-content">{children}</div>
         <TechnicianMobileDock />
