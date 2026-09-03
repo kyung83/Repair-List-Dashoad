@@ -36,32 +36,54 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
   const[busy,setBusy]=useState(false);
   const[message,setMessage]=useState('');
 
-  const load=useCallback(async()=>{
-    setLoading(true);
+  const load=useCallback(async(quiet=false)=>{
+    if(!quiet)setLoading(true);
     try{
       const response=await fetch(`/api/breakdowns/receipts?breakdownId=${breakdownId}`,{cache:'no-store'});
       const payload=await response.json() as {review?:ReceiptReview;error?:string};
       if(!response.ok||!payload.review)throw new Error(payload.error||'Driver follow-up could not be loaded.');
       setReview(payload.review);
-      const receipt=payload.review.receipt;
-      setDraft(current=>({
+      const receipt=payload.review.receipt&&payload.review.receipt.pages.length>0?payload.review.receipt:null;
+      setDraft(current=>quiet?{
+        vendor:current.vendor||receipt?.vendor||providerName||'',
+        invoiceNumber:current.invoiceNumber||receipt?.invoiceNumber||'',
+        invoiceDate:current.invoiceDate||receipt?.invoiceDate||'',
+        totalAmount:current.totalAmount||(initialCost!=null?String(initialCost):(receipt?.totalAmount||'')),
+        serviceSummary:current.serviceSummary||receipt?.serviceSummary||'',
+      }:{
         vendor:receipt?.vendor||providerName||current.vendor||'',
         invoiceNumber:receipt?.invoiceNumber||current.invoiceNumber||'',
         invoiceDate:receipt?.invoiceDate||current.invoiceDate||'',
         totalAmount:initialCost!=null?String(initialCost):(receipt?.totalAmount||current.totalAmount||''),
         serviceSummary:receipt?.serviceSummary||current.serviceSummary||'',
-      }));
-      setMessage('');
-    }catch(error){setMessage(error instanceof Error?error.message:'Driver follow-up could not be loaded.');}
-    finally{setLoading(false);}
+      });
+      if(!quiet)setMessage('');
+    }catch(error){
+      if(!quiet)setMessage(error instanceof Error?error.message:'Driver follow-up could not be loaded.');
+    }finally{
+      if(!quiet)setLoading(false);
+    }
   },[breakdownId,initialCost,providerName]);
 
   useEffect(()=>{void load();},[load]);
+
+  const rolling=Boolean(review?.rollingAt);
+  useEffect(()=>{
+    if(rolling)return;
+    const tick=()=>{if(document.visibilityState==='visible')void load(true);};
+    const interval=window.setInterval(tick,10000);
+    const refreshWhenVisible=()=>{if(document.visibilityState==='visible')void load(true);};
+    document.addEventListener('visibilitychange',refreshWhenVisible);
+    return()=>{
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange',refreshWhenVisible);
+    };
+  },[load,rolling]);
+
   function setField(field:keyof Draft,value:string){setDraft(current=>({...current,[field]:value}));}
 
   const costNumber=Number(draft.totalAmount);
   const costValid=draft.totalAmount.trim()!==''&&Number.isFinite(costNumber)&&costNumber>=0;
-  const rolling=Boolean(review?.rollingAt);
   const statusText=useMemo(()=>{
     if(rolling)return'Driver marked Rolling';
     if(review?.driverStatus==='repair_finished')return'Repair marked finished — Rolling not confirmed';
@@ -85,7 +107,9 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
 
   if(loading)return <div style={{marginTop:12,padding:14,border:'1px solid #dfe6ee',borderRadius:10,background:'#f8fafc',color:'#64748b'}}>Loading closeout status…</div>;
   if(!review)return message?<div style={{marginTop:12,padding:11,border:'1px solid #efc16c',borderRadius:9,background:'#fff8e8'}}>{message}</div>:null;
-  const receipt=review.receipt;
+  const receiptRecord=review.receipt;
+  const receipt=receiptRecord&&receiptRecord.pages.length>0?receiptRecord:null;
+  const receiptRecordWithoutImage=Boolean(receiptRecord&&!receipt);
 
   return <div style={{marginTop:12,display:'grid',gap:12}}>
     <section style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:8}}>
@@ -96,7 +120,7 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
 
     {receipt?<details style={{border:'1px solid #d9e1e8',borderRadius:10,background:'#fff',padding:11}}>
       <summary style={{cursor:'pointer',fontWeight:900,color:'#263b4e'}}>Receipt uploaded — review details</summary>
-      {receipt.pages.length?<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,170px))',gap:8,marginTop:10}}>{receipt.pages.map(page=><a key={page.pageOrder} href={page.url} target="_blank" rel="noreferrer" style={{display:'block',border:'1px solid #d9e1e8',borderRadius:8,overflow:'hidden'}}><img src={page.url} alt={page.fileName} style={{display:'block',width:'100%',height:120,objectFit:'cover'}}/></a>)}</div>:null}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,170px))',gap:8,marginTop:10}}>{receipt.pages.map(page=><a key={page.pageOrder} href={page.url} target="_blank" rel="noreferrer" style={{display:'block',border:'1px solid #d9e1e8',borderRadius:8,overflow:'hidden'}}><img src={page.url} alt={page.fileName} style={{display:'block',width:'100%',height:120,objectFit:'cover'}}/></a>)}</div>
       {receipt.aiStatus==='failed'?<div style={warning}>Receipt saved, but automatic reading failed. Check the image manually. {receipt.aiError}</div>:null}
       {receipt.uncertain.length?<div style={warning}><strong>Check:</strong> {receipt.uncertain.join(' · ')}</div>:null}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:9,marginTop:10}}>
@@ -104,7 +128,7 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
         <label style={label}>Invoice #<input style={input} value={draft.invoiceNumber} onChange={event=>setField('invoiceNumber',event.target.value.slice(0,100))}/></label>
         <label style={label}>Invoice Date<input style={input} type="date" value={draft.invoiceDate} onChange={event=>setField('invoiceDate',event.target.value)}/></label>
       </div>
-    </details>:<div style={{padding:10,border:'1px dashed #cbd5df',borderRadius:9,color:'#667482',fontSize:12}}>No receipt uploaded. Receipt is optional and does not block closeout.</div>}
+    </details>:<div style={{padding:10,border:receiptRecordWithoutImage?'1px solid #efc16c':'1px dashed #cbd5df',borderRadius:9,background:receiptRecordWithoutImage?'#fff8e8':'transparent',color:receiptRecordWithoutImage?'#765218':'#667482',fontSize:12}}>{receiptRecordWithoutImage?'A receipt upload was started, but no saved receipt image is attached to this breakdown. The driver should upload it again.':'No receipt uploaded. Receipt is optional and does not block closeout.'}</div>}
 
     <section style={{padding:14,border:'2px solid #f2a35f',borderRadius:11,background:'#fff9f3'}}>
       <div style={{display:'grid',gridTemplateColumns:'minmax(180px,.55fr) minmax(260px,1.45fr)',gap:12,alignItems:'start'}} className="breakdown-closeout-fields">
