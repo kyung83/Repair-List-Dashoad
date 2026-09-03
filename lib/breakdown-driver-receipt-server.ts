@@ -59,29 +59,40 @@ function cleanFileName(value:string){
 
 async function replaceReceiptPages(receiptId:number,breakdownId:number,files:File[]){
   const old=await env.DB.prepare(`SELECT object_key FROM roadside_breakdown_receipt_pages WHERE receipt_id=?`).bind(receiptId).all<{object_key:string}>();
+  const uploaded:{key:string;file:File;order:number}[]=[];
+
+  try{
+    for(let index=0;index<files.length;index+=1){
+      const file=files[index];
+      const bytes=await file.arrayBuffer();
+      const key=`roadside-breakdown-receipts/${new Date().toISOString().slice(0,4)}/${breakdownId}/${crypto.randomUUID()}-${cleanFileName(file.name)}`;
+      await env.FILES.put(key,bytes,{httpMetadata:{contentType:file.type||'application/octet-stream'}});
+      uploaded.push({key,file,order:index+1});
+    }
+
+    const statements=[env.DB.prepare(`DELETE FROM roadside_breakdown_receipt_pages WHERE receipt_id=?`).bind(receiptId)];
+    for(const page of uploaded){
+      statements.push(env.DB.prepare(`
+        INSERT INTO roadside_breakdown_receipt_pages(receipt_id,page_order,object_key,file_name,content_type)
+        VALUES(?,?,?,?,?)
+      `).bind(receiptId,page.order,page.key,page.file.name.slice(0,255),page.file.type||'application/octet-stream'));
+    }
+    await env.DB.batch(statements);
+
+    const saved=await env.DB.prepare(`SELECT COUNT(*) AS count FROM roadside_breakdown_receipt_pages WHERE receipt_id=?`).bind(receiptId).first<{count:number}>();
+    if(Number(saved?.count||0)!==uploaded.length)throw new Error('Receipt image storage could not be verified.');
+  }catch(error){
+    for(const page of uploaded){
+      try{await env.FILES.delete(page.key);}catch(cleanupError){console.warn('Could not clean up failed breakdown receipt upload.',String(cleanupError));}
+    }
+    throw error;
+  }
+
   for(const page of old.results){
     try{await env.FILES.delete(page.object_key);}catch(error){
       console.warn('Could not delete superseded breakdown receipt page.',String(error));
     }
   }
-
-  const uploaded:{key:string;file:File;order:number}[]=[];
-  for(let index=0;index<files.length;index+=1){
-    const file=files[index];
-    const bytes=await file.arrayBuffer();
-    const key=`roadside-breakdown-receipts/${new Date().toISOString().slice(0,4)}/${breakdownId}/${crypto.randomUUID()}-${cleanFileName(file.name)}`;
-    await env.FILES.put(key,bytes,{httpMetadata:{contentType:file.type||'application/octet-stream'}});
-    uploaded.push({key,file,order:index+1});
-  }
-
-  const statements=[env.DB.prepare(`DELETE FROM roadside_breakdown_receipt_pages WHERE receipt_id=?`).bind(receiptId)];
-  for(const page of uploaded){
-    statements.push(env.DB.prepare(`
-      INSERT INTO roadside_breakdown_receipt_pages(receipt_id,page_order,object_key,file_name,content_type)
-      VALUES(?,?,?,?,?)
-    `).bind(receiptId,page.order,page.key,page.file.name.slice(0,255),page.file.type||'application/octet-stream'));
-  }
-  await env.DB.batch(statements);
 }
 
 async function saveReading(receiptId:number,model:string,reading:OutsideWorkReading){
@@ -112,10 +123,10 @@ export async function uploadAndReadDriverBreakdownReceipt(breakdownId:number,tok
 
   await env.DB.prepare(`
     INSERT INTO roadside_breakdown_receipts(breakdown_id,repair_id,ai_status,review_status,updated_at)
-    VALUES(?,?,'uploaded','pending',CURRENT_TIMESTAMP)
+    VALUES(?,?,'uploading','pending',CURRENT_TIMESTAMP)
     ON CONFLICT(breakdown_id) DO UPDATE SET
       repair_id=excluded.repair_id,
-      ai_status='uploaded',ai_model='',ai_vendor='',ai_invoice_number='',ai_invoice_date='',ai_unit='',ai_mileage='',
+      ai_status='uploading',ai_model='',ai_vendor='',ai_invoice_number='',ai_invoice_date='',ai_unit='',ai_mileage='',
       ai_total_amount='',ai_service_summary='',ai_costs_json='{}',ai_uncertain_json='[]',ai_error='',
       review_status='pending',reviewed_vendor='',reviewed_invoice_number='',reviewed_invoice_date='',reviewed_total_amount='',
       reviewed_service_summary='',reviewed_at=NULL,reviewed_by_user_id=NULL,updated_at=CURRENT_TIMESTAMP
@@ -124,8 +135,18 @@ export async function uploadAndReadDriverBreakdownReceipt(breakdownId:number,tok
   const receipt=await receiptForBreakdown(breakdownId);
   if(!receipt)throw new Error('Receipt record could not be created.');
 
-  // Save the driver's original file(s) first. The phone does no OCR or image conversion.
-  await replaceReceiptPages(receipt.id,breakdownId,files);
+  try{
+    // The upload is not considered successful until the new R2 objects and D1 page rows both exist.
+    await replaceReceiptPages(receipt.id,breakdownId,files);
+  }catch(error){
+    const message=error instanceof Error?error.message:String(error);
+    await env.DB.prepare(`
+      UPDATE roadside_breakdown_receipts
+      SET ai_status='upload_failed',ai_error=?,review_status='pending',updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(message.slice(0,1000),receipt.id).run();
+    throw new Error('Receipt could not be saved. Please try the upload again before leaving this screen.');
+  }
 
   const aiReadable=files.every(file=>{
     const type=String(file.type||'').toLowerCase();
