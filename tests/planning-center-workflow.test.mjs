@@ -10,7 +10,7 @@ test('manager Planning Center bulk-selects work and uses one shared action contr
   assert.match(source,/Action for checked work:/);
   assert.match(source,/aria-label="Bulk action for checked work"/);
   assert.match(source,/\/api\/repair-board\/bulk-assign/);
-  assert.match(source,/>Apply<\/button>/);
+  assert.match(source,/busy==='bulk'\?'Working…':'Apply'/);
   assert.match(source,/Clear Selection/);
   assert.match(source,/Planning Center/);
 });
