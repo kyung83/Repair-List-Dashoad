@@ -199,6 +199,9 @@ async function enforceDashboardAccess(request: Request, env: Env, url: URL): Pro
     if (count === 0) return isApi(url.pathname) ? Response.json({ error: 'Dashboard administrator setup is required.', setupRequired: true }, { status: 503 }) : setupRedirect(url);
     return isApi(url.pathname) ? Response.json({ error: 'Authentication required.' }, { status: 401 }) : loginRedirect(url);
   }
+  if (user.dispatchAccess && url.pathname === '/' && (method === 'GET' || method === 'HEAD')) {
+    return Response.redirect(new URL('/repair-board', url), 302);
+  }
   if (!(await userCanAccess(request, user, url))) return accessDenied(url);
   return null;
 }
