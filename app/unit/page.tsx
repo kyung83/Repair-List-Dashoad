@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import ModuleTabs from "../module-tabs";
 
 type History = { repairs:number; maintenanceEvents:number; historicalRos:number; expenses:number; lastRepairDate:string };
 type Equipment = { id:number; unit:string; category:string; equipmentType:string; active:boolean; archived:boolean; source:"Geotab"|"Manual"; currentMileage:number|null; mileageUpdatedAt:string; serviceDate:string; annualDate:string; notes:string; driver:string; location:string; vin:string; licensePlate:string; licenseState:string; modelYear:number|null; make:string; model:string; history:History };
@@ -48,14 +47,18 @@ export default function UnitPage(){
     setMessage('');setSelectedUnit(found.unit);window.history.replaceState(null,'',`/unit?unit=${encodeURIComponent(found.unit)}`);
   }
 
+  const role=board?.user.role||'';
+  const canWork=role==='mechanic'||role==='manager'||role==='admin';
+  const canOpenBoard=role==='dispatch'||role==='manager'||role==='admin'||role==='viewer';
+  const canOfficeTools=role==='viewer'||role==='manager'||role==='admin';
+  const canUseAnnualForms=role!=='dispatch';
   const latestAnnual=annuals[0];
   const currentMaintenance=openWork.filter(item=>['pm','annual','pm-repair','annual-repair'].includes(item.source));
   const currentRepairs=openWork.filter(item=>!['pm','annual','pm-repair','annual-repair'].includes(item.source));
 
   return <main className="easy-page"><div className="easy-page-narrow">
-    <ModuleTabs module="units" />
     <p className="easy-eyebrow">FIND A UNIT</p><h1 className="easy-title">Truck & trailer lookup</h1>
-    <p className="easy-subtitle">If you know the unit number, you should be able to get to everything else from here.</p>
+    <p className="easy-subtitle">If you know the unit number, you should be able to get to everything you are allowed to use from here.</p>
     {message&&<div className="easy-notice">{message}</div>}
     <section className="easy-finder">
       <label>Unit number
@@ -65,7 +68,7 @@ export default function UnitPage(){
       <button type="button" className="easy-button orange" onClick={openUnit}>Open Unit</button>
     </section>
 
-    {!selected&&<div className="easy-card easy-empty" style={{marginTop:16}}>Search for a unit above. Its repairs, maintenance, future work, and Annual forms will all appear on one page.</div>}
+    {!selected&&<div className="easy-card easy-empty" style={{marginTop:16}}>Search for a unit above. Its repairs, maintenance, future work, and available forms will appear on one page.</div>}
 
     {selected&&<>
       <section className="easy-unit-layout">
@@ -78,9 +81,9 @@ export default function UnitPage(){
             <div className="easy-unit-stat"><span>Mileage source</span><strong>{selected.source}</strong></div>
           </div>
           <div className="easy-actions">
-            <a className="easy-button orange" href="/shop">Work on this Unit</a>
-            {board?.user.role!=='mechanic'&&<a className="easy-button" href="/repair-board">Open Shop Board</a>}
-            {latestAnnual&&<a className="easy-button" href={latestAnnual.printUrl}>Print Latest Annual</a>}
+            {canWork&&<a className="easy-button orange" href="/shop">Work on this Unit</a>}
+            {canOpenBoard&&<a className="easy-button" href="/repair-board">Open Repair Board</a>}
+            {canUseAnnualForms&&latestAnnual&&<a className="easy-button" href={latestAnnual.printUrl}>Print Latest Annual</a>}
           </div>
         </div>
         <div className="easy-card easy-card-body">
@@ -91,7 +94,7 @@ export default function UnitPage(){
             <div className="easy-row"><div><strong>Last PM</strong><span>{dateText(selected.serviceDate)}</span></div></div>
             <div className="easy-row"><div><strong>Last Annual</strong><span>{dateText(selected.annualDate)}</span></div></div>
           </div>
-          {board?.user.role!=='mechanic'&&<div className="easy-actions"><a className="easy-button" href="/equipment">Edit Unit Details</a><a className="easy-button" href="/reports/history">View History</a></div>}
+          {canOfficeTools&&<div className="easy-actions"><a className="easy-button" href="/equipment">Edit Unit Details</a><a className="easy-button" href="/reports/history">View History</a></div>}
         </div>
       </section>
 
@@ -111,14 +114,14 @@ export default function UnitPage(){
       <section className="easy-attention">
         <div className="easy-card easy-card-body">
           <h3 className="easy-section-title">Next service work ({future.length})</h3>
-          <p className="easy-section-copy">Items intentionally saved at the end of a PM or Annual. These are real repairs with parts that can be planned ahead.</p>
+          <p className="easy-section-copy">Items intentionally saved for the next PM or Annual.</p>
           <div className="easy-list">{future.map(item=><div key={item.id} className="easy-row"><div className="easy-row-main"><strong>{item.description}</strong><span>Waiting for next {item.targetEventType==='annual'?'Annual':'PM'}{item.plannedPartCount?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</span></div><span className="easy-badge orange">NEXT {item.targetEventType==='annual'?'ANNUAL':'PM'}</span></div>)}{!future.length&&<div className="easy-empty">Nothing is waiting for a future PM or Annual.</div>}</div>
         </div>
-        <div className="easy-card easy-card-body">
+        {canUseAnnualForms&&<div className="easy-card easy-card-body">
           <h3 className="easy-section-title">Annual forms</h3>
-          <p className="easy-section-copy">Completed inspections stay here so a lost truck copy can be printed again.</p>
+          <p className="easy-section-copy">Completed inspections stay here so a lost copy can be printed again.</p>
           <div className="easy-form-list">{annuals.slice(0,6).map(item=><div className="easy-form-row" key={item.reportNumber}><div><strong>{dateText(item.inspectionDate)} Annual</strong><span>{item.inspector||'Inspector not listed'} · {item.reportNumber}</span></div><a className="easy-button" style={{minHeight:38,padding:'0 11px'}} href={item.printUrl}>Print</a></div>)}{!annuals.length&&<div className="easy-empty">No completed Annual form is stored for this unit yet.</div>}</div>
-        </div>
+        </div>}
       </section>
     </>}
   </div></main>;
