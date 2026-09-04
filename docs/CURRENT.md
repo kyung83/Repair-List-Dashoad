@@ -21,7 +21,7 @@ Use this file before changing a workflow. Replace the current implementation in 
 | Unit Hub | `app/unit/page.tsx` | Universal unit lookup and cross-workflow context. Global sidebar search opens this page directly. |
 | Navigation / role shell | `app/app-nav.tsx`, `app/navigation-config.ts` | Today is the first office landing destination and Find Unit is available globally. `module-tabs.tsx` is compatibility-only and renders nothing. |
 | Shared repair status vocabulary | `lib/status.ts` | Use shared helpers/constants instead of adding new repair-completion aliases. |
-| Production regression command | `npm test` and `scripts/build-verified.sh` | Both run every `tests/*.test.mjs` file so newly-added safety tests cannot silently sit unused. |
+| Production regression command | `npm test` and `scripts/build-verified.sh` | `npm test` remains the raw full suite. `build-verified.sh` runs blocking regressions before the build, keeps the 12 named frozen breakdown/receipt failures in an explicit non-blocking quarantine, and runs `rendered-html.test.mjs` after the build output exists. |
 
 ## Change rule
 
