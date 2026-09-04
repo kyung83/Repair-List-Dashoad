@@ -74,16 +74,16 @@ export default function RepairBoardRoleAwareContent(){
     return <>
       <div style={{background:'#f5f8fb',padding:'10px 22px 0'}}>
         <div style={{maxWidth:1780,margin:'0 auto',display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',padding:'9px 11px',border:'1px solid #d8e2eb',borderRadius:10,background:'#fff'}}>
-          <div><strong style={{display:'block',fontSize:12,color:'#21384d'}}>Repair Board View</strong><span style={{display:'block',marginTop:2,fontSize:9,color:'#758493'}}>Planning Center is the new manager workflow. Classic Board remains available during rollout.</span></div>
+          <div><strong style={{display:'block',fontSize:12,color:'#21384d'}}>Repair Board View</strong><span style={{display:'block',marginTop:2,fontSize:9,color:'#758493'}}>Planning Center is the manager workflow. Classic Board remains available only as a rollout fallback.</span></div>
           <div style={{display:'flex',gap:6}}>
             <button type="button" onClick={()=>setManagerView('planning')} style={{minHeight:34,padding:'0 11px',borderRadius:8,border:managerView==='planning'?'1px solid #176fe6':'1px solid #cbd7e1',background:managerView==='planning'?'#176fe6':'#fff',color:managerView==='planning'?'#fff':'#30475b',fontSize:10,fontWeight:900,cursor:'pointer'}}>Planning Center</button>
             <button type="button" onClick={()=>setManagerView('classic')} style={{minHeight:34,padding:'0 11px',borderRadius:8,border:managerView==='classic'?'1px solid #263b50':'1px solid #cbd7e1',background:managerView==='classic'?'#263b50':'#fff',color:managerView==='classic'?'#fff':'#30475b',fontSize:10,fontWeight:900,cursor:'pointer'}}>Classic Board</button>
           </div>
         </div>
       </div>
-      {managerView==='planning'?<PlanningCenter/>:<><RepairBoardSelfAssignPanel/><RepairBoardDashboard/></>}
-      <RepairCardOutsideVendor />
-      {managerView==='planning'&&<RepairBoardUnassign />}
+      {managerView==='planning'
+        ? <PlanningCenter/>
+        : <><RepairBoardSelfAssignPanel/><RepairBoardDashboard/><RepairCardOutsideVendor/><RepairBoardUnassign/></>}
     </>;
   }
 
