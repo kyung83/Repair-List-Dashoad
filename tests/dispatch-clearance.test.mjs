@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 
 const read=(path)=>readFile(new URL(`../${path}`,import.meta.url),'utf8');
 
-test('Dispatch is a first-class visible clearance with only Repair Board and Active Breakdowns navigation',async()=>{
+test('Dispatch is a first-class visible clearance with Repair Board and roadside breakdown navigation',async()=>{
   const[nav,users,adminRoute]=await Promise.all([
     read('app/navigation-config.ts'),
     read('app/admin/users/page.tsx'),
@@ -19,12 +19,18 @@ test('Dispatch is a first-class visible clearance with only Repair Board and Act
   assert.match(adminRoute,/role:row\.dispatch_access \? 'dispatch' : row\.role/);
 });
 
-test('Dispatch is hard limited at the Worker boundary',async()=>{
+test('Dispatch is hard limited at the Worker boundary while breakdown submission remains public',async()=>{
   const worker=await read('worker/index.ts');
   assert.match(worker,/if \(user\.dispatchAccess\) return dispatchCanAccess\(request, url\)/);
   assert.match(worker,/String\(body\.action \?\? ''\) === 'createRepair'/);
   assert.match(worker,/Number\(body\.technicianId \?\? 0\) <= 0/);
   assert.match(worker,/pathname\.startsWith\('\/api\/breakdowns\/'\)/);
+  const publicPaths=worker.match(/const PUBLIC_PATHS = new Set\(\[([\s\S]*?)\]\);/);
+  assert.ok(publicPaths);
+  assert.match(publicPaths[1],/'\/report-breakdown'/);
+  assert.match(publicPaths[1],/'\/api\/breakdowns'/);
+  assert.doesNotMatch(worker,/cannot submit driver breakdown reports/);
+  assert.doesNotMatch(worker,/const dispatchDriverRoute/);
   const dispatchReads=worker.match(/const DISPATCH_READ_PATHS = new Set\(\[([\s\S]*?)\]\);/);
   assert.ok(dispatchReads);
   assert.match(dispatchReads[1],/'\/repair-board'/);
@@ -34,7 +40,7 @@ test('Dispatch is hard limited at the Worker boundary',async()=>{
   assert.doesNotMatch(dispatchReads[1],/'\/reports'/);
 });
 
-test('Dispatch Repair Board is view plus unassigned repair entry only',async()=>{
+test('Dispatch Repair Board can submit breakdowns and add only unassigned shop repairs',async()=>{
   const[roleAware,addForm]=await Promise.all([
     read('app/repair-board/role-aware-content.tsx'),
     read('app/repair-board/add-repair-form.tsx'),
@@ -42,6 +48,8 @@ test('Dispatch Repair Board is view plus unassigned repair entry only',async()=>
   assert.match(roleAware,/role==='dispatch'/);
   assert.match(roleAware,/RepairBoardDashboard/);
   assert.match(roleAware,/allowTechnicianAssignment=\{false\}/);
+  assert.match(roleAware,/href="\/report-breakdown"/);
+  assert.match(roleAware,/>Submit Breakdown<\/a>/);
   assert.match(roleAware,/Active Breakdowns/);
   assert.match(addForm,/allowTechnicianAssignment&&technicianId\?Number\(technicianId\):0/);
   assert.match(addForm,/\{allowTechnicianAssignment&&<label>Tech/);
