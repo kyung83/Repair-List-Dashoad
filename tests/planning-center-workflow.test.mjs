@@ -4,24 +4,25 @@ import {readFile} from 'node:fs/promises';
 
 const read=(path)=>readFile(new URL(`../${path}`,import.meta.url),'utf8');
 
-test('manager Planning Center bulk-selects work and uses one technician assignment control',async()=>{
+test('manager Planning Center bulk-selects work and uses one shared action control',async()=>{
   const source=await read('app/repair-board/planning-center.tsx');
   assert.match(source,/type="checkbox"/);
-  assert.match(source,/Assign all checked work to:/);
+  assert.match(source,/Action for checked work:/);
+  assert.match(source,/aria-label="Bulk action for checked work"/);
   assert.match(source,/\/api\/repair-board\/bulk-assign/);
-  assert.match(source,/Apply Assignment/);
+  assert.match(source,/busy==='bulk'\?'Working…':'Apply'/);
   assert.match(source,/Clear Selection/);
   assert.match(source,/Planning Center/);
 });
 
-test('Planning Center keeps detailed repair context in the expanded unit view',async()=>{
+test('Planning Center keeps detailed repair context in the expanded unit view without old duplicate sections',async()=>{
   const source=await read('app/repair-board/planning-center.tsx');
   assert.match(source,/RepairPhotoPreview/);
   assert.match(source,/\/api\/shop\/repair-review\?repairId=/);
   assert.match(source,/Parts needed/);
-  assert.match(source,/Shop work recorded/);
-  assert.match(source,/Upcoming Work/);
-  assert.match(source,/Recent Activity/);
+  assert.match(source,/Work recorded on this job/);
+  assert.doesNotMatch(source,/Upcoming Work/);
+  assert.doesNotMatch(source,/Recent Activity/);
   assert.match(source,/Set ETA \/ Depart/);
   assert.match(source,/Mark OOS/);
 });

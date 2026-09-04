@@ -19,7 +19,7 @@ test('Dispatch is a first-class visible clearance with Repair Board and roadside
   assert.match(adminRoute,/role:row\.dispatch_access \? 'dispatch' : row\.role/);
 });
 
-test('Dispatch is hard limited at the Worker boundary while breakdown submission remains public',async()=>{
+test('Dispatch is hard limited at the Worker boundary while retaining Unit Hub read access',async()=>{
   const worker=await read('worker/index.ts');
   assert.match(worker,/if \(user\.dispatchAccess\) return dispatchCanAccess\(request, url\)/);
   assert.match(worker,/String\(body\.action \?\? ''\) === 'createRepair'/);
@@ -37,8 +37,8 @@ test('Dispatch is hard limited at the Worker boundary while breakdown submission
   assert.ok(dispatchReads);
   assert.match(dispatchReads[1],/'\/repair-board'/);
   assert.match(dispatchReads[1],/'\/breakdowns'/);
+  assert.match(dispatchReads[1],/'\/unit'/);
   assert.doesNotMatch(dispatchReads[1],/'\/shop'/);
-  assert.doesNotMatch(dispatchReads[1],/'\/unit'/);
   assert.doesNotMatch(dispatchReads[1],/'\/reports'/);
 });
 

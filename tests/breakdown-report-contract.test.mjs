@@ -81,7 +81,7 @@ test('reports UI exposes dedicated sortable breakdown reports CSV export and pro
     read('app/reports/breakdowns/page.tsx'),
     read('app/navigation-config.ts'),
   ]);
-  assert.match(nav, /href: "\/reports\/breakdowns", label: "Breakdowns"/);
+  assert.match(nav, /href: "\/reports\/breakdowns", label: "Breakdown Reports"/);
   assert.match(page, /Roadside Breakdown Cost & Performance/);
   assert.match(page, /Export Breakdown CSV/);
   assert.match(page, /Click a column heading to sort this breakdown data on its own/);

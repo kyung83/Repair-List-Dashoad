@@ -6,26 +6,29 @@ async function read(path) {
   return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-test('primary navigation is the streamlined seven-section sidebar with no Today tab', async () => {
+test('primary navigation keeps Today first and the simplified role-based sidebar groups', async () => {
   const config = await read('app/navigation-config.ts');
-  for (const label of ['Repairs','Breakdowns','Maintenance','Units','Parts','Reports','Settings']) {
-    assert.match(config, new RegExp(`label: "${label}"`));
+  const todayIndex = config.indexOf('key: "today"');
+  const repairsIndex = config.indexOf('key: "repairs"');
+  assert.ok(todayIndex >= 0 && repairsIndex > todayIndex, 'Today should be defined before Repairs');
+  for (const key of ['today','repairs','breakdowns','units','parts','reports','settings']) {
+    assert.match(config, new RegExp(`key: "${key}"`));
   }
-  assert.doesNotMatch(config, /label:\s*"Today"/);
   assert.match(config, /sidebarGroupsForRole/);
+  assert.match(config, /defaultHrefForRole/);
 });
 
-test('sidebar owns repair billing, breakdown and system destinations', async () => {
+test('sidebar owns current repair billing, breakdown and system destinations', async () => {
   const config = await read('app/navigation-config.ts');
-  assert.match(config, /href: "\/invoices\?view=invoices"[^\n]*label: "Invoices"[^\n]*view: "invoices"/);
-  assert.match(config, /href: "\/invoices\?view=ready"[^\n]*label: "Create Invoice"[^\n]*view: "ready"/);
-  assert.match(config, /href: "\/invoices\?view=settings"[^\n]*label: "Customers & Rates"[^\n]*view: "settings"/);
-  assert.match(config, /href: "\/breakdowns"[^\n]*label: "Active Breakdowns"/);
-  assert.match(config, /href: "\/reports\/breakdowns"[^\n]*label: "Breakdown Reports"/);
-  assert.match(config, /href: "\/breakdowns\/setup"[^\n]*label: "Breakdown Setup"/);
-  assert.match(config, /href: "\/admin\/gmail"[^\n]*label: "Breakdown Email"/);
-  assert.match(config, /href: "\/admin\/twilio"[^\n]*label: "Breakdown Texting"/);
-  assert.match(config, /href: "\/admin\/geotab-review\/connection"[^\n]*label: "Geotab Connection"/);
+  assert.match(config, /href: "\/invoices\?view=invoices", label: "Invoices", view: "invoices"/);
+  assert.match(config, /href: "\/invoices\?view=ready", label: "Ready to Bill", view: "ready"/);
+  assert.match(config, /href: "\/invoices\?view=settings", label: "Customers & Rates", view: "settings"/);
+  assert.match(config, /href: "\/breakdowns", label: "Active Breakdowns"/);
+  assert.match(config, /href: "\/reports\/breakdowns", label: "Breakdown Reports"/);
+  assert.match(config, /href: "\/breakdowns\/setup", label: "Breakdown Setup"/);
+  assert.match(config, /href: "\/admin\/gmail", label: "Breakdown Email"/);
+  assert.match(config, /href: "\/admin\/twilio", label: "Breakdown Texting"/);
+  assert.match(config, /href: "\/admin\/geotab-review\/connection", label: "Geotab Connection"/);
 });
 
 test('sidebar is collapsible and defaults narrow on Repair Board without changing Repair Board dashboard', async () => {
