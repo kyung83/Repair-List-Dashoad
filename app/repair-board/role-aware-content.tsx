@@ -5,6 +5,7 @@ import RepairBoardDashboard from "./dashboard-v2";
 import PlanningCenter from "./planning-center";
 import RepairBoardSelfAssignPanel from "./self-assign-panel";
 import RepairCardOutsideVendor from "./repair-card-outside-vendor";
+import RepairBoardUnassign from "./repair-board-unassign";
 import RepairBoardAddRepair from "./add-repair-form";
 import s from "./repair-board.module.css";
 
@@ -82,6 +83,7 @@ export default function RepairBoardRoleAwareContent(){
       </div>
       {managerView==='planning'?<PlanningCenter/>:<><RepairBoardSelfAssignPanel/><RepairBoardDashboard/></>}
       <RepairCardOutsideVendor />
+      {managerView==='planning'&&<RepairBoardUnassign />}
     </>;
   }
 
