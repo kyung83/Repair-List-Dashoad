@@ -166,7 +166,9 @@ export default function PlanningCenter(){
   const pmRows=available.filter(row=>pm(row.source));
   const annualRows=available.filter(row=>annual(row.source));
   return{
-   active:groups(active),
+   truckRepairs:groups(active.filter(row=>kind(row.equipmentType)==='truck')),
+   trailerRepairs:groups(active.filter(row=>kind(row.equipmentType)==='trailer')),
+   otherRepairs:groups(active.filter(row=>kind(row.equipmentType)==='other')),
    pms:groups(pmRows.filter(row=>kind(row.equipmentType)!=='trailer')),
    truckAnnuals:groups(annualRows.filter(row=>kind(row.equipmentType)!=='trailer')),
    trailerAnnuals:groups(annualRows.filter(row=>kind(row.equipmentType)==='trailer')),
@@ -326,7 +328,9 @@ export default function PlanningCenter(){
 
   <div className={s.layout}>
    <div className={s.mainGrid}>
-    {(category==='all'||category==='active')&&<Panel name="active" title="Active Repairs / DVIR" items={panels.active} wide/>}
+    {(category==='all'||category==='active')&&<Panel name="truck-repairs" title="Truck Repairs / DVIR" items={panels.truckRepairs}/>} 
+    {(category==='all'||category==='active')&&<Panel name="trailer-repairs" title="Trailer Repairs / DVIR" items={panels.trailerRepairs}/>} 
+    {(category==='all'||category==='active')&&panels.otherRepairs.length>0&&<Panel name="other-repairs" title="Other Equipment Repairs / DVIR" items={panels.otherRepairs} wide/>}
     {(category==='all'||category==='pm')&&<Panel name="pms" title="PMs" items={panels.pms}/>} 
     {(category==='all'||category==='annual')&&<Panel name="truck-annuals" title="Truck Annuals" items={panels.truckAnnuals}/>} 
     {(category==='all'||category==='annual')&&<Panel name="trailer-annuals" title="Trailer Annuals" items={panels.trailerAnnuals}/>} 
