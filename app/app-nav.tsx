@@ -21,7 +21,6 @@ function linkActive(pathname:string,currentView:string,link:NavLink){
   return pathname===href||pathname.startsWith(`${href}/`);
 }
 function groupActive(pathname:string,currentView:string,group:SidebarGroup){
-  // Breakdown reporting belongs to the Breakdown workflow even though its URL lives under /reports.
   if(pathname.startsWith("/reports/breakdowns"))return group.key==="breakdowns";
   const rootLink=group.links.find(link=>link.href===group.href);
   const rootActive=rootLink?linkActive(pathname,currentView,rootLink):pathname===pathOnly(group.href);
@@ -34,9 +33,9 @@ function initials(name:string){
 
 function SidebarIcon({name}:{name:IconName}){
   const common={width:22,height:22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round" as const,strokeLinejoin:"round" as const,"aria-hidden":true};
+  if(name==="today")return <svg {...common}><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V20h14v-9.5"/><path d="M9 20v-6h6v6"/></svg>;
   if(name==="repairs")return <svg {...common}><path d="M14.7 6.3a4 4 0 0 0-5-5L7.4 3.6l3 3-3.8 3.8-3-3L1.3 9.7a4 4 0 0 0 5 5l6.4 6.4a2 2 0 0 0 2.8-2.8l-6.4-6.4"/><path d="m16 16 2 2"/></svg>;
   if(name==="breakdowns")return <svg {...common}><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>;
-  if(name==="maintenance")return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/><path d="m9 16 2 2 4-4"/></svg>;
   if(name==="units")return <svg {...common}><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>;
   if(name==="parts")return <svg {...common}><path d="m12 2 8 4-8 4-8-4 8-4Z"/><path d="m4 10 8 4 8-4M4 14l8 4 8-4"/></svg>;
   if(name==="reports")return <svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>;
@@ -50,6 +49,7 @@ export default function AppNav(){
   const [collapsed,setCollapsed]=useState(()=>pathname.startsWith("/repair-board"));
   const [openGroups,setOpenGroups]=useState<Set<string>>(()=>new Set());
   const [currentView,setCurrentView]=useState("");
+  const [unitSearch,setUnitSearch]=useState("");
   const hidden=pathname==="/login"||pathname==="/setup"||pathname.startsWith("/report-breakdown")||pathname.startsWith("/photos")||pathname.startsWith("/annual-inspections/print")||pathname.startsWith("/work-orders/print")||pathname.startsWith("/invoices/print");
 
   useEffect(()=>{
@@ -68,7 +68,7 @@ export default function AppNav(){
     }catch{
       setCollapsed(pathname.startsWith("/repair-board"));
     }
-  },[hidden]);
+  },[hidden,pathname]);
 
   useEffect(()=>{
     if(hidden){setCurrentView("");return;}
@@ -121,10 +121,16 @@ export default function AppNav(){
       const next=new Set(current);next.has(key)?next.delete(key):next.add(key);return next;
     });
   }
+  function openUnit(event:React.FormEvent){
+    event.preventDefault();
+    const value=unitSearch.trim();
+    if(!value){window.location.assign('/unit');return;}
+    window.location.assign(`/unit?unit=${encodeURIComponent(value)}`);
+  }
 
   if(hidden)return null;
 
-  const home=user?.role==='mechanic'?'/shop':'/repair-board';
+  const home=user?.role==='mechanic'?'/shop':user?.role==='dispatch'?'/repair-board':'/';
   const healthTitle=health
     ? `Geotab ${health.status}. Structured results ${health.summary.structured}/${health.summary.expected}. Live ${health.summary.live}, recent ${health.summary.recent}, stale ${health.summary.stale}, no data ${health.summary.noData}, offline ${health.summary.offline}, identity issues ${health.summary.identityErrors}.`
     : '';
@@ -137,6 +143,12 @@ export default function AppNav(){
       </a>
       <button className="app-sidebar-collapse" type="button" onClick={toggleCollapsed} aria-label={collapsed?'Expand navigation':'Collapse navigation'} title={collapsed?'Expand navigation':'Collapse navigation'}>{collapsed?'›':'‹'}</button>
     </div>
+
+    {user&&<form className="app-sidebar-unit-search" onSubmit={openUnit} aria-label="Find unit">
+      {collapsed
+        ? <button type="submit" className="app-sidebar-unit-search-compact" title="Find truck or trailer" aria-label="Find truck or trailer">⌕</button>
+        : <><label htmlFor="global-unit-search">FIND UNIT</label><div><input id="global-unit-search" value={unitSearch} onChange={event=>setUnitSearch(event.target.value.slice(0,32))} placeholder="Truck or trailer #" autoComplete="off"/><button type="submit" aria-label="Open unit">Go</button></div></>}
+    </form>}
 
     <nav className="app-sidebar-nav">
       {groups.map(group=>{
