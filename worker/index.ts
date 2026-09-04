@@ -190,11 +190,6 @@ async function handleLogin(request: Request, env: Env, url: URL) {
 
 async function enforceDashboardAccess(request: Request, env: Env, url: URL): Promise<Response | null> {
   const method = request.method.toUpperCase();
-  const dispatchDriverRoute = url.pathname === '/report-breakdown' || (url.pathname === '/api/breakdowns' && method === 'POST');
-  if (dispatchDriverRoute) {
-    const signedIn = await getSessionUser(env.DB, request);
-    if (signedIn?.dispatchAccess) return accessDenied(url, 'Dispatch clearance handles breakdowns from Active Breakdowns and cannot submit driver breakdown reports.');
-  }
   if (PUBLIC_PATHS.has(url.pathname) || isStaticAsset(url.pathname)) return null;
   const origin = request.headers.get('origin');
   if (!['GET','HEAD','OPTIONS'].includes(method) && origin && origin !== url.origin) return Response.json({ error: 'Cross-site write request rejected.' }, { status: 403 });
