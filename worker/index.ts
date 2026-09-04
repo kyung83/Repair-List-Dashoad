@@ -47,6 +47,12 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/setup',
   '/favicon.svg',
 ]);
+const PUBLIC_LOOKUP_LIMITS = new Map<string, number>([
+  ['/api/equipment/search', 300],
+  ['/api/breakdowns/driver-search', 120],
+  ['/api/breakdowns/geotab-preview', 120],
+]);
+const PUBLIC_LOOKUP_WINDOW_MINUTES = 15;
 const ASSIGNED_MAINTENANCE_WRITE_PATHS = new Set([
   '/api/maintenance-actions',
   '/api/maintenance-checklist',
@@ -82,10 +88,14 @@ const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
 const DISPATCH_READ_PATHS = new Set([
   '/repair-board',
   '/breakdowns',
+  '/unit',
   '/api/repair-board',
   '/api/repair-board/eta',
   '/api/repair-board/order',
   '/api/yard-status',
+  '/api/equipment',
+  '/api/annual-inspections',
+  '/api/maintenance-actions',
   '/api/breakdown-service-providers',
 ]);
 
@@ -110,6 +120,38 @@ function accessDenied(url: URL, message = 'Your clearance does not allow this ac
 }
 function publicUser(user: AppUser) {
   return user.dispatchAccess ? { ...user, role:'dispatch' as const } : user;
+}
+
+async function publicLookupKey(pathname: string, ip: string) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`public-lookup\u0000${pathname}\u0000${ip || '[unknown]'}`)));
+  return `public:${Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function enforcePublicLookupRateLimit(request: Request, env: Env, url: URL): Promise<Response | null> {
+  const limit = PUBLIC_LOOKUP_LIMITS.get(url.pathname);
+  if (!limit || request.method.toUpperCase() !== 'GET') return null;
+  const key = await publicLookupKey(url.pathname, request.headers.get('cf-connecting-ip') || '');
+  const offset = `-${PUBLIC_LOOKUP_WINDOW_MINUTES} minutes`;
+  const row = await env.DB.prepare(`
+    SELECT failures
+    FROM app_login_attempts
+    WHERE attempt_key = ? AND window_started_at >= datetime('now', ?)
+  `).bind(key, offset).first<{ failures:number }>();
+  if (Number(row?.failures ?? 0) >= limit) {
+    return Response.json({ error:'Too many public lookup requests. Wait a few minutes and try again.' }, {
+      status:429,
+      headers:{ 'retry-after':String(PUBLIC_LOOKUP_WINDOW_MINUTES * 60), 'cache-control':'no-store' },
+    });
+  }
+  await env.DB.prepare(`
+    INSERT INTO app_login_attempts(attempt_key,failures,window_started_at,updated_at)
+    VALUES(?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    ON CONFLICT(attempt_key) DO UPDATE SET
+      failures=CASE WHEN app_login_attempts.window_started_at<datetime('now',?) THEN 1 ELSE app_login_attempts.failures+1 END,
+      window_started_at=CASE WHEN app_login_attempts.window_started_at<datetime('now',?) THEN CURRENT_TIMESTAMP ELSE app_login_attempts.window_started_at END,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(key, offset, offset).run();
+  return null;
 }
 
 async function dispatchCanAccess(request: Request, url: URL) {
@@ -237,6 +279,8 @@ const worker = {
         allowedWidths,
       });
     }
+    const rateLimited = await enforcePublicLookupRateLimit(request, env, url);
+    if (rateLimited) return rateLimited;
     const denied = await enforceDashboardAccess(request, env, url);
     if (denied) return denied;
     const response = await handler.fetch(request, env, ctx);
@@ -249,6 +293,11 @@ const worker = {
         console.log(JSON.stringify({ event: 'breakdown_driver_directory_daily_sync', driverDirectory }));
       } catch (error) {
         console.error(JSON.stringify({ event: 'breakdown_driver_directory_sync_failed', error: String(error) }));
+      }
+      try {
+        await env.DB.prepare(`DELETE FROM app_login_attempts WHERE window_started_at < datetime('now','-1 day')`).run();
+      } catch (error) {
+        console.error(JSON.stringify({ event:'auth_attempt_cleanup_failed', error:String(error) }));
       }
       return;
     }

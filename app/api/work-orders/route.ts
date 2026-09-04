@@ -3,6 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { removePartFromRepair } from '@/lib/inventory-db';
 import { applyPartToRepair, undoInventoryOperation } from '@/lib/inventory-operations';
 import { getWorkOrderData, handleWorkOrderAction } from '@/lib/work-orders';
+import { isRepairCompleted, isRepairDeferred } from '@/lib/status';
 import { handleReviewCorrection } from './review-corrections';
 import { addReviewPart } from './review-part-correction';
 
@@ -10,10 +11,6 @@ function repairNumber(value: unknown) {
   const match = String(value ?? '').match(/^repair-(\d+)$/);
   if (!match) throw new Error('Repair row not found');
   return Number(match[1]);
-}
-
-function deferred(status: unknown) {
-  return String(status ?? '').toLowerCase().startsWith('deferred to next');
 }
 
 function operationKey(request: Request, body: Record<string,unknown>, prefix: string) {
@@ -27,7 +24,7 @@ async function enforceTechnicianScope(request: Request, body: Record<string, unk
   const match = String(rawRepairId ?? '').match(/^repair-(\d+)$/);
   if (match) {
     const row = await env.DB.prepare(`SELECT COALESCE(status,'') AS status FROM repairs WHERE id = ?`).bind(Number(match[1])).first<{status:string}>();
-    if (row && deferred(row.status)) throw new Error('This repair is saved for a future PM/Annual and is not active work yet.');
+    if (row && isRepairDeferred(row.status)) throw new Error('This repair is saved for a future PM/Annual and is not active work yet.');
   }
   if (user.role !== 'mechanic') return;
   if (!user.technicianId) throw new Error('This technician login is not linked to a technician record.');
@@ -42,7 +39,7 @@ async function enforceTechnicianScope(request: Request, body: Record<string, unk
     .first<{ technician_id: number | null; status: string }>();
   if (!repair) throw new Error('Repair was not found.');
   if (Number(repair.technician_id ?? 0) !== user.technicianId) throw new Error('This repair is not assigned to you.');
-  if (String(repair.status ?? '').toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
+  if (isRepairCompleted(repair.status)) throw new Error('That repair is already completed.');
 }
 
 async function approveWorkOrder(request: Request, body: Record<string, unknown>) {
@@ -56,7 +53,7 @@ async function approveWorkOrder(request: Request, body: Record<string, unknown>)
   if (ids.length > 100) throw new Error('Too many repairs were included in one work order review.');
   const placeholders = ids.map(() => '?').join(',');
   const rows = await env.DB.prepare(`SELECT id,COALESCE(status,'') AS status FROM repairs WHERE id IN (${placeholders})`).bind(...ids).all<{id:number;status:string}>();
-  if (rows.results.length !== ids.length || rows.results.some((row) => !row.status.toLowerCase().includes('complete'))) {
+  if (rows.results.length !== ids.length || rows.results.some((row) => !isRepairCompleted(row.status))) {
     throw new Error('Only completed repairs can be approved from Work Order Review.');
   }
 
@@ -74,7 +71,7 @@ export async function GET(request: Request) {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
     const data = await getWorkOrderData(env.DB);
-    data.repairs = data.repairs.filter((repair) => !deferred(repair.status));
+    data.repairs = data.repairs.filter((repair) => !isRepairDeferred(repair.status));
     return Response.json({...data,user:{id:user.id,displayName:user.displayName,role:user.role},canApprove:user.role === 'manager' || user.role === 'admin'}, {headers:{'cache-control':'no-store'}});
   } catch (error) {
     console.error(JSON.stringify({event:'work_orders_get_failed',error:String(error)}));
