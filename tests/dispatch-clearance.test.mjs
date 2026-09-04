@@ -25,6 +25,8 @@ test('Dispatch is hard limited at the Worker boundary while breakdown submission
   assert.match(worker,/String\(body\.action \?\? ''\) === 'createRepair'/);
   assert.match(worker,/Number\(body\.technicianId \?\? 0\) <= 0/);
   assert.match(worker,/pathname\.startsWith\('\/api\/breakdowns\/'\)/);
+  assert.match(worker,/user\.dispatchAccess && url\.pathname === '\/'/);
+  assert.match(worker,/Response\.redirect\(new URL\('\/repair-board', url\), 302\)/);
   const publicPaths=worker.match(/const PUBLIC_PATHS = new Set\(\[([\s\S]*?)\]\);/);
   assert.ok(publicPaths);
   assert.match(publicPaths[1],/'\/report-breakdown'/);
