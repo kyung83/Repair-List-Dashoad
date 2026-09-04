@@ -1,108 +1,34 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
-import ModuleTabs from "../module-tabs";
 import InlineWorkOrderReviewEditor from "./inline-review-editor";
+import { isRepairCompleted } from "@/lib/status";
 
-type PartOption = {
-  id:number;
-  partNumber:string;
-  description:string;
-  quantityOnHand:number;
-  unitCost:number|null;
-  location:string;
-};
-type UsedPart = {
-  usageId:number;
-  repairId:string;
-  repairIssue:string;
-  partId:number;
-  partNumber:string;
-  description:string;
-  quantity:number;
-  unitCost:number;
-  lineCost:number;
-  costRecorded:boolean;
-};
-type LaborEntry = {
-  repairId:string;
-  repairIssue:string;
-  id:number;
-  technicianId:number|null;
-  technician:string;
-  laborDate:string;
-  hours:number;
-  rate:number;
-  amount:number;
-  notes:string;
-};
-type TechnicianNote = {
-  repairId:string;
-  repairIssue:string;
-  id:number;
-  technicianId:number|null;
-  technician:string;
-  detail:string;
-  createdAt:string;
-};
+type PartOption = {id:number;partNumber:string;description:string;quantityOnHand:number;unitCost:number|null;location:string};
+type UsedPart = {usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean};
+type LaborEntry = {repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string};
+type TechnicianNote = {repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;detail:string;createdAt:string};
 type Repair = {
-  id:string;
-  numericId:number;
-  equipmentId:number|null;
-  unit:string;
-  issue:string;
-  status:string;
-  assignedTo:string;
-  technicianId:number|null;
-  location:string;
-  laborHours:number;
-  laborRate:number;
-  laborCost:number;
-  partCost:number;
-  outsideCost:number;
-  totalCost:number;
-  completedAt:string;
-  reviewedAt:string;
+  id:string;numericId:number;equipmentId:number|null;unit:string;issue:string;status:string;assignedTo:string;technicianId:number|null;
+  location:string;laborHours:number;laborRate:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;completedAt:string;reviewedAt:string;
 };
 type ReviewPackage = {
-  id:string;
-  repairIds:string[];
-  unit:string;
-  equipmentId:number|null;
-  technician:string;
-  technicianId:number|null;
-  completionDate:string;
-  completedAt:string;
-  reviewed:boolean;
-  reviewedAt:string;
-  reviewedBy:string;
-  reviewNote:string;
-  repairs:Repair[];
-  technicianNotes:TechnicianNote[];
-  laborEntries:LaborEntry[];
-  usedParts:UsedPart[];
-  missingPartCostLines:number;
-  laborHours:number;
-  laborCost:number;
-  partCost:number;
-  outsideCost:number;
-  totalCost:number;
+  id:string;repairIds:string[];unit:string;equipmentId:number|null;technician:string;technicianId:number|null;completionDate:string;completedAt:string;
+  reviewed:boolean;reviewedAt:string;reviewedBy:string;reviewNote:string;repairs:Repair[];technicianNotes:TechnicianNote[];laborEntries:LaborEntry[];
+  usedParts:UsedPart[];missingPartCostLines:number;laborHours:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;
 };
 type WorkOrderData = {
-  defaultLaborRate:number;
-  parts:PartOption[];
-  repairs:Repair[];
-  reviewPackages:ReviewPackage[];
+  defaultLaborRate:number;parts:PartOption[];repairs:Repair[];reviewPackages:ReviewPackage[];
   summary:{needsReview:number;reviewed:number;openRepairs:number;completedRepairs:number;completedValue:number};
-  canApprove:boolean;
-  user:{id:number;displayName:string;role:string};
-  updatedAt:string;
+  canApprove:boolean;user:{id:number;displayName:string;role:string};updatedAt:string;
 };
 type ReviewFilter="needs"|"reviewed"|"all";
 
-function isComplete(item:Repair){return item.status.toLowerCase().includes("complete");}
+type BillingHandoff={workOrderId:string;unit:string;totalCost:number}|null;
+
 function money(value:number){return Number(value||0).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});}
 function dateTime(value:string){if(!value)return "—";const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";const parsed=new Date(normalized);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();}
+function billingHref(item:Pick<ReviewPackage,"id">){return `/invoices?view=ready&workOrderId=${encodeURIComponent(item.id)}`;}
 
 export default function WorkOrdersPage(){
   const [data,setData]=useState<WorkOrderData|null>(null);
@@ -112,6 +38,7 @@ export default function WorkOrdersPage(){
   const [expanded,setExpanded]=useState<Set<string>>(()=>new Set());
   const [reviewNotes,setReviewNotes]=useState<Record<string,string>>({});
   const [saving,setSaving]=useState("");
+  const [billingHandoff,setBillingHandoff]=useState<BillingHandoff>(null);
 
   async function load(){
     const response=await fetch("/api/work-orders",{cache:"no-store"});
@@ -139,18 +66,19 @@ export default function WorkOrdersPage(){
 
   const openRepairs=useMemo(()=>{
     const needle=query.trim().toLowerCase();
-    return (data?.repairs??[]).filter((item)=>!isComplete(item)&&(!needle||[item.unit,item.issue,item.assignedTo,item.location].join(" ").toLowerCase().includes(needle)));
+    return (data?.repairs??[]).filter((item)=>!isRepairCompleted(item.status)&&(!needle||[item.unit,item.issue,item.assignedTo,item.location].join(" ").toLowerCase().includes(needle)));
   },[data,query]);
 
   function toggle(id:string){setExpanded((current)=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;});}
 
   async function approve(item:ReviewPackage){
-    setSaving(item.id);setMessage("");
+    setSaving(item.id);setMessage("");setBillingHandoff(null);
     try{
       const response=await fetch("/api/work-orders",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"approveWorkOrder",repairIds:item.repairIds,reviewNote:reviewNotes[item.id]??""})});
       const payload=await response.json() as {error?:string};
       if(!response.ok)throw new Error(payload.error||"Work order could not be approved.");
       setMessage(`Approved completed work order for Unit ${item.unit}.`);
+      setBillingHandoff({workOrderId:item.id,unit:item.unit,totalCost:item.totalCost});
       setReviewNotes((current)=>({...current,[item.id]:""}));
       await load();
     }catch(error){setMessage(error instanceof Error?error.message:"Work order could not be approved.");}
@@ -160,17 +88,20 @@ export default function WorkOrdersPage(){
   const summary=data?.summary??{needsReview:0,reviewed:0,openRepairs:0,completedRepairs:0,completedValue:0};
 
   return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"30px 34px 80px",color:"#182331"}}>
-    <ModuleTabs module="shop"/>
     <header style={{display:"flex",justifyContent:"space-between",gap:20,alignItems:"flex-end",flexWrap:"wrap"}}>
       <div>
-        <p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>WORK ORDER REVIEW</p>
-        <h1 style={{margin:"6px 0 0",fontSize:31}}>Completed work for manager review</h1>
-        <p style={{margin:"7px 0 0",color:"#64748b",maxWidth:900,fontSize:13}}>Open a completed work order and correct repair wording, labor, parts and outside cost directly in the review rows before approval.</p>
+        <p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>COMPLETED WORK</p>
+        <h1 style={{margin:"6px 0 0",fontSize:31}}>Review finished shop work</h1>
+        <p style={{margin:"7px 0 0",color:"#64748b",maxWidth:900,fontSize:13}}>Correct the repair wording, labor, parts and outside cost here. Approval makes the work order eligible for invoicing.</p>
       </div>
       <div style={{display:"flex",gap:7}}><a href="/repair-board" style={linkButtonStyle}>Repair Board</a><button type="button" onClick={()=>void load()} style={buttonStyle}>Refresh</button></div>
     </header>
 
     {message&&<div style={{marginTop:12,padding:10,background:"#fff8e6",border:"1px solid #f2c66d",fontSize:12}}>{message}</div>}
+    {billingHandoff&&<section style={handoffStyle}>
+      <div><strong>Unit {billingHandoff.unit} is reviewed and ready.</strong><span style={{display:"block",marginTop:3,fontSize:12,color:"#506579"}}>Recorded work-order total: {money(billingHandoff.totalCost)}. You will not have to search for this work order again.</span></div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><a href={`/invoices?view=ready&workOrderId=${encodeURIComponent(billingHandoff.workOrderId)}`} style={billingButtonStyle}>Create Invoice</a><button type="button" onClick={()=>setBillingHandoff(null)} style={buttonStyle}>Done for now</button></div>
+    </section>}
 
     <section style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(5,minmax(120px,1fr))",border:"1px solid #cfd6db",background:"white"}}>
       <Metric label="Needs review" value={String(summary.needsReview)}/><Metric label="Reviewed" value={String(summary.reviewed)}/><Metric label="Open repairs" value={String(summary.openRepairs)}/><Metric label="Completed repairs" value={String(summary.completedRepairs)}/><Metric label="Completed value" value={money(summary.completedValue)} last/>
@@ -185,12 +116,12 @@ export default function WorkOrdersPage(){
       </div>
 
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:1220}}>
-        <thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Completed</th><th style={thStyle}>Technician</th><th style={thStyle}>Repairs</th><th style={thStyle}>Notes</th><th style={thStyle}>Labor</th><th style={thStyle}>Parts</th><th style={thStyle}>Outside</th><th style={thStyle}>Total</th><th style={thStyle}>Review status</th><th style={thStyle}>Review</th></tr></thead>
+        <thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Completed</th><th style={thStyle}>Technician</th><th style={thStyle}>Repairs</th><th style={thStyle}>Notes</th><th style={thStyle}>Labor</th><th style={thStyle}>Parts</th><th style={thStyle}>Outside</th><th style={thStyle}>Total</th><th style={thStyle}>Review status</th><th style={thStyle}>Action</th></tr></thead>
         <tbody>{visiblePackages.map((item)=>{
           const open=expanded.has(item.id);
           return <Fragment key={item.id}>
             <tr style={{borderTop:"1px solid #e7ebee",background:item.reviewed?"#f8faf9":"#fffdf6"}}>
-              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#64748b"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button></td>
+              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#64748b"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button>{item.reviewed&&<a href={billingHref(item)} style={billingSmallStyle}>Create Invoice</a>}</div></td>
             </tr>
             {open&&<tr style={{borderTop:"1px solid #e7ebee",background:"#fafbfc"}}><td colSpan={11} style={{padding:14}}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(150px,1fr))",gap:10}}><Detail label="Unit" value={item.unit||"—"}/><Detail label="Technician" value={item.technician||"Unassigned"}/><Detail label="Completed" value={dateTime(item.completedAt)}/><Detail label="Labor cost" value={money(item.laborCost)}/><Detail label={item.missingPartCostLines?"Recorded total":"Total cost"} value={money(item.totalCost)}/></div>
@@ -198,6 +129,7 @@ export default function WorkOrdersPage(){
               <InlineWorkOrderReviewEditor item={item} canManage={Boolean(data?.canApprove)} defaultLaborRate={data?.defaultLaborRate??0} parts={data?.parts??[]} onChanged={load}/>
 
               {!item.reviewed&&<div style={{marginTop:12,padding:12,border:"1px solid #e0c47a",background:"#fffaf0"}}><strong style={{fontSize:11}}>MANAGER / ADMIN REVIEW</strong><textarea value={reviewNotes[item.id]??""} onChange={(event)=>setReviewNotes((current)=>({...current,[item.id]:event.target.value}))} placeholder="Optional review note" maxLength={1000} style={{...inputStyle,width:"100%",minHeight:60,marginTop:7,resize:"vertical"}}/>{data?.canApprove?<button type="button" disabled={saving===item.id} onClick={()=>void approve(item)} style={{...buttonStyle,marginTop:7,fontWeight:900}}>{saving===item.id?"Saving...":"APPROVE WORK ORDER"}</button>:<div style={{marginTop:7,fontSize:11,color:"#7a858d"}}>Manager or administrator access is required to approve.</div>}</div>}
+              {item.reviewed&&<div style={{marginTop:12,padding:12,border:"1px solid #a9cfb9",background:"#f2fbf5",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}><div><strong style={{fontSize:11}}>APPROVED</strong><span style={{display:"block",marginTop:3,fontSize:11,color:"#557065"}}>This work order is eligible for invoicing.</span></div><a href={billingHref(item)} style={billingButtonStyle}>Create Invoice</a></div>}
             </td></tr>}
           </Fragment>;
         })}</tbody>
@@ -214,8 +146,11 @@ function Metric({label,value,last=false}:{label:string;value:string;last?:boolea
 function Detail({label,value}:{label:string;value:string}){return <div><span style={{display:"block",color:"#74808a",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</span><strong style={{display:"block",marginTop:2,fontSize:11,color:"#263746"}}>{value}</strong></div>;}
 
 const inputStyle={minHeight:34,padding:"6px 8px",border:"1px solid #c7ced3",borderRadius:4,background:"white",color:"#263746"} as const;
-const buttonStyle={minHeight:30,padding:"0 9px",border:"1px solid #bcc5cb",borderRadius:4,background:"white",color:"#263746",fontSize:10,fontWeight:900} as const;
+const buttonStyle={minHeight:30,padding:"0 9px",border:"1px solid #bcc5cb",borderRadius:4,background:"white",color:"#263746",fontSize:10,fontWeight:900,cursor:"pointer"} as const;
 const linkButtonStyle={...buttonStyle,display:"inline-flex",alignItems:"center",textDecoration:"none"} as const;
+const billingSmallStyle={...linkButtonStyle,borderColor:"#92bda4",background:"#f2fbf5",color:"#176440"} as const;
+const billingButtonStyle={minHeight:36,padding:"0 12px",border:"1px solid #176440",borderRadius:6,background:"#176440",color:"white",display:"inline-flex",alignItems:"center",textDecoration:"none",fontSize:11,fontWeight:900} as const;
+const handoffStyle={marginTop:12,padding:13,border:"1px solid #91c2a5",background:"#edf9f1",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap" as const};
 const headRowStyle={background:"#eef1f2",color:"#5b6770",fontSize:9,letterSpacing:".05em",textTransform:"uppercase" as const,textAlign:"left" as const};
 const thStyle={padding:"7px 8px",borderRight:"1px solid #d7dde1"} as const;
 const tdStyle={padding:"8px",fontSize:11,verticalAlign:"middle"} as const;
