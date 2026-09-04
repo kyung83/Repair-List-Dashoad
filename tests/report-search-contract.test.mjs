@@ -38,7 +38,7 @@ test('report search exports all major result sets', () => {
   assert.match(page, /parts-\$\{rangeSlug\}\.csv/);
 });
 
-test('Reports module exposes Search Reports as a first-class tab', () => {
-  assert.match(nav, /href: "\/reports\/search", label: "Search Reports"/);
-  assert.match(nav, /href: "\/reports", label: "Summary"/);
+test('Reports sidebar exposes unit cost search as a first-class destination', () => {
+  assert.match(nav, /href: "\/reports\/search", label: "Unit Cost \/ Search"/);
+  assert.match(nav, /href: "\/reports", label: "Fleet Summary"/);
 });
