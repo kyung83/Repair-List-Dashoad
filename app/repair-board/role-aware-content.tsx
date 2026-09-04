@@ -55,8 +55,9 @@ export default function RepairBoardRoleAwareContent(){
       `}</style>
       <div style={{background:'#fff',padding:'18px 34px 0'}}>
         <div style={{maxWidth:1600,margin:'0 auto',display:'flex',justifyContent:'space-between',gap:14,alignItems:'center',flexWrap:'wrap',padding:'14px 16px',border:'1px solid #d8e0e6',borderRadius:12,background:'#f7f9fa'}}>
-          <div><strong style={{display:'block',color:'#172033'}}>Dispatch Repair Board</strong><span style={{display:'block',marginTop:3,fontSize:13,color:'#667482'}}>View current work and add new repairs. Repairs entered here stay unassigned for the shop.</span></div>
+          <div><strong style={{display:'block',color:'#172033'}}>Dispatch Repair Board</strong><span style={{display:'block',marginTop:3,fontSize:13,color:'#667482'}}>View current work, add unassigned shop repairs, or submit a roadside breakdown when a driver needs help.</span></div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <a href="/report-breakdown" className={s.secondaryAction} style={{textDecoration:'none'}}>Submit Breakdown</a>
             <a href="/breakdowns" className={s.secondaryAction} style={{textDecoration:'none'}}>Active Breakdowns</a>
             <button type="button" className={s.addButton} onClick={()=>setAdding(true)}>+ Add Repair</button>
           </div>
