@@ -6,12 +6,12 @@ Use this file before changing a workflow. Replace the current implementation in 
 | --- | --- | --- |
 | Manager Repair Board | `app/repair-board/planning-center.tsx` | Primary manager/admin workflow. Truck and trailer repairs stay separated. Attention bucket counts, filtering, and row priority use one shared matcher backed by `lib/status.ts`. Assignment, unassign and Outside Vendor are explicit React actions here; no DOM injection is needed in Planning Center. |
 | Dispatch Repair Board | `app/repair-board/dashboard-v2.tsx` via `role-aware-content.tsx` | Still used for dispatch clearance and should not be deleted until Dispatch is moved deliberately. |
-| Technician Shop Jobs | `app/shop/page.tsx` + `app/api/shop/route.ts` | Unit-focused technician workflow. Preserve labor timer and parts behavior. |
+| Technician Shop Jobs | `app/shop/page.tsx` + `app/api/shop/route.ts` | Unit-focused technician workflow. The current maintenance checklist wrapper resolves to `maintenance-checklist-panel-v3.tsx`, which still composes `maintenance-checklist-panel-v2.tsx` and `technician-repair-tools-v2.tsx`; these versioned files are live dependencies. Preserve labor timer and parts behavior. |
 | Repair Board API | `app/api/repair-board/route.ts` | Current route wrapper around Repair Board behavior. `original.ts` remains an implementation dependency until deliberately folded into one file. |
 | PM / Annual setup | `app/pm-schedules/page.tsx`, `app/annual-schedules/page.tsx` | Setup/calculation screens, not the daily manager work queue. |
 | Planned future repairs | `app/next-pm-repairs/page.tsx` | Adds work to the next PM or Annual. |
 | Parts Desk | `app/parts-desk/page.tsx` | Daily shortages, receiving, reservations and stock work. |
-| Outside Repairs | `app/outside-work/intake-v3.tsx` | Current outside-work shell. Retire older intake/parser generations only after parity is verified. |
+| Outside Repairs | `app/outside-work/intake-v3.tsx` | Current outside-work shell. Its create flow still composes `intake-v2.tsx`; that intake uses `invoice-parser-v3.js`, which builds on `invoice-parser-v2.js` and the base parser. These are live dependencies, not removable duplicates. |
 | Roadside driver report | `app/report-breakdown/page.tsx` | Driver submission form. Initial public breakdown POSTs are capped at 30 per 15 minutes per connecting IP before multipart form processing. Do not simplify this flow without an explicit scoped request. |
 | Roadside driver follow-up | `app/report-breakdown/driver-followup.tsx` | Tech arrived, receipt, rolling workflow. |
 | Office breakdown workflow | `app/breakdowns/page.tsx` | Diagnosis, provider/ETA, status and closeout. |
@@ -22,6 +22,15 @@ Use this file before changing a workflow. Replace the current implementation in 
 | Navigation / role shell | `app/app-nav.tsx`, `app/navigation-config.ts` | Today is the first office landing destination and Find Unit is available globally. `module-tabs.tsx` is compatibility-only and renders nothing. |
 | Shared repair status vocabulary | `lib/status.ts` | Use shared helpers/constants instead of adding new repair-completion aliases. |
 | Production regression command | `npm test` and `scripts/build-verified.sh` | `npm test` remains the raw full suite. `build-verified.sh` runs blocking regressions before the build and keeps the 12 named frozen breakdown/receipt failures in an explicit non-blocking quarantine. The former `codex-preview=development` rendered-HTML assertion and its bare-Node Cloudflare stubs were retired because they only verified a development marker rather than production behavior. |
+
+## Versioned file audit
+
+Audit date: **2026-09-08**.
+
+- Repository paths currently include **14 `v2` paths and 3 `v3` paths**.
+- The versioned application files are still in live dependency chains: Dispatch uses `dashboard-v2.tsx`; Outside Repairs uses `intake-v3.tsx` -> `intake-v2.tsx` -> `invoice-parser-v3.js` -> `invoice-parser-v2.js`; the technician maintenance wrapper uses `maintenance-checklist-panel-v3.tsx`, which composes `maintenance-checklist-panel-v2.tsx` and `technician-repair-tools-v2.tsx`.
+- The remaining `v2` names belong to the Parts Inventory v2 rollout: migrations `0092`-`0094`, the internal deployment-health route, its D1 scenario/test assets, and the pull-request validation workflow. Migration filenames are schema history and must not be deleted as duplicate code.
+- Result: **no current `v2`/`v3` path is safe to delete solely as a superseded duplicate**. Collapse or rename these layers only in a deliberately scoped refactor that updates all live imports, routes, tests, and operational references together.
 
 ## Regression quarantine review
 
