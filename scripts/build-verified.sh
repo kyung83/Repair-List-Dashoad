@@ -48,17 +48,14 @@ quarantined_test_files=(
   "${project_root}/tests/roadside-service-provider-directory.test.mjs"
 )
 
-readarray -t test_patterns < <(
+quarantine_pattern="$(
   printf '%s\0' "${quarantined_test_names[@]}" | node -e '
     const fs = require("node:fs");
     const names = fs.readFileSync(0).toString().split("\0").filter(Boolean);
     const escaped = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    const body = escaped.join("|");
-    process.stdout.write(`^(?:${body})$\n^(?!(?:${body})$).*\n`);
+    process.stdout.write(`^(?:${escaped.join("|")})$`);
   '
-)
-quarantine_pattern="${test_patterns[0]}"
-blocking_pattern="${test_patterns[1]}"
+)"
 
 blocking_tests=()
 for test_file in "${project_root}"/tests/*.test.mjs; do
@@ -67,7 +64,7 @@ for test_file in "${project_root}"/tests/*.test.mjs; do
 done
 
 echo "Running blocking pre-build regression tests..."
-node --test --test-name-pattern="$blocking_pattern" "${blocking_tests[@]}"
+node --test --test-skip-pattern="$quarantine_pattern" "${blocking_tests[@]}"
 
 echo "Running frozen breakdown/receipt quarantine (non-blocking, 12 named tests)..."
 set +e
