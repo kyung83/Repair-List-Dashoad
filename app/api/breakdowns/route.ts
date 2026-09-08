@@ -17,6 +17,8 @@ import { notifyBreakdownInitialEmailGroup, type BreakdownEmailAttachment } from 
 const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
 const VALID_SNAPSHOT_VERIFICATION = new Set(['verified', 'corrected', 'unavailable']);
 const BREAKDOWN_ALERT_GROUP = 'Breakdown Alerts';
+const PUBLIC_SUBMISSION_LIMIT = 30;
+const PUBLIC_SUBMISSION_WINDOW_MINUTES = 15;
 
 function safeText(value: FormDataEntryValue | null, max: number) {
   return String(value ?? '').trim().slice(0, max);
@@ -53,6 +55,49 @@ function easternTimestamp(value: unknown) {
   }).format(parsedTimestamp(value));
 }
 
+async function publicSubmissionRateLimitKey(request: Request) {
+  const ip = request.headers.get('cf-connecting-ip') || '';
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`public-breakdown-submit\u0000${ip || '[unknown]'}`),
+  ));
+  return `public:${Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function enforcePublicSubmissionRateLimit(request: Request): Promise<Response | null> {
+  const key = await publicSubmissionRateLimitKey(request);
+  const offset = `-${PUBLIC_SUBMISSION_WINDOW_MINUTES} minutes`;
+  const row = await env.DB.prepare(`
+    SELECT failures
+    FROM app_login_attempts
+    WHERE attempt_key = ? AND window_started_at >= datetime('now', ?)
+  `).bind(key, offset).first<{ failures:number }>();
+
+  if (Number(row?.failures ?? 0) >= PUBLIC_SUBMISSION_LIMIT) {
+    return Response.json(
+      { error: 'Too many breakdown submissions. Wait a few minutes and try again.' },
+      {
+        status: 429,
+        headers: {
+          'retry-after': String(PUBLIC_SUBMISSION_WINDOW_MINUTES * 60),
+          'cache-control': 'no-store',
+        },
+      },
+    );
+  }
+
+  await env.DB.prepare(`
+    INSERT INTO app_login_attempts(attempt_key,failures,window_started_at,updated_at)
+    VALUES(?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    ON CONFLICT(attempt_key) DO UPDATE SET
+      failures=CASE WHEN app_login_attempts.window_started_at<datetime('now',?) THEN 1 ELSE app_login_attempts.failures+1 END,
+      window_started_at=CASE WHEN app_login_attempts.window_started_at<datetime('now',?) THEN CURRENT_TIMESTAMP ELSE app_login_attempts.window_started_at END,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(key, offset, offset).run();
+
+  return null;
+}
+
 /**
  * PUBLIC endpoint -- no session required. The server resolves driver/location
  * from Geotab privately. If Geotab cannot provide the driver, the public form
@@ -64,6 +109,9 @@ export async function POST(request: Request) {
     if (fetchSite === 'cross-site') {
       return Response.json({ error: 'Cross-site breakdown submission rejected.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
     }
+
+    const rateLimited = await enforcePublicSubmissionRateLimit(request);
+    if (rateLimited) return rateLimited;
 
     const form = await request.formData();
     const unitType = safeText(form.get('unitType'), 10);
