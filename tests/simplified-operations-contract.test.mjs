@@ -39,6 +39,15 @@ test('manager Planning Center uses explicit assignment actions',()=>{
   assert.doesNotMatch(roleAware,/managerView==='planning'&&<RepairBoardUnassign/);
 });
 
+test('manager Planning Center uses one shared attention bucket matcher',()=>{
+  assert.match(board,/const ATTENTION_OPTIONS/);
+  assert.match(board,/function matchesAttention\(row:Row,attention:Attention\)/);
+  assert.match(board,/isRepairWaitingForParts\(row\.status\)/);
+  assert.match(board,/isRepairInProgress\(row\.status\)/);
+  assert.match(board,/yardRows\.filter\(row=>matchesAttention\(row,option\.value\)\)/);
+  assert.match(board,/if\(!matchesAttention\(row,attention\)\)return false/);
+});
+
 test('approved work hands directly to reviewed-only billing',()=>{
   assert.match(workOrders,/Create Invoice/);
   assert.match(workOrders,/workOrderId=/);
