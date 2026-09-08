@@ -88,7 +88,8 @@ timeout \
   "${vinext}" build
 
 echo "Running post-build rendered HTML regression..."
-node --test "$rendered_html_test"
+node --import "${project_root}/tests/support/register-cloudflare-stub.mjs" \
+  --test "$rendered_html_test"
 
 worker="${project_root}/dist/server/index.js"
 output_config="${project_root}/dist/server/wrangler.json"
