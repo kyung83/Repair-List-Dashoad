@@ -3,6 +3,7 @@
 import {useCallback,useEffect,useMemo,useState,type CSSProperties} from 'react';
 import RepairBoardAddRepair from './add-repair-form';
 import RepairPhotoPreview from './repair-photo-preview';
+import {isRepairInProgress,isRepairWaitingForParts} from '@/lib/status';
 import {normalizeYard,YARD_KEYS,yardLabel,type YardKey,type YardSelection} from '@/lib/yards';
 import s from './planning-center.module.css';
 
@@ -33,6 +34,14 @@ type OutsideDialog={itemIds:string[];vendors:Vendor[];vendorId:string;notes:stri
 
 const BULK_UNASSIGN='__unassign__';
 const BULK_OUTSIDE='__outside__';
+const ATTENTION_OPTIONS:Array<{value:Attention;label:string}>=[
+ {value:'all',label:'All Work'},
+ {value:'unassigned',label:'Needs Assignment'},
+ {value:'critical',label:'Critical / OOS'},
+ {value:'waiting',label:'Waiting on Parts'},
+ {value:'maintenance',label:'PM / Annual Due'},
+ {value:'working',label:'Working Now'},
+];
 const pm=(source:Src)=>source==='pm'||source==='pm-repair';
 const annual=(source:Src)=>source==='annual'||source==='annual-repair';
 const raw=(source:Src)=>source==='pm'||source==='annual';
@@ -44,6 +53,15 @@ const sourceLabel=(source:Src)=>source==='dvir'?'DVIR':source==='dvir-repair'?'D
 const displayDriver=(value:string)=>value.includes('@')?'':value.trim();
 const lower=(value:unknown)=>String(value??'').trim().toLowerCase();
 
+function matchesAttention(row:Row,attention:Attention){
+ if(attention==='all')return true;
+ if(attention==='unassigned')return row.technicianId===null&&!row.activeTimer;
+ if(attention==='critical')return row.outOfService||row.priority===1||lower(row.status).includes('overdue');
+ if(attention==='waiting')return isRepairWaitingForParts(row.status);
+ if(attention==='maintenance')return pm(row.source)||annual(row.source);
+ if(attention==='working')return Boolean(row.activeTimer)||isRepairInProgress(row.status);
+ return true;
+}
 function groups(rows:Row[]){
  const map=new Map<string,Group>();
  for(const row of rows){
@@ -54,11 +72,10 @@ function groups(rows:Row[]){
  return [...map.values()].map(group=>({...group,rows:[...group.rows].sort((a,b)=>a.priority-b.priority||a.issue.localeCompare(b.issue))}));
 }
 function attentionRank(row:Row){
- const z=lower(row.status);
- if(row.outOfService||row.priority===1||z.includes('overdue'))return 0;
- if(z.includes('waiting'))return 1;
- if(row.activeTimer||z.includes('progress'))return 2;
- if(row.technicianId===null)return 3;
+ if(matchesAttention(row,'critical'))return 0;
+ if(matchesAttention(row,'waiting'))return 1;
+ if(matchesAttention(row,'working'))return 2;
+ if(matchesAttention(row,'unassigned'))return 3;
  return 4;
 }
 function lead(group:Group){return [...group.rows].sort((a,b)=>attentionRank(a)-attentionRank(b)||a.priority-b.priority)[0];}
@@ -66,10 +83,9 @@ function groupIssue(group:Group){const values=group.rows.map(row=>row.issue.trim
 function groupParts(group:Group){const values=[...new Set(group.rows.map(row=>row.parts.trim()).filter(Boolean))];return values.length?values.slice(0,2).join(' • '):'No parts listed';}
 function groupAssignee(group:Group){const values=[...new Set(group.rows.map(row=>row.assignedTo.trim()).filter(Boolean))];return values.length?values.join(', '):'Unassigned';}
 function nextStep(row:Row){
- const z=lower(row.status);
  if(row.outOfService)return'OUT OF SERVICE';
- if(row.activeTimer||z.includes('progress'))return'WORKING NOW';
- if(z.includes('waiting'))return'WAITING ON PARTS';
+ if(matchesAttention(row,'working'))return'WORKING NOW';
+ if(matchesAttention(row,'waiting'))return'WAITING ON PARTS';
  if(row.source==='pm')return'PM NEEDS SCHEDULING';
  if(row.source==='annual')return'ANNUAL NEEDS SCHEDULING';
  if(row.source==='dvir')return'DVIR NEEDS ASSIGNMENT';
@@ -78,7 +94,7 @@ function nextStep(row:Row){
 }
 function statusClass(row:Row){
  const z=nextStep(row).toLowerCase();
- if(row.outOfService||row.priority===1||lower(row.status).includes('overdue'))return s.overdue;
+ if(matchesAttention(row,'critical'))return s.overdue;
  if(z.includes('waiting'))return s.waiting;
  if(z.includes('working'))return s.progress;
  if(z.includes('needs')||z.includes('scheduling'))return s.due;
@@ -158,24 +174,16 @@ export default function PlanningCenter(){
   for(const row of allRows){const yard=yardFor(row);if(yard)result[yard]+=1;}
   return result;
  },[allRows,yardFor]);
- const focusCounts=useMemo(()=>({
-  all:yardRows.length,
-  unassigned:yardRows.filter(row=>row.technicianId===null&&!row.activeTimer).length,
-  critical:yardRows.filter(row=>row.outOfService||row.priority===1||lower(row.status).includes('overdue')).length,
-  waiting:yardRows.filter(row=>lower(row.status).includes('waiting')).length,
-  maintenance:yardRows.filter(row=>pm(row.source)||annual(row.source)).length,
-  working:yardRows.filter(row=>Boolean(row.activeTimer)||lower(row.status).includes('progress')).length,
- }),[yardRows]);
+ const focusCounts=useMemo(()=>{
+  const result={} as Record<Attention,number>;
+  for(const option of ATTENTION_OPTIONS)result[option.value]=yardRows.filter(row=>matchesAttention(row,option.value)).length;
+  return result;
+ },[yardRows]);
 
  const filtered=useMemo(()=>{
   const needle=q.trim().toLowerCase();
   return yardRows.filter(row=>{
-   const z=lower(row.status);
-   if(attention==='unassigned'&&(row.technicianId!==null||Boolean(row.activeTimer)))return false;
-   if(attention==='critical'&&!(row.outOfService||row.priority===1||z.includes('overdue')))return false;
-   if(attention==='waiting'&&!z.includes('waiting'))return false;
-   if(attention==='maintenance'&&!pm(row.source)&&!annual(row.source))return false;
-   if(attention==='working'&&!(row.activeTimer||z.includes('progress')))return false;
+   if(!matchesAttention(row,attention))return false;
    if(assignee==='unassigned'&&row.technicianId!==null)return false;
    if(/^\d+$/.test(assignee)&&Number(assignee)!==Number(row.technicianId||0))return false;
    if(needle&&![row.unit,row.issue,row.parts,row.location,displayDriver(row.driver),row.assignedTo,row.status,sourceLabel(row.source),etas[String(row.equipmentId||'')]].join(' ').toLowerCase().includes(needle))return false;
@@ -397,10 +405,7 @@ export default function PlanningCenter(){
   <nav className={s.yardBar} aria-label="Yard filter">{(['all',...YARD_KEYS] as Shop[]).map(value=><button type="button" key={value} className={shop===value?s.active:''} onClick={()=>setShop(value)}>{value==='all'?'All Yards':yardLabel(value)} <b>{counts[value]}</b></button>)}</nav>
   <nav className={s.yardBar} aria-label="Work needing attention">
    <strong style={{fontSize:10,color:'#526576',marginRight:3}}>SHOW</strong>
-   {([
-    ['all','All Work',focusCounts.all],['unassigned','Needs Assignment',focusCounts.unassigned],['critical','Critical / OOS',focusCounts.critical],
-    ['waiting','Waiting on Parts',focusCounts.waiting],['maintenance','PM / Annual Due',focusCounts.maintenance],['working','Working Now',focusCounts.working],
-   ] as Array<[Attention,string,number]>).map(([value,label,count])=><button type="button" key={value} className={attention===value?s.active:''} onClick={()=>setAttention(value)}>{label} <b>{count}</b></button>)}
+   {ATTENTION_OPTIONS.map(({value,label})=><button type="button" key={value} className={attention===value?s.active:''} onClick={()=>setAttention(value)}>{label} <b>{focusCounts[value]}</b></button>)}
   </nav>
   <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}><button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button><a className={s.link} href="/work-orders">Completed Work</a></div></div>
   {message&&<div className={s.notice}>{message}</div>}

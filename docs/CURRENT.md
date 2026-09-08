@@ -4,7 +4,7 @@ Use this file before changing a workflow. Replace the current implementation in 
 
 | Area | Current implementation | Notes |
 | --- | --- | --- |
-| Manager Repair Board | `app/repair-board/planning-center.tsx` | Primary manager/admin workflow. Truck and trailer repairs stay separated. Assignment, unassign and Outside Vendor are explicit React actions here; no DOM injection is needed in Planning Center. |
+| Manager Repair Board | `app/repair-board/planning-center.tsx` | Primary manager/admin workflow. Truck and trailer repairs stay separated. Attention bucket counts, filtering, and row priority use one shared matcher backed by `lib/status.ts`. Assignment, unassign and Outside Vendor are explicit React actions here; no DOM injection is needed in Planning Center. |
 | Dispatch Repair Board | `app/repair-board/dashboard-v2.tsx` via `role-aware-content.tsx` | Still used for dispatch clearance and should not be deleted until Dispatch is moved deliberately. |
 | Technician Shop Jobs | `app/shop/page.tsx` + `app/api/shop/route.ts` | Unit-focused technician workflow. Preserve labor timer and parts behavior. |
 | Repair Board API | `app/api/repair-board/route.ts` | Current route wrapper around Repair Board behavior. `original.ts` remains an implementation dependency until deliberately folded into one file. |
