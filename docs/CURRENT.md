@@ -12,7 +12,7 @@ Use this file before changing a workflow. Replace the current implementation in 
 | Planned future repairs | `app/next-pm-repairs/page.tsx` | Adds work to the next PM or Annual. |
 | Parts Desk | `app/parts-desk/page.tsx` | Daily shortages, receiving, reservations and stock work. |
 | Outside Repairs | `app/outside-work/intake-v3.tsx` | Current outside-work shell. Retire older intake/parser generations only after parity is verified. |
-| Roadside driver report | `app/report-breakdown/page.tsx` | Driver submission form. Do not simplify this flow without an explicit scoped request. |
+| Roadside driver report | `app/report-breakdown/page.tsx` | Driver submission form. Initial public breakdown POSTs are capped at 30 per 15 minutes per connecting IP before multipart form processing. Do not simplify this flow without an explicit scoped request. |
 | Roadside driver follow-up | `app/report-breakdown/driver-followup.tsx` | Tech arrived, receipt, rolling workflow. |
 | Office breakdown workflow | `app/breakdowns/page.tsx` | Diagnosis, provider/ETA, status and closeout. |
 | Work Order Review | `app/work-orders/page.tsx` + `app/api/work-orders/route.ts` | Manager review/corrections before billing; approved work can hand directly to billing. |
