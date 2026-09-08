@@ -18,6 +18,18 @@ test('driver roadside page stays visually separate from authenticated app naviga
   assert.match(nav, /pathname\.startsWith\(["']\/report-breakdown["']\)/);
 });
 
+test('public breakdown submissions are rate limited before form processing', () => {
+  assert.match(route, /PUBLIC_SUBMISSION_LIMIT\s*=\s*30/);
+  assert.match(route, /PUBLIC_SUBMISSION_WINDOW_MINUTES\s*=\s*15/);
+  assert.match(route, /public-breakdown-submit/);
+  assert.match(route, /Too many breakdown submissions/);
+  assert.match(route, /status:\s*429/);
+  assert.match(route, /['"]retry-after['"]/);
+  const rateLimitIndex = route.indexOf('const rateLimited = await enforcePublicSubmissionRateLimit(request)');
+  const formDataIndex = route.indexOf('const form = await request.formData()');
+  assert.ok(rateLimitIndex >= 0 && formDataIndex > rateLimitIndex, 'rate limiting should run before multipart form processing');
+});
+
 test('public breakdown submission rejects cross-site browser posts', () => {
   assert.match(route, /Cross-site breakdown submission rejected/);
   assert.match(route, /origin !== requestUrl\.origin/);
