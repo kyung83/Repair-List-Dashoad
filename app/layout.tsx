@@ -16,7 +16,6 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: "Northern Logistics Fleet Operations",
   description: "Northern Logistics fleet repair, DVIR, PM, work orders, inventory, reporting, labor, and equipment operations.",
-  other: { "codex-preview": "development" },
   icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
 };
 

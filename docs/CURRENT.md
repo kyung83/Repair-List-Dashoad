@@ -21,7 +21,7 @@ Use this file before changing a workflow. Replace the current implementation in 
 | Unit Hub | `app/unit/page.tsx` | Universal unit lookup and cross-workflow context. Global sidebar search opens this page directly. |
 | Navigation / role shell | `app/app-nav.tsx`, `app/navigation-config.ts` | Today is the first office landing destination and Find Unit is available globally. `module-tabs.tsx` is compatibility-only and renders nothing. |
 | Shared repair status vocabulary | `lib/status.ts` | Use shared helpers/constants instead of adding new repair-completion aliases. |
-| Production regression command | `npm test` and `scripts/build-verified.sh` | `npm test` remains the raw full suite. `build-verified.sh` runs blocking regressions before the build, keeps the 12 named frozen breakdown/receipt failures in an explicit non-blocking quarantine, and runs `rendered-html.test.mjs` post-build as a separate non-blocking check until Workers-runtime D1 coverage replaces the bare-Node path. |
+| Production regression command | `npm test` and `scripts/build-verified.sh` | `npm test` remains the raw full suite. `build-verified.sh` runs blocking regressions before the build and keeps the 12 named frozen breakdown/receipt failures in an explicit non-blocking quarantine. The former `codex-preview=development` rendered-HTML assertion and its bare-Node Cloudflare stubs were retired because they only verified a development marker rather than production behavior. |
 
 ## Regression quarantine review
 
