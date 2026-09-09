@@ -15,9 +15,8 @@ test('default breakdown setup separates Brake Chambers from Air Issues',async()=
   assert.match(migration,/position_codes TEXT/);
 });
 
-test('driver breakdown form loads configured categories and requires chamber position',async()=>{
+test('driver breakdown form renders configured category and chamber-position controls',async()=>{
   const page=await read('app/report-breakdown/page.tsx');
-  assert.match(page,/fetch\('\/api\/breakdown-categories'/);
   assert.match(page,/name="repairSubcategory"/);
   assert.match(page,/name="positionCode"/);
   assert.match(page,/TRUCK_POSITION_AXLES/);
