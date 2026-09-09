@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { fetchJsonWithRetry } from '@/lib/fetch-json-with-retry';
 import DriverFollowup from './driver-followup';
 
 type UnitType = '' | 'truck' | 'trailer';
@@ -100,8 +101,11 @@ export default function ReportBreakdownPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch('/api/breakdown-categories', { cache:'no-store' });
-        const payload = await response.json() as { categories?:BreakdownCategory[]; error?:string };
+        const result = await fetchJsonWithRetry('/api/breakdown-categories', { cache:'no-store' }, {
+          unavailableMessage:'Repair types are temporarily unavailable. Try again.',
+        });
+        const response = result.response;
+        const payload = result.payload as { categories?:BreakdownCategory[]; error?:string };
         if (!response.ok) throw new Error(payload.error || 'Breakdown categories could not be loaded.');
         setCategories(Array.isArray(payload.categories) ? payload.categories : []);
         setCategoryError('');
@@ -129,8 +133,11 @@ export default function ReportBreakdownPage() {
       setSearching(true); setSearchError('');
       try {
         const params = new URLSearchParams({ type: unitType, q: unitQuery.trim() });
-        const response = await fetch(`/api/equipment/search?${params.toString()}`, { cache:'no-store', signal:controller.signal });
-        const payload = await response.json() as { units?:UnitResult[]; hasMore?:boolean; error?:string };
+        const result = await fetchJsonWithRetry(`/api/equipment/search?${params.toString()}`, { cache:'no-store', signal:controller.signal }, {
+          unavailableMessage:'Unit search is temporarily unavailable. Try again.',
+        });
+        const response = result.response;
+        const payload = result.payload as { units?:UnitResult[]; hasMore?:boolean; error?:string };
         if (!response.ok) throw new Error(payload.error || 'Unit search failed.');
         setUnits(Array.isArray(payload.units) ? payload.units : []); setHasMore(Boolean(payload.hasMore));
       } catch (error) {
@@ -148,8 +155,11 @@ export default function ReportBreakdownPage() {
     void (async () => {
       try {
         const params = new URLSearchParams({ unitType, unitNumber:selectedUnit });
-        const response = await fetch(`/api/breakdowns/geotab-preview?${params.toString()}`, { cache:'no-store', signal:controller.signal });
-        const payload = await response.json() as { available?:boolean; driverName?:string; city?:string; state?:string; observedAt?:string; error?:string };
+        const result = await fetchJsonWithRetry(`/api/breakdowns/geotab-preview?${params.toString()}`, { cache:'no-store', signal:controller.signal }, {
+          unavailableMessage:'Geotab is temporarily unavailable. Enter the driver and location manually.',
+        });
+        const response = result.response;
+        const payload = result.payload as { available?:boolean; driverName?:string; city?:string; state?:string; observedAt?:string; error?:string };
         if (!response.ok) throw new Error(payload.error || 'Could not check Geotab.');
         if (!payload.available) { setGeotabPreview({ status:'unavailable' }); setManualFallback(true); setSnapshotChoice('unavailable'); return; }
         setGeotabPreview({ status:'available', driverName:payload.driverName||'', city:payload.city||'', state:payload.state||'', observedAt:payload.observedAt||'' });
