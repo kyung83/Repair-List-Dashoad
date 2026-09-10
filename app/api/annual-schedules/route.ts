@@ -4,22 +4,23 @@ import {
   applyAnnualSchedule,
   clearAnnualSchedule,
   completeAnnual,
+  createAnnualRepairNow,
   getAnnualScheduleData,
 } from '@/lib/annual-schedules';
 
 async function authorize(request: Request) {
   const user = await getSessionUser(env.DB, request);
-  if (!user) return Response.json({ error: 'Not signed in.' }, { status: 401 });
+  if (!user) return { denied: Response.json({ error: 'Not signed in.' }, { status: 401 }), user: null };
   if (user.role !== 'manager' && user.role !== 'admin') {
-    return Response.json({ error: 'Manager or administrator access is required.' }, { status: 403 });
+    return { denied: Response.json({ error: 'Manager or administrator access is required.' }, { status: 403 }), user: null };
   }
-  return null;
+  return { denied: null, user };
 }
 
 export async function GET(request: Request) {
   try {
-    const denied = await authorize(request);
-    if (denied) return denied;
+    const auth = await authorize(request);
+    if (auth.denied) return auth.denied;
     return Response.json(await getAnnualScheduleData(env.DB), { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'annual_schedule_get_failed', error: String(error) }));
@@ -29,13 +30,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const denied = await authorize(request);
-    if (denied) return denied;
+    const auth = await authorize(request);
+    if (auth.denied || !auth.user) return auth.denied ?? Response.json({ error: 'Not signed in.' }, { status: 401 });
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
     if (action === 'applyAnnual') return Response.json(await applyAnnualSchedule(env.DB, body));
     if (action === 'clearAnnual') return Response.json(await clearAnnualSchedule(env.DB, body));
     if (action === 'completeAnnual') return Response.json(await completeAnnual(env.DB, body));
+    if (action === 'createAnnualRepairNow') {
+      return Response.json(await createAnnualRepairNow(env.DB, body, { id: auth.user.id, displayName: auth.user.displayName }));
+    }
     return Response.json({ error: 'Unknown annual schedule action.' }, { status: 400 });
   } catch (error) {
     console.error(JSON.stringify({ event: 'annual_schedule_post_failed', error: String(error) }));
