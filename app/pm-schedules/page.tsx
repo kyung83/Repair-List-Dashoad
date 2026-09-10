@@ -32,6 +32,11 @@ type Equipment = {
   lastServiceDate: string;
   annualIntervalDays: number | null;
   lastAnnualDate: string;
+  openPmRepairId: string | null;
+  customProgramId: number | null;
+  customProgramName: string;
+  customRotationStepId: number | null;
+  customRotationItem: string;
 };
 type SetupData = {
   categories: string[];
@@ -60,6 +65,7 @@ const emptyRule: RuleDraft = { profileId: "", mileageInterval: "", timeIntervalD
 const inputStyle = { width: "100%", minHeight: 34, padding: "6px 8px", border: "1px solid #cbd3d9", borderRadius: 4, background: "white", color: "#172033" } as const;
 const labelStyle = { display: "grid", gap: 4, fontSize: 11, fontWeight: 800, color: "#53616e" } as const;
 const buttonStyle = { minHeight: 32, padding: "0 10px", border: "1px solid #c5cdd3", borderRadius: 4, background: "white", color: "#263746", fontWeight: 800, fontSize: 11 } as const;
+const orangeButtonStyle = { ...buttonStyle, borderColor: "#d56e13", background: "#f47b20", color: "white" } as const;
 
 function ruleFromPreset(preset?: Preset): RuleDraft {
   if (!preset) return { ...emptyRule };
@@ -72,6 +78,9 @@ function ruleFromPreset(preset?: Preset): RuleDraft {
 }
 
 function scheduleText(item: Equipment) {
+  if (item.customRotationItem) {
+    return `${item.customRotationItem} · ${item.customProgramName || "Custom PM"}`;
+  }
   if (!item.profileName) return "No PM rule";
   const trigger = [
     item.mileageInterval ? `${item.mileageInterval.toLocaleString()} mi` : "",
@@ -82,10 +91,20 @@ function scheduleText(item: Equipment) {
 
 function baselineWarnings(item: Equipment) {
   const warnings: string[] = [];
-  if (item.profileName && item.mileageInterval != null && item.lastMileage == null) warnings.push("PM mileage baseline needed");
-  if (item.profileName && item.timeIntervalDays != null && !item.lastServiceDate) warnings.push("PM date baseline needed");
+  if (!item.customRotationItem) {
+    if (item.profileName && item.mileageInterval != null && item.lastMileage == null) warnings.push("PM mileage baseline needed");
+    if (item.profileName && item.timeIntervalDays != null && !item.lastServiceDate) warnings.push("PM date baseline needed");
+  }
   if (item.annualIntervalDays != null && !item.lastAnnualDate) warnings.push("Annual date needed");
   return warnings;
+}
+
+function nextPmLabel(item: Equipment) {
+  return item.customRotationItem || item.nextPmType || item.profileName || "PM";
+}
+
+function hasPmProgram(item: Equipment) {
+  return Boolean(item.customRotationItem || item.profileName);
 }
 
 export default function PmSchedulesPage() {
@@ -97,6 +116,7 @@ export default function PmSchedulesPage() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pmJobBusy, setPmJobBusy] = useState<number | null>(null);
   const [correction, setCorrection] = useState<CorrectionDraft | null>(null);
   const [openGroup, setOpenGroup] = useState<string | null>(null);
 
@@ -146,6 +166,49 @@ export default function PmSchedulesPage() {
       return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function createPmJob(item: Equipment) {
+    if (!hasPmProgram(item)) {
+      setMessage(`Unit ${item.unit} does not have a PM schedule or custom rotational PM program assigned.`);
+      return;
+    }
+    if (item.openPmRepairId) {
+      setMessage(`Unit ${item.unit} already has an open PM repair job. No duplicate was created.`);
+      return;
+    }
+
+    const label = nextPmLabel(item);
+    const confirmed = window.confirm(
+      `Create ${label} PM job now for Unit ${item.unit}?\n\nThis sends the current PM step to the Repair Board for the normal mechanic checklist process. It does NOT change the PM mileage/date baseline or advance the rotation until the mechanic completes the PM.`,
+    );
+    if (!confirmed) return;
+
+    setPmJobBusy(item.id);
+    setMessage("");
+    try {
+      const response = await fetch("/api/maintenance-setup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "createPmRepairNow", equipmentId: item.id }),
+      });
+      const result = await response.json() as {
+        error?: string;
+        existing?: boolean;
+        repairId?: string;
+        pmType?: string;
+        customRotation?: boolean;
+      };
+      if (!response.ok) throw new Error(result.error || "PM repair job could not be created.");
+      await load();
+      setMessage(result.existing
+        ? `Unit ${item.unit} already had an open PM repair job. No duplicate was created.`
+        : `Unit ${item.unit} ${result.pmType || label} PM job created. It is now on the Repair Board for technician assignment and the normal PM checklist process.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "PM repair job could not be created.");
+    } finally {
+      setPmJobBusy(null);
     }
   }
 
@@ -208,7 +271,7 @@ export default function PmSchedulesPage() {
     return (data?.equipment ?? []).filter((item) => {
       if (filter !== "All" && item.category !== filter) return false;
       if (!needle) return true;
-      return [item.unit, item.equipmentType, item.category, item.profileName, item.make, item.model, item.driver, item.location].join(" ").toLowerCase().includes(needle);
+      return [item.unit, item.equipmentType, item.category, item.profileName, item.customProgramName, item.customRotationItem, item.make, item.model, item.driver, item.location].join(" ").toLowerCase().includes(needle);
     });
   }, [data, filter, query]);
 
@@ -243,8 +306,8 @@ export default function PmSchedulesPage() {
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>MAINTENANCE SCHEDULES</p>
           <h1 style={{ margin: "6px 0 0", fontSize: 30, color: "#0d1b2b" }}>PM Schedules</h1>
-          <p style={{ margin: "6px 0 0", color: "#64748b", maxWidth: 820, fontSize: 13 }}>
-            Compact schedule groups up top; the unit assignment table stays below for bulk setup and corrections.
+          <p style={{ margin: "6px 0 0", color: "#64748b", maxWidth: 900, fontSize: 13 }}>
+            Set PM schedules and baselines here. To perform a PM early, use Create PM Job Now; the current PM step goes to the Repair Board and the baseline/rotation changes only after the mechanic completes the PM checklist.
           </p>
         </div>
         <div style={{ fontSize: 12, color: unconfigured ? "#9a5b00" : "#64748b", fontWeight: 800 }}>{unconfigured} units uncategorized</div>
@@ -296,7 +359,7 @@ export default function PmSchedulesPage() {
                       </label>
                     </div>
                     <div style={{ marginTop: 9, display: "flex", gap: 7, alignItems: "center" }}>
-                      <button type="button" disabled={saving} onClick={() => saveCategoryRule(category)} style={{ ...buttonStyle, borderColor: "#d56e13", background: "#f47b20", color: "white" }}>Save rule</button>
+                      <button type="button" disabled={saving} onClick={() => saveCategoryRule(category)} style={orangeButtonStyle}>Save rule</button>
                       <span style={{ color: "#73808a", fontSize: 11 }}>{trailer ? "Trailer Service uses time-based PM rules." : "Saved changes apply to all units in this group."}</span>
                     </div>
                   </div>
@@ -357,16 +420,17 @@ export default function PmSchedulesPage() {
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 1050 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 1210 }}>
             <thead>
               <tr style={{ textAlign: "left", background: "#eef1f2", color: "#59656e", fontSize: 9, textTransform: "uppercase", letterSpacing: ".04em" }}>
                 <th style={{ padding: 8 }}><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={!visible.length} /></th>
-                <th style={{ padding: 8 }}>Unit</th><th style={{ padding: 8 }}>Type</th><th style={{ padding: 8 }}>Schedule group</th><th style={{ padding: 8 }}>Mileage</th><th style={{ padding: 8 }}>PM reminder</th><th style={{ padding: 8 }}>Annual</th><th style={{ padding: 8 }}>Location</th><th style={{ padding: 8 }}>Correction</th>
+                <th style={{ padding: 8 }}>Unit</th><th style={{ padding: 8 }}>Type</th><th style={{ padding: 8 }}>Schedule group</th><th style={{ padding: 8 }}>Mileage</th><th style={{ padding: 8 }}>PM reminder</th><th style={{ padding: 8 }}>Annual</th><th style={{ padding: 8 }}>Location</th><th style={{ padding: 8 }}>PM job</th><th style={{ padding: 8 }}>Correction</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((item) => {
                 const warnings = baselineWarnings(item);
+                const pmAvailable = hasPmProgram(item);
                 return (
                   <tr key={item.id} style={{ borderTop: "1px solid #edf0f2", background: item.category === "Uncategorized" || warnings.length ? "#fffaf2" : "white" }}>
                     <td style={{ padding: 8 }}><input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>
@@ -374,9 +438,19 @@ export default function PmSchedulesPage() {
                     <td style={{ padding: 8 }}>{item.equipmentType}</td>
                     <td style={{ padding: 8, fontWeight: item.category === "Uncategorized" ? 800 : 500 }}>{item.category}</td>
                     <td style={{ padding: 8 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
-                    <td style={{ padding: 8 }}><div>{scheduleText(item)}</div>{warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <small style={{ color: "#9a5b00", fontWeight: 800 }}>{warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}</small>}</td>
+                    <td style={{ padding: 8 }}><div>{scheduleText(item)}</div>{warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <small style={{ color: "#9a5b00", fontWeight: 800 }}>{warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}</small>}{item.customRotationItem && <small style={{ display: "block", color: "#64748b" }}>Custom rotational PM</small>}</td>
                     <td style={{ padding: 8 }}><div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>{item.lastAnnualDate && <small style={{ color: "#64748b" }}>Last {item.lastAnnualDate}</small>}{warnings.includes("Annual date needed") && <small style={{ display: "block", color: "#9a5b00", fontWeight: 800 }}>Annual date needed</small>}</td>
                     <td style={{ padding: 8 }}>{item.location || "—"}</td>
+                    <td style={{ padding: 8 }}>
+                      <button
+                        type="button"
+                        disabled={saving || pmJobBusy !== null || !pmAvailable || Boolean(item.openPmRepairId)}
+                        onClick={() => void createPmJob(item)}
+                        style={item.openPmRepairId ? buttonStyle : orangeButtonStyle}
+                      >
+                        {item.openPmRepairId ? "PM Job Open" : pmJobBusy === item.id ? "Creating..." : pmAvailable ? "Create PM Job Now" : "No PM Rule"}
+                      </button>
+                    </td>
                     <td style={{ padding: 8 }}><button type="button" style={buttonStyle} onClick={() => openCorrection(item)}>Correct</button></td>
                   </tr>
                 );
@@ -399,7 +473,7 @@ export default function PmSchedulesPage() {
             <label style={labelStyle}>Next PM type<select disabled={!correctionProfile?.sequence.length} value={correction.nextPmType} onChange={(event) => setCorrection((current) => current ? { ...current, nextPmType: event.target.value } : current)} style={inputStyle}>{!correctionProfile?.sequence.length && <option value="">No PM rule assigned</option>}{(correctionProfile?.sequence ?? []).map((pmType) => <option key={pmType} value={pmType}>{pmType}</option>)}</select></label>
             <label style={labelStyle}>Last annual / inspection date<input type="date" value={correction.lastAnnualDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastAnnualDate: event.target.value } : current)} style={inputStyle} /></label>
             <div style={{ padding: 9, background: "#f8fafc", color: "#64748b", fontSize: 11 }}>This corrects the stored baseline only. It does not mark a new PM or annual complete.</div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 7 }}><button type="button" disabled={saving} style={buttonStyle} onClick={() => setCorrection(null)}>Cancel</button><button type="button" disabled={saving} onClick={() => void saveCorrection()} style={{ ...buttonStyle, borderColor: "#d56e13", background: "#f47b20", color: "white" }}>{saving ? "Saving..." : "Save correction"}</button></div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 7 }}><button type="button" disabled={saving} style={buttonStyle} onClick={() => setCorrection(null)}>Cancel</button><button type="button" disabled={saving} onClick={() => void saveCorrection()} style={orangeButtonStyle}>{saving ? "Saving..." : "Save correction"}</button></div>
           </div>
         </div>
       </div>}

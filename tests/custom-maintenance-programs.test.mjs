@@ -29,9 +29,9 @@ test('custom maintenance builder API is manager restricted', async () => {
   assert.match(route, /assignMaintenanceProgram/);
 });
 
-test('due custom maintenance becomes a distinct normal repair job', async () => {
+test('custom maintenance materializer separates rotational PM workflow from standalone maintenance', async () => {
   const sync = await read('lib/custom-maintenance-repairs.ts');
-  assert.match(sync, /source = 'custom-maintenance'/);
+  assert.match(sync, /row\.kind === 'rotation' \? 'scheduled-pm' : 'custom-maintenance'/);
   assert.match(sync, /maintenance_source_id/);
   assert.match(sync, /maintenance_program_step_id/);
   assert.match(sync, /WHERE NOT EXISTS/);
@@ -47,13 +47,23 @@ test('Repair Board materializes custom due jobs but builder remains separate', a
   assert.doesNotMatch(route, /saveMaintenanceProgram/);
 });
 
-test('completing custom jobs advances rotations and resets linked interval counters', async () => {
+test('standalone custom jobs still reset linked interval counters', async () => {
   const migration = await read('migrations/0131_custom_maintenance_completion.sql');
   assert.match(migration, /CREATE TRIGGER trg_complete_custom_maintenance_repair/);
   assert.match(migration, /NEW\.source = 'custom-maintenance'/);
-  assert.match(migration, /rotation_position =/);
-  assert.match(migration, /s\.step_type = 'rotation'/);
   assert.match(migration, /s\.step_type = 'interval'/);
   assert.match(migration, /json_each\(COALESCE\(completed_step\.resets_item_ids_json,'\[\]'\)\)/);
   assert.match(migration, /INSERT OR IGNORE INTO custom_maintenance_events/);
+});
+
+test('rotational custom PM completion uses the real PM checklist and advances only its custom rotation', async () => {
+  const migration = await read('migrations/0132_custom_rotational_pm_checklist.sql');
+  assert.match(migration, /NEW\.source = 'scheduled-pm'/);
+  assert.match(migration, /NEW\.maintenance_program_step_id IS NULL/);
+  assert.match(migration, /CREATE TRIGGER trg_advance_custom_rotation_after_checklist_work_order/);
+  assert.match(migration, /NEW\.maintenance_program_step_id IS NOT NULL/);
+  assert.match(migration, /c\.mileage_at_completion/);
+  assert.match(migration, /rotation_position =/);
+  assert.match(migration, /INSERT OR IGNORE INTO custom_maintenance_events/);
+  assert.match(migration, /checklist-custom-wo-/);
 });
