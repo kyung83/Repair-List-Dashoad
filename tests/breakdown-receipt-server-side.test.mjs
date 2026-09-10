@@ -13,7 +13,7 @@ test('driver receipt keeps the native picker and prepares oversized phone images
   assert.match(source,/new Image\(\)/);
   assert.match(source,/RECEIPT_TARGET_BYTES=6\*1024\*1024/);
   assert.match(source,/RECEIPT_MAX_SIDE=2400/);
-  assert.match(source,/new File\(\[output\],receiptJpegName\(file,index\)/);
+  assert.match(source,/new File\(\[output\],receiptJpegName\(file\.name,index\)/);
   assert.match(source,/form\.append\('receipt',file,file\.name\)/);
   assert.doesNotMatch(source,/showPicker/);
   assert.doesNotMatch(source,/DataTransfer/);
