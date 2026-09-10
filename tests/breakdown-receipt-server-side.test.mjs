@@ -4,24 +4,30 @@ import { readFile } from 'node:fs/promises';
 
 const read=(path)=>readFile(new URL(`../${path}`,import.meta.url),'utf8');
 
-test('driver receipt control only uploads selected files and does no image processing',async()=>{
+test('driver receipt keeps the native picker and prepares oversized phone images before upload',async()=>{
   const source=await read('app/report-breakdown/driver-followup.tsx');
   assert.match(source,/type="file"/);
   assert.match(source,/accept="image\/\*"/);
+  assert.match(source,/prepareReceiptFiles\(files\)/);
+  assert.match(source,/document\.createElement\('canvas'\)/);
+  assert.match(source,/new Image\(\)/);
+  assert.match(source,/RECEIPT_TARGET_BYTES=6\*1024\*1024/);
+  assert.match(source,/RECEIPT_MAX_SIDE=2400/);
+  assert.match(source,/new File\(\[output\],receiptJpegName\(file\.name,index\)/);
   assert.match(source,/form\.append\('receipt',file,file\.name\)/);
-  assert.doesNotMatch(source,/document\.createElement\('canvas'\)/);
-  assert.doesNotMatch(source,/new Image\(\)/);
-  assert.doesNotMatch(source,/prepareReceiptFile/);
   assert.doesNotMatch(source,/showPicker/);
   assert.doesNotMatch(source,/DataTransfer/);
+  assert.doesNotMatch(source,/input\.files\s*=/);
 });
 
-test('receipt originals are stored before the server attempts OCR',async()=>{
+test('receipt upload fallback accepts larger phone originals and stores pages before OCR',async()=>{
   const source=await read('lib/breakdown-driver-receipt-server.ts');
   const saveIndex=source.indexOf('await replaceReceiptPages(receipt.id,breakdownId,files)');
   const readIndex=source.indexOf('readOutsideWorkInvoice(ai,env.DB,files)');
   assert.ok(saveIndex>=0,'receipt pages should be saved');
-  assert.ok(readIndex>saveIndex,'AI reading must happen only after the originals are saved');
+  assert.ok(readIndex>saveIndex,'AI reading must happen only after the uploaded pages are saved');
+  assert.match(source,/RECEIPT_UPLOAD_MAX_FILE_BYTES=35\*1024\*1024/);
+  assert.match(source,/RECEIPT_UPLOAD_MAX_TOTAL_BYTES=85\*1024\*1024/);
   assert.match(source,/ai_status='manual_review'/);
   assert.match(source,/image\/heic/);
   assert.match(source,/image\/heif/);
