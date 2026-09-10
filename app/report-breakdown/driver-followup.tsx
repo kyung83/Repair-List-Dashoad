@@ -24,6 +24,12 @@ type DriverFollowupState={
 type Props={breakdownId:number;token:string;onReportAnother:()=>void};
 type ReceiptUploadPayload={breakdown?:DriverFollowupState;error?:string};
 
+type DecodedReceipt={source:CanvasImageSource;width:number;height:number;close:()=>void};
+
+const RECEIPT_TARGET_BYTES=6*1024*1024;
+const RECEIPT_MAX_SIDE=2400;
+const RECEIPT_SAFE_TYPES=new Set(['image/jpeg','image/png','image/webp']);
+
 function completed(value:string|null){return Boolean(value);}
 
 function formatTime(value:string|null){
@@ -35,6 +41,95 @@ function formatTime(value:string|null){
 
 function phoneHref(value:string){
   return `tel:${value.replace(/[^0-9+]/g,'')}`;
+}
+
+function receiptJpegName(name:string,index:number){
+  const stem=name.replace(/\.[^.]+$/,'').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||`receipt-${index+1}`;
+  return `${stem.slice(0,120)}.jpg`;
+}
+
+function canvasJpeg(canvas:HTMLCanvasElement,quality:number){
+  return new Promise<Blob>((resolve,reject)=>{
+    canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Receipt photo could not be compressed.')),'image/jpeg',quality);
+  });
+}
+
+async function decodeReceipt(file:File):Promise<DecodedReceipt>{
+  if(typeof createImageBitmap==='function'){
+    try{
+      const bitmap=await createImageBitmap(file);
+      return{source:bitmap,width:bitmap.width,height:bitmap.height,close:()=>bitmap.close()};
+    }catch{
+      // Fall through to the normal browser image decoder. This is useful on some iPhones/HEIC photos.
+    }
+  }
+
+  return new Promise<DecodedReceipt>((resolve,reject)=>{
+    const url=URL.createObjectURL(file);
+    const image=new Image();
+    image.onload=()=>resolve({
+      source:image,
+      width:image.naturalWidth||image.width,
+      height:image.naturalHeight||image.height,
+      close:()=>URL.revokeObjectURL(url),
+    });
+    image.onerror=()=>{
+      URL.revokeObjectURL(url);
+      reject(new Error('This phone could not prepare that receipt photo.'));
+    };
+    image.src=url;
+  });
+}
+
+async function prepareReceiptFile(file:File,index:number){
+  const type=String(file.type||'').toLowerCase();
+  if(file.size>0&&file.size<=RECEIPT_TARGET_BYTES&&RECEIPT_SAFE_TYPES.has(type))return file;
+
+  const decoded=await decodeReceipt(file);
+  try{
+    let maxSide=RECEIPT_MAX_SIDE;
+    let quality=.86;
+    let output:Blob|null=null;
+
+    for(let attempt=0;attempt<4;attempt+=1){
+      const scale=Math.min(1,maxSide/Math.max(decoded.width,decoded.height));
+      const width=Math.max(1,Math.round(decoded.width*scale));
+      const height=Math.max(1,Math.round(decoded.height*scale));
+      const canvas=document.createElement('canvas');
+      canvas.width=width;
+      canvas.height=height;
+      const context=canvas.getContext('2d');
+      if(!context)throw new Error('This phone could not prepare that receipt photo.');
+      context.drawImage(decoded.source,0,0,width,height);
+      output=await canvasJpeg(canvas,quality);
+      if(output.size<=RECEIPT_TARGET_BYTES)break;
+      maxSide=Math.max(1400,Math.round(maxSide*.8));
+      quality=Math.max(.68,quality-.07);
+    }
+
+    if(!output)throw new Error('Receipt photo could not be compressed.');
+    return new File([output],receiptJpegName(file.name,index),{type:'image/jpeg',lastModified:Date.now()});
+  }finally{
+    decoded.close();
+  }
+}
+
+async function prepareReceiptFiles(files:File[]){
+  const selected=files.slice(0,3);
+  const prepared:File[]=[];
+  for(let index=0;index<selected.length;index+=1){
+    const file=selected[index];
+    try{
+      prepared.push(await prepareReceiptFile(file,index));
+    }catch(error){
+      if(file.size>0&&file.size<=35*1024*1024){
+        prepared.push(file);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return prepared;
 }
 
 export default function DriverFollowup({breakdownId,token,onReportAnother}:Props){
@@ -96,12 +191,14 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
   async function uploadReceipt(files:File[]){
     if(!files.length)return;
     setBusy('receipt');
-    setMessage('Uploading receipt to Northern...');
+    setMessage('Preparing receipt photo...');
     try{
+      const prepared=await prepareReceiptFiles(files);
+      setMessage('Uploading receipt to Northern...');
       const form=new FormData();
       form.set('breakdownId',String(breakdownId));
       form.set('token',token);
-      for(const file of files.slice(0,3))form.append('receipt',file,file.name);
+      for(const file of prepared)form.append('receipt',file,file.name);
 
       const response=await fetch('/api/breakdowns/driver',{method:'POST',body:form});
       const responseText=await response.text();
@@ -110,7 +207,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
         try{
           payload=JSON.parse(responseText) as ReceiptUploadPayload;
         }catch{
-          if(response.status===413)throw new Error('That receipt photo is too large to upload.');
+          if(response.status===413)throw new Error('That receipt photo is still too large to upload. Please select one receipt photo at a time.');
           throw new Error(`Receipt upload returned an unreadable response (HTTP ${response.status}).`);
         }
       }
@@ -191,7 +288,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
                   onChange={(event)=>void uploadReceipt(Array.from(event.target.files||[]).slice(0,3))}
                   style={{width:'100%',minHeight:68,padding:'14px',border:'1px solid #cbd5dd',borderRadius:12,background:'#fff',color:'#172033',fontSize:16,boxSizing:'border-box'}}
                 />
-                {busy==='receipt'&&<small style={{color:'#64748b'}}>Uploading receipt...</small>}
+                {busy==='receipt'&&<small style={{color:'#64748b'}}>Preparing and uploading receipt...</small>}
               </div>
 
               <button
