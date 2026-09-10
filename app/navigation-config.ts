@@ -99,8 +99,8 @@ const sidebarGroups: SidebarGroup[] = [
     href: "/pm-schedules",
     roles: managerRoles,
     links: [
-      { href: "/maintenance-programs", label: "Maintenance Programs", roles: managerRoles },
       { href: "/pm-schedules", label: "PM Schedule Setup", roles: managerRoles },
+      { href: "/maintenance-programs", label: "Custom PM Builder", roles: managerRoles },
       { href: "/annual-schedules", label: "Annual Schedule Setup", roles: managerRoles },
       { href: "/pm-kits", label: "PM Kits", roles: managerRoles },
       { href: "/inventory-controls", label: "Inventory Controls", roles: managerRoles },
