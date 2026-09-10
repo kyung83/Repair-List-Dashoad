@@ -1,13 +1,14 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
+import { getOpenCustomMaintenanceRepairs, syncCustomMaintenanceRepairs } from '@/lib/custom-maintenance-repairs';
 import { GET as originalGET, POST as originalPOST } from './original';
 import { assignToMeFromBoard } from './self-assign';
 import { createRepairForTechnician, setUnitOosByTechnician } from './technician-actions';
 
 type BoardRepair = {
   id:string; source:string; issue:string; status:string; technicianId:number|null; activeTimer:unknown;
-  outOfService:boolean; equipmentType:string; equipmentId:number|null;
+  outOfService:boolean; equipmentType:string; equipmentId:number|null; maintenanceId?:string;
 };
 type OosUnit = { openWork?: Array<{status?:string}>; [key:string]: unknown };
 type AdminRepairRow = {
@@ -68,7 +69,7 @@ async function manualOpenRepair(value: unknown) {
     throw new Error('Completed repairs must be corrected from Work Order Review so completed history stays auditable.');
   }
   if (row.source !== 'manual') {
-    throw new Error('Only manually entered repairs can be changed or deleted here. DVIR, PM, and Annual work stays tied to its source record.');
+    throw new Error('Only manually entered repairs can be changed or deleted here. DVIR, PM, Annual, and custom maintenance work stays tied to its source record.');
   }
   return row;
 }
@@ -253,6 +254,9 @@ async function markDvirRepairedFromBoard(request: Request, body: Record<string, 
 }
 
 export async function GET(request: Request) {
+  const sessionUser = await getSessionUser(env.DB, request);
+  if (sessionUser) await syncCustomMaintenanceRepairs(env.DB);
+
   const response = await originalGET(request);
   if (!response.ok) return response;
   const payload = await response.json() as {
@@ -261,7 +265,15 @@ export async function GET(request: Request) {
     summary?: Record<string, number>;
     [key:string]: unknown;
   };
+  const customRepairs = sessionUser ? await getOpenCustomMaintenanceRepairs(env.DB) : new Map<number,string>();
   const repairs = (payload.repairs ?? [])
+    .map((repair) => {
+      const repairId = numericRepairId(repair.id);
+      const maintenanceSourceId = repairId ? customRepairs.get(repairId) : undefined;
+      return maintenanceSourceId
+        ? { ...repair, source:'pm-repair', maintenanceId:maintenanceSourceId }
+        : repair;
+    })
     .filter((repair) => !deferred(repair.status) && !outsideRepair(repair.status))
     .map(conciseMaintenanceIssue);
   payload.repairs = repairs;
