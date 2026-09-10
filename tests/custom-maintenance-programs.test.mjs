@@ -43,7 +43,7 @@ test('Repair Board materializes custom due jobs but builder remains separate', a
   const route = await read('app/api/repair-board/route.ts');
   assert.match(route, /syncCustomMaintenanceRepairs\(env\.DB\)/);
   assert.match(route, /getOpenCustomMaintenanceRepairs\(env\.DB\)/);
-  assert.match(route, /source:'pm-repair'/);
+  assert.match(route, /source:\s*'pm-repair'/);
   assert.doesNotMatch(route, /saveMaintenanceProgram/);
 });
 
