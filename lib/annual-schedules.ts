@@ -6,6 +6,14 @@ type AnnualRow = {
   interval_days: number | null;
   active: number | null;
   annual_date: string | null;
+  open_annual_repair_id: number | null;
+};
+
+type AnnualRepairEquipment = {
+  id: number;
+  unit: string;
+  driver: string | null;
+  location: string | null;
 };
 
 function positiveInteger(value: unknown, label: string) {
@@ -41,7 +49,16 @@ export async function getAnnualScheduleData(db: D1Database) {
   const result = await db.prepare(`
     SELECT e.id, e.unit, e.equipment_type, e.category,
            a.interval_days, a.active,
-           COALESCE(ps.annual_date, e.annual_date) AS annual_date
+           COALESCE(ps.annual_date, e.annual_date) AS annual_date,
+           (
+             SELECT r.id
+             FROM repairs r
+             WHERE r.equipment_id = e.id
+               AND r.source = 'scheduled-annual'
+               AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+             ORDER BY r.id DESC
+             LIMIT 1
+           ) AS open_annual_repair_id
     FROM equipment e
     LEFT JOIN equipment_annual_settings a ON a.equipment_id = e.id
     LEFT JOIN pm_status ps ON ps.equipment_id = e.id
@@ -57,6 +74,7 @@ export async function getAnnualScheduleData(db: D1Database) {
       category: row.equipment_type === 'trailer' ? 'Trailers' : (row.category && row.category !== 'fleet' ? row.category : 'Uncategorized'),
       annualIntervalDays: row.interval_days == null || row.active === 0 ? null : Number(row.interval_days),
       lastAnnualDate: row.annual_date ?? '',
+      openAnnualRepairId: row.open_annual_repair_id == null ? null : `repair-${Number(row.open_annual_repair_id)}`,
     })),
     updatedAt: new Date().toISOString(),
   };
@@ -86,6 +104,58 @@ export async function clearAnnualSchedule(db: D1Database, body: Record<string, u
     UPDATE equipment_annual_settings SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE equipment_id = ?
   `).bind(id)));
   return { ok: true, count: ids.length };
+}
+
+export async function createAnnualRepairNow(
+  db: D1Database,
+  body: Record<string, unknown>,
+  user: { id: number; displayName: string },
+) {
+  const equipmentId = positiveInteger(body.equipmentId, 'Unit');
+  const equipment = await db.prepare(`
+    SELECT id, unit, driver, location
+    FROM equipment
+    WHERE id = ? AND active = 1
+  `).bind(equipmentId).first<AnnualRepairEquipment>();
+  if (!equipment) throw new Error('Unit was not found or is inactive.');
+
+  const existing = await db.prepare(`
+    SELECT id
+    FROM repairs
+    WHERE equipment_id = ?
+      AND source = 'scheduled-annual'
+      AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+    ORDER BY id DESC
+    LIMIT 1
+  `).bind(equipmentId).first<{ id: number }>();
+  if (existing) {
+    return { ok: true, existing: true, repairId: `repair-${existing.id}`, equipmentId, unit: equipment.unit };
+  }
+
+  const result = await db.prepare(`
+    INSERT INTO repairs (
+      equipment_id, title, description, status, priority, source,
+      driver, location, technician_id, updated_at
+    ) VALUES (?, 'Annual / inspection requested early', ?, 'New', '2', 'scheduled-annual', ?, ?, NULL, CURRENT_TIMESTAMP)
+  `).bind(
+    equipmentId,
+    'Annual inspection manually released early from Annual Schedule Setup. The stored last-completed Annual date was not changed.',
+    equipment.driver ?? '',
+    equipment.location ?? '',
+  ).run();
+  const repairId = Number(result.meta.last_row_id);
+  if (!repairId) throw new Error('Annual repair job could not be created.');
+
+  await db.prepare(`
+    INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
+    VALUES (?, ?, NULL, 'scheduled_maintenance_added', ?)
+  `).bind(
+    repairId,
+    user.id,
+    `${user.displayName} created an Annual inspection job early for Unit ${equipment.unit}. The normal Annual history remains unchanged until the inspection is completed.`,
+  ).run();
+
+  return { ok: true, existing: false, repairId: `repair-${repairId}`, equipmentId, unit: equipment.unit };
 }
 
 export async function completeAnnual(db: D1Database, body: Record<string, unknown>) {

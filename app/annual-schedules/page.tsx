@@ -10,6 +10,7 @@ type AnnualUnit = {
   category: string;
   annualIntervalDays: number | null;
   lastAnnualDate: string;
+  openAnnualRepairId: string | null;
 };
 
 type Payload = {
@@ -144,6 +145,37 @@ export default function AnnualSchedulesPage() {
     );
   }
 
+  async function createAnnualJob(item: AnnualUnit) {
+    if (item.openAnnualRepairId) {
+      setMessage(`Unit ${item.unit} already has an open Annual repair job.`);
+      return;
+    }
+    const confirmed = window.confirm(
+      `Create an Annual repair job now for Unit ${item.unit}?\n\nThis will send the Annual to the Repair Board for the normal mechanic inspection/form process. It will NOT change the stored last-completed Annual date until the mechanic completes the inspection.`,
+    );
+    if (!confirmed) return;
+
+    setBusy(`job-${item.id}`);
+    setMessage("");
+    try {
+      const response = await fetch("/api/annual-schedules", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "createAnnualRepairNow", equipmentId: item.id }),
+      });
+      const result = await response.json() as { error?: string; existing?: boolean; repairId?: string };
+      if (!response.ok) throw new Error(result.error || "Annual repair job could not be created.");
+      await load();
+      setMessage(result.existing
+        ? `Unit ${item.unit} already had an open Annual repair job. No duplicate was created.`
+        : `Unit ${item.unit} Annual job created. It is now on the Repair Board for technician assignment and the normal Annual form process.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Annual repair job could not be created.");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function applySchedule() {
     const interval = Number(intervalDays);
     if (!selected.length) return setMessage("Select at least one unit first.");
@@ -175,8 +207,8 @@ export default function AnnualSchedulesPage() {
         <div>
           <p style={eyebrowStyle}>TRUCK &amp; TRAILER COMPLIANCE</p>
           <h1 style={{ margin: "7px 0 4px", fontSize: 34, color: "#0d1b2b" }}>Annual Schedules</h1>
-          <p style={{ margin: 0, maxWidth: 850, color: "#64748b", lineHeight: 1.5 }}>
-            Update each unit&apos;s last completed Annual date here. The next due date is calculated from that date and the assigned Annual-day interval.
+          <p style={{ margin: 0, maxWidth: 900, color: "#64748b", lineHeight: 1.5 }}>
+            Update completed Annual dates and normal intervals here. If you want an Annual performed early, use Create Annual Job Now so the mechanic gets the normal inspection checklist and completed form without changing the historical Annual date first.
           </p>
         </div>
       </header>
@@ -206,7 +238,7 @@ export default function AnnualSchedulesPage() {
 
       <section style={tableCardStyle}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse", fontSize: 13 }}>
+          <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#eef2f5", color: "#52616e", textAlign: "left", fontSize: 10, letterSpacing: ".05em", textTransform: "uppercase" }}>
                 <th style={cellStyle}><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={!visible.length} /></th>
@@ -216,7 +248,8 @@ export default function AnnualSchedulesPage() {
                 <th style={cellStyle}>Interval</th>
                 <th style={cellStyle}>Next due</th>
                 <th style={cellStyle}>Status</th>
-                <th style={cellStyle}>Update</th>
+                <th style={cellStyle}>Annual job</th>
+                <th style={cellStyle}>Update date</th>
               </tr>
             </thead>
             <tbody>
@@ -231,6 +264,16 @@ export default function AnnualSchedulesPage() {
                     <td style={cellStyle}>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "Not assigned"}</td>
                     <td style={{ ...cellStyle, fontWeight: 800 }}>{due.date ? shortDate(due.date) : "—"}</td>
                     <td style={cellStyle}><span style={badgeStyle[due.tone]}>{due.label}</span></td>
+                    <td style={cellStyle}>
+                      <button
+                        type="button"
+                        disabled={Boolean(busy) || Boolean(item.openAnnualRepairId)}
+                        onClick={() => void createAnnualJob(item)}
+                        style={item.openAnnualRepairId ? disabledJobButtonStyle : jobButtonStyle}
+                      >
+                        {item.openAnnualRepairId ? "Annual Job Open" : busy === `job-${item.id}` ? "Creating…" : "Create Annual Job Now"}
+                      </button>
+                    </td>
                     <td style={cellStyle}><button type="button" disabled={Boolean(busy)} onClick={() => void saveDate(item)} style={orangeButtonStyle}>{busy === `date-${item.id}` ? "Saving…" : "Save Date"}</button></td>
                   </tr>
                 );
@@ -253,6 +296,8 @@ const tableCardStyle = { marginTop: 12, overflow: "hidden", border: "1px solid #
 const inputStyle = { minHeight: 40, boxSizing: "border-box" as const, padding: "7px 10px", border: "1px solid #cbd5dd", borderRadius: 8, background: "white", color: "#172033" } as const;
 const buttonStyle = { minHeight: 40, padding: "0 13px", border: "1px solid #cbd5dd", borderRadius: 8, background: "white", color: "#263746", fontWeight: 900, cursor: "pointer" } as const;
 const orangeButtonStyle = { ...buttonStyle, borderColor: "#f47b20", background: "#f47b20", color: "white" } as const;
+const jobButtonStyle = { ...buttonStyle, minWidth: 168, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
+const disabledJobButtonStyle = { ...buttonStyle, minWidth: 168, background: "#eef2f5", color: "#52616e", cursor: "default" } as const;
 const tabStyle = { ...buttonStyle, minWidth: 130 } as const;
 const activeTabStyle = { ...tabStyle, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
 const noticeStyle = { marginTop: 14, padding: 12, border: "1px solid #f2c66d", borderRadius: 9, background: "#fff8e6", color: "#654d18" } as const;
