@@ -19,8 +19,8 @@ type DriverAccessRow={
 };
 type ReceiptRow={id:number};
 
-const RECEIPT_UPLOAD_MAX_FILE_BYTES=20*1024*1024;
-const RECEIPT_UPLOAD_MAX_TOTAL_BYTES=40*1024*1024;
+const RECEIPT_UPLOAD_MAX_FILE_BYTES=35*1024*1024;
+const RECEIPT_UPLOAD_MAX_TOTAL_BYTES=85*1024*1024;
 const RECEIPT_UPLOAD_TYPES=new Set([
   'image/jpeg',
   'image/png',
@@ -103,11 +103,11 @@ export async function uploadAndReadDriverBreakdownReceipt(breakdownId:number,tok
   if(files.length>OUTSIDE_WORK_MAX_IMAGES)throw new Error(`Upload up to ${OUTSIDE_WORK_MAX_IMAGES} receipt pages.`);
 
   const totalBytes=files.reduce((sum,file)=>sum+file.size,0);
-  if(totalBytes>RECEIPT_UPLOAD_MAX_TOTAL_BYTES)throw new Error('Receipt images are too large to upload.');
+  if(totalBytes>RECEIPT_UPLOAD_MAX_TOTAL_BYTES)throw new Error('Receipt images are still too large to upload. Try one receipt photo at a time.');
   for(const file of files){
     const type=String(file.type||'').toLowerCase();
     if(!RECEIPT_UPLOAD_TYPES.has(type))throw new Error('Receipt upload accepts JPEG, PNG, WebP, HEIC, or HEIF images.');
-    if(file.size<=0||file.size>RECEIPT_UPLOAD_MAX_FILE_BYTES)throw new Error('Each receipt image must be 20 MB or smaller.');
+    if(file.size<=0||file.size>RECEIPT_UPLOAD_MAX_FILE_BYTES)throw new Error('Each receipt image must be 35 MB or smaller.');
   }
 
   await env.DB.prepare(`
@@ -124,7 +124,7 @@ export async function uploadAndReadDriverBreakdownReceipt(breakdownId:number,tok
   const receipt=await receiptForBreakdown(breakdownId);
   if(!receipt)throw new Error('Receipt record could not be created.');
 
-  // Save the driver's original file(s) first. The phone does no OCR or image conversion.
+  // The driver page normally sends a resized JPEG. Keep the larger original as a fallback when a phone cannot resize it.
   await replaceReceiptPages(receipt.id,breakdownId,files);
 
   const aiReadable=files.every(file=>{
@@ -136,7 +136,7 @@ export async function uploadAndReadDriverBreakdownReceipt(breakdownId:number,tok
     await env.DB.prepare(`
       UPDATE roadside_breakdown_receipts
       SET ai_status='manual_review',
-          ai_error='Original receipt uploaded successfully. This image needs office review because it is not in the AI reader safe format/size.',
+          ai_error='Receipt uploaded successfully. This image needs office review because it is not in the AI reader safe format/size.',
           review_status='pending',updated_at=CURRENT_TIMESTAMP
       WHERE id=?
     `).bind(receipt.id).run();
