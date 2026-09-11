@@ -42,6 +42,15 @@ test('each breakdown summary table gets its own export and print controls', () =
   assert.match(actions, /By Location/);
 });
 
+test('breakdown cost by unit is constrained to its own scroll area with sticky headers', () => {
+  assert.match(actions, /configureBreakdownUnitSummaryScroller/);
+  assert.match(actions, /title === "Breakdown Cost by Unit"/);
+  assert.match(actions, /wrapper\.style\.maxHeight = "420px"/);
+  assert.match(actions, /wrapper\.style\.overflowY = "auto"/);
+  assert.match(actions, /breakdownUnitSummaryScroller/);
+  assert.match(actions, /cell\.style\.position = "sticky"/);
+});
+
 test('breakdown detail is constrained to an internal scroll area with sticky headers', () => {
   assert.match(actions, /configureBreakdownDetailScroller/);
   assert.match(actions, /wrapper\.style\.maxHeight = "560px"/);
