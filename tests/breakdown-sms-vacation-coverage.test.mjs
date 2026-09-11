@@ -9,7 +9,7 @@ import {
 const migration = readFileSync(new URL('../migrations/0133_breakdown_sms_vacation_coverage.sql', import.meta.url), 'utf8');
 const vacationRuntime = readFileSync(new URL('../lib/breakdown-sms-vacation.ts', import.meta.url), 'utf8');
 const scheduleApi = readFileSync(new URL('../app/api/admin/twilio/schedule/route.ts', import.meta.url), 'utf8');
-const schedulePage = readFileSync(new URL('../app/admin/twilio/schedule/page.tsx', import.meta.url), 'utf8');
+const page = readFileSync(new URL('../app/admin/twilio/unified-page.tsx', import.meta.url), 'utf8');
 const notifications = readFileSync(new URL('../lib/notifications.ts', import.meta.url), 'utf8');
 
 test('vacation dates are inclusive and evaluated in Detroit local time', () => {
@@ -32,21 +32,24 @@ test('vacation coverage persists dates and a different backup contact', () => {
   assert.match(vacationRuntime, /Choose a different breakdown person as the vacation backup/);
 });
 
-test('away primary is suppressed and active backup inherits the primary normal window', () => {
+test('away primary is suppressed and active backup inherits whichever normal window is active, including on-call', () => {
   assert.match(vacationRuntime, /if \(!primary\.allowedNow\) continue/);
   assert.match(vacationRuntime, /if \(awayNowById\.get\(backup\.contactId\)\) continue/);
   assert.match(vacationRuntime, /!awayNow && \(normalAllowedNow \|\| coveringFor\.length > 0\)/);
   assert.match(notifications, /breakdownSmsContactAllows/);
+  assert.match(page, /Office Hours/);
+  assert.match(page, /On Call Schedule/);
+  assert.match(page, /backup automatically inherits whichever of these windows would be active/i);
 });
 
 test('admin can save and cancel vacation coverage without changing the normal schedule', () => {
   assert.match(scheduleApi, /action === 'save-away'/);
   assert.match(scheduleApi, /action === 'remove-away'/);
-  assert.match(schedulePage, /VACATION \/ AWAY/);
-  assert.match(schedulePage, /Backup person/);
-  assert.match(schedulePage, /Save Vacation \/ Away/);
-  assert.match(schedulePage, /normal schedule stays saved/i);
-  assert.match(schedulePage, /resumes automatically/i);
-  assert.match(schedulePage, /Pause Live Texts/);
-  assert.match(schedulePage, /Enable Live Texts/);
+  assert.match(page, /VACATION \/ AWAY/);
+  assert.match(page, /Backup person/);
+  assert.match(page, /Save Vacation \/ Away/);
+  assert.match(page, /normal schedule stays saved/i);
+  assert.match(page, /resumes automatically/i);
+  assert.match(page, /Pause Live Texts/);
+  assert.match(page, /Enable Live Texts/);
 });

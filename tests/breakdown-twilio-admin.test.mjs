@@ -13,7 +13,8 @@ const notifications = readFileSync(new URL('../lib/notifications.ts', import.met
 const webhook = readFileSync(new URL('../app/api/webhook/twilio-sms/route.ts', import.meta.url), 'utf8');
 const claims = readFileSync(new URL('../lib/breakdown-sms-claims.ts', import.meta.url), 'utf8');
 const api = readFileSync(new URL('../app/api/admin/twilio/route.ts', import.meta.url), 'utf8');
-const page = readFileSync(new URL('../app/admin/twilio/page.tsx', import.meta.url), 'utf8');
+const page = readFileSync(new URL('../app/admin/twilio/unified-page.tsx', import.meta.url), 'utf8');
+const pageRoute = readFileSync(new URL('../app/admin/twilio/page.tsx', import.meta.url), 'utf8');
 const navigation = readFileSync(new URL('../app/navigation-config.ts', import.meta.url), 'utf8');
 const worker = readFileSync(new URL('../worker/index.ts', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0112_breakdown_twilio_admin.sql', import.meta.url), 'utf8');
@@ -31,7 +32,7 @@ test('Twilio credentials are admin-managed and auth token is encrypted', () => {
   assert.match(runtime, /encryptGeotabRuntimeSecret\(authToken, env\)/);
   assert.match(runtime, /decryptGeotabRuntimeSecret/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS twilio_runtime_credentials/);
-  assert.match(page, /Replace Twilio credentials/);
+  assert.match(page, /Replace Twilio Credentials/);
   assert.match(page, /Auth Token/);
   assert.match(page, /never shown back/);
 });
@@ -50,7 +51,7 @@ test('Admin controls breakdown text recipients and editable wording in D1', () =
   assert.match(runtime, /addBreakdownSmsContact/);
   assert.match(runtime, /updateBreakdownSmsContact/);
   assert.match(runtime, /removeBreakdownSmsContact/);
-  assert.match(page, /BREAKDOWN TEXT USERS/);
+  assert.match(page, /BREAKDOWN PEOPLE/);
   assert.match(page, /Messages Twilio reads from Cloudflare/);
   assert.match(navigation, /href: "\/admin\/twilio", label: "Breakdown Texting"/);
   assert.match(notifications, /buildNewBreakdownSms/);
@@ -76,6 +77,14 @@ test('Twilio admin includes webhook URL, live pause, and test text controls', ()
   assert.match(page, /Send Test/);
 });
 
+test('Breakdown texting has one Setup entry and old Text Schedule URL redirects into it', () => {
+  assert.match(pageRoute, /UnifiedBreakdownTextingPage/);
+  assert.match(schedulePage, /redirect\('\/admin\/twilio'\)/);
+  assert.match(navigation, /href: "\/admin\/twilio", label: "Breakdown Texting"/);
+  assert.doesNotMatch(navigation, /label: "Text Schedule"/);
+  assert.doesNotMatch(navigation, /href: "\/admin\/twilio\/schedule"/);
+});
+
 test('Breakdown SMS recipient schedules are admin-managed in Detroit time and gate new alerts only', () => {
   assert.match(contactScheduleMigration, /CREATE TABLE IF NOT EXISTS breakdown_sms_contact_schedules/);
   assert.match(contactScheduleMigration, /America\/Detroit/);
@@ -86,11 +95,10 @@ test('Breakdown SMS recipient schedules are admin-managed in Detroit time and ga
   assert.match(scheduleApi, /saveBreakdownSmsContactSchedule/);
   assert.match(notifications, /breakdownSmsContactAllows/);
   assert.match(notifications, /Outside configured breakdown SMS schedule/);
-  assert.match(schedulePage, /Breakdown email still sends immediately/);
-  assert.match(schedulePage, /Individual Breakdown Text Schedules/);
-  assert.match(schedulePage, /type="time"/);
-  assert.doesNotMatch(schedulePage, /SHARED OFFICE HOURS/);
-  assert.match(navigation, /href: "\/admin\/twilio\/schedule", label: "Text Schedule"/);
+  assert.match(page, /Breakdown email still sends immediately/);
+  assert.match(page, /Coverage at a glance/);
+  assert.match(page, /type="time"/);
+  assert.doesNotMatch(page, /SHARED OFFICE HOURS/);
 });
 
 test('Each breakdown text user has an independent mode and independent coverage windows', () => {
@@ -101,10 +109,10 @@ test('Each breakdown text user has an independent mode and independent coverage 
   assert.match(scheduleRuntime, /saveBreakdownSmsContactSchedule/);
   assert.match(scheduleRuntime, /breakdownSmsScheduleAllows\(db: D1Database, contactId\?: number\)/);
   assert.match(scheduleApi, /action !== 'save-contact'/);
-  assert.match(schedulePage, /Pause scheduled breakdown texts/);
-  assert.match(schedulePage, /Always text this person/);
-  assert.match(schedulePage, /Use this person’s coverage windows/);
-  assert.match(schedulePage, /One person’s hours never change another person’s hours/);
+  assert.match(page, /Pause scheduled breakdown texts/);
+  assert.match(page, /Always text this person/);
+  assert.match(page, /Use this person’s coverage windows/);
+  assert.match(page, /Office hours and on-call schedule/);
   assert.match(notifications, /sendBreakdownSms\(breakdownId, phone, outboundMessage, contact\.id\)/);
 });
 
@@ -118,8 +126,8 @@ test('The old shared schedule is migrated into personal windows and then ignored
   assert.match(scheduleRuntime, /if \(!contactId\) return true/);
   assert.match(scheduleApi, /action === 'save-default'/);
   assert.match(scheduleApi, /The shared schedule was removed/);
-  assert.match(schedulePage, /normal schedule stays saved/i);
-  assert.doesNotMatch(schedulePage, /Save Shared Office Hours/);
+  assert.match(page, /normal schedule stays saved/i);
+  assert.doesNotMatch(page, /Save Shared Office Hours/);
 });
 
 test('A person can save several separate personal coverage windows', () => {
@@ -132,9 +140,9 @@ test('A person can save several separate personal coverage windows', () => {
   assert.match(scheduleRuntime, /personalRows\.map\(windowCore\)/);
   assert.match(scheduleRuntime, /db\.batch\(statements\)/);
   assert.match(scheduleApi, /requestedWindows\(body\.windows\)/);
-  assert.match(schedulePage, /Add Another Coverage Window/);
-  assert.match(schedulePage, /Remove Window/);
-  assert.match(schedulePage, /Normal schedule/);
+  assert.match(page, /Add Another Coverage Window/);
+  assert.match(page, /Remove Window/);
+  assert.match(page, /NORMAL COVERAGE/);
 });
 
 test('Personal coverage windows support a safe every-other-week rotation', () => {
@@ -145,10 +153,9 @@ test('Personal coverage windows support a safe every-other-week rotation', () =>
   assert.match(scheduleRuntime, /breakdownSmsAnchorForCurrentWeek/);
   assert.match(scheduleApi, /weekInterval/);
   assert.match(scheduleApi, /activeThisWeek/);
-  assert.match(schedulePage, /Every other week/);
-  assert.match(schedulePage, /This week ON, next week OFF/);
-  assert.match(schedulePage, /This week OFF, next week ON/);
-  assert.match(schedulePage, /flips automatically every Monday/);
+  assert.match(page, /Every other week/);
+  assert.match(page, /This week ON, next week OFF/);
+  assert.match(page, /This week OFF, next week ON/);
 });
 
 test('Biweekly evaluator alternates Mondays in Detroit and keeps overnight work in the starting week', () => {

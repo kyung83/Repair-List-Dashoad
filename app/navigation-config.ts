@@ -109,7 +109,6 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/admin/users", label: "Users & Access", roles: adminRoles },
       { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
       { href: "/admin/twilio", label: "Breakdown Texting", exact: true, roles: adminRoles },
-      { href: "/admin/twilio/schedule", label: "Text Schedule", exact: true, roles: adminRoles },
       { href: "/admin/geotab-review/health", label: "Fleet / Geotab Health", exact: true, roles: adminRoles },
       { href: "/admin/geotab-review/assignments", label: "Device Assignments", exact: true, roles: adminRoles },
       { href: "/admin/geotab-review", label: "Identity & Mileage", exact: true, roles: adminRoles },
