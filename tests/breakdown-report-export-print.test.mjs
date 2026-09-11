@@ -9,6 +9,7 @@ const layout = readFileSync(new URL('../app/reports/breakdowns/layout.tsx', impo
 test('breakdown reports expose obvious export and print actions', () => {
   assert.match(actions, /Print \/ Save PDF/);
   assert.match(actions, /Export CSV/);
+  assert.match(actions, /Export Summary CSV/);
   assert.match(layout, /BreakdownReportActions/);
   assert.match(layout, /breakdown-report-print-scope/);
 });
@@ -27,4 +28,24 @@ test('print action prints a cleaned clone of the current report only', () => {
   assert.match(actions, /replaceFormControlsWithValues/);
   assert.match(actions, /@page \{ size: landscape/);
   assert.match(actions, /printWindow\.print\(\)/);
+});
+
+test('each breakdown summary table gets its own export and print controls', () => {
+  assert.match(actions, /injectIndividualSummaryActions/);
+  assert.match(actions, /downloadOneSummaryCsv/);
+  assert.match(actions, /makeMiniButton\("Print \/ Save PDF"/);
+  assert.match(actions, /makeMiniButton\("Export CSV"/);
+  assert.match(actions, /Breakdown Cost by Unit/);
+  assert.match(actions, /Monthly Breakdown Trend/);
+  assert.match(actions, /By Breakdown Category/);
+  assert.match(actions, /By Service Provider/);
+  assert.match(actions, /By Location/);
+});
+
+test('breakdown detail is constrained to an internal scroll area with sticky headers', () => {
+  assert.match(actions, /configureBreakdownDetailScroller/);
+  assert.match(actions, /wrapper\.style\.maxHeight = "560px"/);
+  assert.match(actions, /wrapper\.style\.overflowY = "auto"/);
+  assert.match(actions, /cell\.style\.position = "sticky"/);
+  assert.match(actions, /Scroll inside the detail table to review more breakdowns/);
 });
