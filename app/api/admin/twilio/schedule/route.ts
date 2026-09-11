@@ -1,12 +1,16 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import {
-  getBreakdownSmsContactSchedules,
   saveBreakdownSmsContactSchedule,
   type BreakdownSmsContactScheduleMode,
   type BreakdownSmsContactScheduleWindowInput,
   type BreakdownSmsWeekInterval,
 } from '@/lib/breakdown-sms-schedule';
+import {
+  getBreakdownSmsContactCoverage,
+  removeBreakdownSmsAwayPeriod,
+  saveBreakdownSmsAwayPeriod,
+} from '@/lib/breakdown-sms-vacation';
 
 async function requireAdmin(request: Request) {
   const user = await getSessionUser(env.DB, request);
@@ -16,7 +20,7 @@ async function requireAdmin(request: Request) {
 }
 
 async function statusPayload() {
-  return { contacts: await getBreakdownSmsContactSchedules(env.DB) };
+  return { contacts: await getBreakdownSmsContactCoverage(env.DB) };
 }
 
 export async function GET(request: Request) {
@@ -44,6 +48,11 @@ type ScheduleBody = {
   contactId?: number;
   mode?: BreakdownSmsContactScheduleMode;
   windows?: WindowBody[];
+  awayId?: number;
+  startDate?: string;
+  endDate?: string;
+  backupContactId?: number | null;
+  awayLabel?: string;
   // Accepted only so a browser left open during deployment can still save one
   // personal window after refreshing. The shared/default save is retired.
   days?: number[];
@@ -83,6 +92,36 @@ export async function POST(request: Request) {
       return Response.json({
         error: 'The shared schedule was removed. Refresh this page and set each person’s coverage windows instead.',
       }, { status: 409 });
+    }
+
+    if (action === 'save-away') {
+      await saveBreakdownSmsAwayPeriod(env.DB, {
+        awayId: body.awayId == null ? null : Number(body.awayId),
+        contactId: Number(body.contactId),
+        startDate: String(body.startDate || ''),
+        endDate: String(body.endDate || ''),
+        backupContactId: body.backupContactId == null ? null : Number(body.backupContactId),
+        label: String(body.awayLabel || ''),
+      }, auth.user.id);
+      return Response.json({
+        ok: true,
+        message: 'Vacation / away coverage saved. Normal texting will resume automatically after the end date.',
+        ...await statusPayload(),
+      });
+    }
+
+    if (action === 'remove-away') {
+      await removeBreakdownSmsAwayPeriod(
+        env.DB,
+        Number(body.contactId),
+        Number(body.awayId),
+        auth.user.id,
+      );
+      return Response.json({
+        ok: true,
+        message: 'Vacation / away period canceled. The normal text schedule is active again when its regular hours match.',
+        ...await statusPayload(),
+      });
     }
 
     if (action !== 'save-contact') {
