@@ -3,7 +3,7 @@ import { sendGmailRuntimeEmail, type GmailRuntimeAttachment } from '@/lib/gmail-
 import { getGmailRuntimeCredentialMetadata } from '@/lib/gmail-runtime-credentials';
 import { sendTwilioRuntimeSms, twilioRuntimeReady } from '@/lib/twilio-runtime';
 import { buildNewBreakdownSms } from '@/lib/breakdown-sms-message';
-import { breakdownSmsScheduleAllows } from '@/lib/breakdown-sms-schedule';
+import { breakdownSmsContactAllows } from '@/lib/breakdown-sms-vacation';
 
 const BREAKDOWN_EMAIL_FROM = 'norlow-breakdowns@norloworld.com';
 
@@ -174,7 +174,7 @@ export async function sendBreakdownSms(
 ) {
   try {
     const twilioReady = await twilioRuntimeReady(env.DB);
-    const scheduleAllowed = await breakdownSmsScheduleAllows(env.DB, contactId);
+    const scheduleAllowed = await breakdownSmsContactAllows(env.DB, contactId);
     if (twilioReady && scheduleAllowed) {
       await sendSmsLive(toPhone, message);
       await logNotification({ breakdownId, channel: 'sms', direction: 'outbound', recipient: toPhone, body: message, status: 'sent' });
