@@ -220,6 +220,31 @@ function injectIndividualSummaryActions(root: HTMLElement) {
   });
 }
 
+function configureBreakdownUnitSummaryScroller(root: HTMLElement) {
+  const summary = findSummaryTables(root)
+    .find(({ title }) => title === "Breakdown Cost by Unit");
+  const table = summary?.table ?? null;
+  const wrapper = table?.parentElement as HTMLElement | null;
+  if (!table || !wrapper) return;
+
+  wrapper.dataset.breakdownUnitSummaryScroller = "true";
+  wrapper.style.maxHeight = "420px";
+  wrapper.style.overflow = "auto";
+  wrapper.style.overflowX = "auto";
+  wrapper.style.overflowY = "auto";
+  wrapper.style.position = "relative";
+  wrapper.style.border = "1px solid #e2e8f0";
+  wrapper.style.borderRadius = "8px";
+
+  table.querySelectorAll<HTMLElement>("thead th").forEach((cell) => {
+    cell.style.position = "sticky";
+    cell.style.top = "0";
+    cell.style.zIndex = "3";
+    cell.style.background = "#fff";
+    cell.style.boxShadow = "0 1px 0 #dce2e7";
+  });
+}
+
 function configureBreakdownDetailScroller(root: HTMLElement) {
   const heading = Array.from(root.querySelectorAll<HTMLHeadingElement>("h2"))
     .find((candidate) => candidate.textContent?.trim() === "Breakdown Detail");
@@ -276,6 +301,7 @@ export default function BreakdownReportActions() {
       const root = document.getElementById("breakdown-report-print-scope");
       if (!root) return;
       injectIndividualSummaryActions(root);
+      configureBreakdownUnitSummaryScroller(root);
       configureBreakdownDetailScroller(root);
     };
 
