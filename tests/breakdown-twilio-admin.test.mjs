@@ -84,7 +84,7 @@ test('Breakdown SMS recipient schedules are admin-managed in Detroit time and ga
   assert.match(scheduleCore, /previousDay/);
   assert.match(scheduleApi, /user\.role !== 'admin'/);
   assert.match(scheduleApi, /saveBreakdownSmsContactSchedule/);
-  assert.match(notifications, /breakdownSmsScheduleAllows/);
+  assert.match(notifications, /breakdownSmsContactAllows/);
   assert.match(notifications, /Outside configured breakdown SMS schedule/);
   assert.match(schedulePage, /Breakdown email still sends immediately/);
   assert.match(schedulePage, /Individual Breakdown Text Schedules/);
@@ -118,7 +118,7 @@ test('The old shared schedule is migrated into personal windows and then ignored
   assert.match(scheduleRuntime, /if \(!contactId\) return true/);
   assert.match(scheduleApi, /action === 'save-default'/);
   assert.match(scheduleApi, /The shared schedule was removed/);
-  assert.match(schedulePage, /There is no shared office-hours setting/);
+  assert.match(schedulePage, /normal schedule stays saved/i);
   assert.doesNotMatch(schedulePage, /Save Shared Office Hours/);
 });
 
@@ -134,7 +134,7 @@ test('A person can save several separate personal coverage windows', () => {
   assert.match(scheduleApi, /requestedWindows\(body\.windows\)/);
   assert.match(schedulePage, /Add Another Coverage Window/);
   assert.match(schedulePage, /Remove Window/);
-  assert.match(schedulePage, /Different start times/);
+  assert.match(schedulePage, /Normal schedule/);
 });
 
 test('Personal coverage windows support a safe every-other-week rotation', () => {
