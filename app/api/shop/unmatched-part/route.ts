@@ -3,13 +3,18 @@ import { getSessionUser } from '@/lib/auth';
 import { requestUnmatchedPart } from '@/lib/unmatched-parts';
 import { POST as shopPOST } from '../route';
 
+type RequestContext = {
+  url:string;
+  headers:Headers;
+};
+
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   return match ? Number(match[1]) : 0;
 }
 
 async function autoWaitAfterRequest(
-  request:Request,
+  requestContext:RequestContext,
   user:{id:number;technicianId:number|null},
   repairId:number,
   detail:string,
@@ -18,10 +23,10 @@ async function autoWaitAfterRequest(
     .bind(user.id).first<{repair_id:number}>();
 
   if (Number(ownTimer?.repair_id ?? 0) === repairId) {
-    const headers = new Headers(request.headers);
+    const headers = new Headers(requestContext.headers);
     headers.set('content-type','application/json');
     headers.delete('content-length');
-    const waitingRequest = new Request(request.url,{
+    const waitingRequest = new Request(requestContext.url,{
       method:'POST',
       headers,
       body:JSON.stringify({
@@ -65,6 +70,10 @@ export async function POST(request: Request) {
       throw new Error('A working technician account is required.');
     }
 
+    const requestContext:RequestContext = {
+      url:request.url,
+      headers:new Headers(request.headers),
+    };
     const body = await request.json() as Record<string, unknown>;
     const repairId = numericRepairId(body.repairId);
     const requestedText = String(body.requestedText ?? '').trim();
@@ -117,7 +126,7 @@ export async function POST(request: Request) {
     ).run();
 
     const waitingResult = await autoWaitAfterRequest(
-      request.clone(),
+      requestContext,
       {id:user.id,technicianId:user.technicianId},
       repairId,
       `Part shortage requested from Part Lookup. ${detail}`,
