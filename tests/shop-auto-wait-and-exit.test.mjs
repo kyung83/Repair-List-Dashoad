@@ -6,6 +6,7 @@ const page=readFileSync(new URL('../app/shop/page.tsx',import.meta.url),'utf8');
 const tools=readFileSync(new URL('../app/shop/technician-repair-tools-v2.tsx',import.meta.url),'utf8');
 const shopRoute=readFileSync(new URL('../app/api/shop/route.ts',import.meta.url),'utf8');
 const unmatchedRoute=readFileSync(new URL('../app/api/shop/unmatched-part/route.ts',import.meta.url),'utf8');
+const unmatchedLib=readFileSync(new URL('../lib/unmatched-parts.ts',import.meta.url),'utf8');
 
 test('mobile repair actions no longer require a separate Waiting on Part outcome button',()=>{
   assert.doesNotMatch(page,/style=\{waitingButton\}/);
@@ -46,12 +47,24 @@ test('working managers and admins can use the same unmatched part request flow a
   assert.doesNotMatch(unmatchedRoute,/user\.role !== 'mechanic'/);
 });
 
-test('unmatched part requests resolve a shop from live Geotab yard before legacy and user fallbacks',()=>{
+test('unmatched part requests resolve the first recognized shop instead of the first non-empty location',()=>{
   assert.match(unmatchedRoute,/equipment_geotab_devices/);
   assert.match(unmatchedRoute,/geotab_unit_state/);
   assert.match(unmatchedRoute,/COALESCE\(s\.yard,''\) AS live_yard/);
   assert.match(unmatchedRoute,/COALESCE\(u\.yard,''\) AS user_yard/);
-  assert.match(unmatchedRoute,/fallbackYard:repair\.live_yard \|\| repair\.current_yard \|\| repair\.repair_location \|\| repair\.user_yard/);
+  assert.match(unmatchedRoute,/function firstRecognizedWarehouse/);
+  assert.match(unmatchedRoute,/normalizeWarehouseCode\(value\)/);
+  assert.match(unmatchedRoute,/repair\.live_yard,[\s\S]*repair\.current_yard,[\s\S]*repair\.repair_location,[\s\S]*repair\.user_yard/);
+  assert.doesNotMatch(unmatchedRoute,/fallbackYard:repair\.live_yard \|\|/);
+});
+
+test('unknown typed parts are never blocked only because the repair yard is unknown',()=>{
+  assert.match(unmatchedLib,/async function optionalWarehouseCode/);
+  assert.match(unmatchedLib,/This repair needs a recognized shop location before parts can be requested or used/);
+  assert.match(unmatchedLib,/return '';/);
+  assert.match(unmatchedLib,/const effectiveWarehouseCode = warehouseCode \|\| existing\?\.warehouse_code \|\| ''/);
+  assert.match(unmatchedLib,/warehouseCode:effectiveWarehouseCode/);
+  assert.match(unmatchedRoute,/yard to be assigned by Parts Desk/);
 });
 
 test('unmatched part auto-wait does not clone the request after its JSON body has been consumed',()=>{
