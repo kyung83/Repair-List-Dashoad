@@ -35,8 +35,9 @@ test('manager Planning Center uses explicit assignment actions',()=>{
   assert.match(board,/Trailer Repairs \/ DVIR/);
   assert.doesNotMatch(board,/Recent Activity/);
   assert.doesNotMatch(board,/Upcoming Work/);
-  assert.match(roleAware,/managerView==='planning'\s*\? <PlanningCenter\/>/);
-  assert.doesNotMatch(roleAware,/managerView==='planning'&&<RepairBoardUnassign/);
+  assert.match(roleAware,/className=\{merge\.managerBoard\}><PlanningCenter\/>/);
+  assert.doesNotMatch(roleAware,/Classic Board/);
+  assert.doesNotMatch(roleAware,/managerView/);
 });
 
 test('manager Planning Center uses one shared attention bucket matcher',()=>{
