@@ -54,6 +54,13 @@ test('unmatched part requests resolve a shop from live Geotab yard before legacy
   assert.match(unmatchedRoute,/fallbackYard:repair\.live_yard \|\| repair\.current_yard \|\| repair\.repair_location \|\| repair\.user_yard/);
 });
 
+test('unmatched part auto-wait does not clone the request after its JSON body has been consumed',()=>{
+  assert.match(unmatchedRoute,/const requestContext:RequestContext = \{[\s\S]*headers:new Headers\(request\.headers\)/);
+  assert.match(unmatchedRoute,/const body = await request\.json\(\)/);
+  assert.match(unmatchedRoute,/autoWaitAfterRequest\([\s\S]*requestContext/);
+  assert.doesNotMatch(unmatchedRoute,/request\.clone\(\)/);
+});
+
 test('automatic waiting does not delete used inventory or existing part demand',()=>{
   assert.doesNotMatch(shopRoute,/DELETE FROM repair_parts/);
   assert.doesNotMatch(shopRoute,/DELETE FROM repair_part_requests/);
