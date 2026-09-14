@@ -65,6 +65,6 @@ test('Google script protects source tab and supports comparison plus five-minute
   assert.match(googleScript, /refreshNorthernYardCheckComparison/);
   assert.match(googleScript, /everyMinutes\(5\)/);
   assert.match(googleScript, /findUnitColumn_/);
-  assert.match(googleScript, /Repair Board-only/i);
+  assert.match(googleScript, /!sourceUnits\[key\]/);
   assert.doesNotMatch(googleScript, /source\.clear|source\.setValues/);
 });
