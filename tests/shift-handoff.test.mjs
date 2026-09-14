@@ -12,6 +12,14 @@ test('technician shift handoff uses the already-authorized doneUnit shop action'
   assert.match(route,/action === 'doneUnit' && body\.handoff === true/);
 });
 
+test('done working now opens the finish-or-handoff choice instead of ending labor immediately',()=>{
+  assert.match(page,/DONE WORKING ON UNIT/);
+  assert.match(page,/onClick=\{\(\)=>setHandoffOpen\(open=>!open\)\}/);
+  assert.match(page,/Done for now or hand off to the next shift\?/);
+  assert.match(page,/DONE FOR NOW — KEEP ASSIGNED TO ME/);
+  assert.match(page,/OR HAND OFF TO NEXT SHIFT/);
+});
+
 test('shift handoff requires a note and can target another active technician or next shift unassigned',()=>{
   assert.match(page,/HAND OFF TO NEXT SHIFT/);
   assert.match(page,/What is left to do\? \*/);
@@ -38,7 +46,7 @@ test('next shift sees a pending handoff until labor starts on that repair',()=>{
   assert.match(page,/selected\.handoffNote/);
 });
 
-test('handoff explicitly tells users that recorded parts and work stay on the repair',()=>{
-  assert.match(page,/Parts used, requested parts, pictures, notes, DVIR links, and existing work stay on the same repair records/);
+test('handoff explicitly tells users that recorded work stays on the repair',()=>{
+  assert.match(page,/Nothing already recorded on the repair is lost/);
   assert.match(page,/all parts\/work stayed with the repair/);
 });

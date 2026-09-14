@@ -95,6 +95,58 @@ async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repair
   }
 }
 
+async function autoWaitAfterPartShortage(
+  request:Request,
+  repairId:number,
+  user:{id:number;technicianId:number|null},
+  repairTechnicianId:number|null,
+  detail:string,
+) {
+  const ownTimer = await env.DB.prepare('SELECT repair_id FROM repair_labor_timers WHERE user_id = ?')
+    .bind(user.id).first<{repair_id:number}>();
+
+  if (Number(ownTimer?.repair_id ?? 0) === repairId) {
+    const headers = new Headers(request.headers);
+    headers.set('content-type','application/json');
+    headers.delete('content-length');
+    const waitingRequest = new Request(request.url,{
+      method:'POST',
+      headers,
+      body:JSON.stringify({
+        action:'repairOutcome',
+        repairId:`repair-${repairId}`,
+        outcome:'waiting_part',
+        notes:detail,
+      }),
+    });
+    const response = await legacyPOST(waitingRequest);
+    const payload = await response.json() as Record<string,unknown>;
+    if (!response.ok || payload.ok === false) {
+      throw new Error(String(payload.error ?? 'The part request was saved, but the repair could not move to Waiting on Part.'));
+    }
+    return payload;
+  }
+
+  const anyTimer = await env.DB.prepare('SELECT user_id FROM repair_labor_timers WHERE repair_id = ? LIMIT 1')
+    .bind(repairId).first<{user_id:number}>();
+  if (anyTimer) {
+    return { waitingOnPart:false, activeLaborContinues:true };
+  }
+
+  await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE repairs
+      SET status='Waiting on Part', updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+    `).bind(repairId),
+    env.DB.prepare(`
+      INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
+      VALUES (?,?,?,'waiting_on_part',?)
+    `).bind(repairId,user.id,repairTechnicianId,detail.slice(0,500)),
+  ]);
+  return { waitingOnPart:true, nextRepairId:null, laborStarted:false };
+}
+
 async function restoreWorkingManagerAssignments(request:Request,response:Response) {
   const user = await getSessionUser(env.DB, request);
   if (!response.ok || user?.role !== 'manager' || !user.technicianId) return response;
@@ -204,8 +256,16 @@ export async function POST(request: Request) {
       warehouseCode,
       userId:user.id,
     });
-    await repairJobEvent(repairId,user.id,repair.technician_id,'part_requested_awaiting',`${stock.partNumber}: ${quantity} requested from ${warehouseCode}; ${requestResult.shortageQuantity} currently short.`);
-    return Response.json(requestResult,{status:200});
+    const shortageDetail = `${stock.partNumber}: ${quantity} requested from ${warehouseCode}; ${requestResult.shortageQuantity} currently short.`;
+    await repairJobEvent(repairId,user.id,repair.technician_id,'part_requested_awaiting',shortageDetail);
+    const waitingResult = await autoWaitAfterPartShortage(
+      request.clone(),
+      repairId,
+      {id:user.id,technicianId:user.technicianId ?? null},
+      repair.technician_id,
+      `Part shortage requested from Part Lookup. ${shortageDetail}`,
+    );
+    return Response.json({...requestResult,...waitingResult,awaitingParts:true},{status:200});
   } catch (error) {
     console.error(JSON.stringify({event:'shop_inventory_v2_action_failed',error:String(error)}));
     return Response.json({error:error instanceof Error ? error.message : 'Part action failed.'},{status:400});
