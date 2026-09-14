@@ -105,6 +105,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/pm-kits", label: "PM Kits", roles: managerRoles },
       { href: "/inventory-controls", label: "Inventory Controls", roles: managerRoles },
       { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
+      { href: "/admin/yard-check-api", label: "Yard Check API", exact: true, roles: managerRoles },
       { href: "/invoices?view=settings", label: "Customers & Rates", view: "settings", roles: managerRoles },
       { href: "/admin/users", label: "Users & Access", roles: adminRoles },
       { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
