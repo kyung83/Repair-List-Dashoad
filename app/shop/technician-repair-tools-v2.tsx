@@ -7,8 +7,8 @@ type WarehouseStock={warehouseCode:string;warehouseName?:string;available?:numbe
 type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string;warehouseStocks?:WarehouseStock[]};
 type ShopPayload={parts?:Part[];error?:string};
 type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
-type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string};
-type UnmatchedResult={ok?:boolean;error?:string;requestedText?:string;requestedQuantity?:number;warehouseCode?:string;unmatchedPart?:boolean};
+type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string;waitingOnPart?:boolean;nextRepairId?:string|null;hours?:number;laborStarted?:boolean;activeLaborContinues?:boolean};
+type UnmatchedResult={ok?:boolean;error?:string;requestedText?:string;requestedQuantity?:number;warehouseCode?:string;unmatchedPart?:boolean;awaitingParts?:boolean;waitingOnPart?:boolean;nextRepairId?:string|null;hours?:number;laborStarted?:boolean;activeLaborContinues?:boolean};
 type SpeechResultLike={length:number;isFinal:boolean;[index:number]:{transcript:string}|undefined};
 type SpeechEventLike={results:ArrayLike<SpeechResultLike>};
 type RecognitionLike={lang:string;continuous:boolean;interimResults:boolean;start:()=>void;stop:()=>void;onresult:((event:SpeechEventLike)=>void)|null;onerror:((event:{error?:string})=>void)|null;onend:(()=>void)|null};
@@ -19,6 +19,8 @@ function noteTime(value:string){const parsed=Date.parse(value.includes("T")?valu
 function qty(value:number|undefined){const number=Number(value??0);return Number.isInteger(number)?String(number):number.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")}
 function warehouseAvailable(stock:WarehouseStock|undefined){return Number(stock?.available??stock?.quantityOnHand??0)}
 function refreshReview(repairId:string){window.dispatchEvent(new CustomEvent("repair-review-refresh",{detail:{repairId}}))}
+function refreshShop(){window.dispatchEvent(new Event("shop-jobs-refresh"))}
+function waitMessage(result:{waitingOnPart?:boolean;nextRepairId?:string|null;activeLaborContinues?:boolean}){if(result.nextRepairId)return " Labor was saved, this repair moved to Waiting on Part, and the next repair started.";if(result.waitingOnPart)return " Labor was saved and this repair moved to Waiting on Part.";if(result.activeLaborContinues)return " The request was saved, but another active labor session is still running on this repair.";return " The request was saved for Parts Desk."}
 
 export default function TechnicianRepairToolsV2({repairId,canWork}:Props){
   const[note,setNote]=useState(""),[notes,setNotes]=useState<RepairNote[]>([]),[noteBusy,setNoteBusy]=useState(false),[noteMessage,setNoteMessage]=useState(""),[listening,setListening]=useState(false);
@@ -50,13 +52,13 @@ export default function TechnicianRepairToolsV2({repairId,canWork}:Props){
       const response=await fetch("/api/shop",{method:"POST",headers:{"content-type":"application/json","idempotency-key":operationKey},body:JSON.stringify({action:"usePart",repairId,partId:selectedPart.id,quantity,warehouseCode,operationKey})});
       const result=await response.json() as ActionResult;
       if(!response.ok||!result.ok)throw new Error(result.error||"Part could not be applied or requested.");
-      if(result.awaitingParts)setPartMessage(`${result.partNumber||selectedPart.partNumber}: request recorded for ${warehouseCode}. ${qty(result.shortageQuantity)} still needed.`);
+      if(result.awaitingParts){setPartMessage(`${result.partNumber||selectedPart.partNumber}: request recorded for ${warehouseCode}. ${qty(result.shortageQuantity)} still needed.${waitMessage(result)}`);if(result.waitingOnPart)refreshShop()}
       else setPartMessage(`${qty(result.usedImmediately||quantity)} × ${result.partNumber||selectedPart.partNumber} applied from ${result.warehouseCode||warehouseCode}.`);
       setSearch("");setSelectedPart(null);setWarehouseCode("");setQuantity(1);await loadParts();refreshReview(repairId);
     }catch(error){setPartMessage(error instanceof Error?error.message:"Part could not be applied or requested.")}finally{setPartBusy(false)}
   }
 
-  async function requestTypedPart(){const requestedText=search.trim();if(!requestedText){setPartMessage("Type the part number or description first.");return}if(!validQuantity())return;setPartBusy(true);setPartMessage("");try{const response=await fetch("/api/shop/unmatched-part",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({repairId,requestedText,quantity})});const result=await response.json() as UnmatchedResult;if(!response.ok||!result.ok)throw new Error(result.error||"Part request could not be sent to Parts Desk.");setPartMessage(`${qty(quantity)} × ${result.requestedText||requestedText} sent to Parts Desk${result.warehouseCode?` for ${result.warehouseCode}`:""}.`);setSearch("");setSelectedPart(null);setWarehouseCode("");setQuantity(1);refreshReview(repairId)}catch(error){setPartMessage(error instanceof Error?error.message:"Part request could not be sent to Parts Desk.")}finally{setPartBusy(false)}}
+  async function requestTypedPart(){const requestedText=search.trim();if(!requestedText){setPartMessage("Type the part number or description first.");return}if(!validQuantity())return;setPartBusy(true);setPartMessage("");try{const response=await fetch("/api/shop/unmatched-part",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({repairId,requestedText,quantity})});const result=await response.json() as UnmatchedResult;if(!response.ok||!result.ok)throw new Error(result.error||"Part request could not be sent to Parts Desk.");setPartMessage(`${qty(quantity)} × ${result.requestedText||requestedText} sent to Parts Desk${result.warehouseCode?` for ${result.warehouseCode}`:""}.${waitMessage(result)}`);if(result.waitingOnPart)refreshShop();setSearch("");setSelectedPart(null);setWarehouseCode("");setQuantity(1);refreshReview(repairId)}catch(error){setPartMessage(error instanceof Error?error.message:"Part request could not be sent to Parts Desk.")}finally{setPartBusy(false)}}
 
   const actionLabel=!warehouseCode?"CHOOSE WAREHOUSE":selectedAvailable+0.000001>=quantity?"APPLY PART":"REQUEST PART";
 
@@ -70,7 +72,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork}:Props){
     </div>
 
     <div style={toolCard}>
-      <div><strong style={heading}>PART LOOKUP</strong><span style={help}>Choose the exact warehouse. In-stock parts post through the inventory ledger; shortages create demand for Parts Desk.</span></div>
+      <div><strong style={heading}>PART LOOKUP</strong><span style={help}>Choose the exact warehouse. In-stock parts are applied immediately. If the warehouse is short, requesting the part automatically saves labor and moves the repair to Waiting on Part.</span></div>
       <div style={searchRow}><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedPart(null);setWarehouseCode("");setPartMessage("")}} placeholder="Type part number or description…" style={input} disabled={partBusy||!canWork}/><input aria-label="Part quantity" type="number" min="0.01" step="any" value={quantity} onChange={event=>setQuantity(Number(event.target.value))} style={qtyInput} disabled={partBusy||!canWork}/></div>
       {matches.length>0&&<div style={results}>{matches.map(part=><button key={part.id} type="button" onClick={()=>{setSelectedPart(part);setWarehouseCode("");setSearch(`${part.partNumber} — ${part.description}`);setPartMessage("")}} style={selectedPart?.id===part.id?selectedResult:resultButton}><span><strong>{part.partNumber}</strong> — {part.description}</span><span style={availability}>{qty(part.available??part.quantityOnHand)} total available</span></button>)}</div>}
       {selectedPart&&<>
