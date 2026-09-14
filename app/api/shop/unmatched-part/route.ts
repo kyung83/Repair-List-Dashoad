@@ -61,7 +61,9 @@ export async function POST(request: Request) {
   try {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
-    if (user.role !== 'mechanic' || !user.technicianId) throw new Error('A technician account is required.');
+    if (!['mechanic','manager','admin'].includes(user.role) || !user.technicianId) {
+      throw new Error('A working technician account is required.');
+    }
 
     const body = await request.json() as Record<string, unknown>;
     const repairId = numericRepairId(body.repairId);
