@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import { normalizeWarehouseCode } from '@/lib/parts-lifecycle';
 import { requestUnmatchedPart } from '@/lib/unmatched-parts';
 import { POST as shopPOST } from '../route';
 
@@ -11,6 +12,14 @@ type RequestContext = {
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   return match ? Number(match[1]) : 0;
+}
+
+function firstRecognizedWarehouse(...values:unknown[]) {
+  for (const value of values) {
+    const code = normalizeWarehouseCode(value);
+    if (code) return code;
+  }
+  return '';
 }
 
 async function autoWaitAfterRequest(
@@ -105,16 +114,26 @@ export async function POST(request: Request) {
     if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
     if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
 
+    const fallbackYard = firstRecognizedWarehouse(
+      repair.live_yard,
+      repair.current_yard,
+      repair.repair_location,
+      repair.user_yard,
+    );
+
     const result = await requestUnmatchedPart(env.DB, {
       repairId,
       requestedText,
       quantity,
       userId:user.id,
       technicianId:Number(user.technicianId),
-      fallbackYard:repair.live_yard || repair.current_yard || repair.repair_location || repair.user_yard,
+      fallbackYard,
     });
 
-    const detail = `${result.addedQuantity} x ${result.requestedText} requested for Parts Desk (${result.warehouseCode}).`;
+    const yardDetail = result.warehouseCode
+      ? ` (${result.warehouseCode})`
+      : ' (yard to be assigned by Parts Desk)';
+    const detail = `${result.addedQuantity} x ${result.requestedText} requested for Parts Desk${yardDetail}.`;
     await env.DB.prepare(`
       INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
       VALUES (?, ?, ?, 'unmatched_part_requested', ?)
