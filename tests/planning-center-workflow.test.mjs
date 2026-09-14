@@ -39,11 +39,11 @@ test('bulk assignment preserves DVIR PM annual and active-labor safety rules',as
   assert.match(source,/repair_job_events/);
 });
 
-test('manager view defaults to Planning Center but keeps Classic Board rollback path',async()=>{
+test('manager and admin use the unified Planning Center Repair Board with no Classic rollback view',async()=>{
   const source=await read('app/repair-board/role-aware-content.tsx');
-  assert.match(source,/useState<"planning"\|"classic">\("planning"\)/);
   assert.match(source,/role===\'manager\'\|\|role===\'admin\'/);
-  assert.match(source,/<PlanningCenter\/>/);
-  assert.match(source,/Classic Board/);
-  assert.match(source,/<RepairBoardDashboard\/>/);
+  assert.match(source,/className=\{merge\.managerBoard\}><PlanningCenter\/>/);
+  assert.doesNotMatch(source,/useState<"planning"\|"classic">/);
+  assert.doesNotMatch(source,/Classic Board/);
+  assert.doesNotMatch(source,/managerView/);
 });
