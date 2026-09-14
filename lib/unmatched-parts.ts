@@ -9,6 +9,22 @@ function cleanText(value: unknown) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 180);
 }
 
+async function optionalWarehouseCode(db:D1Database, repairId:number, fallbackYard:string) {
+  try {
+    const warehouse = await resolveRepairWarehouse(db, repairId, fallbackYard);
+    return warehouse.code;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message === 'This repair needs a recognized shop location before parts can be requested or used.' ||
+      / is not configured as an active parts warehouse\.$/.test(message)
+    ) {
+      return '';
+    }
+    throw error;
+  }
+}
+
 export type UnmatchedPartRequestView = {
   id:number;
   repairId:string;
@@ -40,21 +56,22 @@ export async function requestUnmatchedPart(
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('Completed repairs cannot request parts.');
 
-  const warehouse = await resolveRepairWarehouse(db, input.repairId, input.fallbackYard ?? '');
+  const warehouseCode = await optionalWarehouseCode(db, input.repairId, input.fallbackYard ?? '');
   const existing = await db.prepare(`
-    SELECT id, requested_quantity
+    SELECT id, requested_quantity, COALESCE(warehouse_code,'') AS warehouse_code
     FROM unmatched_part_requests
     WHERE repair_id = ? AND status = 'open' AND lower(trim(requested_text)) = lower(trim(?))
     ORDER BY id DESC LIMIT 1
-  `).bind(input.repairId, text).first<{id:number;requested_quantity:number}>();
+  `).bind(input.repairId, text).first<{id:number;requested_quantity:number;warehouse_code:string}>();
 
+  const effectiveWarehouseCode = warehouseCode || existing?.warehouse_code || '';
   let requestId = 0;
   if (existing) {
     await db.prepare(`
       UPDATE unmatched_part_requests
       SET requested_quantity = requested_quantity + ?, warehouse_code = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).bind(quantity, warehouse.code, existing.id).run();
+    `).bind(quantity, effectiveWarehouseCode, existing.id).run();
     requestId = Number(existing.id);
   } else {
     const result = await db.prepare(`
@@ -65,7 +82,7 @@ export async function requestUnmatchedPart(
       input.repairId,
       text,
       quantity,
-      warehouse.code,
+      effectiveWarehouseCode,
       input.userId ?? null,
       input.technicianId ?? null,
     ).run();
@@ -85,7 +102,7 @@ export async function requestUnmatchedPart(
     requestedText:text,
     requestedQuantity:finite(row?.requested_quantity),
     addedQuantity:quantity,
-    warehouseCode:warehouse.code,
+    warehouseCode:effectiveWarehouseCode,
   };
 }
 
