@@ -116,6 +116,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/admin/geotab-review/connection", label: "Geotab Connection", exact: true, roles: adminRoles },
       { href: "/admin/equipment-merge", label: "Duplicate Units", roles: adminRoles },
       { href: "/admin/history-import", label: "History Import", roles: adminRoles },
+      { href: "/admin/go-live-cutover", label: "Go-Live Cutover", exact: true, roles: adminRoles },
     ],
   },
 ];
@@ -151,4 +152,5 @@ export function primaryLinksForRole(role: Role | null): NavLink[] {
 export const adminMoreLinks: NavLink[] = [
   { href: "/admin/users", label: "Users & Access" },
   { href: "/admin/history-import", label: "History Import" },
+  { href: "/admin/go-live-cutover", label: "Go-Live Cutover" },
 ];
