@@ -346,6 +346,77 @@ async function handleSwitchRepair(request:Request, body:Record<string,unknown>) 
   return { ok:true, repairId:`repair-${id}`, previousRepairId:`repair-${stopped!.repairId}`, hours:stopped!.hours, laborStarted:true, switched:true };
 }
 
+async function handleShiftHandoff(request:Request, body:Record<string,unknown>) {
+  const user = await getSessionUser(env.DB, request) as SessionUser|null;
+  if (!user) throw new Error('Authentication required.');
+  const technician = await requireTechnician(user);
+  const note = String(body.handoffNote ?? body.notes ?? '').trim().slice(0,500);
+  if (!note) throw new Error('Enter what is left to do before handing this unit off.');
+
+  const timer = await activeTimer(user.id);
+  if (!timer) throw new Error('You do not have an active unit session to hand off.');
+  const current = await loadRepairUnit(Number(timer.repair_id));
+
+  const targetValue = body.targetTechnicianId;
+  const targetId = targetValue == null || String(targetValue).trim() === '' ? 0 : Number(targetValue);
+  if (!Number.isInteger(targetId) || targetId < 0) throw new Error('Choose a valid next-shift technician or leave the work unassigned.');
+  if (targetId === technician.id) throw new Error('Choose a different technician or leave the work unassigned for the next shift.');
+  const target = targetId > 0
+    ? await env.DB.prepare('SELECT id,name FROM technicians WHERE id=? AND active=1').bind(targetId).first<Technician>()
+    : null;
+  if (targetId > 0 && !target) throw new Error('The selected next-shift technician is not active.');
+
+  const affected = current.equipment_id === null
+    ? await env.DB.prepare(`
+        SELECT id FROM repairs
+        WHERE id=? AND technician_id=?
+          AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+          AND lower(COALESCE(status,'')) NOT LIKE 'deferred to next%'
+      `).bind(current.id,technician.id).all<{id:number}>()
+    : await env.DB.prepare(`
+        SELECT id FROM repairs
+        WHERE equipment_id=? AND technician_id=?
+          AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+          AND lower(COALESCE(status,'')) NOT LIKE 'deferred to next%'
+        ORDER BY id
+      `).bind(current.equipment_id,technician.id).all<{id:number}>();
+  const ids = affected.results.map((row)=>Number(row.id)).filter((id)=>Number.isInteger(id)&&id>0);
+  if (!ids.length) throw new Error('No unfinished repairs on this unit are assigned to you.');
+
+  const placeholders = ids.map(()=>'?').join(',');
+  const otherTimer = await env.DB.prepare(`
+    SELECT repair_id FROM repair_labor_timers
+    WHERE repair_id IN (${placeholders}) AND user_id<>?
+    LIMIT 1
+  `).bind(...ids,user.id).first<{repair_id:number}>();
+  if (otherTimer) throw new Error('Another user has active labor on this unit. Stop that labor before changing the shift assignment.');
+
+  const stopped = await stopLaborSession(user,technician,Number(timer.repair_id),true,`Shift handoff: ${note}`);
+  const targetName = target?.name ?? 'Next shift (unassigned)';
+  const detail = `${technician.name} handed off to ${targetName}. ${note}`.slice(0,500);
+  await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE repairs
+      SET technician_id=?, driver=?, updated_at=CURRENT_TIMESTAMP
+      WHERE id IN (${placeholders})
+    `).bind(target?.id ?? null,target?.name ?? '',...ids),
+    ...ids.map((id)=>env.DB.prepare(`
+      INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
+      VALUES (?,?,?,'shift_handoff',?)
+    `).bind(id,user.id,technician.id,detail)),
+  ]);
+
+  return {
+    ok:true,
+    repairId:`repair-${stopped!.repairId}`,
+    hours:stopped!.hours,
+    unitDone:true,
+    handoff:true,
+    handedOffCount:ids.length,
+    handoffTarget:targetName,
+  };
+}
+
 async function handleDoneUnit(request:Request, body:Record<string,unknown>) {
   const user = await getSessionUser(env.DB, request) as SessionUser|null;
   if (!user) throw new Error('Authentication required.');
@@ -451,8 +522,35 @@ export async function GET(request: Request) {
     payload.yardScope = { yard, yardAssigned: Boolean(yard) };
   }
 
-  repairs = repairs.map((repair) => ({ ...repair, yard: physicalYard(repair, yards) }));
+  const [technicians,pendingHandoffs] = await Promise.all([
+    env.DB.prepare('SELECT id,name FROM technicians WHERE active=1 ORDER BY name').all<Technician>(),
+    env.DB.prepare(`
+      SELECT e.repair_id, COALESCE(e.detail,'') AS detail, e.created_at
+      FROM repair_job_events e
+      WHERE e.action='shift_handoff'
+        AND e.id=(
+          SELECT MAX(e2.id) FROM repair_job_events e2
+          WHERE e2.repair_id=e.repair_id AND e2.action='shift_handoff'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM repair_job_events later
+          WHERE later.repair_id=e.repair_id AND later.id>e.id
+            AND later.action IN ('labor_started','completed')
+        )
+    `).all<{repair_id:number;detail:string;created_at:string}>(),
+  ]);
+  const handoffByRepair = new Map(pendingHandoffs.results.map((row)=>[Number(row.repair_id),row]));
+  repairs = repairs.map((repair) => {
+    const pending = handoffByRepair.get(numericRepairId(repair.id));
+    return {
+      ...repair,
+      yard: physicalYard(repair, yards),
+      handoffNote: pending?.detail ?? '',
+      handoffAt: pending?.created_at ?? '',
+    };
+  });
   payload.repairs = repairs;
+  payload.technicians = technicians.results.map((row)=>({id:Number(row.id),name:row.name}));
   payload.parts = await decorateShopParts(env.DB, payload.parts ?? []);
   const visibleIds = new Set(repairs.map((repair) => numericRepairId(repair.id)).filter(Boolean));
   const requests = (await getRepairPartRequests(env.DB)).filter((partRequest) => visibleIds.has(partRequest.repairNumericId));
@@ -479,6 +577,7 @@ export async function POST(request: Request) {
       const result = await handleRepairOutcome(request.clone(),body);
       return Response.json(result,{status:result.ok===false?409:200});
     }
+    if (action === 'doneUnit' && body.handoff === true) return Response.json(await handleShiftHandoff(request.clone(),body));
     if (action === 'doneUnit') return Response.json(await handleDoneUnit(request.clone(),body));
 
     if (action === 'usePart') {
