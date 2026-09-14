@@ -39,6 +39,13 @@ test('typed unmatched part requests also auto-wait instead of requiring another 
   assert.match(unmatchedRoute,/awaitingParts:true/);
 });
 
+test('working managers and admins can use the same unmatched part request flow as mechanics',()=>{
+  assert.match(unmatchedRoute,/\['mechanic','manager','admin'\]\.includes\(user\.role\)/);
+  assert.match(unmatchedRoute,/!user\.technicianId/);
+  assert.match(unmatchedRoute,/This repair is not assigned to you/);
+  assert.doesNotMatch(unmatchedRoute,/user\.role !== 'mechanic'/);
+});
+
 test('automatic waiting does not delete used inventory or existing part demand',()=>{
   assert.doesNotMatch(shopRoute,/DELETE FROM repair_parts/);
   assert.doesNotMatch(shopRoute,/DELETE FROM repair_part_requests/);
