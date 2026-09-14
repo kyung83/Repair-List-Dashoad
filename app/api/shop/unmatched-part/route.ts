@@ -73,12 +73,24 @@ export async function POST(request: Request) {
 
     const repair = await env.DB.prepare(`
       SELECT r.id, r.technician_id, COALESCE(r.status,'') AS status,
-             COALESCE(e.current_yard,'') AS current_yard, COALESCE(r.location,'') AS repair_location
+             COALESCE(s.yard,'') AS live_yard,
+             COALESCE(e.current_yard,'') AS current_yard,
+             COALESCE(r.location,'') AS repair_location,
+             COALESCE(u.yard,'') AS user_yard
       FROM repairs r
       LEFT JOIN equipment e ON e.id = r.equipment_id
+      LEFT JOIN equipment_geotab_devices d ON d.equipment_id = e.id AND d.current = 1
+      LEFT JOIN geotab_unit_state s ON s.equipment_id = e.id AND s.geotab_device_id = d.geotab_device_id
+      LEFT JOIN app_users u ON u.id = ?
       WHERE r.id = ?
-    `).bind(repairId).first<{
-      id:number;technician_id:number|null;status:string;current_yard:string;repair_location:string;
+    `).bind(user.id,repairId).first<{
+      id:number;
+      technician_id:number|null;
+      status:string;
+      live_yard:string;
+      current_yard:string;
+      repair_location:string;
+      user_yard:string;
     }>();
     if (!repair) throw new Error('Repair was not found.');
     if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
@@ -90,7 +102,7 @@ export async function POST(request: Request) {
       quantity,
       userId:user.id,
       technicianId:Number(user.technicianId),
-      fallbackYard:repair.current_yard || repair.repair_location,
+      fallbackYard:repair.live_yard || repair.current_yard || repair.repair_location || repair.user_yard,
     });
 
     const detail = `${result.addedQuantity} x ${result.requestedText} requested for Parts Desk (${result.warehouseCode}).`;
