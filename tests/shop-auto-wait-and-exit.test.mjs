@@ -46,6 +46,14 @@ test('working managers and admins can use the same unmatched part request flow a
   assert.doesNotMatch(unmatchedRoute,/user\.role !== 'mechanic'/);
 });
 
+test('unmatched part requests resolve a shop from live Geotab yard before legacy and user fallbacks',()=>{
+  assert.match(unmatchedRoute,/equipment_geotab_devices/);
+  assert.match(unmatchedRoute,/geotab_unit_state/);
+  assert.match(unmatchedRoute,/COALESCE\(s\.yard,''\) AS live_yard/);
+  assert.match(unmatchedRoute,/COALESCE\(u\.yard,''\) AS user_yard/);
+  assert.match(unmatchedRoute,/fallbackYard:repair\.live_yard \|\| repair\.current_yard \|\| repair\.repair_location \|\| repair\.user_yard/);
+});
+
 test('automatic waiting does not delete used inventory or existing part demand',()=>{
   assert.doesNotMatch(shopRoute,/DELETE FROM repair_parts/);
   assert.doesNotMatch(shopRoute,/DELETE FROM repair_part_requests/);
