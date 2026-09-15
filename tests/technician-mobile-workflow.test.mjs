@@ -12,9 +12,11 @@ test('working users get one-tap phone navigation without losing Repair Board acc
   ]);
   assert.match(layout,/TechnicianMobileDock/);
   assert.match(layout,/technician-mobile-dock\.css/);
-  assert.match(dock,/href="\/repair-board"/);
-  assert.match(dock,/href="\/shop"/);
-  assert.match(dock,/href="\/unit"/);
+  assert.match(dock,/import Link from "next\/link"/);
+  assert.match(dock,/<Link href="\/repair-board"/);
+  assert.match(dock,/<Link href="\/shop"/);
+  assert.match(dock,/<Link href="\/unit"/);
+  assert.doesNotMatch(dock,/<a href="\/repair-board"/);
   assert.match(dock,/technicianId/);
   assert.match(dock,/WORKING NOW/);
   assert.match(dock,/tech-active-work-ribbon/);
@@ -22,6 +24,14 @@ test('working users get one-tap phone navigation without losing Repair Board acc
   assert.match(css,/body\.technician-mobile-enabled \.app-sidebar\{display:none!important\}/);
   assert.match(css,/body\.technician-mobile-enabled \.app-shell-content\{margin-left:0!important/);
   assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+});
+
+test('mobile Repair Board navigation stays inside the app shell instead of reloading the desktop shell',async()=>{
+  const dock=await read('app/technician-mobile-dock.tsx');
+  assert.match(dock,/import Link from "next\/link"/);
+  assert.match(dock,/<Link href="\/repair-board"/);
+  assert.match(dock,/moreLinks\.map\(\(\[label,href\]\)=><Link/);
+  assert.match(dock,/<Link className="tech-active-work-ribbon" href="\/shop"/);
 });
 
 test('mobile More menu keeps sign out available when the desktop sidebar is hidden',async()=>{
