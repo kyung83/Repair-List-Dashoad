@@ -8,10 +8,12 @@ const shopRoute=readFileSync(new URL('../app/api/shop/route.ts',import.meta.url)
 const unmatchedRoute=readFileSync(new URL('../app/api/shop/unmatched-part/route.ts',import.meta.url),'utf8');
 const unmatchedLib=readFileSync(new URL('../lib/unmatched-parts.ts',import.meta.url),'utf8');
 
-test('mobile repair actions no longer require a separate Waiting on Part outcome button',()=>{
+test('mobile repair actions use Done Working instead of a separate Skip for Now tile',()=>{
   assert.doesNotMatch(page,/style=\{waitingButton\}/);
   assert.match(page,/<strong>REPAIRED<\/strong><span style=\{outcomeHint\}>/);
-  assert.match(page,/<strong>SKIP FOR NOW<\/strong><span style=\{outcomeHint\}>/);
+  assert.match(page,/<strong>DONE WORKING<\/strong><span style=\{outcomeHint\}>/);
+  assert.match(page,/setHandoffOpen\(open=>!open\)/);
+  assert.doesNotMatch(page,/<strong>SKIP FOR NOW<\/strong>/);
   assert.match(page,/const outcomeBase=\{[^\n]*display:"grid",gap:4/);
 });
 

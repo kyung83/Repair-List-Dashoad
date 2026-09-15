@@ -12,8 +12,8 @@ test('technician shift handoff uses the already-authorized doneUnit shop action'
   assert.match(route,/action === 'doneUnit' && body\.handoff === true/);
 });
 
-test('done working now opens the finish-or-handoff choice instead of ending labor immediately',()=>{
-  assert.match(page,/DONE WORKING ON UNIT/);
+test('done working opens the finish-or-handoff choice instead of ending labor immediately',()=>{
+  assert.match(page,/<strong>DONE WORKING<\/strong>/);
   assert.match(page,/onClick=\{\(\)=>setHandoffOpen\(open=>!open\)\}/);
   assert.match(page,/Done for now or hand off to the next shift\?/);
   assert.match(page,/DONE FOR NOW — KEEP ASSIGNED TO ME/);

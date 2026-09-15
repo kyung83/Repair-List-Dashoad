@@ -11,9 +11,11 @@ type Props={repairId:string;canWork:boolean;parts?:Part[]};
 
 export default function MaintenanceChecklistPanelV3(props:Props){
   const[checklist,setChecklist]=useState<ChecklistData|null>(null);
+  const[inspectionOpen,setInspectionOpen]=useState(false);
 
   useEffect(()=>{
     let cancelled=false;
+    setInspectionOpen(false);
     async function load(){
       try{
         const r=await fetch(`/api/maintenance-checklist?repairId=${encodeURIComponent(props.repairId)}`,{cache:'no-store'});
@@ -33,10 +35,28 @@ export default function MaintenanceChecklistPanelV3(props:Props){
     Number(checklist.pendingCount??checklist.items.filter(i=>i.result==='pending').length)>0
   );
 
+  const maintenanceLabel=checklist?.eventType==='annual'?'Annual Inspection':'PM Inspection';
+  const maintenanceProgress=checklist?`${checklist.items.filter(item=>item.result!=='pending').length}/${checklist.items.length} answered`:'';
+
   return <>
     <TechnicianRepairTools repairId={props.repairId} canWork={props.canWork}/>
-    {showTires&&<PmSheetDetails repairId={props.repairId} canWork={props.canWork} tiresOnly/>}
-    <MaintenanceChecklistPanelV2 {...props}/>
+    {checklist&&<section style={maintenanceLauncher}>
+      <button type="button" onClick={()=>setInspectionOpen(open=>!open)} style={maintenanceLauncherButton} aria-expanded={inspectionOpen}>
+        <span style={maintenanceLauncherIcon}>▣</span>
+        <span style={{minWidth:0,textAlign:'left',display:'grid',gap:3}}>
+          <strong style={{fontSize:15,color:'#17324a'}}>{maintenanceLabel}</strong>
+          <span style={{fontSize:12,color:'#617180'}}>{inspectionOpen?'Current PM / Annual layout is open below.':'Open the PM / Annual checklist exactly as it is today.'}{maintenanceProgress?` · ${maintenanceProgress}`:''}</span>
+        </span>
+        <span style={maintenanceLauncherArrow}>{inspectionOpen?'▲':'›'}</span>
+      </button>
+    </section>}
+    {inspectionOpen&&showTires&&<PmSheetDetails repairId={props.repairId} canWork={props.canWork} tiresOnly/>}
+    {inspectionOpen&&<MaintenanceChecklistPanelV2 {...props}/>} 
     <TechnicianRepairReview repairId={props.repairId} canWork={props.canWork} checklist={checklist}/>
   </>;
 }
+
+const maintenanceLauncher={marginTop:16,border:'1px solid #d7dee5',borderRadius:12,background:'#fffaf5',overflow:'hidden'} as const;
+const maintenanceLauncherButton={width:'100%',border:0,background:'transparent',padding:'14px 15px',display:'grid',gridTemplateColumns:'34px minmax(0,1fr) auto',gap:11,alignItems:'center',cursor:'pointer'} as const;
+const maintenanceLauncherIcon={width:34,height:34,borderRadius:9,display:'grid',placeItems:'center',background:'#edf4fb',color:'#17324a',fontSize:19,fontWeight:950} as const;
+const maintenanceLauncherArrow={fontSize:24,lineHeight:1,color:'#17324a',fontWeight:950} as const;
