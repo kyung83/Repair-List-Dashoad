@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 
@@ -89,15 +90,15 @@ export default function TechnicianMobileDock(){
   const unitActive=pathname==="/unit"||pathname.startsWith("/unit/");
 
   return <>
-    {timer&&!workActive&&<a className="tech-active-work-ribbon" href="/shop" aria-label={`Return to working unit ${timer.unit}`}>
+    {timer&&!workActive&&<Link className="tech-active-work-ribbon" href="/shop" aria-label={`Return to working unit ${timer.unit}`}>
       <span><strong>WORKING NOW</strong><b>Unit {timer.unit||"—"} · {timer.title}</b></span>
       <time>{elapsed(timer.startedAt,now)}</time>
-    </a>}
+    </Link>}
     {moreOpen&&<div className="tech-mobile-more" role="dialog" aria-label="More technician navigation">
       <button type="button" className="tech-mobile-more-backdrop" aria-label="Close menu" onClick={()=>setMoreOpen(false)}/>
       <div className="tech-mobile-more-sheet">
         <div className="tech-mobile-more-head"><strong>More</strong><button type="button" onClick={()=>setMoreOpen(false)}>Close</button></div>
-        {moreLinks.map(([label,href])=><a key={href} href={href}>{label}<span>›</span></a>)}
+        {moreLinks.map(([label,href])=><Link key={href} href={href}>{label}<span>›</span></Link>)}
         <div className="tech-mobile-more-user">
           <span><strong>{user?.displayName||"Signed in"}</strong><small>{manager?"Manager":"Technician"}</small></span>
           <button type="button" className="tech-mobile-more-signout" onClick={()=>void signOut()}>Sign out</button>
@@ -105,9 +106,9 @@ export default function TechnicianMobileDock(){
       </div>
     </div>}
     <nav className="tech-mobile-dock" aria-label="Technician quick navigation">
-      <a href="/repair-board" className={boardActive?"active":""}><Icon name="board"/><span>Repair Board</span></a>
-      <a href="/shop" className={workActive?"active":""}><Icon name="work"/><span>My Work</span>{timer?<i aria-label="Labor timer running"/>:null}</a>
-      <a href="/unit" className={unitActive?"active":""}><Icon name="unit"/><span>Unit</span></a>
+      <Link href="/repair-board" className={boardActive?"active":""}><Icon name="board"/><span>Repair Board</span></Link>
+      <Link href="/shop" className={workActive?"active":""}><Icon name="work"/><span>My Work</span>{timer?<i aria-label="Labor timer running"/>:null}</Link>
+      <Link href="/unit" className={unitActive?"active":""}><Icon name="unit"/><span>Unit</span></Link>
       <button type="button" className={moreOpen||(!boardActive&&!workActive&&!unitActive)?"active":""} onClick={()=>setMoreOpen(open=>!open)}><Icon name="more"/><span>More</span></button>
     </nav>
   </>;
