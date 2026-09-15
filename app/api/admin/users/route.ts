@@ -57,23 +57,56 @@ function shouldLinkTechnician(role: Clearance, worksOnRepairs: boolean) {
   return role === 'mechanic' || ((role === 'manager' || role === 'admin') && worksOnRepairs);
 }
 
+function shiftEligible(role: Clearance) {
+  return role === 'mechanic' || role === 'manager';
+}
+
+function shiftIdValue(value: unknown) {
+  const id = Number(value ?? 0);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+async function setUserShift(userId:number, role:Clearance, requestedShiftId:unknown) {
+  if (!shiftEligible(role)) {
+    await env.DB.prepare('DELETE FROM maintenance_shift_assignments WHERE user_id=?').bind(userId).run();
+    return null;
+  }
+  const shiftId = shiftIdValue(requestedShiftId);
+  if (!shiftId) {
+    await env.DB.prepare('DELETE FROM maintenance_shift_assignments WHERE user_id=?').bind(userId).run();
+    return null;
+  }
+  const shift = await env.DB.prepare('SELECT id FROM maintenance_shifts WHERE id=? AND active=1').bind(shiftId).first<{id:number}>();
+  if (!shift) throw new Error('Choose an active maintenance shift.');
+  await env.DB.prepare(`
+    INSERT INTO maintenance_shift_assignments(user_id,shift_id)
+    VALUES(?,?)
+    ON CONFLICT(user_id) DO UPDATE SET shift_id=excluded.shift_id,updated_at=CURRENT_TIMESTAMP
+  `).bind(userId,shiftId).run();
+  return shiftId;
+}
+
 export async function GET(request: Request) {
   const auth = await requireAdmin(request);
   if (auth.response) return auth.response;
   const result = await env.DB.prepare(`
-    SELECT id, username, email, display_name, role, active, technician_id,
-           COALESCE(dispatch_access,0) AS dispatch_access,
-           last_login_at, created_at, updated_at
-    FROM app_users
-    ORDER BY active DESC, display_name COLLATE NOCASE, username COLLATE NOCASE
+    SELECT u.id,u.username,u.email,u.display_name,u.role,u.active,u.technician_id,
+           COALESCE(u.dispatch_access,0) AS dispatch_access,
+           u.last_login_at,u.created_at,u.updated_at,a.shift_id,s.name AS shift_name
+    FROM app_users u
+    LEFT JOIN maintenance_shift_assignments a ON a.user_id=u.id
+    LEFT JOIN maintenance_shifts s ON s.id=a.shift_id
+    ORDER BY u.active DESC,u.display_name COLLATE NOCASE,u.username COLLATE NOCASE
   `).all<{
     id:number; username:string|null; email:string; display_name:string; role:string; active:number;
     technician_id:number|null; dispatch_access:number; last_login_at:string|null; created_at:string; updated_at:string;
+    shift_id:number|null; shift_name:string|null;
   }>();
   return Response.json({ users: result.results.map((row) => ({
     id:Number(row.id), username:row.username ?? '', displayName:row.display_name, role:row.dispatch_access ? 'dispatch' : row.role,
     active:Boolean(row.active), technicianId:row.technician_id === null ? null : Number(row.technician_id),
     worksOnRepairs:row.technician_id !== null && !row.dispatch_access,
+    shiftId:row.shift_id === null ? null : Number(row.shift_id), shiftName:row.shift_name ?? '',
     lastLoginAt:row.last_login_at, createdAt:row.created_at, updatedAt:row.updated_at,
     legacyEmail: row.email.endsWith('@local.norlow') ? '' : row.email,
   })) }, { headers: { 'cache-control': 'no-store' } });
@@ -105,7 +138,9 @@ export async function POST(request: Request) {
           password_iterations, password_algorithm, active, force_password_change
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
       `).bind(username, internalEmail, displayName, settings.storedRole, settings.dispatchAccess, technicianId, passwordData.hash, passwordData.salt, passwordData.iterations, passwordData.algorithm).run();
-      return Response.json({ ok:true, id:Number(result.meta.last_row_id), username, role:settings.clearance, technicianId, worksOnRepairs });
+      const id = Number(result.meta.last_row_id);
+      const shiftId = await setUserShift(id,settings.clearance,body.shiftId);
+      return Response.json({ ok:true, id, username, role:settings.clearance, technicianId, worksOnRepairs, shiftId });
     }
 
     const id = Number(body.id);
@@ -139,8 +174,9 @@ export async function POST(request: Request) {
         SET username = ?, display_name = ?, role = ?, dispatch_access = ?, technician_id = ?, active = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).bind(username, displayName, settings.storedRole, settings.dispatchAccess, technicianId, active ? 1 : 0, id).run();
+      const shiftId = await setUserShift(id,settings.clearance,body.shiftId);
       if (!active) await env.DB.prepare('DELETE FROM app_sessions WHERE user_id = ?').bind(id).run();
-      return Response.json({ ok:true, id, username, role:settings.clearance, technicianId, worksOnRepairs });
+      return Response.json({ ok:true, id, username, role:settings.clearance, technicianId, worksOnRepairs, shiftId });
     }
 
     if (action === 'resetPassword') {

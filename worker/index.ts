@@ -7,6 +7,7 @@ import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 import { syncGeotabGpsFeed, syncGeotabLocationMirror } from '../lib/geotab-gps-feed';
 import { recoverStaleGeotabGps } from '../lib/geotab-gps-stale-recovery';
+import { processDueMaintenanceShiftSummaries } from '../lib/maintenance-shift-summary';
 
 interface Env {
   ASSETS: Fetcher;
@@ -287,6 +288,16 @@ const worker = {
     return restrictDispatchRepairBoard(request, env, response, url);
   },
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (controller.cron === '*/5 * * * *') {
+      try {
+        const shiftSummaries = await processDueMaintenanceShiftSummaries(env.DB, controller.scheduledTime);
+        console.log(JSON.stringify({ event:'maintenance_shift_summary_schedule',shiftSummaries }));
+      } catch (error) {
+        console.error(JSON.stringify({ event:'maintenance_shift_summary_schedule_failed',error:String(error) }));
+      }
+      return;
+    }
+
     if (controller.cron === '15 6 * * *') {
       try {
         const driverDirectory = await syncBreakdownDriverDirectory(env);
