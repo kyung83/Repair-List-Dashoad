@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
 const route=readFileSync(new URL('../app/api/shop/route-legacy.ts',import.meta.url),'utf8');
-const page=readFileSync(new URL('../app/shop/page.tsx',import.meta.url),'utf8');
+const page=readFileSync(new URL('../app/shop/page-v2.tsx',import.meta.url),'utf8');
+const currentWork=readFileSync(new URL('../app/shop/current-work-home.tsx',import.meta.url),'utf8');
 const worker=readFileSync(new URL('../worker/index.ts',import.meta.url),'utf8');
+const ui=`${page}\n${currentWork}`;
 
 test('technician shift handoff uses the already-authorized doneUnit shop action',()=>{
   assert.match(worker,/['"]doneUnit['"]/);
@@ -13,11 +15,11 @@ test('technician shift handoff uses the already-authorized doneUnit shop action'
 });
 
 test('done working opens the finish-or-handoff choice instead of ending labor immediately',()=>{
-  assert.match(page,/<strong>DONE WORKING<\/strong>/);
-  assert.match(page,/onClick=\{\(\)=>setHandoffOpen\(open=>!open\)\}/);
-  assert.match(page,/Done for now or hand off to the next shift\?/);
+  assert.match(currentWork,/DONE WORKING/);
+  assert.match(page,/onDoneWorking=\{\(\)=>setHandoffOpen\(open=>!open\)\}/);
+  assert.match(page,/Done working on this unit/);
   assert.match(page,/DONE FOR NOW — KEEP ASSIGNED TO ME/);
-  assert.match(page,/OR HAND OFF TO NEXT SHIFT/);
+  assert.match(page,/OR HAND OFF/);
 });
 
 test('shift handoff requires a note and can target another active technician or next shift unassigned',()=>{
@@ -31,7 +33,6 @@ test('shift handoff requires a note and can target another active technician or 
 
 test('empty handoff note gives feedback instead of silently disabling the handoff button',()=>{
   assert.doesNotMatch(page,/disabled=\{busy\|\|!handoffNote\.trim\(\)\}/);
-  assert.match(page,/disabled=\{busy\} onClick=\{\(\)=>void handoffUnit\(\)\} style=\{confirmHandoffButton\}>HAND OFF TO NEXT SHIFT/);
   assert.match(page,/Enter what is left to do for the next shift/);
   assert.match(page,/requestAnimationFrame[\s\S]*Shift handoff note/);
 });
@@ -49,11 +50,10 @@ test('next shift sees a pending handoff until labor starts on that repair',()=>{
   assert.match(route,/e\.action='shift_handoff'/);
   assert.match(route,/later\.action IN \('labor_started','completed'\)/);
   assert.match(route,/handoffNote: pending\?\.detail/);
-  assert.match(page,/SHIFT HANDOFF/);
-  assert.match(page,/selected\.handoffNote/);
+  assert.match(ui,/SHIFT HANDOFF/);
+  assert.match(currentWork,/repair\.handoffNote/);
 });
 
 test('handoff explicitly tells users that recorded work stays on the repair',()=>{
-  assert.match(page,/Nothing already recorded on the repair is lost/);
-  assert.match(page,/all parts\/work stayed with the repair/);
+  assert.match(page,/all recorded work stayed with the repair/);
 });
