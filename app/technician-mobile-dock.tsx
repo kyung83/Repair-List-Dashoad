@@ -77,6 +77,12 @@ export default function TechnicianMobileDock(){
     ["Annual Forms","/annual-inspections"],
   ],[manager]);
 
+  async function signOut(){
+    setMoreOpen(false);
+    await fetch("/api/auth/logout",{method:"POST"}).catch(()=>undefined);
+    window.location.assign("/login");
+  }
+
   if(hidden||!enabled)return null;
   const boardActive=pathname.startsWith("/repair-board");
   const workActive=shopRoute;
@@ -92,6 +98,10 @@ export default function TechnicianMobileDock(){
       <div className="tech-mobile-more-sheet">
         <div className="tech-mobile-more-head"><strong>More</strong><button type="button" onClick={()=>setMoreOpen(false)}>Close</button></div>
         {moreLinks.map(([label,href])=><a key={href} href={href}>{label}<span>›</span></a>)}
+        <div className="tech-mobile-more-user">
+          <span><strong>{user?.displayName||"Signed in"}</strong><small>{manager?"Manager":"Technician"}</small></span>
+          <button type="button" className="tech-mobile-more-signout" onClick={()=>void signOut()}>Sign out</button>
+        </div>
       </div>
     </div>}
     <nav className="tech-mobile-dock" aria-label="Technician quick navigation">

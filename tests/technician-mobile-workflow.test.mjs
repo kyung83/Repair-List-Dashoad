@@ -24,6 +24,20 @@ test('working users get one-tap phone navigation without losing Repair Board acc
   assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
 });
 
+test('mobile More menu keeps sign out available when the desktop sidebar is hidden',async()=>{
+  const[dock,css]=await Promise.all([
+    read('app/technician-mobile-dock.tsx'),
+    read('app/technician-mobile-dock.css'),
+  ]);
+  assert.match(dock,/async function signOut/);
+  assert.match(dock,/fetch\("\/api\/auth\/logout",\{method:"POST"\}\)/);
+  assert.match(dock,/window\.location\.assign\("\/login"\)/);
+  assert.match(dock,/tech-mobile-more-signout/);
+  assert.match(dock,/>Sign out</);
+  assert.match(css,/\.tech-mobile-more-user\{/);
+  assert.match(css,/\.tech-mobile-more-signout\{/);
+});
+
 test('PM and annual inspection stays on existing workflow but gains guided phone and tablet controls',async()=>{
   const[panel,question,shopLayout,css]=await Promise.all([
     read('app/shop/maintenance-checklist-panel-v2.tsx'),

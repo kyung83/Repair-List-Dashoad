@@ -25,6 +25,11 @@
   .tech-mobile-more-head button{min-height:34px;border:1px solid #d5dde4;border-radius:8px;background:#f7f9fa;color:#53616e;font-weight:850}
   .tech-mobile-more-sheet a{min-height:50px;padding:0 12px;border-radius:10px;color:#21364a;text-decoration:none;font-size:14px;font-weight:900;display:flex;align-items:center;justify-content:space-between;background:#f8fafb}
   .tech-mobile-more-sheet a span{font-size:24px;color:#7a8791}
+  .tech-mobile-more-user{margin-top:3px;padding:10px 8px 2px;border-top:1px solid #e8edf1;display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .tech-mobile-more-user>span{min-width:0;display:grid;gap:2px;color:#20354a}
+  .tech-mobile-more-user strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tech-mobile-more-user small{font-size:10px;color:#748391;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+  .tech-mobile-more-signout{min-height:42px;padding:0 16px;border:1px solid #d54d4d;border-radius:10px;background:#fff5f5;color:#9b2222;font:900 13px inherit;cursor:pointer;touch-action:manipulation}
 }
 
 @media(max-width:420px){
