@@ -29,6 +29,13 @@ test('shift handoff requires a note and can target another active technician or 
   assert.match(route,/Choose a different technician or leave the work unassigned/);
 });
 
+test('empty handoff note gives feedback instead of silently disabling the handoff button',()=>{
+  assert.doesNotMatch(page,/disabled=\{busy\|\|!handoffNote\.trim\(\)\}/);
+  assert.match(page,/disabled=\{busy\} onClick=\{\(\)=>void handoffUnit\(\)\} style=\{confirmHandoffButton\}>HAND OFF TO NEXT SHIFT/);
+  assert.match(page,/Enter what is left to do for the next shift/);
+  assert.match(page,/requestAnimationFrame[\s\S]*Shift handoff note/);
+});
+
 test('handoff saves labor then changes only ownership of unfinished repairs on that unit',()=>{
   assert.match(route,/stopLaborSession\(user,technician,Number\(timer\.repair_id\),true,`Shift handoff:/);
   assert.match(route,/WHERE equipment_id=\? AND technician_id=\?/);
