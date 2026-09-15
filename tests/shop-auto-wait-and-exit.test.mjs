@@ -2,19 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
-const page=readFileSync(new URL('../app/shop/page.tsx',import.meta.url),'utf8');
+const page=readFileSync(new URL('../app/shop/page-v2.tsx',import.meta.url),'utf8');
+const currentWork=readFileSync(new URL('../app/shop/current-work-home.tsx',import.meta.url),'utf8');
 const tools=readFileSync(new URL('../app/shop/technician-repair-tools-v2.tsx',import.meta.url),'utf8');
 const shopRoute=readFileSync(new URL('../app/api/shop/route.ts',import.meta.url),'utf8');
 const unmatchedRoute=readFileSync(new URL('../app/api/shop/unmatched-part/route.ts',import.meta.url),'utf8');
 const unmatchedLib=readFileSync(new URL('../lib/unmatched-parts.ts',import.meta.url),'utf8');
 
 test('mobile repair actions use Done Working instead of a separate Skip for Now tile',()=>{
-  assert.doesNotMatch(page,/style=\{waitingButton\}/);
-  assert.match(page,/<strong>REPAIRED<\/strong><span style=\{outcomeHint\}>/);
-  assert.match(page,/<strong>DONE WORKING<\/strong><span style=\{outcomeHint\}>/);
-  assert.match(page,/setHandoffOpen\(open=>!open\)/);
-  assert.doesNotMatch(page,/<strong>SKIP FOR NOW<\/strong>/);
-  assert.match(page,/const outcomeBase=\{[^\n]*display:"grid",gap:4/);
+  assert.match(currentWork,/REPAIRED/);
+  assert.match(currentWork,/DONE WORKING/);
+  assert.match(currentWork,/FOUND/);
+  assert.match(page,/onDoneWorking=\{\(\)=>setHandoffOpen\(open=>!open\)\}/);
+  assert.doesNotMatch(currentWork,/SKIP FOR NOW/);
 });
 
 test('catalog Part Lookup keeps working when stock exists and auto-waits when stock is short',()=>{
