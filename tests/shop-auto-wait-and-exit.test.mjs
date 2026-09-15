@@ -12,7 +12,7 @@ const unmatchedLib=readFileSync(new URL('../lib/unmatched-parts.ts',import.meta.
 test('mobile repair actions use Done Working instead of a separate Skip for Now tile',()=>{
   assert.match(currentWork,/REPAIRED/);
   assert.match(currentWork,/DONE WORKING/);
-  assert.match(currentWork,/FOUND/);
+  assert.match(currentWork,/FoundRepairControl/);
   assert.match(page,/onDoneWorking=\{\(\)=>setHandoffOpen\(open=>!open\)\}/);
   assert.doesNotMatch(currentWork,/SKIP FOR NOW/);
 });
