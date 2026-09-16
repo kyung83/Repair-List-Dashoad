@@ -32,10 +32,51 @@ function outsideRepair(status: unknown) {
   return String(status ?? '').toLowerCase().startsWith('outside - waiting on');
 }
 
-function conciseMaintenanceIssue(repair: BoardRepair) {
-  if (repair.source === 'pm') return { ...repair, issue: 'PM' };
-  if (repair.source === 'annual') return { ...repair, issue: 'Annual' };
-  return repair;
+function maintenanceSource(source: unknown) {
+  return ['pm','annual','pm-repair','annual-repair'].includes(String(source ?? ''));
+}
+
+function parsedDueNumber(text: string, pattern: RegExp) {
+  const match = text.match(pattern);
+  if (!match) return null;
+  const value = Number(String(match[1]).replace(/,/g,''));
+  return Number.isFinite(value) ? value : null;
+}
+
+function maintenanceUrgency(repair: BoardRepair) {
+  if (!maintenanceSource(repair.source)) return 1_000_000;
+  const text = `${repair.issue} ${repair.status}`.toLowerCase();
+  const overdueScores: number[] = [];
+  const dueScores: number[] = [];
+
+  const milesOverdue = parsedDueNumber(text, /([\d,]+(?:\.\d+)?)\s*(?:miles?|mi)\s+overdue/);
+  const daysOverdue = parsedDueNumber(text, /([\d,]+(?:\.\d+)?)\s*day\(s\)\s+overdue|([\d,]+(?:\.\d+)?)\s*days?\s+overdue/);
+  const annualOverdue = parsedDueNumber(text, /overdue\s+by\s+([\d,]+(?:\.\d+)?)\s*day/);
+  const milesDue = parsedDueNumber(text, /(?:due\s+)?in\s+([\d,]+(?:\.\d+)?)\s*(?:miles?|mi)/);
+  const daysDue = parsedDueNumber(text, /(?:due\s+)?in\s+([\d,]+(?:\.\d+)?)\s*day/);
+
+  if (milesOverdue != null) overdueScores.push(-(milesOverdue / 1000));
+  if (daysOverdue != null) overdueScores.push(-(daysOverdue / 30));
+  if (annualOverdue != null) overdueScores.push(-(annualOverdue / 30));
+  if (overdueScores.length) return Math.min(...overdueScores);
+
+  if (milesDue != null) dueScores.push(milesDue / 1000);
+  if (daysDue != null) dueScores.push(daysDue / 30);
+  if (dueScores.length) return Math.min(...dueScores);
+
+  if (text.includes('overdue')) return -0.000001;
+  if (text.includes('due soon') || text.includes('due')) return 1000;
+  return 1_000_000;
+}
+
+function orderMaintenanceRows(repairs: BoardRepair[]) {
+  const sorted = repairs
+    .filter((repair) => maintenanceSource(repair.source))
+    .sort((a,b) => maintenanceUrgency(a) - maintenanceUrgency(b)
+      || String(a.equipmentId ?? '').localeCompare(String(b.equipmentId ?? ''), undefined, { numeric:true })
+      || a.issue.localeCompare(b.issue));
+  let index = 0;
+  return repairs.map((repair) => maintenanceSource(repair.source) ? sorted[index++] : repair);
 }
 
 function numericRepairId(value: unknown) {
@@ -265,17 +306,16 @@ export async function GET(request: Request) {
     summary?: Record<string, number>;
     [key:string]: unknown;
   };
-  const customRepairs = sessionUser ? await getOpenCustomMaintenanceRepairs(env.DB) : new Map<number,string>();
-  const repairs = (payload.repairs ?? [])
+  const customRepairs = sessionUser ? await getOpenCustomMaintenanceRepairs(env.DB) : new Map<number,{maintenanceSourceId:string;issue:string;dueSort:number}>();
+  const repairs = orderMaintenanceRows((payload.repairs ?? [])
     .map((repair) => {
       const repairId = numericRepairId(repair.id);
-      const maintenanceSourceId = repairId ? customRepairs.get(repairId) : undefined;
-      return maintenanceSourceId
-        ? { ...repair, source:'pm-repair', maintenanceId:maintenanceSourceId }
+      const custom = repairId ? customRepairs.get(repairId) : undefined;
+      return custom
+        ? { ...repair, source:'pm-repair', maintenanceId:custom.maintenanceSourceId, issue:custom.issue }
         : repair;
     })
-    .filter((repair) => !deferred(repair.status) && !outsideRepair(repair.status))
-    .map(conciseMaintenanceIssue);
+    .filter((repair) => !deferred(repair.status) && !outsideRepair(repair.status)));
   payload.repairs = repairs;
   if (Array.isArray(payload.oosUnits)) {
     payload.oosUnits = payload.oosUnits.map((unit) => ({
@@ -291,7 +331,7 @@ export async function GET(request: Request) {
     trucks: repairs.filter((row) => !row.outOfService && /truck|tractor|vehicle/i.test(row.equipmentType)).length,
     trailers: repairs.filter((row) => !row.outOfService && /trailer/i.test(row.equipmentType)).length,
     dvirOpen: repairs.filter((row) => row.source === 'dvir' || row.source === 'dvir-repair').length,
-    maintenanceDue: repairs.filter((row) => ['pm','annual','pm-repair','annual-repair'].includes(row.source)).length,
+    maintenanceDue: repairs.filter((row) => maintenanceSource(row.source)).length,
     unassigned: repairs.filter((row) => row.technicianId === null).length,
     activeLabor: repairs.filter((row) => row.activeTimer !== null).length,
   };
