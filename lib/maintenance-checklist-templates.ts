@@ -1,6 +1,7 @@
 import { checklistFor } from './maintenance-checklists';
 
 export type ChecklistEventType = 'pm' | 'annual';
+export type ChecklistAppliesTo = 'truck' | 'trailer';
 
 export type ChecklistTemplateItem = {
   position: number;
@@ -62,7 +63,12 @@ type VersionRow = {
   item_count: number;
 };
 
-const DEFAULT_KEY = 'default';
+type AssignmentRow = {
+  applies_to: ChecklistAppliesTo;
+  template_key: string;
+};
+
+export const DEFAULT_CHECKLIST_TEMPLATE_KEY = 'default';
 const INSERT_BATCH = 70;
 
 function builtInName(eventType: ChecklistEventType) {
@@ -140,14 +146,14 @@ async function seedItems(db: D1Database, templateId: number, items: ChecklistTem
   }
 }
 
-async function activeRow(db: D1Database, eventType: ChecklistEventType) {
+async function activeRow(db: D1Database, eventType: ChecklistEventType, templateKey: string) {
   return db.prepare(`
     SELECT id, event_type, template_key, name, version, active, created_at
     FROM maintenance_checklist_templates
     WHERE event_type = ? AND template_key = ? AND active = 1
     ORDER BY version DESC
     LIMIT 1
-  `).bind(eventType, DEFAULT_KEY).first<TemplateRow>();
+  `).bind(eventType, templateKey).first<TemplateRow>();
 }
 
 async function rowToTemplate(db: D1Database, row: TemplateRow): Promise<ChecklistTemplate> {
@@ -164,7 +170,7 @@ async function rowToTemplate(db: D1Database, row: TemplateRow): Promise<Checklis
 }
 
 export async function ensureDefaultChecklistTemplate(db: D1Database, eventType: ChecklistEventType) {
-  let row = await activeRow(db, eventType);
+  let row = await activeRow(db, eventType, DEFAULT_CHECKLIST_TEMPLATE_KEY);
   if (row) {
     const items = await loadItems(db, Number(row.id));
     if (items.length) return { ...await rowToTemplate(db, row), items };
@@ -176,27 +182,49 @@ export async function ensureDefaultChecklistTemplate(db: D1Database, eventType: 
     SELECT COALESCE(MAX(version), 0) AS version
     FROM maintenance_checklist_templates
     WHERE event_type = ? AND template_key = ?
-  `).bind(eventType, DEFAULT_KEY).first<{ version: number }>();
+  `).bind(eventType, DEFAULT_CHECKLIST_TEMPLATE_KEY).first<{ version: number }>();
   const version = Math.max(1, Number(max?.version ?? 0) + 1);
 
   await db.prepare(`
     INSERT OR IGNORE INTO maintenance_checklist_templates (
       event_type, template_key, name, version, active, created_at, updated_at
     ) VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `).bind(eventType, DEFAULT_KEY, builtInName(eventType), version).run();
+  `).bind(eventType, DEFAULT_CHECKLIST_TEMPLATE_KEY, builtInName(eventType), version).run();
 
-  row = await activeRow(db, eventType);
+  row = await activeRow(db, eventType, DEFAULT_CHECKLIST_TEMPLATE_KEY);
   if (!row) throw new Error('The checklist template could not be initialized.');
   const currentItems = await loadItems(db, Number(row.id));
   if (!currentItems.length) await seedItems(db, Number(row.id), builtInItems(eventType));
   return rowToTemplate(db, row);
 }
 
-export async function getActiveChecklistTemplate(db: D1Database, eventType: ChecklistEventType) {
-  return ensureDefaultChecklistTemplate(db, eventType);
+export async function getActiveChecklistTemplate(
+  db: D1Database,
+  eventType: ChecklistEventType,
+  templateKey = DEFAULT_CHECKLIST_TEMPLATE_KEY,
+) {
+  if (templateKey === DEFAULT_CHECKLIST_TEMPLATE_KEY) return ensureDefaultChecklistTemplate(db, eventType);
+  const row = await activeRow(db, eventType, templateKey);
+  if (!row) throw new Error('The selected checklist template is not available.');
+  return rowToTemplate(db, row);
 }
 
-export async function listChecklistTemplateVersions(db: D1Database, eventType: ChecklistEventType) {
+export async function listActiveChecklistTemplates(db: D1Database, eventType: ChecklistEventType) {
+  await ensureDefaultChecklistTemplate(db, eventType);
+  const rows = await db.prepare(`
+    SELECT id, event_type, template_key, name, version, active, created_at
+    FROM maintenance_checklist_templates
+    WHERE event_type = ? AND active = 1
+    ORDER BY CASE WHEN template_key = ? THEN 0 ELSE 1 END, name COLLATE NOCASE, template_key
+  `).bind(eventType, DEFAULT_CHECKLIST_TEMPLATE_KEY).all<TemplateRow>();
+  return Promise.all(rows.results.map((row) => rowToTemplate(db, row)));
+}
+
+export async function listChecklistTemplateVersions(
+  db: D1Database,
+  eventType: ChecklistEventType,
+  templateKey = DEFAULT_CHECKLIST_TEMPLATE_KEY,
+) {
   const rows = await db.prepare(`
     SELECT t.id, t.name, t.version, t.active, t.created_at,
            SUM(CASE WHEN i.enabled = 1 THEN 1 ELSE 0 END) AS item_count
@@ -205,7 +233,7 @@ export async function listChecklistTemplateVersions(db: D1Database, eventType: C
     WHERE t.event_type = ? AND t.template_key = ?
     GROUP BY t.id, t.name, t.version, t.active, t.created_at
     ORDER BY t.version DESC
-  `).bind(eventType, DEFAULT_KEY).all<VersionRow>();
+  `).bind(eventType, templateKey).all<VersionRow>();
   return rows.results.map((row) => ({
     id: Number(row.id),
     name: row.name,
@@ -222,26 +250,27 @@ export async function publishChecklistTemplate(
   name: string,
   items: ChecklistTemplateItem[],
   userId: number,
+  templateKey = DEFAULT_CHECKLIST_TEMPLATE_KEY,
 ) {
   const max = await db.prepare(`
     SELECT COALESCE(MAX(version), 0) AS version
     FROM maintenance_checklist_templates
     WHERE event_type = ? AND template_key = ?
-  `).bind(eventType, DEFAULT_KEY).first<{ version: number }>();
+  `).bind(eventType, templateKey).first<{ version: number }>();
   const version = Number(max?.version ?? 0) + 1;
 
   await db.prepare(`
     INSERT INTO maintenance_checklist_templates (
       event_type, template_key, name, version, active, created_by_user_id, created_at, updated_at
     ) VALUES (?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `).bind(eventType, DEFAULT_KEY, name, version, userId).run();
+  `).bind(eventType, templateKey, name, version, userId).run();
 
   const row = await db.prepare(`
     SELECT id, event_type, template_key, name, version, active, created_at
     FROM maintenance_checklist_templates
     WHERE event_type = ? AND template_key = ? AND version = ?
     LIMIT 1
-  `).bind(eventType, DEFAULT_KEY, version).first<TemplateRow>();
+  `).bind(eventType, templateKey, version).first<TemplateRow>();
   if (!row) throw new Error('The new checklist version could not be created.');
 
   await seedItems(db, Number(row.id), items);
@@ -250,7 +279,7 @@ export async function publishChecklistTemplate(
       UPDATE maintenance_checklist_templates
       SET active = 0, updated_at = CURRENT_TIMESTAMP
       WHERE event_type = ? AND template_key = ? AND active = 1
-    `).bind(eventType, DEFAULT_KEY),
+    `).bind(eventType, templateKey),
     db.prepare(`
       UPDATE maintenance_checklist_templates
       SET active = 1, updated_at = CURRENT_TIMESTAMP
@@ -258,7 +287,79 @@ export async function publishChecklistTemplate(
     `).bind(row.id),
   ]);
 
-  const active = await activeRow(db, eventType);
+  const active = await activeRow(db, eventType, templateKey);
   if (!active) throw new Error('The new checklist version could not be activated.');
   return rowToTemplate(db, active);
+}
+
+export async function createChecklistTemplate(
+  db: D1Database,
+  eventType: ChecklistEventType,
+  name: string,
+  items: ChecklistTemplateItem[],
+  userId: number,
+) {
+  const templateKey = `template-${crypto.randomUUID()}`;
+  await db.prepare(`
+    INSERT INTO maintenance_checklist_templates (
+      event_type, template_key, name, version, active, created_by_user_id, created_at, updated_at
+    ) VALUES (?, ?, ?, 1, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  `).bind(eventType, templateKey, name, userId).run();
+
+  const row = await activeRow(db, eventType, templateKey);
+  if (!row) throw new Error('The checklist template could not be created.');
+  await seedItems(db, Number(row.id), items);
+  return rowToTemplate(db, row);
+}
+
+export async function listChecklistAssignments(db: D1Database, eventType: ChecklistEventType) {
+  const rows = await db.prepare(`
+    SELECT applies_to, template_key
+    FROM maintenance_checklist_template_assignments
+    WHERE event_type = ?
+  `).bind(eventType).all<AssignmentRow>();
+  const result: Record<ChecklistAppliesTo, string> = {
+    truck: DEFAULT_CHECKLIST_TEMPLATE_KEY,
+    trailer: DEFAULT_CHECKLIST_TEMPLATE_KEY,
+  };
+  for (const row of rows.results) result[row.applies_to] = row.template_key;
+  return result;
+}
+
+export async function assignChecklistTemplate(
+  db: D1Database,
+  eventType: ChecklistEventType,
+  appliesTo: ChecklistAppliesTo,
+  templateKey: string,
+  userId: number,
+) {
+  const template = await activeRow(db, eventType, templateKey);
+  if (!template) throw new Error('Choose an active checklist template first.');
+  await db.prepare(`
+    INSERT INTO maintenance_checklist_template_assignments (
+      event_type, applies_to, template_key, updated_by_user_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(event_type, applies_to) DO UPDATE SET
+      template_key = excluded.template_key,
+      updated_by_user_id = excluded.updated_by_user_id,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(eventType, appliesTo, templateKey, userId).run();
+  return rowToTemplate(db, template);
+}
+
+export async function getAssignedChecklistTemplate(
+  db: D1Database,
+  eventType: ChecklistEventType,
+  appliesTo: ChecklistAppliesTo,
+) {
+  const assignment = await db.prepare(`
+    SELECT template_key
+    FROM maintenance_checklist_template_assignments
+    WHERE event_type = ? AND applies_to = ?
+    LIMIT 1
+  `).bind(eventType, appliesTo).first<{ template_key: string }>();
+  const templateKey = assignment?.template_key || DEFAULT_CHECKLIST_TEMPLATE_KEY;
+  const row = await activeRow(db, eventType, templateKey);
+  if (row) return rowToTemplate(db, row);
+  return ensureDefaultChecklistTemplate(db, eventType);
 }
