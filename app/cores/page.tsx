@@ -49,7 +49,7 @@ export default function CoresPage(){
   const[filter,setFilter]=useState("");
 
   async function load(){
-    const response=await fetch("/api/inventory-controls",{cache:"no-store"});
+    const response=await fetch("/api/cores",{cache:"no-store"});
     const payload=await response.json() as CoreData&{error?:string};
     if(!response.ok)throw new Error(payload.error||"Core information could not be loaded.");
     setData(payload);
@@ -61,14 +61,16 @@ export default function CoresPage(){
     if(!data||!issuedPartId)return;
     const selected=data.parts.find(part=>part.id===Number(issuedPartId));
     if(!selected)return;
-    setCorePartId(selected.core_return_part_id==null?"":String(selected.core_return_part_id));
+    // Most cores are the used version of the same catalog part. Default new rules
+    // to that part while still allowing a different core SKU when the shop uses one.
+    setCorePartId(selected.core_return_part_id==null?String(selected.id):String(selected.core_return_part_id));
     setCoreQuantity(selected.core_return_part_id==null?"1":String(selected.core_return_quantity||1));
   },[data,issuedPartId]);
 
   async function post(action:string,body:Record<string,unknown>,success:string){
     setBusy(action);setMessage("");
     try{
-      const response=await fetch("/api/inventory-controls",{
+      const response=await fetch("/api/cores",{
         method:"POST",
         headers:{"content-type":"application/json","idempotency-key":`${action}:${crypto.randomUUID()}`},
         body:JSON.stringify({action,...body}),
@@ -96,7 +98,9 @@ export default function CoresPage(){
 
   async function closeCore(core:CoreObligation,disposition:"returned"|"waived"){
     let note="Core physically returned";
-    if(disposition==="waived"){
+    if(disposition==="returned"){
+      if(!window.confirm(`Mark this core returned${core.unit?` for Unit ${core.unit}`:""}?`))return;
+    }else{
       note=(window.prompt("Reason for waiving this core obligation?")??"").trim();
       if(!note)return;
     }
@@ -110,6 +114,9 @@ export default function CoresPage(){
     if(!term)return rows;
     return rows.filter(core=>`${core.unit} ${core.issued_part_number} ${core.issued_description} ${core.core_part_number??""} ${core.core_description??""} ${core.repair_id??""}`.toLowerCase().includes(term));
   },[data,filter]);
+
+  const selectedIssuedPart=useMemo(()=>data?.parts.find(part=>part.id===Number(issuedPartId))??null,[data,issuedPartId]);
+  const otherCoreParts=useMemo(()=>data?.parts.filter(part=>part.id!==Number(issuedPartId))??[],[data,issuedPartId]);
 
   const partName=(id:number|null)=>{
     if(id==null)return "—";
@@ -126,7 +133,6 @@ export default function CoresPage(){
           <h1 style={title}>Cores</h1>
           <p style={subtitle}>Track every core that needs to come back and configure which issued parts create a core obligation.</p>
         </div>
-        <a href="/inventory-controls" style={secondaryLink}>Inventory Controls</a>
       </header>
 
       {message&&<div style={notice}>{message}</div>}
@@ -149,12 +155,12 @@ export default function CoresPage(){
               <div style={{minWidth:0}}>
                 <strong style={coreTitle}>{core.core_part_number||"Core"}{core.core_description?` — ${core.core_description}`:""}</strong>
                 <div style={coreMeta}>{core.unit?`Unit ${core.unit}`:"No unit"} · Repair {core.repair_id??"—"}</div>
-                <div style={coreDetail}>Created by issued part <strong>{core.issued_part_number}</strong>{core.issued_description?` — ${core.issued_description}`:""}</div>
+                <div style={coreDetail}>Issued part <strong>{core.issued_part_number}</strong>{core.issued_description?` — ${core.issued_description}`:""}</div>
                 <div style={coreDate}>Opened {when(core.opened_at)}</div>
               </div>
             </div>
             <div style={actions}>
-              <button type="button" disabled={!!busy} onClick={()=>void closeCore(core,"returned")} style={returnedButton}>{busy?"Saving…":"RETURNED"}</button>
+              <button type="button" disabled={!!busy} onClick={()=>void closeCore(core,"returned")} style={returnedButton}>{busy==="closeCore"?"SAVING…":"RETURN CORE"}</button>
               <button type="button" disabled={!!busy} onClick={()=>void closeCore(core,"waived")} style={waiveButton}>WAIVE</button>
             </div>
           </article>)}
@@ -166,13 +172,17 @@ export default function CoresPage(){
         <form onSubmit={saveRule} style={card}>
           <p style={sectionEyebrow}>SETUP</p>
           <h2 style={sectionTitle}>Core Return Rule</h2>
-          <p style={sectionHelp}>Choose the stocked part being issued, then choose the core that must come back.</p>
+          <p style={sectionHelp}>Choose the part being issued. The returned core can be the same part number or a different core SKU.</p>
 
           <label style={label}>ISSUED PART
             <select value={issuedPartId} onChange={event=>setIssuedPartId(event.target.value)} style={input}><option value="">Choose issued part…</option>{(data?.parts??[]).map(part=><option key={part.id} value={part.id}>{part.part_number} — {part.description}</option>)}</select>
           </label>
           <label style={label}>RETURNED CORE PART
-            <select value={corePartId} onChange={event=>setCorePartId(event.target.value)} style={input} disabled={!issuedPartId}><option value="">No core obligation</option>{(data?.parts??[]).filter(part=>part.id!==Number(issuedPartId)).map(part=><option key={part.id} value={part.id}>{part.part_number} — {part.description}</option>)}</select>
+            <select value={corePartId} onChange={event=>setCorePartId(event.target.value)} style={input} disabled={!issuedPartId}>
+              <option value="">No core obligation</option>
+              {selectedIssuedPart&&<option value={selectedIssuedPart.id}>SAME AS ISSUED — {selectedIssuedPart.part_number} — {selectedIssuedPart.description}</option>}
+              {otherCoreParts.map(part=><option key={part.id} value={part.id}>{part.part_number} — {part.description}</option>)}
+            </select>
           </label>
           <label style={label}>CORES REQUIRED PER ISSUED UNIT
             <input type="number" min="0.01" step="any" value={coreQuantity} onChange={event=>setCoreQuantity(event.target.value)} style={input} disabled={!corePartId}/>
@@ -202,7 +212,6 @@ const header={display:"flex",justifyContent:"space-between",alignItems:"flex-end
 const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".16em"} as const;
 const title={margin:"6px 0 4px",fontSize:"clamp(30px,5vw,42px)",color:"#0d1b2b"} as const;
 const subtitle={margin:0,maxWidth:760,color:"#687783",fontSize:14,lineHeight:1.45} as const;
-const secondaryLink={border:"1px solid #b9c6d1",borderRadius:9,padding:"10px 13px",background:"white",color:"#173a5d",fontWeight:900,textDecoration:"none"} as const;
 const notice={marginTop:16,padding:"11px 13px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800,color:"#5b6670"} as const;
 const summaryGrid={marginTop:18,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12} as const;
 const summaryCard={border:"1px solid #d9e1e7",borderRadius:12,background:"white",padding:15,display:"grid",gap:3} as const;
