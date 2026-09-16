@@ -47,8 +47,8 @@ function dueBits(row: DueRow) {
   }
   if (row.daysRemaining != null) {
     bits.push(row.daysRemaining <= 0
-      ? `${Math.abs(row.daysRemaining)} days overdue`
-      : `due in ${row.daysRemaining} days`);
+      ? `${Math.abs(row.daysRemaining)} day(s) overdue`
+      : `due in ${row.daysRemaining} day(s)`);
   }
   return bits;
 }
