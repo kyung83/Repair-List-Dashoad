@@ -91,6 +91,7 @@ const sidebarGroups: SidebarGroup[] = [
     links: [
       { href: "/reports", label: "Fleet Summary", exact: true, roles: officeRoles },
       { href: "/reports/search", label: "Unit Cost / Search", exact: true, roles: officeRoles },
+      { href: "/reports/parts-usage", label: "Parts Usage", exact: true, roles: officeRoles },
       { href: "/reports/history", label: "Repair History", roles: officeRoles },
     ],
   },
