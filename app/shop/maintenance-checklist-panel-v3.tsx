@@ -51,7 +51,7 @@ export default function MaintenanceChecklistPanelV3(props:Props){
     </section>}
     {inspectionOpen&&showTires&&<PmSheetDetails repairId={props.repairId} canWork={props.canWork} tiresOnly/>}
     {inspectionOpen&&<MaintenanceChecklistPanelV2 {...props}/>} 
-    <TechnicianRepairTools repairId={props.repairId} canWork={props.canWork}/>
+    <TechnicianRepairTools repairId={props.repairId} canWork={props.canWork} mode="notes"/>
     {props.children}
     <TechnicianRepairReview repairId={props.repairId} canWork={props.canWork} checklist={checklist}/>
   </>;
