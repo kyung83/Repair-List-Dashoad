@@ -1,4 +1,5 @@
 import { geotabProtectedConfig } from './geotab-protected-config';
+import { createGeotabClient } from './geotab-client';
 import { recoverAssignedOdometers } from './geotab-odometer-recovery';
 import { refreshMissingVinMetadata } from './vin-decoder';
 import type { GeotabEnv } from './geotab';
@@ -170,7 +171,7 @@ async function runBatches(db: D1Database, statements: D1PreparedStatement[], siz
 }
 
 export async function syncGeotabFleetMaster(env: GeotabEnv) {
-  const auth = await authenticate(env);
+  const client = await createGeotabClient(env);
   const assignmentResult = await env.DB.prepare(`
     SELECT a.equipment_id, a.geotab_device_id, a.mileage_offset,
            e.unit, e.equipment_type, e.current_mileage, e.mileage_updated_at,
@@ -187,7 +188,7 @@ export async function syncGeotabFleetMaster(env: GeotabEnv) {
     .map((assignment) => assignment.geotab_device_id);
 
   const [devices, odometerResult] = await Promise.all([
-    call<JsonRecord[]>(auth, 'Get', { typeName: 'Device' }),
+    client.call<JsonRecord[]>('Get', { typeName: 'Device' }),
     recoverAssignedOdometers(env, mileageDeviceIds),
   ]);
 
