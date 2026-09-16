@@ -4,6 +4,7 @@ import type {ReactNode} from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
 import RepairPhotoControl from "./repair-photo-control";
+import TechnicianRepairTools from "./technician-repair-tools-v2";
 
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
@@ -40,6 +41,7 @@ export default function CurrentWorkHome(props:Props){
   const runningTime=duration(timer.startedAt,now);
   const unitHref=`/unit?unit=${encodeURIComponent(repair.unit)}`;
   const repairMine=repair.technicianId===technicianId&&technicianId!==null;
+  const otherRepairs=unitRepairs.filter(item=>item.id!==timer.repairId);
 
   function goToFinalReview(){window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
 
@@ -67,10 +69,12 @@ export default function CurrentWorkHome(props:Props){
 
       <RepairPhotoControl repairId={repair.id} canWork />
 
-      <section style={card}>
-        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Open Repair on This Unit</strong><span style={countBadge}>{unitRepairs.length}</span></div>
-        <div style={repairList}>{unitRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={{...repairRow,...(s==="WORKING NOW"?activeRepairRow:{})}}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
-      </section>
+      {repairMine&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
+
+      {otherRepairs.length>0&&<section style={card}>
+        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{otherRepairs.length}</span></div>
+        <div style={repairList}>{otherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
+      </section>}
 
       {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
 
@@ -95,7 +99,7 @@ export default function CurrentWorkHome(props:Props){
   </main>;
 }
 
-const page={minHeight:"100vh",background:"#f4f6f8",padding:"18px clamp(10px,2vw,20px) 110px",color:"#13283d"} as const;
+const page={minHeight:"100vh",background:"#f4f6f8",padding:"18px clamp(10px,2vw,20px) 36px",color:"#13283d"} as const;
 const shell={maxWidth:860,margin:"0 auto",display:"grid",gap:12} as const;
 const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
 const unitStrip={display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",padding:"14px 16px",borderRadius:14,background:"white",border:"1px solid #dbe2e8",boxShadow:"0 5px 18px #13283d0b"} as const;
@@ -119,7 +123,6 @@ const cardTitle={fontSize:16,color:"#102a53"} as const;
 const countBadge={minWidth:24,height:24,borderRadius:999,display:"grid",placeItems:"center",background:"#edf2f6",fontSize:11,fontWeight:950} as const;
 const repairList={display:"grid",gap:8} as const;
 const repairRow={width:"100%",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:10,padding:"12px",borderRadius:10,border:"1px solid #dce3e8",background:"#fbfcfd",color:"#182331",cursor:"pointer"} as const;
-const activeRepairRow={border:"2px solid #ff6b16",background:"#fff9f4"} as const;
 const repairMeta={marginTop:4,fontSize:11,color:"#667482",fontWeight:800} as const;
 const chevron={fontSize:28,color:"#102a53"} as const;
 const handoffNotice={padding:"12px",border:"1px solid #75a6df",borderRadius:11,background:"#f2f7fd",fontSize:12,color:"#24445f",display:"grid",gap:4} as const;
