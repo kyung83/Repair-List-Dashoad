@@ -8,12 +8,6 @@ function positiveId(value: unknown, label: string) {
   return id;
 }
 
-function positiveNumber(value: unknown, label: string) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) throw new Error(`${label} must be greater than zero.`);
-  return number;
-}
-
 function operationKey(request: Request, body: Record<string,unknown>, prefix: string) {
   return String(body.operationKey ?? request.headers.get('idempotency-key') ?? `${prefix}:${crypto.randomUUID()}`).trim().slice(0,160);
 }
@@ -50,41 +44,37 @@ async function existingOperation(key: string) {
 export async function GET(request: Request) {
   try {
     await requireManager(request);
-    const [issues,cores,tires,parts,warehouses] = await Promise.all([
+    const [issues,tires,parts,warehouses] = await Promise.all([
       env.DB.prepare(`
         SELECT i.id,i.part_id,i.warehouse_id,i.expected_quantity,i.counted_quantity,i.difference_quantity,i.reason,i.stock_version,i.created_at,
                p.part_number,p.description,w.code AS warehouse_code,w.name AS warehouse_name
         FROM inventory_discrepancy_issues i
-        JOIN parts p ON p.id=i.part_id JOIN warehouses w ON w.id=i.warehouse_id
-        WHERE i.status='open' ORDER BY i.created_at,i.id
-      `).all<any>(),
-      env.DB.prepare(`
-        SELECT c.id,c.source_operation_id,c.repair_id,c.issued_part_id,c.core_part_id,c.quantity,c.status,c.opened_at,
-               issued.part_number AS issued_part_number,issued.description AS issued_description,
-               core.part_number AS core_part_number,core.description AS core_description,
-               COALESCE(e.unit,'') AS unit
-        FROM part_core_obligations c
-        JOIN parts issued ON issued.id=c.issued_part_id
-        LEFT JOIN parts core ON core.id=c.core_part_id
-        LEFT JOIN repairs r ON r.id=c.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id
-        WHERE c.status='open' ORDER BY c.opened_at,c.id
+        JOIN parts p ON p.id=i.part_id
+        JOIN warehouses w ON w.id=i.warehouse_id
+        WHERE i.status='open'
+        ORDER BY i.created_at,i.id
       `).all<any>(),
       env.DB.prepare(`
         SELECT t.id,t.source_operation_id,t.repair_id,t.part_id,t.warehouse_id,t.position_code,t.condition_note,t.status,t.recovered_at,
                t.disposition_at,t.disposition_repair_id,t.disposition_position_code,p.part_number,p.description,
                w.code AS warehouse_code,w.name AS warehouse_name,COALESCE(e.unit,'') AS source_unit
         FROM recovered_used_tires t
-        LEFT JOIN parts p ON p.id=t.part_id JOIN warehouses w ON w.id=t.warehouse_id
-        LEFT JOIN repairs r ON r.id=t.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id
-        WHERE t.status='available' ORDER BY t.recovered_at,t.id
+        LEFT JOIN parts p ON p.id=t.part_id
+        JOIN warehouses w ON w.id=t.warehouse_id
+        LEFT JOIN repairs r ON r.id=t.repair_id
+        LEFT JOIN equipment e ON e.id=r.equipment_id
+        WHERE t.status='available'
+        ORDER BY t.recovered_at,t.id
       `).all<any>(),
       env.DB.prepare(`
-        SELECT id,part_number,description,core_return_part_id,core_return_quantity
-        FROM parts WHERE active=1 ORDER BY description,part_number
+        SELECT id,part_number,description
+        FROM parts
+        WHERE active=1
+        ORDER BY description,part_number
       `).all<any>(),
       env.DB.prepare('SELECT id,code,name FROM warehouses WHERE active=1 ORDER BY name').all<any>(),
     ]);
-    return Response.json({ok:true,issues:issues.results,coreObligations:cores.results,recoveredTires:tires.results,parts:parts.results,warehouses:warehouses.results},{headers:{'cache-control':'no-store'}});
+    return Response.json({ok:true,issues:issues.results,recoveredTires:tires.results,parts:parts.results,warehouses:warehouses.results},{headers:{'cache-control':'no-store'}});
   } catch (error) {
     return Response.json({error:error instanceof Error?error.message:'Inventory controls could not be loaded.'},{status:403,headers:{'cache-control':'no-store'}});
   }
@@ -103,53 +93,6 @@ export async function POST(request: Request) {
         userId:user.id,
         note:body.note,
       }));
-    }
-
-    if (action === 'configureCore') {
-      const partId = positiveId(body.partId,'Part');
-      const corePartId = body.corePartId == null || body.corePartId === '' ? null : positiveId(body.corePartId,'Core part');
-      const quantity = corePartId == null ? 0 : positiveNumber(body.coreReturnQuantity,'Core quantity');
-      if (corePartId === partId) throw new Error('The issued part and returned-core part must be different catalog items.');
-      if (!await activePart(partId)) throw new Error('Issued part was not found or is inactive.');
-      if (corePartId && !await activePart(corePartId)) throw new Error('Returned-core part was not found or is inactive.');
-      await env.DB.prepare('UPDATE parts SET core_return_part_id=?,core_return_quantity=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND active=1')
-        .bind(corePartId,quantity,partId).run();
-      return Response.json({ok:true,partId,corePartId,coreReturnQuantity:quantity});
-    }
-
-    if (action === 'closeCore') {
-      const obligationId = positiveId(body.obligationId,'Core obligation');
-      const disposition = String(body.disposition ?? '').toLowerCase();
-      if (disposition !== 'returned' && disposition !== 'waived') throw new Error('Core disposition must be returned or waived.');
-      const key = operationKey(request,body,`core-${disposition}`);
-      const prior = await existingOperation(key);
-      if (prior) return Response.json({ok:true,idempotent:true,operationId:prior.id,obligationId,disposition});
-      const obligation = await env.DB.prepare(`
-        SELECT id,source_operation_id,repair_id,status
-        FROM part_core_obligations WHERE id=?
-      `).bind(obligationId).first<{id:number;source_operation_id:number;repair_id:number|null;status:string}>();
-      if (!obligation || obligation.status !== 'open') throw new Error('Core obligation is no longer open.');
-      await env.DB.batch([
-        env.DB.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,repair_id,user_id,note) VALUES (?,?,?,?,?)`)
-          .bind(key,`core_${disposition}`,obligation.repair_id,user.id,String(body.note ?? '').trim().slice(0,500)),
-        env.DB.prepare(`
-          UPDATE part_core_obligations
-          SET status=?,closed_at=CURRENT_TIMESTAMP,closed_by_user_id=?
-          WHERE id=? AND status='open'
-        `).bind(disposition,user.id,obligationId),
-        env.DB.prepare(`
-          INSERT INTO inventory_operation_dependencies (operation_id,depends_on_operation_id,reason)
-          SELECT id,?,'Core obligation disposition depends on the original issued part.'
-          FROM inventory_operations WHERE operation_key=?
-        `).bind(obligation.source_operation_id,key),
-        env.DB.prepare(`
-          INSERT INTO inventory_operation_commits (operation_id,applied)
-          SELECT id,CASE WHEN (SELECT status FROM part_core_obligations WHERE id=?)=? THEN 1 ELSE 0 END
-          FROM inventory_operations WHERE operation_key=?
-        `).bind(obligationId,disposition,key),
-      ]);
-      const operation = await existingOperation(key);
-      return Response.json({ok:true,idempotent:false,operationId:operation?.id,obligationId,disposition});
     }
 
     if (action === 'recoverUsedTire') {
@@ -195,7 +138,7 @@ export async function POST(request: Request) {
       const key = operationKey(request,body,`used-tire-${disposition}`);
       const prior = await existingOperation(key);
       if (prior) return Response.json({ok:true,idempotent:true,operationId:prior.id,tireId,disposition});
-      const tire = await env.DB.prepare(`SELECT id,source_operation_id,status FROM recovered_used_tires WHERE id=?`).bind(tireId).first<{id:number;source_operation_id:number;status:string}>();
+      const tire = await env.DB.prepare('SELECT id,source_operation_id,status FROM recovered_used_tires WHERE id=?').bind(tireId).first<{id:number;source_operation_id:number;status:string}>();
       if (!tire || tire.status !== 'available') throw new Error('Recovered tire is no longer available.');
       if (destinationRepairId && destinationPositionCode && !await repairPosition(destinationRepairId,destinationPositionCode)) {
         throw new Error('That tire position is not recorded on the destination repair. Save the destination tire position first.');
