@@ -10,6 +10,12 @@ import {
 
 const TARGET_BATCH_SIZE = 40;
 const MAX_SECOND_PASS = 120;
+const PRIMARY_ODOMETER_DIAGNOSTIC = 'DiagnosticOdometerId';
+const FALLBACK_ODOMETER_DIAGNOSTIC = 'DiagnosticOdometerAdjustmentId';
+const ODOMETER_DIAGNOSTICS = [
+  { id: PRIMARY_ODOMETER_DIAGNOSTIC },
+  { id: FALLBACK_ODOMETER_DIAGNOSTIC },
+];
 
 type OdometerResult = {
   milesByDevice: Map<string, number>;
@@ -32,12 +38,24 @@ function collectOdometers(rows: GeotabJsonRecord[], target: Map<string, number>)
   for (const status of rows) {
     const deviceId = geotabObjectId(geotabGet(status, 'device', 'Device')) || geotabObjectId(status);
     if (!deviceId) continue;
+
+    let primaryMiles: number | null = null;
+    let fallbackMiles: number | null = null;
+
     for (const item of geotabArray(geotabGet(status, 'statusData', 'StatusData'))) {
       const diagnosticId = geotabObjectId(geotabGet(item, 'diagnostic', 'Diagnostic'));
-      if (diagnosticId && diagnosticId !== 'DiagnosticOdometerId') continue;
+      if (diagnosticId !== PRIMARY_ODOMETER_DIAGNOSTIC && diagnosticId !== FALLBACK_ODOMETER_DIAGNOSTIC) continue;
+
       const meters = Number(geotabGet(item, 'data', 'Data'));
-      if (Number.isFinite(meters) && meters >= 0) target.set(deviceId, Math.round(meters / 1609.344));
+      if (!Number.isFinite(meters) || meters < 0) continue;
+      const miles = Math.round(meters / 1609.344);
+
+      if (diagnosticId === PRIMARY_ODOMETER_DIAGNOSTIC) primaryMiles = miles;
+      else fallbackMiles = miles;
     }
+
+    const selectedMiles = primaryMiles ?? fallbackMiles;
+    if (selectedMiles != null) target.set(deviceId, selectedMiles);
   }
 }
 
@@ -55,7 +73,7 @@ async function targetedBatch(
       typeName: 'DeviceStatusInfo',
       search: {
         deviceSearch: { id },
-        diagnostics: [{ id: 'DiagnosticOdometerId' }],
+        diagnostics: ODOMETER_DIAGNOSTICS,
       },
     },
   }));
@@ -68,7 +86,7 @@ async function targetedBatch(
 async function broadFallback(client: Awaited<ReturnType<typeof createGeotabClient>>) {
   const rows = await client.call<GeotabJsonRecord[]>('Get', {
     typeName: 'DeviceStatusInfo',
-    search: { diagnostics: [{ id: 'DiagnosticOdometerId' }] },
+    search: { diagnostics: ODOMETER_DIAGNOSTICS },
   });
   const miles = new Map<string, number>();
   collectOdometers(rows, miles);
