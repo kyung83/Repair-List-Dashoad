@@ -53,7 +53,7 @@ test('technician checklist question loads configured requirements and saves meas
 
 test('manager navigation exposes the PM and Annual checklist editor',async()=>{
   const navigation=await read('app/navigation-config.ts');
-  const page=await read('app/maintenance-checklists/page.tsx');
+  const page=await read('app/maintenance-checklists/editor-client.tsx');
   assert.match(navigation,/href:\s*"\/maintenance-checklists",\s*label:\s*"PM & Annual Checklists"/);
   assert.match(page,/Publish New Version/);
   assert.match(page,/Add Section/);
