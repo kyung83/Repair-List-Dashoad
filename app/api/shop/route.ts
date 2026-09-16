@@ -99,7 +99,7 @@ async function reconcileDoneUnitWaiting(request:Request,response:Response) {
   const wasWaiting = alreadyWaitingForParts(repair.status);
   await env.DB.prepare(`
     UPDATE repairs
-    SET status='Waiting for Parts',updated_at=CURRENT_TIMESTAMP
+    SET status='Waiting on Part',updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
   `).bind(repairId).run();
 
@@ -111,7 +111,7 @@ async function reconcileDoneUnitWaiting(request:Request,response:Response) {
         user.id,
         repair.technician_id,
         'waiting_on_parts_reconciled',
-        'Done Working found an outstanding parts request and kept this repair queued as Waiting for Parts.',
+        'Done Working found an outstanding parts request and kept this repair queued as Waiting on Parts.',
       );
     }
   }
@@ -201,7 +201,7 @@ async function autoWaitAfterPartShortage(
   await env.DB.batch([
     env.DB.prepare(`
       UPDATE repairs
-      SET status='Waiting for Parts', updated_at=CURRENT_TIMESTAMP
+      SET status='Waiting on Part', updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
     `).bind(repairId),
     env.DB.prepare(`
