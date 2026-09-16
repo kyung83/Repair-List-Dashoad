@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
-import { checklistFor } from '@/lib/maintenance-checklists';
-import { getActiveChecklistTemplate } from '@/lib/maintenance-checklist-templates';
+import { getAssignedChecklistTemplate } from '@/lib/maintenance-checklist-templates';
 
 type EventType = 'pm' | 'annual';
 type MileageSource = 'Geotab' | 'Geotab Stale' | 'Manual' | 'Verified Manual' | 'Unavailable';
@@ -12,6 +11,7 @@ type RepairRow = {
   source: string;
   status: string;
   unit: string;
+  equipment_type: string | null;
   current_mileage: number | null;
   mileage_updated_at: string | null;
   geotab_device_id: string | null;
@@ -127,7 +127,7 @@ async function requireUser(request: Request) {
 async function loadRepair(id: number) {
   const row = await env.DB.prepare(`
     SELECT r.id, r.equipment_id, r.technician_id, COALESCE(r.source,'manual') AS source,
-           COALESCE(r.status,'') AS status, COALESCE(e.unit,'') AS unit,
+           COALESCE(r.status,'') AS status, COALESCE(e.unit,'') AS unit, e.equipment_type,
            e.current_mileage, e.mileage_updated_at, e.geotab_device_id,
            s.mileage_interval
     FROM repairs r
@@ -170,7 +170,8 @@ async function ensureRun(user: AppUser, repair: RepairRow) {
 
   const kind = eventType(repair.source);
   const source = liveMileageSource(repair);
-  const template = await getActiveChecklistTemplate(env.DB, kind);
+  const appliesTo = String(repair.equipment_type ?? '').toLowerCase() === 'trailer' ? 'trailer' : 'truck';
+  const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo);
 
   // D1 batch executes these statements atomically. The unique repair_id on the run
   // plus INSERT OR IGNORE makes simultaneous opens converge on one snapshot. The
@@ -394,6 +395,8 @@ async function payloadFor(repair: RepairRow) {
   const mileageStale = Boolean(repair.geotab_device_id) && !fresh;
   const mileageEntryAllowed = !repair.geotab_device_id || mileageStale;
   if (!run) {
+    const appliesTo = String(repair.equipment_type ?? '').toLowerCase() === 'trailer' ? 'trailer' : 'truck';
+    const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo);
     return {
       repairId: `repair-${repair.id}`,
       equipmentId: repair.equipment_id,
@@ -406,7 +409,7 @@ async function payloadFor(repair: RepairRow) {
       mileageUpdatedAt: repair.mileage_updated_at,
       mileageEntryAllowed,
       mileageStale,
-      items: checklistFor(kind).map((item) => ({ ...item, id: null, result: 'pending', notes: '', photos: [], correctiveRepair: null })),
+      items: template.items.filter((item) => item.enabled).map((item) => ({ number: item.position, section: item.section, text: item.text, id: null, result: 'pending', notes: '', photos: [], correctiveRepair: null })),
     };
   }
 
