@@ -80,6 +80,7 @@ const sidebarGroups: SidebarGroup[] = [
     links: [
       { href: "/parts-desk", label: "Parts Desk", roles: managerRoles },
       { href: "/inventory", label: "Inventory", exact: true, roles: managerRoles },
+      { href: "/cores", label: "Cores", exact: true, roles: managerRoles },
     ],
   },
   {
