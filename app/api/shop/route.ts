@@ -54,6 +54,71 @@ async function repairJobEvent(repairId:number,userId:number,technicianId:number|
   `).bind(repairId,userId,technicianId,action,detail.slice(0,500)).run();
 }
 
+async function hasOpenPartNeed(repairId:number) {
+  const row = await env.DB.prepare(`
+    SELECT 1 AS found
+    WHERE EXISTS (
+      SELECT 1
+      FROM repair_part_requests
+      WHERE repair_id=?
+        AND status='open'
+        AND requested_quantity > used_quantity + 0.000001
+    ) OR EXISTS (
+      SELECT 1
+      FROM unmatched_part_requests
+      WHERE repair_id=?
+        AND status='open'
+    )
+    LIMIT 1
+  `).bind(repairId,repairId).first<{found:number}>();
+  return Boolean(row?.found);
+}
+
+function alreadyWaitingForParts(status:unknown) {
+  const normalized=String(status??'').trim().toLowerCase().replace(/\s+/g,' ');
+  return normalized.includes('waiting for part')||normalized.includes('waiting on part');
+}
+
+async function reconcileDoneUnitWaiting(request:Request,response:Response) {
+  if (!response.ok) return response;
+  const payload = await response.json() as Record<string,unknown>;
+  const repairId = numericRepairId(payload.repairId);
+  if (!repairId || payload.unitDone !== true || !(await hasOpenPartNeed(repairId))) {
+    return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
+  }
+
+  const repair = await env.DB.prepare(`
+    SELECT id,technician_id,COALESCE(status,'') AS status
+    FROM repairs
+    WHERE id=?
+  `).bind(repairId).first<{id:number;technician_id:number|null;status:string}>();
+  if (!repair || repair.status.toLowerCase().includes('complete')) {
+    return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
+  }
+
+  const wasWaiting = alreadyWaitingForParts(repair.status);
+  await env.DB.prepare(`
+    UPDATE repairs
+    SET status='Waiting for Parts',updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+  `).bind(repairId).run();
+
+  if (!wasWaiting) {
+    const user = await getSessionUser(env.DB,request);
+    if (user) {
+      await repairJobEvent(
+        repairId,
+        user.id,
+        repair.technician_id,
+        'waiting_on_parts_reconciled',
+        'Done Working found an outstanding parts request and kept this repair queued as Waiting for Parts.',
+      );
+    }
+  }
+
+  return Response.json({...payload,waitingOnPart:true},{status:response.status,headers:{'cache-control':'no-store'}});
+}
+
 async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repairId:number) {
   const user = await getSessionUser(env.DB, request);
   if (!user) throw new Error('Authentication required.');
@@ -136,7 +201,7 @@ async function autoWaitAfterPartShortage(
   await env.DB.batch([
     env.DB.prepare(`
       UPDATE repairs
-      SET status='Waiting on Part', updated_at=CURRENT_TIMESTAMP
+      SET status='Waiting for Parts', updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
     `).bind(repairId),
     env.DB.prepare(`
@@ -214,6 +279,11 @@ export async function POST(request: Request) {
     } catch (error) {
       return Response.json({error:error instanceof Error?error.message:'DVIR repair could not be completed.'},{status:409});
     }
+  }
+
+  if (action === 'doneUnit') {
+    const sessionRequest = request.clone();
+    return reconcileDoneUnitWaiting(sessionRequest,await legacyPOST(request));
   }
 
   if (action !== 'usePart') return legacyPOST(request);
