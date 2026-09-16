@@ -20,8 +20,8 @@ test('custom PM rows keep current mileage or time due wording',()=>{
   assert.match(customRepairs,/boardIssue/);
   assert.match(customRepairs,/miles overdue/);
   assert.match(customRepairs,/due in .* miles/);
-  assert.match(customRepairs,/days overdue/);
-  assert.match(customRepairs,/due in .* days/);
+  assert.match(customRepairs,/day\(s\) overdue/);
+  assert.match(customRepairs,/due in .* day\(s\)/);
 });
 
 test('Repair Board orders all maintenance slots by urgency before Planning Center splits truck and trailer panels',()=>{
