@@ -1,0 +1,36 @@
+name: Patch checklist template library route
+
+on:
+  push:
+    branches:
+      - feature/checklist-template-library
+    paths:
+      - "scripts/patch-checklist-template-library.mjs"
+      - ".github/workflows/patch-checklist-template-library.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/checklist-template-library
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Patch maintenance checklist route
+        run: node scripts/patch-checklist-template-library.mjs
+      - name: Commit route patch
+        run: |
+          if git diff --quiet -- app/api/maintenance-checklist/route.ts; then
+            echo "No route changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/api/maintenance-checklist/route.ts
+          git commit -m "Select checklist templates by equipment type"
+          git push origin HEAD:feature/checklist-template-library
