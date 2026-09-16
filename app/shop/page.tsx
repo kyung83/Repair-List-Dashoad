@@ -1,4 +1,10 @@
 "use client";
 
-// Current Work screen is implemented in page-v2 and deployed through this route.
-export { default } from "./page-v2";
+import ShopPageV2 from "./page-v2";
+
+export default function ShopPage(){
+  return <>
+    <style>{`nav[aria-label="Current repair tools"]{display:none!important;}`}</style>
+    <ShopPageV2/>
+  </>;
+}
