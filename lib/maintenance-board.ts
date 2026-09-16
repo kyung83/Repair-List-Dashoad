@@ -39,10 +39,14 @@ type MaintenanceRepair = {
   relatedGeotabDefectId: string;
   usedParts: never[];
   maintenanceKind: 'pm' | 'annual';
+  milesRemaining: number | null;
+  daysRemaining: number | null;
+  dueSort: number;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GEOTAB_MILEAGE_STALE_HOURS = 6;
+const NO_DUE_SORT = 1_000_000;
 
 function daysUntil(date: string | null, intervalDays: number | null) {
   if (!date || !intervalDays) return null;
@@ -50,6 +54,22 @@ function daysUntil(date: string | null, intervalDays: number | null) {
   if (Number.isNaN(start)) return null;
   const due = start + intervalDays * DAY_MS;
   return Math.ceil((due - Date.now()) / DAY_MS);
+}
+
+function normalizedDueSort(
+  milesRemaining: number | null,
+  mileageInterval: number | null,
+  daysRemaining: number | null,
+  timeIntervalDays: number | null,
+) {
+  const scores: number[] = [];
+  if (milesRemaining != null && mileageInterval != null && mileageInterval > 0) {
+    scores.push(milesRemaining / mileageInterval);
+  }
+  if (daysRemaining != null && timeIntervalDays != null && timeIntervalDays > 0) {
+    scores.push(daysRemaining / timeIntervalDays);
+  }
+  return scores.length ? Math.min(...scores) : NO_DUE_SORT;
 }
 
 function timestampMs(value: string | null) {
@@ -123,8 +143,10 @@ export async function getMaintenanceBoardItems(db: D1Database) {
 
   for (const row of result.results) {
     if (row.profile_name) {
-      const mileageDue = row.mileage_interval != null && row.last_mileage != null
-        ? Number(row.last_mileage) + Number(row.mileage_interval)
+      const mileageInterval = row.mileage_interval == null ? null : Number(row.mileage_interval);
+      const timeIntervalDays = row.time_interval_days == null ? null : Number(row.time_interval_days);
+      const mileageDue = mileageInterval != null && row.last_mileage != null
+        ? Number(row.last_mileage) + mileageInterval
         : null;
       const ageHours = mileageAgeHours(row.mileage_updated_at);
       const mileageStale = row.geotab_tracked === 1
@@ -133,17 +155,26 @@ export async function getMaintenanceBoardItems(db: D1Database) {
       const milesRemaining = !mileageStale && mileageDue != null && row.current_mileage != null
         ? mileageDue - Number(row.current_mileage)
         : null;
-      const timeRemaining = daysUntil(row.service_date, row.time_interval_days == null ? null : Number(row.time_interval_days));
+      const timeRemaining = daysUntil(row.service_date, timeIntervalDays);
       const overdue = (milesRemaining != null && milesRemaining <= 0) || (timeRemaining != null && timeRemaining <= 0);
       const dueSoon = (milesRemaining != null && milesRemaining <= 1000) || (timeRemaining != null && timeRemaining <= 30);
+      const dueSort = normalizedDueSort(milesRemaining, mileageInterval, timeRemaining, timeIntervalDays);
 
       if (mileageStale || overdue || dueSoon) {
         const nextType = row.pm_type || (row.profile_name.includes('40') ? '40' : 'Service');
         const dueBits: string[] = [];
-        if (mileageDue != null && !mileageStale) dueBits.push(`${mileageDue.toLocaleString()} mi`);
-        if (timeRemaining != null) dueBits.push(timeRemaining <= 0 ? `${Math.abs(timeRemaining)} day(s) overdue` : `in ${timeRemaining} day(s)`);
+        if (milesRemaining != null) {
+          dueBits.push(milesRemaining <= 0
+            ? `${Math.abs(milesRemaining).toLocaleString()} miles overdue`
+            : `due in ${milesRemaining.toLocaleString()} miles`);
+        }
+        if (timeRemaining != null) {
+          dueBits.push(timeRemaining <= 0
+            ? `${Math.abs(timeRemaining)} day(s) overdue`
+            : `due in ${timeRemaining} day(s)`);
+        }
 
-        let issue = `${nextType} PM due${dueBits.length ? ` — ${dueBits.join(' or ')}` : ''}`;
+        let issue = `${nextType} PM${dueBits.length ? ` — ${dueBits.join(' or ')}` : ' due'}`;
         let status = overdue ? 'PM Overdue' : 'PM Due Soon';
         if (mileageStale) {
           const lastMileage = row.current_mileage == null ? 'unknown' : Number(row.current_mileage).toLocaleString();
@@ -167,12 +198,16 @@ export async function getMaintenanceBoardItems(db: D1Database) {
           relatedGeotabDefectId: '',
           usedParts: [],
           maintenanceKind: 'pm',
+          milesRemaining,
+          daysRemaining: timeRemaining,
+          dueSort,
         });
       }
     }
 
     if (row.annual_active !== 0 && row.annual_interval_days != null && row.annual_date) {
-      const annualRemaining = daysUntil(row.annual_date, Number(row.annual_interval_days));
+      const annualIntervalDays = Number(row.annual_interval_days);
+      const annualRemaining = daysUntil(row.annual_date, annualIntervalDays);
       if (annualRemaining != null && annualRemaining <= 45) {
         repairs.push({
           id: `annual-${row.id}`,
@@ -188,6 +223,9 @@ export async function getMaintenanceBoardItems(db: D1Database) {
           relatedGeotabDefectId: '',
           usedParts: [],
           maintenanceKind: 'annual',
+          milesRemaining: null,
+          daysRemaining: annualRemaining,
+          dueSort: normalizedDueSort(null, null, annualRemaining, annualIntervalDays),
         });
       }
     }
