@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import ModuleTabs from "../module-tabs";
 
 type Issue = {
@@ -14,18 +14,6 @@ type Issue = {
   difference_quantity: number;
   reason: string;
   created_at: string;
-};
-
-type CoreObligation = {
-  id: number;
-  repair_id: number | null;
-  quantity: number;
-  issued_part_number: string;
-  issued_description: string;
-  core_part_number: string | null;
-  core_description: string | null;
-  unit: string;
-  opened_at: string;
 };
 
 type RecoveredTire = {
@@ -45,8 +33,6 @@ type Part = {
   id: number;
   part_number: string;
   description: string;
-  core_return_part_id: number | null;
-  core_return_quantity: number;
 };
 
 type Warehouse = { id: number; code: string; name: string };
@@ -54,7 +40,6 @@ type Warehouse = { id: number; code: string; name: string };
 type ControlsData = {
   ok: boolean;
   issues: Issue[];
-  coreObligations: CoreObligation[];
   recoveredTires: RecoveredTire[];
   parts: Part[];
   warehouses: Warehouse[];
@@ -66,9 +51,6 @@ export default function InventoryControlsPage() {
   const [data, setData] = useState<ControlsData | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
-  const [issuedPartId, setIssuedPartId] = useState("");
-  const [corePartId, setCorePartId] = useState("");
-  const [coreQuantity, setCoreQuantity] = useState("1");
   const [sourceRepairId, setSourceRepairId] = useState("");
   const [tireWarehouse, setTireWarehouse] = useState("");
   const [tirePosition, setTirePosition] = useState("");
@@ -86,14 +68,6 @@ export default function InventoryControlsPage() {
   useEffect(() => {
     void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Inventory controls could not be loaded."));
   }, []);
-
-  useEffect(() => {
-    if (!data || !issuedPartId) return;
-    const selected = data.parts.find((part) => part.id === Number(issuedPartId));
-    if (!selected) return;
-    setCorePartId(selected.core_return_part_id == null ? "" : String(selected.core_return_part_id));
-    setCoreQuantity(selected.core_return_part_id == null ? "1" : String(selected.core_return_quantity || 1));
-  }, [data, issuedPartId]);
 
   async function post(action: string, body: Record<string, unknown>, success: string) {
     setBusy(action);
@@ -115,16 +89,6 @@ export default function InventoryControlsPage() {
     } finally {
       setBusy("");
     }
-  }
-
-  async function configureCore(event: FormEvent) {
-    event.preventDefault();
-    if (!issuedPartId) return setMessage("Choose the part that creates the core obligation.");
-    await post("configureCore", {
-      partId: Number(issuedPartId),
-      corePartId: corePartId ? Number(corePartId) : null,
-      coreReturnQuantity: corePartId ? Number(coreQuantity) : 0,
-    }, corePartId ? "Core-return rule saved." : "Core-return rule removed.");
   }
 
   async function recoverTire(event: FormEvent) {
@@ -158,8 +122,6 @@ export default function InventoryControlsPage() {
     }, "Recovered tire assigned to its destination repair and wheel position.");
   }
 
-  const selectedIssuedPart = useMemo(() => data?.parts.find((part) => part.id === Number(issuedPartId)) ?? null, [data, issuedPartId]);
-
   const cardStyle = { background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 18 } as const;
   const inputStyle = { padding: "10px 11px", border: "1px solid #cfd7de", borderRadius: 8, background: "white", width: "100%", boxSizing: "border-box" as const };
   const buttonStyle = { border: 0, borderRadius: 8, padding: "9px 13px", background: "#0d1b2b", color: "white", fontWeight: 800, cursor: "pointer" } as const;
@@ -171,7 +133,7 @@ export default function InventoryControlsPage() {
       <header>
         <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 800, letterSpacing: ".16em" }}>PARTS OPERATIONS</p>
         <h1 style={{ margin: "8px 0 0", color: "#0d1b2b", fontSize: 34 }}>Inventory Controls</h1>
-        <p style={{ margin: "8px 0 0", color: "#6c7886", maxWidth: 850 }}>Manager review for physical-count discrepancies, core obligations, and recovered used tires. These controls do not silently change saleable stock.</p>
+        <p style={{ margin: "8px 0 0", color: "#6c7886", maxWidth: 850 }}>Manager review for physical-count discrepancies and recovered used tires. Core returns and core rules are now handled on the dedicated Cores page under Parts.</p>
       </header>
 
       {message && <div style={{ marginTop: 18, padding: 12, borderRadius: 9, background: "#fff8e6", border: "1px solid #f2c66d" }}>{message}</div>}
@@ -196,41 +158,6 @@ export default function InventoryControlsPage() {
             </tbody>
           </table>
         </div>
-      </section>
-
-      <section style={splitStyle}>
-        <form onSubmit={configureCore} style={cardStyle}>
-          <h2 style={{ margin: 0 }}>Core-return rules</h2>
-          <p style={{ color: "#6c7886", fontSize: 13 }}>Configure which issued stocked parts create a core obligation. The returned core is an obligation record, not normal on-hand inventory.</p>
-          <label style={{ display: "grid", gap: 6, marginTop: 12, fontSize: 12, fontWeight: 800 }}>ISSUED PART
-            <select value={issuedPartId} onChange={(event) => setIssuedPartId(event.target.value)} style={inputStyle}><option value="">Choose part…</option>{(data?.parts ?? []).map((part) => <option key={part.id} value={part.id}>{part.part_number} — {part.description}</option>)}</select>
-          </label>
-          <label style={{ display: "grid", gap: 6, marginTop: 12, fontSize: 12, fontWeight: 800 }}>RETURNED CORE PART
-            <select value={corePartId} onChange={(event) => setCorePartId(event.target.value)} style={inputStyle}><option value="">No core obligation</option>{(data?.parts ?? []).filter((part) => part.id !== Number(issuedPartId)).map((part) => <option key={part.id} value={part.id}>{part.part_number} — {part.description}</option>)}</select>
-          </label>
-          <label style={{ display: "grid", gap: 6, marginTop: 12, fontSize: 12, fontWeight: 800 }}>CORES REQUIRED PER ISSUED UNIT
-            <input type="number" min="0.01" step="any" disabled={!corePartId} value={coreQuantity} onChange={(event) => setCoreQuantity(event.target.value)} style={inputStyle} />
-          </label>
-          {selectedIssuedPart?.core_return_part_id != null && <p style={{ fontSize: 12, color: "#6c7886" }}>Current rule: {selectedIssuedPart.core_return_quantity} core(s) per issued unit.</p>}
-          <button disabled={!!busy || !issuedPartId} type="submit" style={{ ...buttonStyle, marginTop: 14 }}>{corePartId ? "Save core rule" : "Remove core rule"}</button>
-        </form>
-
-        <article style={cardStyle}>
-          <h2 style={{ margin: 0 }}>Open core obligations</h2>
-          <p style={{ color: "#6c7886", fontSize: 13 }}>These are opened automatically when a configured part is issued. Returned or waived cores become downstream dependencies, so the original issue cannot later be undone.</p>
-          <div style={{ display: "grid", gap: 10 }}>
-            {(data?.coreObligations ?? []).map((core) => <div key={core.id} style={{ border: "1px solid #e2e7eb", borderRadius: 9, padding: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div><b>{core.quantity} × {core.core_part_number || "Core"}</b><small style={{ display: "block", color: "#6c7886" }}>{core.unit ? `Unit ${core.unit} · ` : ""}Repair {core.repair_id ?? "—"} · issued {core.issued_part_number}</small></div>
-                <div style={{ display: "flex", gap: 7 }}>
-                  <button disabled={!!busy} onClick={() => void post("closeCore", { obligationId: core.id, disposition: "returned", note: "Core physically returned" }, "Core obligation marked returned.")} style={buttonStyle}>Returned</button>
-                  <button disabled={!!busy} onClick={() => { const note = window.prompt("Reason for waiving this core obligation?") ?? ""; if (note.trim()) void post("closeCore", { obligationId: core.id, disposition: "waived", note }, "Core obligation waived with manager note."); }} style={{ ...buttonStyle, background: "#6d4c1f" }}>Waive</button>
-                </div>
-              </div>
-            </div>)}
-            {!data?.coreObligations.length && <span style={{ color: "#6c7886" }}>No open core obligations.</span>}
-          </div>
-        </article>
       </section>
 
       <section style={splitStyle}>
