@@ -3,22 +3,41 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
 const navigation=readFileSync(new URL('../app/navigation-config.ts',import.meta.url),'utf8');
-const cores=readFileSync(new URL('../app/cores/page.tsx',import.meta.url),'utf8');
+const corePage=readFileSync(new URL('../app/cores/page.tsx',import.meta.url),'utf8');
+const coreApi=readFileSync(new URL('../app/api/cores/route.ts',import.meta.url),'utf8');
+const controlsPage=readFileSync(new URL('../app/inventory-controls/page.tsx',import.meta.url),'utf8');
+const controlsApi=readFileSync(new URL('../app/api/inventory-controls/route.ts',import.meta.url),'utf8');
 
-test('Cores is a first-class Parts navigation page',()=>{
-  assert.match(navigation,/href: "\/cores", label: "Cores"/);
+test('Core is the single Parts navigation destination',()=>{
+  assert.match(navigation,/href: "\/cores", label: "Core"/);
+  assert.doesNotMatch(navigation,/href: "\/inventory-controls", label: "Inventory Controls"/);
 });
 
-test('Cores page exposes the two core workflows',()=>{
-  assert.match(cores,/Open Cores/);
-  assert.match(cores,/Core Return Rule/);
-  assert.match(cores,/configureCore/);
-  assert.match(cores,/closeCore/);
-  assert.match(cores,/RETURNED/);
-  assert.match(cores,/WAIVE/);
+test('Core page owns every former Inventory Controls workflow',()=>{
+  assert.match(corePage,/Open Cores/);
+  assert.match(corePage,/Core Return Rule/);
+  assert.match(corePage,/Physical-count discrepancies/);
+  assert.match(corePage,/Recover a Used Tire/);
+  assert.match(corePage,/Recovered Tires Available/);
+  assert.match(corePage,/\/api\/cores/);
 });
 
-test('Cores page reuses inventory controls API without moving other controls',()=>{
-  assert.match(cores,/\/api\/inventory-controls/);
-  assert.match(cores,/href="\/inventory-controls"/);
+test('Returned core part supports the same catalog part',()=>{
+  assert.match(corePage,/SAME AS ISSUED/);
+  assert.match(corePage,/setCorePartId\(selected\.core_return_part_id==null\?String\(selected\.id\)/);
+  assert.doesNotMatch(coreApi,/corePartId === partId/);
+});
+
+test('Core API owns all four control action groups',()=>{
+  assert.match(coreApi,/action === 'configureCore'/);
+  assert.match(coreApi,/action === 'closeCore'/);
+  assert.match(coreApi,/action === 'resolvePhysicalCount'/);
+  assert.match(coreApi,/action === 'recoverUsedTire'/);
+  assert.match(coreApi,/action === 'disposeUsedTire'/);
+  assert.match(coreApi,/Core return did not save/);
+});
+
+test('old Inventory Controls routes only forward to Core',()=>{
+  assert.match(controlsPage,/redirect\("\/cores"\)/);
+  assert.match(controlsApi,/export \{ GET, POST \} from "\.\.\/cores\/route"/);
 });

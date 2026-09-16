@@ -80,7 +80,7 @@ const sidebarGroups: SidebarGroup[] = [
     links: [
       { href: "/parts-desk", label: "Parts Desk", roles: managerRoles },
       { href: "/inventory", label: "Inventory", exact: true, roles: managerRoles },
-      { href: "/cores", label: "Cores", exact: true, roles: managerRoles },
+      { href: "/cores", label: "Core", exact: true, roles: managerRoles },
     ],
   },
   {
@@ -105,7 +105,6 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/maintenance-checklists", label: "PM & Annual Checklists", roles: managerRoles },
       { href: "/annual-schedules", label: "Annual Schedule Setup", roles: managerRoles },
       { href: "/pm-kits", label: "PM Kits", roles: managerRoles },
-      { href: "/inventory-controls", label: "Inventory Controls", roles: managerRoles },
       { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
       { href: "/admin/yard-check-api", label: "Yard Check API", exact: true, roles: managerRoles },
       { href: "/invoices?view=settings", label: "Customers & Rates", view: "settings", roles: managerRoles },
