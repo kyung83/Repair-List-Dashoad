@@ -15,8 +15,8 @@ const review=await readFile(new URL('app/api/work-orders/review-part-correction.
 const inventory=await readFile(new URL('app/api/inventory/route.ts',root),'utf8');
 const controls=await readFile(new URL('app/api/inventory-controls/route.ts',root),'utf8');
 const controlsPage=await readFile(new URL('app/inventory-controls/page.tsx',root),'utf8');
-const coresApi=await readFile(new URL('app/api/cores/route.ts',root),'utf8');
-const coresPage=await readFile(new URL('app/cores/page.tsx',root),'utf8');
+const coreApi=await readFile(new URL('app/api/cores/route.ts',root),'utf8');
+const corePage=await readFile(new URL('app/cores/page.tsx',root),'utf8');
 const tsconfig=await readFile(new URL('tsconfig.json',root),'utf8');
 const check=(name,text,regex)=>test(name,()=>assert.match(text,regex));
 
@@ -75,24 +75,25 @@ check('48 undo deletes only still-open core obligations in the same D1 batch',st
 check('49 undo is blocked after a core is returned or waived',stockOps,/core obligation was already returned or waived/);
 check('50 recovered tire source repair-position is unique',operational,/UNIQUE INDEX[\s\S]*recovered_used_tires\(repair_id, position_code\)/);
 check('51 recovered tire reuse stores destination position',operational,/disposition_position_code/);
-check('52 inventory controls require manager or admin',controls,/Manager or administrator access is required/);
-check('53 core controls require manager or admin',coresApi,/Manager or administrator access is required/);
-check('54 core disposition creates a dependency on the issued part',coresApi,/Core obligation disposition depends on the original issued part/);
-check('55 core return verifies final disposition',coresApi,/Core return did not save/);
-check('56 same part can be its own returned core',coresPage,/SAME AS ISSUED/);
-check('57 recovered tire requires a saved source wheel position',controls,/not recorded on the source repair/);
-check('58 recovered tire reuse requires destination repair position',controls,/not recorded on the destination repair/);
-check('59 recovered tire disposition depends on recovery operation',controls,/Recovered tire disposition depends on the recovery operation/);
-check('60 manager controls UI exposes discrepancy resolution',controlsPage,/Physical-count discrepancies[\s\S]*Apply count/);
-check('61 manager controls UI keeps recovered tire separate from new stock',controlsPage,/separate from new\/saleable tire stock/);
-check('62 manager controls UI records destination repair and wheel position',controlsPage,/destinationRepairId[\s\S]*destinationPositionCode/);
-check('63 dedicated cores UI exposes core obligations',coresPage,/Open Cores[\s\S]*RETURN CORE[\s\S]*WAIVE/);
-check('64 dedicated cores API owns core configuration',coresApi,/action === 'configureCore'/);
+check('52 Core controls require manager or admin',coreApi,/Manager or administrator access is required/);
+check('53 core disposition creates a dependency on the issued part',coreApi,/Core obligation disposition depends on the original issued part/);
+check('54 core return verifies final disposition',coreApi,/Core return did not save/);
+check('55 same part can be its own returned core',corePage,/SAME AS ISSUED/);
+check('56 recovered tire requires a saved source wheel position',coreApi,/not recorded on the source repair/);
+check('57 recovered tire reuse requires destination repair position',coreApi,/not recorded on the destination repair/);
+check('58 recovered tire disposition depends on recovery operation',coreApi,/Recovered tire disposition depends on the recovery operation/);
+check('59 Core UI exposes discrepancy resolution',corePage,/Physical-count discrepancies[\s\S]*APPLY COUNT/);
+check('60 Core UI keeps recovered tire separate from new stock',corePage,/separate from new\/saleable tire stock/);
+check('61 Core UI records destination repair and wheel position',corePage,/destinationRepairId[\s\S]*destinationPositionCode/);
+check('62 Core UI exposes core obligations',corePage,/Open Cores[\s\S]*RETURN CORE[\s\S]*WAIVE/);
+check('63 Core API owns core configuration',coreApi,/action === 'configureCore'/);
+check('64 Core API owns physical count resolution',coreApi,/action === 'resolvePhysicalCount'/);
+check('65 Core API owns recovered tire controls',coreApi,/action === 'recoverUsedTire'[\s\S]*action === 'disposeUsedTire'/);
 
-test('65 inventory controls no longer duplicate core management',()=>{
-  assert.doesNotMatch(controlsPage,/Core-return rules|Open core obligations|RETURNED CORE PART/);
-  assert.doesNotMatch(controls,/action === 'configureCore'|action === 'closeCore'/);
+test('66 legacy Inventory Controls routes forward to Core',()=>{
+  assert.match(controlsPage,/redirect\("\/cores"\)/);
+  assert.match(controls,/export \{ GET, POST \} from "\.\.\/cores\/route"/);
 });
 
-test('66 migration 0094 is trigger-free for Wrangler D1 migration parsing',()=>assert.doesNotMatch(operational,/CREATE\s+TRIGGER/i));
-check('67 application imports resolve stock mutations through the v2 entrypoint',tsconfig,/"@\/lib\/inventory-operations"[\s\S]*inventory-operations-entry\.ts/);
+test('67 migration 0094 is trigger-free for Wrangler D1 migration parsing',()=>assert.doesNotMatch(operational,/CREATE\s+TRIGGER/i));
+check('68 application imports resolve stock mutations through the v2 entrypoint',tsconfig,/"@\/lib\/inventory-operations"[\s\S]*inventory-operations-entry\.ts/);
