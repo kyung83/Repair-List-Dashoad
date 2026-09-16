@@ -3,6 +3,7 @@
 import type {ReactNode} from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
+import RepairPhotoControl from "./repair-photo-control";
 
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
@@ -63,6 +64,8 @@ export default function CurrentWorkHome(props:Props){
       </section>
 
       {props.handoffPanel}
+
+      <RepairPhotoControl repairId={repair.id} canWork />
 
       <section style={card}>
         <div style={cardTitleRow}><strong style={cardTitle}>🔧 Open Repair on This Unit</strong><span style={countBadge}>{unitRepairs.length}</span></div>
