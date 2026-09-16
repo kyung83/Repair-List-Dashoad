@@ -4,13 +4,13 @@ import {readFileSync} from 'node:fs';
 
 const route=readFileSync(new URL('../app/api/shop/route.ts',import.meta.url),'utf8');
 
-test('Done Working reconciles outstanding part requests back to Waiting for Parts',()=>{
+test('Done Working reconciles outstanding part requests back to the waiting-parts queue',()=>{
   assert.match(route,/async function hasOpenPartNeed\(repairId:number\)/);
   assert.match(route,/repair_part_requests[\s\S]*requested_quantity\s*>\s*used_quantity\s*\+\s*0\.000001/);
   assert.match(route,/unmatched_part_requests[\s\S]*status='open'/);
   assert.match(route,/action === 'doneUnit'/);
   assert.match(route,/reconcileDoneUnitWaiting/);
-  assert.match(route,/status='Waiting for Parts'/);
+  assert.match(route,/status='Waiting on Part'/);
 });
 
 test('Waiting reconciliation preserves the assigned technician',()=>{
