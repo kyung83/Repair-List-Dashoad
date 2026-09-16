@@ -34,6 +34,7 @@ test('editor migrations preserve a PM that was already in progress before deploy
       '0138_maintenance_checklist_templates.sql',
       '0139_checklist_required_photo_guard.sql',
       '0140_checklist_editor_trigger_cleanup.sql',
+      '0141_maintenance_checklist_template_assignments.sql',
     ]) {
       await copyFile(join(root, 'migrations', name), join(migrations, name));
     }
@@ -163,6 +164,8 @@ SELECT CASE WHEN
   )
   AND EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'maintenance_checklist_templates')
   AND EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'maintenance_checklist_template_items')
+  AND EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'maintenance_checklist_template_assignments')
+  AND 4 = (SELECT COUNT(*) FROM maintenance_checklist_template_assignments WHERE template_key = 'default')
   AND NOT EXISTS(
     SELECT 1 FROM sqlite_master
     WHERE type = 'trigger'
@@ -190,9 +193,9 @@ test('Worker keeps existing runs on their own item snapshot through completion',
 
   const existingLookup = route.indexOf('const existing = await loadRun(repair.id);');
   const existingReturn = route.indexOf('if (existing) return existing;', existingLookup);
-  const templateLookup = route.indexOf('const template = await getActiveChecklistTemplate(env.DB, kind);');
+  const templateLookup = route.indexOf('const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo);');
   assert.ok(existingLookup >= 0 && existingReturn > existingLookup && templateLookup > existingReturn,
-    'ensureRun must return a pre-existing run before loading the current published template.');
+    'ensureRun must return a pre-existing run before loading the assigned published template.');
 
   const validationStart = route.indexOf('async function validateRunForCompletion');
   const validationEnd = route.indexOf('\nfunction photoUrl', validationStart);
