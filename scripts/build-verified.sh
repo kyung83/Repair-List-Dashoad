@@ -48,7 +48,7 @@ quarantined_test_files=(
 
 quarantine_pattern="$(
   printf '%s\0' "${quarantined_test_names[@]}" | node -e '
-    const fs = require("node:fs");
+    const fs = require("fs");
     const names = fs.readFileSync(0).toString().split("\0").filter(Boolean);
     const escaped = names.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     process.stdout.write(`^(?:${escaped.join("|")})$`);
@@ -76,6 +76,7 @@ fi
 
 echo "Running local D1 integration scenarios..."
 bash "${project_root}/scripts/test-parts-inventory-v2-d1.sh"
+bash "${project_root}/scripts/test-checklist-editor-d1.sh"
 
 echo "Running bounded vinext/Cloudflare build..."
 timeout \
@@ -115,7 +116,7 @@ console.log(`Generated Worker compatibility_date=${compatibilityDate || "<missin
 console.log(`Generated Worker compatibility_flags=${compatibilityFlags.join(",") || "<none>"}`);
 console.log(`Generated Worker main=${config.main}`);
 console.log(`Generated Worker AI binding=${config.ai?.binding || "<none>"}`);
-console.log(`Generated Worker email bindings=${emailBindings.map((entry) => String(entry?.name || "")).filter(Boolean).join(",") || "<none>"}`);
+console.log(`Generated Worker email bindings=${emailBindings.map((entry) => String(entry?.name || '')).filter(Boolean).join(",") || "<none>"}`);
 console.log(`Generated Worker crons=${crons.join(",") || "<none>"}`);
 
 if (!compatibilityDate) {
