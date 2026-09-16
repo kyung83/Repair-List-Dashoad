@@ -22,6 +22,12 @@ type OpenCustomRepair = {
   maintenance_source_id: string;
 };
 
+type OpenCustomRepairInfo = {
+  maintenanceSourceId: string;
+  issue: string;
+  dueSort: number;
+};
+
 function sourceId(row: DueRow) {
   return row.kind === 'rotation'
     ? `custom-rotation-${row.equipmentId}-${row.programStepId}`
@@ -32,7 +38,7 @@ function repairSource(row: DueRow) {
   return row.kind === 'rotation' ? 'scheduled-pm' : 'custom-maintenance';
 }
 
-function dueDescription(row: DueRow) {
+function dueBits(row: DueRow) {
   const bits: string[] = [];
   if (row.milesRemaining != null) {
     bits.push(row.milesRemaining <= 0
@@ -44,11 +50,29 @@ function dueDescription(row: DueRow) {
       ? `${Math.abs(row.daysRemaining)} days overdue`
       : `due in ${row.daysRemaining} days`);
   }
-  const schedule = bits.length ? bits.join(' or ') : row.status;
+  return bits;
+}
+
+function dueDescription(row: DueRow) {
+  const schedule = dueBits(row);
   const workflow = row.kind === 'rotation'
     ? 'Rotational PM · mechanic PM checklist required'
     : 'Independent maintenance';
-  return `${row.programName} · ${workflow} · ${schedule}`;
+  return `${row.programName} · ${workflow} · ${schedule.length ? schedule.join(' or ') : row.status}`;
+}
+
+function boardIssue(row: DueRow) {
+  const schedule = dueBits(row);
+  return `${row.itemName}${schedule.length ? ` — ${schedule.join(' or ')}` : ` — ${row.status}`}`;
+}
+
+function dueSort(row: DueRow) {
+  const scores: number[] = [];
+  // Custom programs can mix mileage and calendar triggers. Normalize against the
+  // program's default due-soon windows so the board can compare both dimensions.
+  if (row.milesRemaining != null) scores.push(row.milesRemaining / 1000);
+  if (row.daysRemaining != null) scores.push(row.daysRemaining / 30);
+  return scores.length ? Math.min(...scores) : 1_000_000;
 }
 
 export async function syncCustomMaintenanceRepairs(db: D1Database) {
@@ -104,12 +128,27 @@ export async function syncCustomMaintenanceRepairs(db: D1Database) {
 }
 
 export async function getOpenCustomMaintenanceRepairs(db: D1Database) {
-  const rows = await db.prepare(`
-    SELECT id, COALESCE(maintenance_source_id,'') AS maintenance_source_id
-    FROM repairs
-    WHERE source IN ('custom-maintenance', 'scheduled-pm')
-      AND COALESCE(maintenance_source_id,'') <> ''
-      AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
-  `).all<OpenCustomRepair>();
-  return new Map(rows.results.map((row) => [Number(row.id), row.maintenance_source_id]));
+  const [rows, preview] = await Promise.all([
+    db.prepare(`
+      SELECT id, COALESCE(maintenance_source_id,'') AS maintenance_source_id
+      FROM repairs
+      WHERE source IN ('custom-maintenance', 'scheduled-pm')
+        AND COALESCE(maintenance_source_id,'') <> ''
+        AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+    `).all<OpenCustomRepair>(),
+    getCustomMaintenanceDuePreview(db) as unknown as Promise<DueRow[]>,
+  ]);
+
+  const dueBySource = new Map(preview.map((row) => [sourceId(row), row]));
+  const result = new Map<number, OpenCustomRepairInfo>();
+  for (const repair of rows.results) {
+    const maintenanceSourceId = repair.maintenance_source_id;
+    const live = dueBySource.get(maintenanceSourceId);
+    result.set(Number(repair.id), {
+      maintenanceSourceId,
+      issue: live ? boardIssue(live) : maintenanceSourceId,
+      dueSort: live ? dueSort(live) : 1_000_000,
+    });
+  }
+  return result;
 }
