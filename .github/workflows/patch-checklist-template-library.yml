@@ -21,16 +21,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: Patch maintenance checklist route
+      - name: Apply checklist source patch
         run: node scripts/patch-checklist-template-library.mjs
-      - name: Commit route patch
+      - name: Commit source patch
         run: |
-          if git diff --quiet -- app/api/maintenance-checklist/route.ts; then
-            echo "No route changes needed."
+          if git diff --quiet -- app/api/maintenance-checklist/route.ts app/maintenance-checklists/editor-client.tsx; then
+            echo "No source changes needed."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/api/maintenance-checklist/route.ts
-          git commit -m "Select checklist templates by equipment type"
+          git add app/api/maintenance-checklist/route.ts app/maintenance-checklists/editor-client.tsx
+          git commit -m "Finish checklist template library source patch"
           git push origin HEAD:feature/checklist-template-library
