@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { checklistFor } from '@/lib/maintenance-checklists';
+import { getActiveChecklistTemplate } from '@/lib/maintenance-checklist-templates';
 
 type EventType = 'pm' | 'annual';
 type MileageSource = 'Geotab' | 'Geotab Stale' | 'Manual' | 'Verified Manual' | 'Unavailable';
@@ -29,6 +30,8 @@ type RunRow = {
   started_at: string;
   ready_at: string | null;
   completed_at: string | null;
+  template_id: number | null;
+  template_version: number | null;
 };
 type ItemRow = {
   id: number;
@@ -53,6 +56,23 @@ type MutableItemRow = {
   id: number;
   item_text: string;
   result: 'pending' | 'pass' | 'fail' | 'na';
+  allow_pass: number;
+  allow_fail: number;
+  allow_na: number;
+  require_notes: number;
+  require_photo: number;
+  require_measurement: number;
+  measurement_value: string | null;
+  has_photo: number;
+};
+type CompletionValidationRow = {
+  total: number | null;
+  pending: number | null;
+  failed: number | null;
+  invalid_result: number | null;
+  missing_notes: number | null;
+  missing_measurement: number | null;
+  missing_photo: number | null;
 };
 
 const GEOTAB_MILEAGE_STALE_HOURS = 6;
@@ -133,7 +153,7 @@ async function loadRun(id: number) {
   return env.DB.prepare(`
     SELECT id, repair_id, equipment_id, event_type, status,
            mileage_at_start, mileage_at_completion, mileage_source, mileage_updated_at,
-           started_at, ready_at, completed_at
+           started_at, ready_at, completed_at, template_id, template_version
     FROM maintenance_checklist_runs
     WHERE repair_id = ?
   `).bind(id).first<RunRow>();
@@ -142,35 +162,126 @@ async function loadRun(id: number) {
 async function ensureRun(user: AppUser, repair: RepairRow) {
   requireWorkAccess(user, repair);
   if (String(repair.status).toLowerCase().includes('complete')) throw new Error('That maintenance work order is already completed.');
+
+  // A run that already existed before this deployment is intentionally left alone.
+  // Its own item rows remain the source of truth for the rest of that inspection.
+  const existing = await loadRun(repair.id);
+  if (existing) return existing;
+
   const kind = eventType(repair.source);
   const source = liveMileageSource(repair);
-  await env.DB.prepare(`
-    INSERT OR IGNORE INTO maintenance_checklist_runs (
-      repair_id, equipment_id, event_type, mileage_at_start, mileage_source,
-      mileage_updated_at, started_by_user_id, started_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-  `).bind(
-    repair.id,
-    repair.equipment_id,
-    kind,
-    repair.current_mileage,
-    source,
-    repair.mileage_updated_at,
-    user.id,
-  ).run();
+  const template = await getActiveChecklistTemplate(env.DB, kind);
+
+  // D1 batch executes these statements atomically. The unique repair_id on the run
+  // plus INSERT OR IGNORE makes simultaneous opens converge on one snapshot. The
+  // item INSERT selects only the template id stored on that run, so a concurrent
+  // publish cannot mix two template versions into one PM/Annual inspection.
+  await env.DB.batch([
+    env.DB.prepare(`
+      INSERT OR IGNORE INTO maintenance_checklist_runs (
+        repair_id, equipment_id, event_type, mileage_at_start, mileage_source,
+        mileage_updated_at, started_by_user_id, started_at, updated_at,
+        template_id, template_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
+    `).bind(
+      repair.id,
+      repair.equipment_id,
+      kind,
+      repair.current_mileage,
+      source,
+      repair.mileage_updated_at,
+      user.id,
+      template.id,
+      template.version,
+    ),
+    env.DB.prepare(`
+      INSERT OR IGNORE INTO maintenance_checklist_items (
+        checklist_run_id, item_number, section, item_text, result,
+        allow_pass, allow_fail, allow_na,
+        require_notes, require_photo, require_measurement,
+        measurement_label, measurement_unit, updated_at
+      )
+      SELECT
+        r.id,
+        i.position,
+        i.section,
+        i.item_text,
+        'pending',
+        i.allow_pass,
+        i.allow_fail,
+        i.allow_na,
+        i.require_notes,
+        i.require_photo,
+        i.require_measurement,
+        i.measurement_label,
+        i.measurement_unit,
+        CURRENT_TIMESTAMP
+      FROM maintenance_checklist_runs r
+      JOIN maintenance_checklist_template_items i ON i.template_id = ?
+      WHERE r.repair_id = ?
+        AND r.template_id = ?
+        AND i.enabled = 1
+      ORDER BY i.position
+    `).bind(template.id, repair.id, template.id),
+  ]);
 
   const run = await loadRun(repair.id);
   if (!run) throw new Error('Checklist could not be started.');
-  const template = checklistFor(kind);
-  const statements = template.map((item) => env.DB.prepare(`
-    INSERT OR IGNORE INTO maintenance_checklist_items (
-      checklist_run_id, item_number, section, item_text, result, updated_at
-    ) VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
-  `).bind(run.id, item.number, item.section, item.text));
-  for (let index = 0; index < statements.length; index += 75) {
-    await env.DB.batch(statements.slice(index, index + 75));
-  }
   return run;
+}
+
+function validateItemAnswer(item: MutableItemRow, result: string, notes: string) {
+  if (result === 'pending') return;
+  if (result === 'pass' && !Boolean(item.allow_pass)) throw new Error('Pass is not allowed for this checklist item.');
+  if (result === 'fail' && !Boolean(item.allow_fail)) throw new Error('Fail is not allowed for this checklist item.');
+  if (result === 'na' && !Boolean(item.allow_na)) throw new Error('N/A is not allowed for this checklist item.');
+  if (result === 'fail' && !notes) throw new Error('Add a note explaining a failed inspection item.');
+  if (Boolean(item.require_notes) && !notes) throw new Error('A note is required for this checklist item.');
+  if (Boolean(item.require_measurement) && !String(item.measurement_value ?? '').trim()) {
+    throw new Error('A measurement is required for this checklist item.');
+  }
+  if (Boolean(item.require_photo) && !Boolean(item.has_photo)) {
+    throw new Error('A photo is required for this checklist item.');
+  }
+}
+
+async function validateRunForCompletion(runId: number) {
+  const validation = await env.DB.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN i.result = 'pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN i.result = 'fail' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE
+        WHEN (i.result = 'pass' AND i.allow_pass = 0)
+          OR (i.result = 'fail' AND i.allow_fail = 0)
+          OR (i.result = 'na' AND i.allow_na = 0)
+        THEN 1 ELSE 0 END) AS invalid_result,
+      SUM(CASE
+        WHEN i.result <> 'pending' AND i.require_notes = 1
+          AND COALESCE(TRIM(i.notes), '') = ''
+        THEN 1 ELSE 0 END) AS missing_notes,
+      SUM(CASE
+        WHEN i.result <> 'pending' AND i.require_measurement = 1
+          AND COALESCE(TRIM(i.measurement_value), '') = ''
+        THEN 1 ELSE 0 END) AS missing_measurement,
+      SUM(CASE
+        WHEN i.result <> 'pending' AND i.require_photo = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM maintenance_checklist_photos p
+            WHERE p.checklist_item_id = i.id
+          )
+        THEN 1 ELSE 0 END) AS missing_photo
+    FROM maintenance_checklist_items i
+    WHERE i.checklist_run_id = ?
+  `).bind(runId).first<CompletionValidationRow>();
+
+  if (Number(validation?.total ?? 0) <= 0) throw new Error('This checklist has no inspection items.');
+  if (Number(validation?.pending ?? 0) > 0) throw new Error('Finish every checklist item before completing this maintenance job.');
+  if (Number(validation?.failed ?? 0) > 0) throw new Error('Failed checklist items must be corrected and changed to Pass before this maintenance job can be completed.');
+  if (Number(validation?.invalid_result ?? 0) > 0) throw new Error('One or more checklist answers are not allowed by this inspection version.');
+  if (Number(validation?.missing_notes ?? 0) > 0) throw new Error('Add the required notes before completing this maintenance job.');
+  if (Number(validation?.missing_measurement ?? 0) > 0) throw new Error('Enter the required measurements before completing this maintenance job.');
+  if (Number(validation?.missing_photo ?? 0) > 0) throw new Error('Add the required photos before completing this maintenance job.');
 }
 
 function photoUrl(key: string) {
@@ -410,14 +521,21 @@ export async function POST(request: Request) {
       if (!Number.isInteger(itemNumber) || itemNumber <= 0) throw new Error('Checklist item was not found.');
       if (!['pending','pass','fail','na'].includes(result)) throw new Error('Choose Pass, Fail, or N/A.');
       const notes = String(body.notes ?? '').trim().slice(0, 1000);
-      if (result === 'fail' && !notes) throw new Error('Add a note explaining a failed inspection item.');
 
       const item = await env.DB.prepare(`
-        SELECT id, item_text, result
-        FROM maintenance_checklist_items
-        WHERE checklist_run_id = ? AND item_number = ?
+        SELECT i.id, i.item_text, i.result,
+               i.allow_pass, i.allow_fail, i.allow_na,
+               i.require_notes, i.require_photo, i.require_measurement,
+               i.measurement_value,
+               EXISTS(
+                 SELECT 1 FROM maintenance_checklist_photos p
+                 WHERE p.checklist_item_id = i.id
+               ) AS has_photo
+        FROM maintenance_checklist_items i
+        WHERE i.checklist_run_id = ? AND i.item_number = ?
       `).bind(run.id, itemNumber).first<MutableItemRow>();
       if (!item) throw new Error('Checklist item was not found.');
+      validateItemAnswer(item, result, notes);
 
       const changed = await env.DB.prepare(`
         UPDATE maintenance_checklist_items
@@ -470,27 +588,61 @@ export async function POST(request: Request) {
       if (run.status === 'completed') throw new Error('Completed checklists cannot be changed.');
       const photoId = Number(body.photoId ?? 0);
       const photo = await env.DB.prepare(`
-        SELECT id, object_key FROM maintenance_checklist_photos
+        SELECT id, checklist_item_id, object_key
+        FROM maintenance_checklist_photos
         WHERE id = ? AND checklist_run_id = ?
-      `).bind(photoId, run.id).first<{ id: number; object_key: string }>();
+      `).bind(photoId, run.id).first<{ id: number; checklist_item_id: number; object_key: string }>();
       if (!photo) throw new Error('Checklist photo was not found.');
-      await env.FILES.delete(photo.object_key);
-      await env.DB.prepare('DELETE FROM maintenance_checklist_photos WHERE id = ? AND checklist_run_id = ?').bind(photoId, run.id).run();
+
+      // Delete the D1 row first and enforce the last-required-photo rule inside the
+      // same DELETE statement. Concurrent deletes cannot both pass this condition.
+      const removed = await env.DB.prepare(`
+        DELETE FROM maintenance_checklist_photos
+        WHERE id = ?
+          AND checklist_run_id = ?
+          AND (
+            NOT EXISTS (
+              SELECT 1
+              FROM maintenance_checklist_items i
+              WHERE i.id = maintenance_checklist_photos.checklist_item_id
+                AND i.require_photo = 1
+                AND i.result <> 'pending'
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM maintenance_checklist_photos other
+              WHERE other.checklist_item_id = maintenance_checklist_photos.checklist_item_id
+                AND other.id <> maintenance_checklist_photos.id
+            )
+          )
+      `).bind(photoId, run.id).run();
+      if (!Number(removed.meta.changes ?? 0)) {
+        throw new Error('This photo is required for the answered checklist item. Change the answer first or add another photo before removing it.');
+      }
+
+      // An R2 failure after the row is gone can leave only an unreferenced object,
+      // which is safer than a database row pointing at a missing image.
+      try {
+        await env.FILES.delete(photo.object_key);
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'maintenance_checklist_orphaned_r2_photo',
+          photoId: photo.id,
+          checklistItemId: photo.checklist_item_id,
+          objectKey: photo.object_key,
+          error: String(error),
+        }));
+      }
       return Response.json({ ok: true, ...(await payloadFor(repair)) });
     }
 
     if (action === 'markReady') {
       const run = await ensureRun(user, repair);
       if (run.status === 'completed') throw new Error('This checklist is already completed.');
-      const counts = await env.DB.prepare(`
-        SELECT
-          SUM(CASE WHEN result = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN result = 'fail' THEN 1 ELSE 0 END) AS failed
-        FROM maintenance_checklist_items
-        WHERE checklist_run_id = ?
-      `).bind(run.id).first<{ pending: number | null; failed: number | null }>();
-      if (Number(counts?.pending ?? 0) > 0) throw new Error('Finish every checklist item before completing this maintenance job.');
-      if (Number(counts?.failed ?? 0) > 0) throw new Error('Failed checklist items must be corrected and changed to Pass before this maintenance job can be completed.');
+
+      // Validate the run's own item snapshot, never the currently published template.
+      // That keeps an in-progress PM/Annual stable when a manager publishes a new version.
+      await validateRunForCompletion(run.id);
 
       const suppliedText = body.mileage == null ? '' : String(body.mileage).trim();
       let suppliedMileage: number | null = null;
