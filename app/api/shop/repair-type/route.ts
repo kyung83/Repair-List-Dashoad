@@ -49,8 +49,17 @@ async function payload(repair:RepairRow) {
   const maintenanceEventType = repair.maintenance_event_type === 'pm' || repair.maintenance_event_type === 'annual'
     ? repair.maintenance_event_type
     : null;
+  const checklistRun = await env.DB.prepare(`SELECT id FROM repair_type_checklist_runs WHERE repair_id=? LIMIT 1`)
+    .bind(repair.id).first<{id:number}>();
   const all = await listRepairTypes(env.DB,true);
   const types = all.filter(type => type.name.toUpperCase() !== 'INDIRECT LABOR-OTHER');
+  const lockReason = checklistRun
+    ? 'checklist_started'
+    : maintenanceEventType
+      ? 'maintenance'
+      : repair.equipment_id === null
+        ? 'no_unit'
+        : null;
   return {
     repairId:`repair-${repair.id}`,
     current,
@@ -58,7 +67,8 @@ async function payload(repair:RepairRow) {
     maintenanceEventType,
     maintenanceLabel:maintenanceEventType === 'annual' ? 'ANNUAL' : maintenanceEventType === 'pm' ? 'PM' : '',
     noUnit:repair.equipment_id === null,
-    locked:Boolean(maintenanceEventType || repair.equipment_id === null),
+    locked:Boolean(lockReason),
+    lockReason,
   };
 }
 
