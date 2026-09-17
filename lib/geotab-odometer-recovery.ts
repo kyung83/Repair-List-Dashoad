@@ -24,6 +24,7 @@ type OdometerResult = {
   firstPassReceived: number;
   retried: number;
   targetedRecovered: number;
+  calculatedFallbackRecovered: number;
   broadFallbackRecovered: number;
   stillMissing: number;
 };
@@ -59,11 +60,34 @@ function collectOdometers(rows: GeotabJsonRecord[], target: Map<string, number>)
   }
 }
 
+function calculatedAdjustmentMiles(rows: GeotabJsonRecord[]) {
+  let selected: { miles: number; timestamp: number; index: number } | null = null;
+
+  rows.forEach((item, index) => {
+    const diagnosticId = geotabObjectId(geotabGet(item, 'diagnostic', 'Diagnostic'));
+    if (diagnosticId && diagnosticId !== FALLBACK_ODOMETER_DIAGNOSTIC) return;
+
+    const meters = Number(geotabGet(item, 'data', 'Data'));
+    if (!Number.isFinite(meters) || meters < 0) return;
+
+    const dateValue = String(geotabGet(item, 'dateTime', 'DateTime') ?? '').trim();
+    const parsed = dateValue ? Date.parse(dateValue) : Number.NaN;
+    const timestamp = Number.isFinite(parsed) ? parsed : -1;
+    const miles = Math.round(meters / 1609.344);
+
+    if (!selected || timestamp > selected.timestamp || (timestamp === selected.timestamp && index > selected.index)) {
+      selected = { miles, timestamp, index };
+    }
+  });
+
+  return selected?.miles ?? null;
+}
+
 async function wait(ms: number) {
   await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function targetedBatch(
+async function targetedStatusBatch(
   client: Awaited<ReturnType<typeof createGeotabClient>>,
   deviceIds: string[],
 ) {
@@ -81,6 +105,59 @@ async function targetedBatch(
   const miles = new Map<string, number>();
   for (const child of Array.isArray(result) ? result : []) collectOdometers(rowsFromMultiCallChild(child), miles);
   return miles;
+}
+
+async function targetedCalculatedAdjustmentBatch(
+  client: Awaited<ReturnType<typeof createGeotabClient>>,
+  deviceIds: string[],
+) {
+  const calls = deviceIds.map((id) => ({
+    method: 'Get',
+    params: {
+      typeName: 'StatusData',
+      search: {
+        deviceSearch: { id },
+        diagnosticSearch: { id: FALLBACK_ODOMETER_DIAGNOSTIC },
+      },
+    },
+  }));
+  const result = await client.call<unknown[]>('ExecuteMultiCall', { calls });
+  const miles = new Map<string, number>();
+  const children = Array.isArray(result) ? result : [];
+
+  for (let index = 0; index < deviceIds.length; index += 1) {
+    const rows = rowsFromMultiCallChild(children[index]);
+    const calculated = calculatedAdjustmentMiles(rows);
+    if (calculated != null) miles.set(deviceIds[index], calculated);
+  }
+  return miles;
+}
+
+async function recoverCalculatedAdjustments(
+  client: Awaited<ReturnType<typeof createGeotabClient>>,
+  deviceIds: string[],
+  target: Map<string, number>,
+) {
+  let recovered = 0;
+  for (let index = 0; index < deviceIds.length; index += TARGET_BATCH_SIZE) {
+    const batch = deviceIds.slice(index, index + TARGET_BATCH_SIZE).filter((id) => !target.has(id));
+    if (!batch.length) continue;
+    try {
+      const result = await targetedCalculatedAdjustmentBatch(client, batch);
+      for (const [id, miles] of result) {
+        if (target.has(id)) continue;
+        target.set(id, miles);
+        recovered += 1;
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: 'geotab_calculated_odometer_batch_failed',
+        batchSize: batch.length,
+        error: String(error),
+      }));
+    }
+  }
+  return recovered;
 }
 
 async function broadFallback(client: Awaited<ReturnType<typeof createGeotabClient>>) {
@@ -107,6 +184,7 @@ export async function recoverAssignedOdometers(
       firstPassReceived: 0,
       retried: 0,
       targetedRecovered: 0,
+      calculatedFallbackRecovered: 0,
       broadFallbackRecovered: 0,
       stillMissing: 0,
     };
@@ -118,7 +196,7 @@ export async function recoverAssignedOdometers(
   for (let index = 0; index < uniqueIds.length; index += TARGET_BATCH_SIZE) {
     const batch = uniqueIds.slice(index, index + TARGET_BATCH_SIZE);
     try {
-      const result = await targetedBatch(client, batch);
+      const result = await targetedStatusBatch(client, batch);
       successfulBatches += 1;
       for (const [id, miles] of result) milesByDevice.set(id, miles);
     } catch (error) {
@@ -132,6 +210,16 @@ export async function recoverAssignedOdometers(
 
   const firstPassReceived = milesByDevice.size;
   let missing = uniqueIds.filter((id) => !milesByDevice.has(id));
+
+  // Geotab documents Get<StatusData> for DiagnosticOdometerAdjustmentId as the
+  // calculated per-device fallback. It can extend the last known odometer using
+  // GPS distance when a current ECM odometer is unavailable. DeviceStatusInfo
+  // alone does not guarantee that calculated value will be returned.
+  const calculatedFallbackRecovered = missing.length
+    ? await recoverCalculatedAdjustments(client, missing, milesByDevice)
+    : 0;
+
+  missing = uniqueIds.filter((id) => !milesByDevice.has(id));
   const retryIds = missing.slice(0, MAX_SECOND_PASS);
 
   if (retryIds.length) {
@@ -139,7 +227,7 @@ export async function recoverAssignedOdometers(
     for (let index = 0; index < retryIds.length; index += TARGET_BATCH_SIZE) {
       const batch = retryIds.slice(index, index + TARGET_BATCH_SIZE);
       try {
-        const result = await targetedBatch(client, batch);
+        const result = await targetedStatusBatch(client, batch);
         successfulBatches += 1;
         for (const [id, miles] of result) milesByDevice.set(id, miles);
       } catch (error) {
@@ -149,6 +237,11 @@ export async function recoverAssignedOdometers(
           error: String(error),
         }));
       }
+    }
+
+    const retryStillMissing = retryIds.filter((id) => !milesByDevice.has(id));
+    if (retryStillMissing.length) {
+      await recoverCalculatedAdjustments(client, retryStillMissing, milesByDevice);
     }
   }
 
@@ -175,11 +268,12 @@ export async function recoverAssignedOdometers(
   const stillMissing = uniqueIds.filter((id) => !milesByDevice.has(id)).length;
   return {
     milesByDevice,
-    available: successfulBatches > 0 || broadAvailable,
+    available: successfulBatches > 0 || calculatedFallbackRecovered > 0 || broadAvailable,
     requested: uniqueIds.length,
     firstPassReceived,
     retried: retryIds.length,
     targetedRecovered,
+    calculatedFallbackRecovered,
     broadFallbackRecovered,
     stillMissing,
   };
