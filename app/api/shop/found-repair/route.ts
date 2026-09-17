@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { getTirePositionStatus, replaceTirePositions } from '@/lib/tire-position-db';
+import { requireRepairType } from '@/lib/repair-types';
+import { POST as repairTypeChecklistPOST } from '../../repair-type-checklist/route';
+import { POST as repairTypeAssignmentPOST } from '../../repair-types/repair/route';
+import { POST as indirectLaborPOST } from '../indirect-labor/route';
 
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
@@ -93,19 +97,32 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const forwarded = request.clone();
   try {
+    const contentType=request.headers.get('content-type')??'';
+    if(contentType.includes('multipart/form-data')){
+      const form=await request.clone().formData();
+      if(String(form.get('repairTypeChecklist')??'')==='1'&&String(form.get('action')??'')==='uploadPhoto'){
+        return repairTypeChecklistPOST(forwarded);
+      }
+    }
+
+    const body = await request.clone().json() as Record<string, unknown>;
+    const action = String(body.action ?? 'foundRepair');
+    if(['startChecklist','setItem','removePhoto','completeChecklist'].includes(action)) return repairTypeChecklistPOST(forwarded);
+    if(action==='setRepairType') return repairTypeAssignmentPOST(forwarded);
+    if(action==='startIndirectLabor') return indirectLaborPOST(forwarded);
+
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
     if (!['mechanic','manager','admin'].includes(user.role) || !user.technicianId) {
       throw new Error('A technician account is required to update the unit workspace.');
     }
 
-    const body = await request.json() as Record<string, unknown>;
     const expectedRepairId = numericRepairId(body.repairId);
     if (!expectedRepairId) throw new Error('The repair was not found.');
     const technicianId = Number(user.technicianId);
     const technician = await technicianName(technicianId);
-    const action = String(body.action ?? 'foundRepair');
 
     if (action === 'saveTirePositions') {
       await activeRepairForUser(user.id, technicianId, expectedRepairId);
@@ -157,18 +174,19 @@ export async function POST(request: Request) {
     if (active.equipment_id === null) {
       throw new Error('This repair is not linked to a fleet unit, so another repair cannot be added from the unit workspace.');
     }
+    const repairType=await requireRepairType(env.DB,body.repairTypeId);
 
     const result = await env.DB.prepare(`
-      INSERT INTO repairs (equipment_id, title, status, priority, source, location, technician_id, updated_at)
-      VALUES (?, ?, 'Open', '2', 'manual', ?, ?, CURRENT_TIMESTAMP)
-    `).bind(active.equipment_id, issue, active.location, technician.id).run();
+      INSERT INTO repairs (equipment_id, title, status, priority, source, location, technician_id, repair_type_id, updated_at)
+      VALUES (?, ?, 'Open', '2', 'manual', ?, ?, ?, CURRENT_TIMESTAMP)
+    `).bind(active.equipment_id, issue, active.location, technician.id, repairType.id).run();
     const id = Number(result.meta.last_row_id);
     if (!id) throw new Error('The repair could not be added.');
 
     await env.DB.prepare(`
       INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
       VALUES (?, ?, ?, 'repair_created_by_technician', ?)
-    `).bind(id, user.id, technician.id, `${technician.name} found additional work on Unit ${active.unit || active.equipment_id}: ${issue}`.slice(0, 500)).run();
+    `).bind(id, user.id, technician.id, `${technician.name} found additional ${repairType.name} work on Unit ${active.unit || active.equipment_id}: ${issue}`.slice(0, 500)).run();
 
     return Response.json({
       ok:true,
@@ -177,6 +195,7 @@ export async function POST(request: Request) {
       equipmentId:Number(active.equipment_id),
       unit:active.unit,
       issue,
+      repairType,
       status:'Open',
       priority:2,
       technicianId:technician.id,
