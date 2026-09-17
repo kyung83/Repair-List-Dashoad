@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import AppNav from "./app-nav";
 import TechnicianMobileDock from "./technician-mobile-dock";
 import ShopMobileRouteStyle from "./shop-mobile-route-style";
+import WorkOrderRepairTypeDock from "./work-order-repair-type-dock";
 import "./globals.css";
 import "./professional-shell.css";
 import "./northern-brand.css";
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <ShopMobileRouteStyle />
         <AppNav />
         <div className="app-shell-content">{children}</div>
+        <WorkOrderRepairTypeDock />
         <TechnicianMobileDock />
         <script src="/breakdown-photo-prep.js" defer />
         <script dangerouslySetInnerHTML={{ __html: `(function(){
