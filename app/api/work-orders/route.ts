@@ -80,9 +80,17 @@ export async function GET(request: Request) {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
     const [data,types] = await Promise.all([getWorkOrderData(env.DB),repairTypeMap()]);
-    const withType = <T extends {numericId:number}>(repair:T)=>({...repair,repairType:types.get(Number(repair.numericId))??'Uncategorized'});
+    const withType = <T extends {numericId:number;equipmentId:number|null;unit:string}>(repair:T)=>{
+      const repairType=types.get(Number(repair.numericId))??'Uncategorized';
+      const unit=repair.equipmentId===null&&repairType==='INDIRECT LABOR-OTHER'?'SHOP / NO UNIT':repair.unit;
+      return {...repair,repairType,unit};
+    };
     const repairs = data.repairs.filter((repair) => !isRepairDeferred(repair.status)).map(withType);
-    const reviewPackages = data.reviewPackages.map((workOrder)=>({...workOrder,repairs:workOrder.repairs.map(withType)}));
+    const reviewPackages = data.reviewPackages.map((workOrder)=>{
+      const mapped=workOrder.repairs.map(withType);
+      const noUnit=workOrder.equipmentId===null&&mapped.length>0&&mapped.every((repair)=>repair.repairType==='INDIRECT LABOR-OTHER');
+      return {...workOrder,unit:noUnit?'SHOP / NO UNIT':workOrder.unit,repairs:mapped};
+    });
     return Response.json({...data,repairs,reviewPackages,user:{id:user.id,displayName:user.displayName,role:user.role},canApprove:user.role === 'manager' || user.role === 'admin'}, {headers:{'cache-control':'no-store'}});
   } catch (error) {
     console.error(JSON.stringify({event:'work_orders_get_failed',error:String(error)}));
