@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useState} from "react";
 
 type Photo={id:number;fileName:string;url:string};
 type Item={
@@ -19,29 +19,59 @@ export default function RepairTypeChecklistPanel({repairId,canWork}:Props){
   const[data,setData]=useState<Payload|null>(null),[open,setOpen]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
   const[notes,setNotes]=useState<Record<number,string>>({}),[measurements,setMeasurements]=useState<Record<number,string>>({});
 
-  function accept(payload:Payload){setData(payload);setNotes(Object.fromEntries((payload.items??[]).map(item=>[item.number,item.notes||""])));setMeasurements(Object.fromEntries((payload.items??[]).map(item=>[item.number,item.measurementValue||""])))}
-  async function load(){const response=await fetch(`/api/repair-type-checklist?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});const payload=await response.json() as Payload;if(!response.ok)throw new Error(payload.error||"Repair checklist could not be loaded.");accept(payload)}
+  function accept(payload:Payload){
+    setData(payload);
+    setNotes(Object.fromEntries((payload.items??[]).map(item=>[item.number,item.notes||""])));
+    setMeasurements(Object.fromEntries((payload.items??[]).map(item=>[item.number,item.measurementValue||""])));
+  }
+  async function load(){
+    const response=await fetch(`/api/repair-type-checklist?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});
+    const payload=await response.json() as Payload;
+    if(!response.ok)throw new Error(payload.error||"Repair checklist could not be loaded.");
+    accept(payload);
+  }
   useEffect(()=>{setData(null);setOpen(false);setMessage("");void load().catch(()=>setData({available:false}))},[repairId]);
 
   async function post(body:Record<string,unknown>){
     setBusy(true);setMessage("");
-    try{const response=await fetch("/api/repair-type-checklist",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...body,repairId})});const payload=await response.json() as Payload;if(!response.ok||!payload.ok)throw new Error(payload.error||"Checklist change failed.");accept(payload);return payload}catch(error){setMessage(error instanceof Error?error.message:"Checklist change failed.");return null}finally{setBusy(false)}
+    try{
+      const response=await fetch("/api/shop/found-repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...body,repairId})});
+      const payload=await response.json() as Payload;
+      if(!response.ok||!payload.ok)throw new Error(payload.error||"Checklist change failed.");
+      accept(payload);return payload;
+    }catch(error){setMessage(error instanceof Error?error.message:"Checklist change failed.");return null}
+    finally{setBusy(false)}
   }
 
   async function setResult(item:Item,result:Item["result"]){
     const note=(notes[item.number]??"").trim(),measurement=(measurements[item.number]??"").trim();
     const saved=await post({action:"setItem",itemNumber:item.number,result,notes:note,measurement});
-    if(saved)setMessage(result==="fail"?"Failed item saved. A linked corrective repair was created. Fix it, then change this item to Pass.":"Checklist item saved.")
+    if(saved)setMessage(result==="fail"?"Failed item saved. A linked corrective repair was created. Fix it, then change this item to Pass.":"Checklist item saved.");
   }
 
   async function upload(item:Item,file:File|null){
-    if(!file)return;setBusy(true);setMessage("");
-    try{const form=new FormData();form.set("action","uploadPhoto");form.set("repairId",repairId);form.set("itemNumber",String(item.number));form.set("photo",file);const response=await fetch("/api/repair-type-checklist",{method:"POST",body:form});const payload=await response.json() as Payload;if(!response.ok||!payload.ok)throw new Error(payload.error||"Photo could not be uploaded.");accept(payload);setMessage("Photo saved.")}catch(error){setMessage(error instanceof Error?error.message:"Photo could not be uploaded.")}finally{setBusy(false)}
+    if(!file)return;
+    setBusy(true);setMessage("");
+    try{
+      const form=new FormData();form.set("repairTypeChecklist","1");form.set("action","uploadPhoto");form.set("repairId",repairId);form.set("itemNumber",String(item.number));form.set("photo",file);
+      const response=await fetch("/api/shop/found-repair",{method:"POST",body:form});
+      const payload=await response.json() as Payload;
+      if(!response.ok||!payload.ok)throw new Error(payload.error||"Photo could not be uploaded.");
+      accept(payload);setMessage("Photo saved.");
+    }catch(error){setMessage(error instanceof Error?error.message:"Photo could not be uploaded.")}
+    finally{setBusy(false)}
   }
 
   if(!data?.available)return null;
-  const items=data.items??[],answered=items.filter(item=>item.result!=="pending").length,pending=data.pendingCount??items.filter(item=>item.result==="pending").length,failed=data.failedCount??items.filter(item=>item.result==="fail").length,completed=data.status==="completed";
-  const grouped=useMemo(()=>{const map=new Map<string,Item[]>();for(const item of items){const rows=map.get(item.section)??[];rows.push(item);map.set(item.section,rows)}return [...map.entries()]},[items]);
+  const items=data.items??[];
+  const answered=items.filter(item=>item.result!=="pending").length;
+  const pending=data.pendingCount??items.filter(item=>item.result==="pending").length;
+  const failed=data.failedCount??items.filter(item=>item.result==="fail").length;
+  const completed=data.status==="completed";
+  const groups=new Map<string,Item[]>();
+  for(const item of items){const rows=groups.get(item.section)??[];rows.push(item);groups.set(item.section,rows)}
+  const grouped=[...groups.entries()];
+  const finishDisabled=busy||pending>0||failed>0;
 
   return <section style={shell}>
     <button type="button" onClick={()=>setOpen(current=>!current)} style={{...launcher,borderColor:data.required?"#f1a24b":"#bdcbd6"}}>
@@ -72,7 +102,7 @@ export default function RepairTypeChecklistPanel({repairId,canWork}:Props){
             </>}
           </article>)}</div></section>)}</div>
 
-          {!completed&&<div style={finishBox}><div><strong>Finish Checklist</strong><p style={help}>{pending?`${pending} unanswered item${pending===1?"":"s"} remain.`:failed?"Failed items must be repaired and changed to Pass first.":"All checklist questions are ready to lock."}</p></div>{canWork&&<button type="button" disabled={busy||pending>0||failed>0} onClick={()=>void post({action:"completeChecklist"})} style={{...primary,opacity:busy||pending>0||failed>0?.5:1}}>COMPLETE CHECKLIST</button>}</div>}
+          {!completed&&<div style={finishBox}><div><strong>Finish Checklist</strong><p style={help}>{pending?`${pending} unanswered item${pending===1?"":"s"} remain.`:failed?"Failed items must be repaired and changed to Pass first.":"All checklist questions are ready to lock."}</p></div>{canWork&&<button type="button" disabled={finishDisabled} onClick={()=>void post({action:"completeChecklist"})} style={{...primary,opacity:finishDisabled?.5:1}}>COMPLETE CHECKLIST</button>}</div>}
         </>}
       </>}
     </div>}
