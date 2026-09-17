@@ -70,9 +70,12 @@ export async function PATCH(request:Request){
     }
     statements.push(env.DB.prepare(`
       UPDATE roadside_breakdowns
-      SET stage=5,status='complete',ready_for_review_at=COALESCE(ready_for_review_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
+      SET stage=5,status='complete',
+          service_provider=CASE WHEN ?='' THEN service_provider ELSE ? END,
+          closeout_invoice_number=?,closeout_invoice_date=?,closeout_notes=?,
+          ready_for_review_at=COALESCE(ready_for_review_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
       WHERE id=?
-    `).bind(id));
+    `).bind(vendor,vendor,invoiceNumber,invoiceDate,serviceSummary,id));
     statements.push(env.DB.prepare(`
       UPDATE repairs
       SET status='Completed',outside_cost=?,completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
