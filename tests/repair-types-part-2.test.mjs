@@ -31,8 +31,13 @@ test('Current Work lets the assigned technician choose Repair Type while WORKING
   assert.match(control,/\/api\/shop\/repair-type/);
   assert.match(control,/DONE WORKING/);
   assert.match(control,/repair-type-changed/);
+  assert.match(control,/repair-type-checklist-started/);
+  assert.match(control,/disabled=\{busy\|\|data\.locked\}/);
+  assert.match(control,/Locked because this category checklist has started/);
   assert.match(api,/requireWorkingNow/);
   assert.match(api,/repair_type_selected/);
+  assert.match(api,/repair_type_checklist_runs/);
+  assert.match(api,/checklist_started/);
   assert.match(api,/This Repair Type cannot be changed after its checklist has been started/);
   assert.match(helpers,/Choose the Repair Type before leaving this work/);
   assert.match(helpers,/maintenanceWorkTypeForRepair/);
@@ -48,6 +53,7 @@ test('Current Work runs categorized check sheets and refreshes them after type s
   ]);
   assert.match(wrapper,/RepairTypeChecklistPanel/);
   assert.match(panel,/repair-type-changed/);
+  assert.match(panel,/repair-type-checklist-started/);
   assert.match(panel,/START CHECKLIST/);
   assert.match(panel,/PASS/);
   assert.match(panel,/FAIL/);
