@@ -13,9 +13,10 @@ test('Current Work puts part lookup directly below repair photos',()=>{
   assert.doesNotMatch(currentWork,/Open Repair on This Unit/);
 });
 
-test('repair switching stays available only when another open repair exists',()=>{
+test('repair switching stays available only when another visible unit repair exists',()=>{
   assert.match(currentWork,/const otherRepairs=unitRepairs\.filter/);
-  assert.match(currentWork,/otherRepairs\.length>0/);
+  assert.match(currentWork,/const visibleOtherRepairs=noUnit\?\[\]:otherRepairs/);
+  assert.match(currentWork,/visibleOtherRepairs\.length>0/);
   assert.match(currentWork,/Other Repairs on This Unit/);
   assert.match(currentWork,/onChooseRepair\(item\)/);
 });
