@@ -33,7 +33,10 @@ async function payload(repair:RepairRow){
 }
 
 async function createCorrective(user:AppUser,repair:RepairRow,item:ItemRow,notes:string){
- if(item.corrective_repair_id)return item.corrective_repair_id;
+ if(item.corrective_repair_id){
+  await env.DB.prepare(`UPDATE repairs SET status='Open',completed_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(item.corrective_repair_id).run();
+  return item.corrective_repair_id;
+ }
  const title=`${repair.repair_type_name} checklist #${item.item_number} failed: ${item.item_text}${notes?` - ${notes}`:''}`.slice(0,500);
  const result=await env.DB.prepare(`INSERT INTO repairs(equipment_id,title,description,status,priority,source,technician_id,opened_at,updated_at) VALUES(?,?,?,'Open','2','repair-type-checklist',?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).bind(repair.equipment_id,title,notes||null,repair.technician_id).run();const id=Number(result.meta.last_row_id);if(!id)throw new Error('Corrective repair could not be created.');
  await env.DB.prepare(`UPDATE repair_type_checklist_items SET corrective_repair_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(id,item.id).run();
@@ -53,7 +56,7 @@ export async function POST(request:Request){
    const item=await env.DB.prepare(`SELECT id,item_number,section,item_text,result,notes,allow_pass,allow_fail,allow_na,require_notes,require_photo,require_measurement,measurement_label,measurement_unit,measurement_value,corrective_repair_id FROM repair_type_checklist_items WHERE checklist_run_id=? AND item_number=?`).bind(run.id,n).first<ItemRow>();if(!item)throw new Error('Checklist item was not found.');
    if(result==='pass'&&!item.allow_pass)throw new Error('Pass is not allowed.');if(result==='fail'&&!item.allow_fail)throw new Error('Fail is not allowed.');if(result==='na'&&!item.allow_na)throw new Error('N/A is not allowed.');if(result==='fail'&&!notes)throw new Error('Describe what failed in the note box.');if(result!=='pending'&&item.require_notes&&!notes)throw new Error('A note is required.');if(result!=='pending'&&item.require_measurement&&!measurement)throw new Error('A measurement is required.');if(result!=='pending'&&item.require_photo){const photo=await env.DB.prepare(`SELECT id FROM repair_type_checklist_photos WHERE checklist_item_id=? LIMIT 1`).bind(item.id).first<{id:number}>();if(!photo)throw new Error('A photo is required.');}
    await env.DB.prepare(`UPDATE repair_type_checklist_items SET result=?,notes=?,measurement_value=?,updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(result,notes||null,measurement||null,user.id,item.id).run();
-   if(result==='fail')await createCorrective(user,repair,item,notes);else if(item.result==='fail'&&(result==='pass'||result==='na'))await closeCorrective(user,item);
+   if(result==='fail')await createCorrective(user,repair,item,notes);else if(item.corrective_repair_id&&(result==='pass'||result==='na'))await closeCorrective(user,item);
    return Response.json({ok:true,...await payload(repair)});
   }
   if(action==='uploadPhoto'){
