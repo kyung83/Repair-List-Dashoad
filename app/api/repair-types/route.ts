@@ -38,7 +38,8 @@ async function activeTemplate(repairTypeId:number){
 }
 
 async function payload(user:AppUser){
-  const rows=await env.DB.prepare(`SELECT id,name,unit_rule,checklist_mode,active,sort_order FROM repair_types ${manager(user)?'':'WHERE active=1'} ORDER BY sort_order,name COLLATE NOCASE`).all<RepairTypeRow>();
+  const where=manager(user)?'':`WHERE active=1 AND upper(name)<>'INDIRECT LABOR-OTHER'`;
+  const rows=await env.DB.prepare(`SELECT id,name,unit_rule,checklist_mode,active,sort_order FROM repair_types ${where} ORDER BY sort_order,name COLLATE NOCASE`).all<RepairTypeRow>();
   const types=await Promise.all(rows.results.map(async row=>({id:Number(row.id),name:row.name,unitRule:row.unit_rule,checklistMode:row.checklist_mode,active:Boolean(row.active),sortOrder:Number(row.sort_order),checklist:await activeTemplate(Number(row.id))})));
   return{types,canManage:manager(user),updatedAt:new Date().toISOString()};
 }
