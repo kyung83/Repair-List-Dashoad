@@ -42,7 +42,8 @@ export default function CurrentWorkHome(props:Props){
   const noUnit=!String(repair.unit||timer.unit||"").trim();
   const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
   const repairMine=repair.technicianId===technicianId&&technicianId!==null;
-  const otherRepairs=noUnit?[]:unitRepairs.filter(item=>item.id!==timer.repairId);
+  const otherRepairs=unitRepairs.filter(item=>item.id!==timer.repairId);
+  const visibleOtherRepairs=noUnit?[]:otherRepairs;
 
   function goToFinalReview(){window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
 
@@ -72,9 +73,9 @@ export default function CurrentWorkHome(props:Props){
 
       {repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
 
-      {otherRepairs.length>0&&<section style={card}>
-        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{otherRepairs.length}</span></div>
-        <div style={repairList}>{otherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
+      {visibleOtherRepairs.length>0&&<section style={card}>
+        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
+        <div style={repairList}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
       </section>}
 
       {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
