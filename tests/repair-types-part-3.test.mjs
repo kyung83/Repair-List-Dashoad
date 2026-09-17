@@ -52,3 +52,14 @@ test('Indirect labor uses the standard timer without requiring equipment',async(
   assert.match(shop,/INSERT INTO repair_labor_entries/);
   assert.match(shop,/loadRepairUnit/);
 });
+
+test('Completed Work and Report Search label indirect labor as SHOP / NO UNIT',async()=>{
+  const [workOrders,reports]=await Promise.all([
+    read('app/api/work-orders/route.ts'),
+    read('app/api/reports/search/route.ts'),
+  ]);
+  assert.match(workOrders,/INDIRECT LABOR-OTHER/);
+  assert.match(workOrders,/SHOP \/ NO UNIT/);
+  assert.match(reports,/row\.repairType === 'INDIRECT LABOR-OTHER'/);
+  assert.match(reports,/SHOP \/ NO UNIT/);
+});
