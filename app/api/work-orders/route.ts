@@ -66,13 +66,24 @@ async function approveWorkOrder(request: Request, body: Record<string, unknown>)
   return {ok:true,approved:true,repairIds:ids.map((id)=>`repair-${id}`),reviewedBy:reviewer};
 }
 
+async function repairTypeMap() {
+  const rows = await env.DB.prepare(`
+    SELECT r.id,COALESCE(NULLIF(rt.name,''),'Uncategorized') AS repair_type
+    FROM repairs r
+    LEFT JOIN repair_types rt ON rt.id=r.repair_type_id
+  `).all<{id:number;repair_type:string}>();
+  return new Map(rows.results.map((row)=>[Number(row.id),row.repair_type]));
+}
+
 export async function GET(request: Request) {
   try {
     const user = await getSessionUser(env.DB, request);
     if (!user) throw new Error('Authentication required.');
-    const data = await getWorkOrderData(env.DB);
-    data.repairs = data.repairs.filter((repair) => !isRepairDeferred(repair.status));
-    return Response.json({...data,user:{id:user.id,displayName:user.displayName,role:user.role},canApprove:user.role === 'manager' || user.role === 'admin'}, {headers:{'cache-control':'no-store'}});
+    const [data,types] = await Promise.all([getWorkOrderData(env.DB),repairTypeMap()]);
+    const withType = <T extends {numericId:number}>(repair:T)=>({...repair,repairType:types.get(Number(repair.numericId))??'Uncategorized'});
+    const repairs = data.repairs.filter((repair) => !isRepairDeferred(repair.status)).map(withType);
+    const reviewPackages = data.reviewPackages.map((workOrder)=>({...workOrder,repairs:workOrder.repairs.map(withType)}));
+    return Response.json({...data,repairs,reviewPackages,user:{id:user.id,displayName:user.displayName,role:user.role},canApprove:user.role === 'manager' || user.role === 'admin'}, {headers:{'cache-control':'no-store'}});
   } catch (error) {
     console.error(JSON.stringify({event:'work_orders_get_failed',error:String(error)}));
     return Response.json({error:error instanceof Error ? error.message : 'Work orders could not be loaded.'},{status:500});
