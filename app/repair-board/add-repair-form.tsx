@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import s from "./repair-board.module.css";
 
 type Equipment={id:number;unit:string;equipmentType:string;driver:string;location:string};
 type Technician={id:number;name:string};
+type RepairType={id:number;name:string;unitRule:"required"|"optional";checklistMode:"none"|"optional"|"required";active:boolean;sortOrder:number};
 type EquipmentKind="truck"|"trailer"|"other";
 
 type Props={
@@ -17,14 +18,13 @@ type Props={
   onSaved:()=>Promise<void>|void;
 };
 
-type CreateResult={ok?:boolean;error?:string;repairId?:string;equipmentId?:number;unit?:string};
+type CreateResult={ok?:boolean;error?:string;repairId?:string;equipmentId?:number;unit?:string;repairType?:string};
 
 function kind(value:string):EquipmentKind{
   if(/trailer/i.test(value))return "trailer";
   if(/truck|tractor|vehicle/i.test(value))return "truck";
   return "other";
 }
-
 function searchable(value:string){return value.trim().toLowerCase()}
 
 export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,onClose,onSaved}:Props){
@@ -34,6 +34,8 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   const[addNew,setAddNew]=useState(false);
   const[newType,setNewType]=useState<EquipmentKind>(initial?kind(initial.equipmentType):"other");
   const[newLocation,setNewLocation]=useState(initial?.location??"");
+  const[repairTypes,setRepairTypes]=useState<RepairType[]>([]);
+  const[repairTypeId,setRepairTypeId]=useState("");
   const[issue,setIssue]=useState("");
   const[parts,setParts]=useState("");
   const[priority,setPriority]=useState(2);
@@ -41,6 +43,16 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   const[lastSavedUnit,setLastSavedUnit]=useState("");
   const[busy,setBusy]=useState(false);
   const[message,setMessage]=useState("");
+
+  useEffect(()=>{
+    void fetch("/api/repair-types",{cache:"no-store"}).then(async response=>{
+      const payload=await response.json() as{types?:RepairType[];error?:string};
+      if(!response.ok)throw new Error(payload.error||"Repair types could not be loaded.");
+      setRepairTypes((payload.types??[]).filter(type=>type.name.toUpperCase()!=="INDIRECT LABOR-OTHER"));
+    }).catch(error=>setMessage(error instanceof Error?error.message:"Repair types could not be loaded."));
+  },[]);
+
+  const selectedRepairType=repairTypes.find(type=>String(type.id)===repairTypeId)??null;
 
   const matches=useMemo(()=>{
     if(lockEquipment||selected)return[];
@@ -56,39 +68,27 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   },[equipment,lockEquipment,search,selected]);
 
   function chooseEquipment(item:Equipment){
-    setSelected(item);
-    setSearch(item.unit);
-    setNewLocation(item.location);
-    setNewType(kind(item.equipmentType));
-    setAddNew(false);
-    setLastSavedUnit("");
-    setMessage("");
+    setSelected(item);setSearch(item.unit);setNewLocation(item.location);setNewType(kind(item.equipmentType));setAddNew(false);setLastSavedUnit("");setMessage("");
   }
-
   function changeUnit(){
     if(lockEquipment)return;
-    setSelected(null);
-    setSearch("");
-    setAddNew(false);
-    setNewType("other");
-    setNewLocation("");
-    setLastSavedUnit("");
-    setMessage("");
+    setSelected(null);setSearch("");setAddNew(false);setNewType("other");setNewLocation("");setLastSavedUnit("");setMessage("");
   }
 
   async function createRepair(){
     const repair=issue.trim();
+    if(!repairTypeId){setMessage("Choose a repair type.");return}
     if(!repair){setMessage("Enter the repair needed.");return}
     if(!selected&&!addNew){setMessage("Search for a unit and select it, or choose the no-match option to add a new unit.");return}
     if(addNew&&!search.trim()){setMessage("Enter a unit number.");return}
 
     setBusy(true);setMessage("");
     try{
-      const response=await fetch("/api/repair-board",{
+      const response=await fetch("/api/repair-types/create-repair",{
         method:"POST",
         headers:{"content-type":"application/json"},
         body:JSON.stringify({
-          action:"createRepair",
+          repairTypeId:Number(repairTypeId),
           mode:selected?"equipment":"freeform",
           equipmentId:selected?.id??0,
           unit:selected?.unit??search.trim(),
@@ -105,30 +105,20 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
 
       const unit=result.unit||selected?.unit||search.trim();
       const equipmentId=Number(result.equipmentId??selected?.id??0);
-      const sticky:Equipment={
-        id:equipmentId,
-        unit,
-        equipmentType:selected?.equipmentType??newType,
-        driver:selected?.driver??"",
-        location:selected?.location??newLocation.trim(),
-      };
-      setSelected(sticky);
-      setSearch(unit);
-      setAddNew(false);
-      setIssue("");
-      setParts("");
-      setLastSavedUnit(unit);
-      setMessage(`Repair added to Unit ${unit}. Add another repair below or close when you are done.`);
+      const sticky:Equipment={id:equipmentId,unit,equipmentType:selected?.equipmentType??newType,driver:selected?.driver??"",location:selected?.location??newLocation.trim()};
+      setSelected(sticky);setSearch(unit);setAddNew(false);setIssue("");setParts("");setLastSavedUnit(unit);
+      setMessage(`${result.repairType||selectedRepairType?.name||"Repair"} added to Unit ${unit}. Add another repair below or close when you are done.`);
       await onSaved();
-    }catch(error){
-      setMessage(error instanceof Error?error.message:"Repair could not be added.");
-    }finally{setBusy(false)}
+    }catch(error){setMessage(error instanceof Error?error.message:"Repair could not be added.")}
+    finally{setBusy(false)}
   }
 
   return <section className={s.addPanel}>
     <h3>{lastSavedUnit?`Add another repair — Unit ${lastSavedUnit}`:"Add Repair"}</h3>
     {message&&<div style={{gridColumn:"1 / -1",padding:"9px 11px",borderRadius:8,background:"#fff8e6",border:"1px solid #f2c66d",fontSize:12,fontWeight:700}}>{message}</div>}
     <div>
+      <label style={{gridColumn:"1 / -1"}}>Repair Type<select className={s.fieldSelect} value={repairTypeId} onChange={event=>{setRepairTypeId(event.target.value);setMessage("")}}><option value="">Choose repair type…</option>{repairTypes.map(type=><option key={type.id} value={type.id}>{type.name}{type.checklistMode==="required"?" · CHECKLIST":""}</option>)}</select></label>
+
       {selected?<div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",padding:"11px 12px",border:"1px solid #ccd5dd",borderRadius:9,background:"#f7f9fb"}}><div><strong>Unit {selected.unit}</strong><div style={{fontSize:11,color:"#667482",marginTop:2}}>{selected.equipmentType||"Equipment"}{selected.location?` · ${selected.location}`:""}</div></div>{!lockEquipment&&<button type="button" className={s.metaButton} onClick={changeUnit}>Change unit</button>}</div>:<>
         <label style={{gridColumn:"1 / -1"}}>Unit search<input className={s.fieldSelect} value={search} onChange={event=>{setSearch(event.target.value);setAddNew(false);setLastSavedUnit("");setMessage("")}} placeholder="Search unit #, location, driver…" autoFocus/></label>
         {matches.length>0&&<div style={{gridColumn:"1 / -1",display:"flex",gap:7,flexWrap:"wrap"}}>{matches.map(item=><button type="button" key={item.id} className={s.metaButton} onClick={()=>chooseEquipment(item)}>Unit {item.unit}{item.location?` · ${item.location}`:""}</button>)}</div>}

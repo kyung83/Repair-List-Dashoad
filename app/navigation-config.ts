@@ -101,6 +101,7 @@ const sidebarGroups: SidebarGroup[] = [
     href: "/pm-schedules",
     roles: managerRoles,
     links: [
+      { href: "/repair-types", label: "Repair Types", exact: true, roles: managerRoles },
       { href: "/pm-schedules", label: "PM Schedule Setup", roles: managerRoles },
       { href: "/maintenance-programs", label: "Custom PM Builder", roles: managerRoles },
       { href: "/maintenance-checklists", label: "PM & Annual Checklists", roles: managerRoles },
