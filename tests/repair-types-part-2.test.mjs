@@ -4,22 +4,41 @@ import test from 'node:test';
 
 async function read(path){return readFile(new URL(`../${path}`,import.meta.url),'utf8')}
 
-test('Found Something Else requires a normal repair type and preserves unit tire workflow',async()=>{
-  const [ui,api,typesApi]=await Promise.all([
+test('Found Something Else stays fast and defers Repair Type until work begins',async()=>{
+  const [ui,api]=await Promise.all([
     read('app/shop/found-repair-control.tsx'),
     read('app/api/shop/found-repair/route.ts'),
-    read('app/api/repair-types/route.ts'),
   ]);
-  assert.match(ui,/Choose repair type/);
-  assert.match(ui,/repairTypeId/);
+  assert.doesNotMatch(ui,/Choose repair type/);
+  assert.doesNotMatch(ui,/repairTypeId/);
   assert.match(ui,/TIRE POSITION REQUIRED/);
-  assert.match(api,/requireRepairType/);
-  assert.match(api,/repair_type_id/);
-  assert.match(typesApi,/INDIRECT LABOR-OTHER/);
-  assert.match(typesApi,/upper\(name\).*INDIRECT LABOR-OTHER/i);
+  assert.match(ui,/Repair Type will be selected when that repair is worked/);
+  assert.doesNotMatch(api,/requireRepairType/);
+  assert.match(api,/repair_type_id, updated_at/);
+  assert.match(api,/NULL, CURRENT_TIMESTAMP/);
+  assert.match(api,/Repair Type will be selected when the repair is worked/);
 });
 
-test('Current Work runs categorized check sheets and blocks required incomplete close',async()=>{
+test('Current Work lets the assigned technician choose Repair Type while WORKING NOW',async()=>{
+  const [home,control,api,helpers]=await Promise.all([
+    read('app/shop/current-work-home.tsx'),
+    read('app/shop/current-repair-type-control.tsx'),
+    read('app/api/shop/repair-type/route.ts'),
+    read('lib/repair-types.ts'),
+  ]);
+  assert.match(home,/CurrentRepairTypeControl/);
+  assert.match(control,/Choose Repair Type/);
+  assert.match(control,/\/api\/shop\/repair-type/);
+  assert.match(control,/DONE WORKING/);
+  assert.match(control,/repair-type-changed/);
+  assert.match(api,/requireWorkingNow/);
+  assert.match(api,/repair_type_selected/);
+  assert.match(api,/This Repair Type cannot be changed after its checklist has been started/);
+  assert.match(helpers,/Choose the Repair Type before leaving this work/);
+  assert.match(helpers,/maintenanceWorkTypeForRepair/);
+});
+
+test('Current Work runs categorized check sheets and refreshes them after type selection',async()=>{
   const [panel,wrapper,api,shop,helpers]=await Promise.all([
     read('app/shop/repair-type-checklist-panel.tsx'),
     read('app/shop/maintenance-checklist-panel-v3.tsx'),
@@ -28,6 +47,7 @@ test('Current Work runs categorized check sheets and blocks required incomplete 
     read('lib/repair-types.ts'),
   ]);
   assert.match(wrapper,/RepairTypeChecklistPanel/);
+  assert.match(panel,/repair-type-changed/);
   assert.match(panel,/START CHECKLIST/);
   assert.match(panel,/PASS/);
   assert.match(panel,/FAIL/);

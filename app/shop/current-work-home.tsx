@@ -5,6 +5,7 @@ import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
 import RepairPhotoControl from "./repair-photo-control";
 import TechnicianRepairTools from "./technician-repair-tools-v2";
+import CurrentRepairTypeControl from "./current-repair-type-control";
 
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
@@ -61,6 +62,8 @@ export default function CurrentWorkHome(props:Props){
         <div style={timerStyle}>◷ {runningTime}</div>
       </section>
 
+      {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>} 
+
       <section style={{...actionGrid,gridTemplateColumns:noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))"}}>
         <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
         <button disabled={busy} onClick={props.onDoneWorking} style={doneButton}><span style={actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Keep open / hand off</small></button>
@@ -84,7 +87,7 @@ export default function CurrentWorkHome(props:Props){
         <section style={twoCol}>
           {!noUnit&&<div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
             {requests.length>0&&<div style={requestList}>{requests.map(request=><div key={request.id} style={requestRow}><span><b>{request.partNumber}</b><br/><small>{numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</small></span>{request.reservedQuantity>0&&<button disabled={busy} onClick={()=>props.onUseReservedPart(request)} style={smallButton}>Use Reserved</button>}</div>)}</div>}
-            {repair.plannedParts.length>0&&<div style={requestList}>{repair.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity);return <div key={planned.id} style={requestRow}><span><b>{planned.partNumber}</b><br/><small>{numberText(remaining)} remaining · {planned.description}</small></span>{remaining>0&&<button disabled={busy} onClick={()=>props.onUsePlannedPart(repair,planned)} style={smallButton}>Use / Request</button>}</div>})}</div>}
+            {repair.plannedParts.length>0&&<div style={requestList}>{repair.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity);return <div key={planned.id} style={requestRow}><span><b>{planned.partNumber}</b><br/><small>{numberText(remaining)} remaining · {planned.description}</small></span>{remaining>0&&<button disabled={busy} onClick={()=>props.onUsePlannedPart(repair,planned)} style={smallButton}>Use / Request</button>}</div>;})}</div>}
           </div>}
           <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current {noUnit?"Work":"Repair"} Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours {noUnit?"on Work Order":"on Unit"}</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
         </section>
