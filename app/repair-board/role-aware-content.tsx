@@ -5,6 +5,7 @@ import RepairBoardDashboard from "./dashboard-v2";
 import PlanningCenter from "./planning-center";
 import RepairBoardSelfAssignPanel from "./self-assign-panel";
 import RepairCardOutsideVendor from "./repair-card-outside-vendor";
+import OutsideVendorQuickAdd from "./outside-vendor-quick-add";
 import RepairBoardAddRepair from "./add-repair-form";
 import merge from "./manager-board-merge.module.css";
 import s from "./repair-board.module.css";
@@ -70,7 +71,7 @@ export default function RepairBoardRoleAwareContent(){
   }
 
   if(role==='manager'||role==='admin'){
-    return <div className={merge.managerBoard}><PlanningCenter/></div>;
+    return <div className={merge.managerBoard}><PlanningCenter/><OutsideVendorQuickAdd/></div>;
   }
 
   return <>
