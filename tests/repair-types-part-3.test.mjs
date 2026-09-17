@@ -29,20 +29,23 @@ test('Current Work presents indirect labor as SHOP / NO UNIT without unit-only t
   assert.match(ui,/repairMine&&!noUnit&&<TechnicianRepairTools/);
   assert.match(ui,/!noUnit&&<FoundRepairControl/);
   assert.match(ui,/!noUnit&&<nav/);
+  assert.match(ui,/CurrentRepairTypeControl/);
 });
 
-test('Manager Add Repair can create SHOP / NO UNIT only for optional-unit repair types',async()=>{
+test('Manager Add Repair keeps a dedicated SHOP / NO UNIT indirect-labor path',async()=>{
   const [form,route]=await Promise.all([
     read('app/repair-board/add-repair-form.tsx'),
     read('app/api/repair-types/create-repair/route.ts'),
   ]);
-  assert.match(form,/selectedRepairType\?\.unitRule==="optional"/);
+  assert.match(form,/INDIRECT LABOR/);
   assert.match(form,/SHOP \/ NO UNIT/);
+  assert.match(form,/repairTypeId:noUnit\?indirectType\?\.id:null/);
   assert.match(form,/mode:noUnit\?"no-unit"/);
   assert.match(route,/mode==='no-unit'/);
+  assert.match(route,/if\(!repairType\)throw new Error\('SHOP \/ NO UNIT requires an indirect-labor work type\.'/);
   assert.match(route,/repairType\.unitRule!=='optional'/);
   assert.match(route,/equipmentId:number\|null=null/);
-  assert.match(route,/source=repairType\.name==='INDIRECT LABOR-OTHER'\?'indirect-labor':'manual'/);
+  assert.match(route,/source=repairType\?\.name==='INDIRECT LABOR-OTHER'\?'indirect-labor':'manual'/);
 });
 
 test('Indirect labor uses the standard timer without requiring equipment',async()=>{
