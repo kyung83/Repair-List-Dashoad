@@ -56,18 +56,17 @@ test('New Equipment Check and Look Over are separate editable categories',async(
  assert.match(nav,/href: "\/repair-types", label: "Repair Types"/);
 });
 
-test('Repair Board Add Repair keeps repair types and supports optional no-unit work',async()=>{
+test('Repair Board keeps normal repair entry fast and uncategorized',async()=>{
  const [form,route]=await Promise.all([
   read('app/repair-board/add-repair-form.tsx'),
   read('app/api/repair-types/create-repair/route.ts'),
  ]);
- assert.match(form,/Repair Type/);
- assert.match(form,/Choose repair type/);
+ assert.doesNotMatch(form,/Repair Type<select/);
+ assert.doesNotMatch(form,/Choose repair type/);
  assert.match(form,/\/api\/repair-types\/create-repair/);
- assert.match(form,/SHOP \/ NO UNIT/);
- assert.match(form,/selectedRepairType\?\.unitRule==="optional"/);
- assert.match(route,/requireRepairType/);
- assert.match(route,/repair_type_id/);
- assert.match(route,/mode==='no-unit'/);
- assert.match(route,/repairType\.unitRule!=='optional'/);
+ assert.match(form,/repairTypeId:noUnit\?indirectType\?\.id:null/);
+ assert.match(form,/tech will choose the Repair Type when the repair is worked/i);
+ assert.match(route,/requestedTypeId/);
+ assert.match(route,/repairType\?\.id\?\?null/);
+ assert.match(route,/Repair Type will be selected when the repair is worked/);
 });
