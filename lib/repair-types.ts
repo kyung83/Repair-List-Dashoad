@@ -20,13 +20,24 @@ export async function repairTypeForRepair(db:D1Database,repairId:number){
  return{id:Number(row.id),name:row.name,unitRule:row.unit_rule,checklistMode:row.checklist_mode,active:Boolean(row.active),sortOrder:Number(row.sort_order)} as RepairType;
 }
 
+export async function maintenanceWorkTypeForRepair(db:D1Database,repairId:number){
+ const row=await db.prepare(`SELECT event_type FROM maintenance_checklist_runs WHERE repair_id=? AND event_type IN ('pm','annual') LIMIT 1`).bind(repairId).first<{event_type:string}>();
+ return row?.event_type==='pm'||row?.event_type==='annual'?row.event_type:null;
+}
+
+export async function requireRepairTypeBeforeLeavingWork(db:D1Database,repairId:number){
+ const maintenance=await maintenanceWorkTypeForRepair(db,repairId);if(maintenance)return null;
+ const type=await repairTypeForRepair(db,repairId);if(!type)throw new Error('Choose the Repair Type before leaving this work.');
+ return type;
+}
+
 export async function activeRepairTypeChecklistTemplate(db:D1Database,repairTypeId:number){
  const row=await db.prepare(`SELECT id,name,version FROM repair_type_checklist_templates WHERE repair_type_id=? AND active=1 ORDER BY version DESC LIMIT 1`).bind(repairTypeId).first<{id:number;name:string;version:number}>();
  return row?{id:Number(row.id),name:row.name,version:Number(row.version)}:null;
 }
 
 export async function validateRepairTypeChecklistBeforeClose(db:D1Database,repairId:number){
- const type=await repairTypeForRepair(db,repairId);if(!type||type.checklistMode==='none')return;
+ const type=await requireRepairTypeBeforeLeavingWork(db,repairId);if(!type||type.checklistMode==='none')return;
  const template=await activeRepairTypeChecklistTemplate(db,type.id);
  const run=await db.prepare(`SELECT id,status FROM repair_type_checklist_runs WHERE repair_id=?`).bind(repairId).first<{id:number;status:string}>();
  if(type.checklistMode==='optional'&&!run)return;
