@@ -30,7 +30,10 @@ export async function GET(request: Request) {
       expenseSource: params.get('expenseSource'),
       query: params.get('q'),
     });
-    return Response.json(data, { headers: { 'cache-control': 'no-store' } });
+    const repairs = data.repairs.map((row) => row.repairType === 'INDIRECT LABOR-OTHER' && !row.unit
+      ? { ...row, unit: 'SHOP / NO UNIT' }
+      : row);
+    return Response.json({ ...data, repairs }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'report_search_failed', error: String(error) }));
     return Response.json({ error: error instanceof Error ? error.message : 'Report search could not be loaded.' }, { status: 500 });

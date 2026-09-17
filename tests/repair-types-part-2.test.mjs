@@ -54,7 +54,8 @@ test('Completed Work Review shows repair types',async()=>{
     read('app/work-orders/page.tsx'),
   ]);
   assert.match(api,/repairTypeMap/);
-  assert.match(api,/repairType:/);
+  assert.match(api,/const repairType=types\.get/);
+  assert.match(api,/repairs:workOrder\.repairs\.map|repairs:mapped/);
   assert.match(page,/Repair Types/);
   assert.match(page,/repair\.repairType/);
   assert.match(page,/Uncategorized/);

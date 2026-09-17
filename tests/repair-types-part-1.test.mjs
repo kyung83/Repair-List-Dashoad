@@ -56,7 +56,7 @@ test('New Equipment Check and Look Over are separate editable categories',async(
  assert.match(nav,/href: "\/repair-types", label: "Repair Types"/);
 });
 
-test('Repair Board Add Repair saves a repair type while Part 3 indirect labor remains isolated',async()=>{
+test('Repair Board Add Repair keeps repair types and supports optional no-unit work',async()=>{
  const [form,route]=await Promise.all([
   read('app/repair-board/add-repair-form.tsx'),
   read('app/api/repair-types/create-repair/route.ts'),
@@ -64,9 +64,10 @@ test('Repair Board Add Repair saves a repair type while Part 3 indirect labor re
  assert.match(form,/Repair Type/);
  assert.match(form,/Choose repair type/);
  assert.match(form,/\/api\/repair-types\/create-repair/);
- assert.match(form,/INDIRECT LABOR-OTHER/);
+ assert.match(form,/SHOP \/ NO UNIT/);
+ assert.match(form,/selectedRepairType\?\.unitRule==="optional"/);
  assert.match(route,/requireRepairType/);
  assert.match(route,/repair_type_id/);
- assert.match(route,/being enabled in Part 3/);
- assert.doesNotMatch(form,/SHOP \/ NO UNIT/);
+ assert.match(route,/mode==='no-unit'/);
+ assert.match(route,/repairType\.unitRule!=='optional'/);
 });
