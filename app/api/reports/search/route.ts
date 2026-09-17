@@ -18,6 +18,7 @@ export async function GET(request: Request) {
       equipmentType: params.get('equipmentType'),
       make: params.get('make'),
       model: params.get('model'),
+      repairType: params.get('repairType'),
       repairStatus: params.get('repairStatus'),
       technician: params.get('technician'),
       repairSource: params.get('repairSource'),

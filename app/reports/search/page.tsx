@@ -11,6 +11,7 @@ type Filters = {
   equipmentType: string;
   make: string;
   model: string;
+  repairType: string;
   repairStatus: string;
   technician: string;
   repairSource: string;
@@ -40,7 +41,7 @@ type Data = {
     operatingCost: number;
   };
   equipment: Array<{ id: number; unit: string; category: string; equipmentType: string; modelYear: number | null; make: string; model: string }>;
-  repairs: Array<{ id: number; kind: string; equipmentId: number | null; unit: string; category: string; equipmentType: string; modelYear: number | null; make: string; model: string; date: string; repair: string; status: string; technician: string; source: string; location: string; partsCost: number; laborHours: number; laborCost: number; outsideCost: number; totalCost: number }>;
+  repairs: Array<{ id: number; kind: string; equipmentId: number | null; unit: string; category: string; equipmentType: string; modelYear: number | null; make: string; model: string; date: string; repairType: string; repair: string; status: string; technician: string; source: string; location: string; partsCost: number; laborHours: number; laborCost: number; outsideCost: number; totalCost: number }>;
   maintenance: Array<{ id: number; equipmentId: number; unit: string; date: string; type: string; pmType: string; mileage: number | null; source: string; notes: string }>;
   expenses: Array<{ id: number; equipmentId: number; unit: string; date: string; category: string; amount: number; vendor: string; description: string; source: string }>;
   parts: Array<{ partNumber: string; description: string; quantity: number; repairCount: number; unitCount: number; cost: number }>;
@@ -50,6 +51,7 @@ type Data = {
     equipmentTypes: string[];
     makes: string[];
     models: string[];
+    repairTypes: string[];
     repairStatuses: string[];
     technicians: string[];
     repairSources: string[];
@@ -141,6 +143,7 @@ const blankFilters: Filters = {
   equipmentType: "",
   make: "",
   model: "",
+  repairType: "",
   repairStatus: "",
   technician: "",
   repairSource: "",
@@ -167,7 +170,7 @@ export default function ReportSearchPage() {
       const params = new URLSearchParams({ start: next.start, end: next.end });
       const pairs: Array<[string, string]> = [
         ["unit", next.unit], ["category", next.category], ["equipmentType", next.equipmentType], ["make", next.make], ["model", next.model],
-        ["repairStatus", next.repairStatus], ["technician", next.technician], ["repairSource", next.repairSource], ["repairLocation", next.repairLocation],
+        ["repairType", next.repairType], ["repairStatus", next.repairStatus], ["technician", next.technician], ["repairSource", next.repairSource], ["repairLocation", next.repairLocation],
         ["maintenanceType", next.maintenanceType], ["pmType", next.pmType], ["maintenanceSource", next.maintenanceSource],
         ["expenseCategory", next.expenseCategory], ["expenseSource", next.expenseSource], ["q", next.q],
       ];
@@ -231,7 +234,7 @@ export default function ReportSearchPage() {
         <div>
           <p style={{ margin: 0, color: "#6d28d9", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>REPORT SEARCH</p>
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Search Every Report Range</h1>
-          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 900 }}>Choose any date range, then drill into units, equipment, repairs, technicians, sources, locations, PM/annual records, expenses and parts usage.</p>
+          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 900 }}>Choose any date range, then drill into units, repair types, technicians, sources, locations, PM/annual records, expenses and parts usage.</p>
         </div>
         <button style={button} onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Run Report"}</button>
       </header>
@@ -242,19 +245,7 @@ export default function ReportSearchPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(185px,1fr))", gap: 10 }}>
           <label style={label}>Date preset
             <select style={input} value={preset} onChange={(event) => applyPreset(event.target.value)}>
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="this_week">This week</option>
-              <option value="last_7">Last 7 days</option>
-              <option value="this_month">This month</option>
-              <option value="last_30">Last 30 days</option>
-              <option value="last_90">Last 90 days</option>
-              <option value="this_quarter">This quarter</option>
-              <option value="ytd">Year to date</option>
-              <option value="this_year">This calendar year</option>
-              <option value="last_year">Last calendar year</option>
-              <option value="all">All history</option>
-              <option value="custom">Custom dates</option>
+              <option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_week">This week</option><option value="last_7">Last 7 days</option><option value="this_month">This month</option><option value="last_30">Last 30 days</option><option value="last_90">Last 90 days</option><option value="this_quarter">This quarter</option><option value="ytd">Year to date</option><option value="this_year">This calendar year</option><option value="last_year">Last calendar year</option><option value="all">All history</option><option value="custom">Custom dates</option>
             </select>
           </label>
           <label style={label}>Start date<input type="date" style={input} value={filters.start} onChange={(event) => { setPreset("custom"); set("start", event.target.value); }} /></label>
@@ -269,6 +260,7 @@ export default function ReportSearchPage() {
         <details style={{ marginTop: 14 }} open>
           <summary style={{ fontWeight: 850, cursor: "pointer" }}>Repair filters</summary>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(185px,1fr))", gap: 10, marginTop: 10 }}>
+            <SelectFilter title="Repair type" value={filters.repairType} values={data.filterOptions.repairTypes} onChange={(value) => set("repairType", value)} />
             <SelectFilter title="Repair status" value={filters.repairStatus} values={data.filterOptions.repairStatuses} onChange={(value) => set("repairStatus", value)} />
             <SelectFilter title="Technician" value={filters.technician} values={data.filterOptions.technicians} onChange={(value) => set("technician", value)} />
             <SelectFilter title="Repair source" value={filters.repairSource} values={data.filterOptions.repairSources} onChange={(value) => set("repairSource", value)} />
@@ -294,7 +286,7 @@ export default function ReportSearchPage() {
         </details>
 
         <label style={{ ...label, marginTop: 14 }}>Search everything
-          <input style={input} value={filters.q} onChange={(event) => set("q", event.target.value)} placeholder="Unit, repair, RO, source, technician, location, PM, vendor, description…" onKeyDown={(event) => { if (event.key === "Enter") void load(); }} />
+          <input style={input} value={filters.q} onChange={(event) => set("q", event.target.value)} placeholder="Unit, repair type, repair, RO, source, technician, location, PM, vendor, description…" onKeyDown={(event) => { if (event.key === "Enter") void load(); }} />
         </label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
           <button style={button} onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Apply All Filters"}</button>
@@ -306,24 +298,14 @@ export default function ReportSearchPage() {
       <div style={{ marginTop: 14, color: "#64748b", fontSize: 13 }}>Showing {data.range.startDate} through {data.range.endDate}. Date and equipment filters scope every section; repair, maintenance and expense filters apply to their matching report sections.</div>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 12 }}>
-        {[
-          ["UNITS IN SCOPE", num(data.summary.unitsInScope)],
-          ["REPAIRS / ROs", num(data.summary.repairCount)],
-          ["PARTS", money(data.summary.partsCost)],
-          ["LABOR", money(data.summary.laborCost)],
-          ["OUTSIDE / SUBLET", money(data.summary.outsideCost)],
-          ["REPAIR COST", money(data.summary.repairCost)],
-          ["PM / ANNUAL EVENTS", num(data.summary.maintenanceEvents)],
-          ["OTHER EXPENSES", money(data.summary.expenseCost)],
-          ["OPERATING COST", money(data.summary.operatingCost)],
-        ].map(([name, value]) => <article key={String(name)} style={panel}><small style={{ color: "#64748b", fontWeight: 850 }}>{name}</small><strong style={{ display: "block", fontSize: 23, marginTop: 7 }}>{value}</strong></article>)}
+        {[["UNITS IN SCOPE", num(data.summary.unitsInScope)],["REPAIRS / ROs", num(data.summary.repairCount)],["PARTS", money(data.summary.partsCost)],["LABOR", money(data.summary.laborCost)],["OUTSIDE / SUBLET", money(data.summary.outsideCost)],["REPAIR COST", money(data.summary.repairCost)],["PM / ANNUAL EVENTS", num(data.summary.maintenanceEvents)],["OTHER EXPENSES", money(data.summary.expenseCost)],["OPERATING COST", money(data.summary.operatingCost)]].map(([name, value]) => <article key={String(name)} style={panel}><small style={{ color: "#64748b", fontWeight: 850 }}>{name}</small><strong style={{ display: "block", fontSize: 23, marginTop: 7 }}>{value}</strong></article>)}
       </section>
 
       {anyTruncated && <div style={{ ...panel, marginTop: 18, borderColor: "#f2c66d", background: "#fff8e6" }}>More than 5,000 rows match at least one section. Totals remain calculated across the full match; narrow the filters to inspect every individual row.</div>}
 
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}><div><h2 style={{ margin: 0 }}>Repair & RO History</h2><small style={{ color: "#64748b" }}>{data.summary.currentRepairCount} software repairs + {data.summary.historicalRepairCount} imported historical ROs</small></div><button style={button} onClick={() => downloadCsv(`repairs-${rangeSlug}.csv`, data.repairs)}>Export CSV</button></div>
-        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1450 }}><thead><tr>{["Date","Unit","Type","Repair / RO","Status","Technician","Source","Location","Parts","Labor","Outside","Total"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.repairs.map((row) => <tr key={`${row.kind}-${row.id}`}><td style={td}>{row.date}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.kind}</td><td style={td}>{row.repair}</td><td style={td}>{row.status}</td><td style={td}>{row.technician}</td><td style={td}>{row.source}</td><td style={td}>{row.location || "—"}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td></tr>)}</tbody></table></div>
+        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1580 }}><thead><tr>{["Date","Unit","Type","Repair Type","Repair / RO","Status","Technician","Source","Location","Parts","Labor","Outside","Total"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.repairs.map((row) => <tr key={`${row.kind}-${row.id}`}><td style={td}>{row.date}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.kind}</td><td style={{...td,fontWeight:850}}>{row.repairType}</td><td style={td}>{row.repair}</td><td style={td}>{row.status}</td><td style={td}>{row.technician}</td><td style={td}>{row.source}</td><td style={td}>{row.location || "—"}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td></tr>)}</tbody></table></div>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))", gap: 18, marginTop: 18 }}>
@@ -338,7 +320,7 @@ export default function ReportSearchPage() {
       </section>
 
       <section style={{ ...panel, marginTop: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Parts Usage</h2><small style={{ color: "#64748b" }}>Current software repair part lines matching the selected repair scope.</small></div><button style={button} onClick={() => downloadCsv(`parts-${rangeSlug}.csv`, data.parts)}>Export CSV</button></div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Parts Usage</h2><small style={{ color: "#64748b" }}>Current software repair part lines matching the selected repair scope, including Repair Type.</small></div><button style={button} onClick={() => downloadCsv(`parts-${rangeSlug}.csv`, data.parts)}>Export CSV</button></div>
         <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}><thead><tr>{["Part","Description","Qty","Repairs","Units","Cost"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.parts.map((row) => <tr key={row.partNumber}><td style={{ ...td, fontWeight: 850 }}>{row.partNumber}</td><td style={td}>{row.description}</td><td style={td}>{num(row.quantity, 2)}</td><td style={td}>{row.repairCount}</td><td style={td}>{row.unitCount}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.cost)}</td></tr>)}</tbody></table></div>
       </section>
     </main>

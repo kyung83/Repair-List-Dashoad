@@ -5,6 +5,7 @@ import { getDerivedPartAvailability, requestPartDerived } from '@/lib/derived-re
 import { getRepairPartRequests } from '@/lib/parts-lifecycle';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { normalizeYard } from '@/lib/yards';
+import { completeRepairTypeChecklist, validateRepairTypeChecklistBeforeClose } from '@/lib/repair-types';
 import { GET as originalGET } from './original';
 import { GET as legacyGET, POST as legacyPOST } from './route-legacy';
 
@@ -271,13 +272,15 @@ export async function POST(request: Request) {
     try {
       const repairId = numericRepairId(body.repairId);
       if (!repairId) throw new Error('Repair was not found.');
+      await validateRepairTypeChecklistBeforeClose(env.DB,repairId);
       const dvir = await markLinkedDvirRepairedBeforeShopCompletion(request.clone(),repairId);
       const response = await legacyPOST(request);
+      if (response.ok) await completeRepairTypeChecklist(env.DB,repairId);
       if (!response.ok || !dvir.linked) return response;
       const payload = await response.json() as Record<string,unknown>;
       return Response.json({...payload,geotabRepaired:dvir.geotabRepaired},{status:response.status,headers:{'cache-control':'no-store'}});
     } catch (error) {
-      return Response.json({error:error instanceof Error?error.message:'DVIR repair could not be completed.'},{status:409});
+      return Response.json({error:error instanceof Error?error.message:'Repair could not be completed.'},{status:409});
     }
   }
 

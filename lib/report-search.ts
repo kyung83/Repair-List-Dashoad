@@ -6,6 +6,7 @@ type SearchInput = {
   equipmentType?: unknown;
   make?: unknown;
   model?: unknown;
+  repairType?: unknown;
   repairStatus?: unknown;
   technician?: unknown;
   repairSource?: unknown;
@@ -38,6 +39,7 @@ type RepairRow = {
   make: string;
   model: string;
   title: string;
+  repair_type: string;
   status: string;
   source: string;
   opened_at: string;
@@ -173,6 +175,7 @@ function normalizeInput(raw: SearchInput) {
     equipmentType: text(raw.equipmentType, 80),
     make: text(raw.make, 100),
     model: text(raw.model, 100),
+    repairType: text(raw.repairType, 100),
     repairStatus: text(raw.repairStatus, 100),
     technician: text(raw.technician, 160),
     repairSource: text(raw.repairSource, 120),
@@ -216,19 +219,21 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   const repairClauses = [`substr(r.opened_at,1,10) BETWEEN ? AND ?`];
   const repairBinds: unknown[] = [input.startDate, input.endDate];
   addEquipmentFilters('e', input, repairClauses, repairBinds);
+  if (input.repairType) { repairClauses.push(`lower(trim(COALESCE(NULLIF(rt.name,''),'Uncategorized'))) = lower(trim(?))`); repairBinds.push(input.repairType); }
   if (input.repairStatus) { repairClauses.push(`lower(trim(COALESCE(r.status,''))) = lower(trim(?))`); repairBinds.push(input.repairStatus); }
   if (input.technician) { repairClauses.push(`lower(trim(COALESCE(t.name,r.driver,''))) = lower(trim(?))`); repairBinds.push(input.technician); }
   if (input.repairSource) { repairClauses.push(`lower(trim(COALESCE(r.source,''))) = lower(trim(?))`); repairBinds.push(input.repairSource); }
   if (input.repairLocation) { repairClauses.push(`lower(trim(COALESCE(r.location,''))) = lower(trim(?))`); repairBinds.push(input.repairLocation); }
   if (input.query) {
-    repairClauses.push(`lower(COALESCE(e.unit,'') || ' ' || COALESCE(r.title,'') || ' ' || COALESCE(r.status,'') || ' ' || COALESCE(r.source,'') || ' ' || COALESCE(t.name,r.driver,'') || ' ' || COALESCE(r.location,'')) LIKE ?`);
+    repairClauses.push(`lower(COALESCE(e.unit,'') || ' ' || COALESCE(r.title,'') || ' ' || COALESCE(rt.name,'Uncategorized') || ' ' || COALESCE(r.status,'') || ' ' || COALESCE(r.source,'') || ' ' || COALESCE(t.name,r.driver,'') || ' ' || COALESCE(r.location,'')) LIKE ?`);
     repairBinds.push(`%${input.query.toLowerCase()}%`);
   }
 
   const repairSql = `
     WITH repair_data AS (
       SELECT r.id,r.equipment_id,COALESCE(e.unit,'') AS unit,COALESCE(e.category,'') AS category,COALESCE(e.equipment_type,'') AS equipment_type,
-             e.model_year,COALESCE(e.make,'') AS make,COALESCE(e.model,'') AS model,r.title,COALESCE(r.status,'') AS status,
+             e.model_year,COALESCE(e.make,'') AS make,COALESCE(e.model,'') AS model,r.title,
+             COALESCE(NULLIF(rt.name,''),'Uncategorized') AS repair_type,COALESCE(r.status,'') AS status,
              COALESCE(r.source,'') AS source,r.opened_at,r.completed_at,COALESCE(t.name,r.driver,'') AS technician,
              COALESCE(r.location,'') AS location,COALESCE(r.labor_hours,0) AS labor_hours,COALESCE(r.labor_rate,0) AS labor_rate,
              COALESCE(r.outside_cost,0) AS outside_cost,
@@ -236,6 +241,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
       FROM repairs r
       LEFT JOIN equipment e ON e.id=r.equipment_id
       LEFT JOIN technicians t ON t.id=r.technician_id
+      LEFT JOIN repair_types rt ON rt.id=r.repair_type_id
       WHERE ${repairClauses.join(' AND ')}
     )
     SELECT *,COUNT(*) OVER() AS filtered_count,
@@ -250,6 +256,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   const historyClauses = [`substr(h.ro_date,1,10) BETWEEN ? AND ?`, `e.active=1`];
   const historyBinds: unknown[] = [input.startDate, input.endDate];
   addEquipmentFilters('e', input, historyClauses, historyBinds);
+  if (input.repairType) historyClauses.push('1=0');
   if (input.repairStatus) { historyClauses.push(`lower(trim(COALESCE(h.source_status,''))) = lower(trim(?))`); historyBinds.push(input.repairStatus); }
   if (input.repairSource && input.repairSource.toLowerCase() !== 'historical ro import') historyClauses.push('1=0');
   if (input.technician && input.technician.toLowerCase() !== 'historical import') historyClauses.push('1=0');
@@ -318,13 +325,14 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
            COUNT(DISTINCT r.equipment_id) AS unit_count,
            COALESCE(SUM(rp.quantity*COALESCE(rp.unit_cost,p.unit_cost,0)),0) AS cost
     FROM repair_parts rp JOIN repairs r ON r.id=rp.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id
-    LEFT JOIN technicians t ON t.id=r.technician_id JOIN parts p ON p.id=rp.part_id
+    LEFT JOIN technicians t ON t.id=r.technician_id LEFT JOIN repair_types rt ON rt.id=r.repair_type_id JOIN parts p ON p.id=rp.part_id
     WHERE ${partClauses.join(' AND ')}
     GROUP BY p.id,p.part_number,p.description
     ORDER BY cost DESC,quantity DESC,p.part_number COLLATE NOCASE LIMIT 1000
   `).bind(...partBinds).all<PartRow>();
 
   const optionPromises = Promise.all([
+    distinctValues(db, `SELECT value FROM (SELECT name AS value FROM repair_types WHERE active=1 UNION SELECT 'Uncategorized' AS value WHERE EXISTS(SELECT 1 FROM repairs WHERE repair_type_id IS NULL)) ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT COALESCE(status,'') AS value FROM repairs UNION SELECT DISTINCT COALESCE(source_status,'') FROM historical_repairs ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT COALESCE(t.name,r.driver,'') AS value FROM repairs r LEFT JOIN technicians t ON t.id=r.technician_id UNION SELECT 'Historical import' ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT COALESCE(source,'') AS value FROM repairs UNION SELECT 'Historical RO import' ORDER BY value COLLATE NOCASE`),
@@ -362,6 +370,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
         make: row.make,
         model: row.model,
         date: row.opened_at.slice(0, 10),
+        repairType: row.repair_type || 'Uncategorized',
         repair: row.title,
         status: row.status,
         technician: row.technician || 'Unassigned',
@@ -385,6 +394,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
       make: row.make,
       model: row.model,
       date: row.ro_date.slice(0, 10),
+      repairType: 'Historical RO',
       repair: `RO ${row.ro_number}`,
       status: row.source_status,
       technician: 'Historical import',
@@ -416,7 +426,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   const repairOutside = Number(currentTotals?.filtered_outside ?? 0) + Number(historicalTotals?.filtered_outside ?? 0);
   const repairTotal = Number(currentTotals?.filtered_total ?? 0) + Number(historicalTotals?.filtered_total ?? 0);
 
-  const [statuses, technicians, repairSources, repairLocations, maintenanceTypes, pmTypes, maintenanceSources, expenseCategories, expenseSources] = options;
+  const [repairTypes,statuses, technicians, repairSources, repairLocations, maintenanceTypes, pmTypes, maintenanceSources, expenseCategories, expenseSources] = options;
 
   return {
     range: { startDate: input.startDate, endDate: input.endDate },
@@ -459,6 +469,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
       equipmentTypes: [...new Set(equipment.map((row) => row.equipmentType).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
       makes: [...new Set(equipment.map((row) => row.make).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
       models: [...new Set(equipment.map((row) => row.model).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+      repairTypes,
       repairStatuses: statuses,
       technicians,
       repairSources,
