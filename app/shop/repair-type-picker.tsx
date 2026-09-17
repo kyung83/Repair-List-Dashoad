@@ -15,7 +15,7 @@ export default function RepairTypePicker({repairId,equipmentId}:Props){
   async function save(next:string){
     setValue(next);if(!next)return;
     setBusy(true);setMessage("");
-    try{const response=await fetch("/api/repair-types/repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({repairId,repairTypeId:Number(next)})});const payload=await response.json() as {ok?:boolean;error?:string;warning?:string};if(!response.ok||!payload.ok)throw new Error(payload.error||"Repair type could not be saved.");setMessage(payload.warning||"Repair type saved.");await load();window.dispatchEvent(new Event("shop-jobs-refresh"))}catch(error){setMessage(error instanceof Error?error.message:"Repair type could not be saved.");await load().catch(()=>undefined)}finally{setBusy(false)}
+    try{const response=await fetch("/api/shop/found-repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"setRepairType",repairId,repairTypeId:Number(next)})});const payload=await response.json() as {ok?:boolean;error?:string;warning?:string};if(!response.ok||!payload.ok)throw new Error(payload.error||"Repair type could not be saved.");setMessage(payload.warning||"Repair type saved.");await load();window.dispatchEvent(new Event("shop-jobs-refresh"))}catch(error){setMessage(error instanceof Error?error.message:"Repair type could not be saved.");await load().catch(()=>undefined)}finally{setBusy(false)}
   }
 
   if(!data&&!message)return null;
