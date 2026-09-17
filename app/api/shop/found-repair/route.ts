@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { getTirePositionStatus, replaceTirePositions } from '@/lib/tire-position-db';
+import { requireRepairType } from '@/lib/repair-types';
 
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
@@ -157,18 +158,19 @@ export async function POST(request: Request) {
     if (active.equipment_id === null) {
       throw new Error('This repair is not linked to a fleet unit, so another repair cannot be added from the unit workspace.');
     }
+    const repairType = await requireRepairType(env.DB, body.repairTypeId);
 
     const result = await env.DB.prepare(`
-      INSERT INTO repairs (equipment_id, title, status, priority, source, location, technician_id, updated_at)
-      VALUES (?, ?, 'Open', '2', 'manual', ?, ?, CURRENT_TIMESTAMP)
-    `).bind(active.equipment_id, issue, active.location, technician.id).run();
+      INSERT INTO repairs (equipment_id, title, status, priority, source, location, technician_id, repair_type_id, updated_at)
+      VALUES (?, ?, 'Open', '2', 'manual', ?, ?, ?, CURRENT_TIMESTAMP)
+    `).bind(active.equipment_id, issue, active.location, technician.id, repairType.id).run();
     const id = Number(result.meta.last_row_id);
     if (!id) throw new Error('The repair could not be added.');
 
     await env.DB.prepare(`
       INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
       VALUES (?, ?, ?, 'repair_created_by_technician', ?)
-    `).bind(id, user.id, technician.id, `${technician.name} found additional work on Unit ${active.unit || active.equipment_id}: ${issue}`.slice(0, 500)).run();
+    `).bind(id, user.id, technician.id, `${technician.name} found ${repairType.name} work on Unit ${active.unit || active.equipment_id}: ${issue}`.slice(0, 500)).run();
 
     return Response.json({
       ok:true,
@@ -177,6 +179,8 @@ export async function POST(request: Request) {
       equipmentId:Number(active.equipment_id),
       unit:active.unit,
       issue,
+      repairTypeId:repairType.id,
+      repairType:repairType.name,
       status:'Open',
       priority:2,
       technicianId:technician.id,
