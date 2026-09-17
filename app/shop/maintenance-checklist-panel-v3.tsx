@@ -5,6 +5,7 @@ import MaintenanceChecklistPanelV2 from './maintenance-checklist-panel-v2';
 import PmSheetDetails from './pm-sheet-details';
 import TechnicianRepairTools from './technician-repair-tools-v2';
 import TechnicianRepairReview from './technician-repair-review';
+import RepairTypeChecklistPanel from './repair-type-checklist-panel';
 import type {ChecklistData,Part} from './maintenance-types';
 
 type Props={repairId:string;canWork:boolean;parts?:Part[];children?:ReactNode};
@@ -39,6 +40,7 @@ export default function MaintenanceChecklistPanelV3(props:Props){
   const maintenanceProgress=checklist?`${checklist.items.filter(item=>item.result!=='pending').length}/${checklist.items.length} answered`:'';
 
   return <>
+    <RepairTypeChecklistPanel repairId={props.repairId} canWork={props.canWork}/>
     {checklist&&<section style={maintenanceLauncher}>
       <button type="button" onClick={()=>setInspectionOpen(open=>!open)} style={maintenanceLauncherButton} aria-expanded={inspectionOpen}>
         <span style={maintenanceLauncherIcon}>▣</span>
