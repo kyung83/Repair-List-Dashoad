@@ -5,11 +5,13 @@ import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
 import RepairPhotoControl from "./repair-photo-control";
 import TechnicianRepairTools from "./technician-repair-tools-v2";
+import RepairTypePicker from "./repair-type-picker";
+import RepairTypeChecklistPanel from "./repair-type-checklist-panel";
 
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
 type LaborEntry={id:number;technician:string;laborDate:string;hours:number;rate:number;notes:string};
-type Repair={id:string;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
+type Repair={id:string;equipmentId:number|null;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
 type PartRequest={id:number;repairId:string;partNumber:string;description:string;reservedQuantity:number;shortageQuantity:number};
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
 
@@ -39,7 +41,8 @@ function state(repair:Repair,activeId:string){if(repair.id===activeId)return "WO
 export default function CurrentWorkHome(props:Props){
   const {timer,repair,unitRepairs,requests,technicianId,now,busy}=props;
   const runningTime=duration(timer.startedAt,now);
-  const unitHref=`/unit?unit=${encodeURIComponent(repair.unit)}`;
+  const noUnit=repair.equipmentId===null;
+  const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
   const repairMine=repair.technicianId===technicianId&&technicianId!==null;
   const otherRepairs=unitRepairs.filter(item=>item.id!==timer.repairId);
 
@@ -50,26 +53,29 @@ export default function CurrentWorkHome(props:Props){
       {props.message&&<div style={notice}>{props.message}</div>}
 
       <section style={unitStrip}>
-        <div><span style={crumb}>MY WORK · WORKING NOW</span><a href={unitHref} style={unitLink}>Unit {repair.unit||"—"} ↗</a></div>
-        <div style={unitStatus}><strong>REPAIR</strong><span>● Open</span></div>
+        <div><span style={crumb}>MY WORK · WORKING NOW</span>{noUnit?<strong style={shopLabel}>SHOP / NO UNIT</strong>:<a href={unitHref} style={unitLink}>Unit {repair.unit||"—"} ↗</a>}</div>
+        <div style={unitStatus}><strong>{noUnit?"SHOP LABOR":"REPAIR"}</strong><span>● Open</span></div>
       </section>
 
       <section style={workingCard}>
-        <div style={{minWidth:0}}><p style={workingEyebrow}>WORKING NOW</p><h1 style={workingUnit}>Unit {timer.unit||repair.unit||"—"}</h1><div style={workingIssue}>{timer.title||repair.issue}</div><div style={tracking}>● &nbsp; Labor is tracking automatically while this unit is open.</div></div>
+        <div style={{minWidth:0}}><p style={workingEyebrow}>WORKING NOW</p><h1 style={workingUnit}>{noUnit?"SHOP / NO UNIT":`Unit ${timer.unit||repair.unit||"—"}`}</h1><div style={workingIssue}>{timer.title||repair.issue}</div><div style={tracking}>● &nbsp; Labor is tracking automatically while this work is open.</div></div>
         <div style={timerStyle}>◷ {runningTime}</div>
       </section>
 
-      <section style={actionGrid}>
-        <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>REPAIRED</strong><small>Save labor & close this repair</small></button>
+      <RepairTypePicker repairId={repair.id} equipmentId={repair.equipmentId}/>
+      <RepairTypeChecklistPanel repairId={repair.id} canWork={repairMine}/>
+
+      <section style={{...actionGrid,gridTemplateColumns:noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))"}}>
+        <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>{noUnit?"Save labor & close this shop task":"Save labor & close this repair"}</small></button>
         <button disabled={busy} onClick={props.onDoneWorking} style={doneButton}><span style={actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Hand off / leave unassigned</small></button>
-        <FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>
+        {!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>} 
       </section>
 
       {props.handoffPanel}
 
-      <RepairPhotoControl repairId={repair.id} canWork />
+      {!noUnit&&<RepairPhotoControl repairId={repair.id} canWork />}
 
-      {repairMine&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
+      {!noUnit&&repairMine&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
 
       {otherRepairs.length>0&&<section style={card}>
         <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{otherRepairs.length}</span></div>
@@ -79,22 +85,22 @@ export default function CurrentWorkHome(props:Props){
       {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
 
       {repairMine&&<MaintenanceChecklistPanel repairId={repair.id} canWork>
-        <section style={twoCol}>
-          <div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
+        <section style={{...twoCol,gridTemplateColumns:noUnit?"1fr":"repeat(2,minmax(0,1fr))"}}>
+          {!noUnit&&<div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
             {requests.length>0&&<div style={requestList}>{requests.map(request=><div key={request.id} style={requestRow}><span><b>{request.partNumber}</b><br/><small>{numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</small></span>{request.reservedQuantity>0&&<button disabled={busy} onClick={()=>props.onUseReservedPart(request)} style={smallButton}>Use Reserved</button>}</div>)}</div>}
             {repair.plannedParts.length>0&&<div style={requestList}>{repair.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity);return <div key={planned.id} style={requestRow}><span><b>{planned.partNumber}</b><br/><small>{numberText(remaining)} remaining · {planned.description}</small></span>{remaining>0&&<button disabled={busy} onClick={()=>props.onUsePlannedPart(repair,planned)} style={smallButton}>Use / Request</button>}</div>})}</div>}
-          </div>
-          <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current Repair Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours on Unit</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
+          </div>}
+          <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current Work Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
         </section>
       </MaintenanceChecklistPanel>}
 
-      <nav style={quickTools} aria-label="Current repair tools">
+      {!noUnit&&<nav style={quickTools} aria-label="Current repair tools">
         <a href="/repair-board" style={quickButton}>▣<span>DVIR</span></a>
         <button type="button" onClick={()=>window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})} style={quickButton}>▤<span>Photos</span></button>
         <a href={unitHref} style={quickButton}>◷<span>History</span></a>
         <a href={unitHref} style={quickButton}>▰<span>Unit Info</span></a>
         <button type="button" onClick={goToFinalReview} style={finalButton}>▧<span>Final Review</span></button>
-      </nav>
+      </nav>}
     </div>
   </main>;
 }
@@ -105,6 +111,7 @@ const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,bac
 const unitStrip={display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",padding:"14px 16px",borderRadius:14,background:"white",border:"1px solid #dbe2e8",boxShadow:"0 5px 18px #13283d0b"} as const;
 const crumb={display:"block",fontSize:11,fontWeight:900,color:"#617181",letterSpacing:".08em",marginBottom:4} as const;
 const unitLink={display:"block",fontSize:27,fontWeight:950,color:"#102a53",textDecoration:"none"} as const;
+const shopLabel={display:"block",fontSize:25,fontWeight:950,color:"#102a53"} as const;
 const unitStatus={display:"grid",justifyItems:"end",gap:5,fontSize:12,color:"#5f6f7d"} as const;
 const workingCard={display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",padding:"19px",borderRadius:16,background:"linear-gradient(135deg,#102a43,#0d1b2b)",color:"white",boxShadow:"0 9px 26px #102a432b"} as const;
 const workingEyebrow={margin:"0 0 5px",fontSize:12,fontWeight:950,letterSpacing:".15em",color:"#ff8b32"} as const;
