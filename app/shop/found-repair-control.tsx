@@ -3,27 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 
 type Props={repairId:string;unit:string;onAdded:()=>Promise<void>|void};
-type RepairType={id:number;name:string;unitRule:"required"|"optional"};
 type TirePosition={code:string;label:string};
 type TireAxle={axle:number;label:string;positions:TirePosition[]};
 type TireStatus={required:boolean;equipmentType:string;axles:TireAxle[];positions:string[]};
 type Result={
-  ok?:boolean;error?:string;repairId?:string;unit?:string;issue?:string;foundRepair?:boolean;repairType?:string;
+  ok?:boolean;error?:string;repairId?:string;unit?:string;issue?:string;foundRepair?:boolean;
   tirePositionsSaved?:boolean;tirePosition?:TireStatus;
 };
 
 function samePositions(left:string[],right:string[]){if(left.length!==right.length)return false;const a=[...left].sort(),b=[...right].sort();return a.every((value,index)=>value===b[index])}
 
 export default function FoundRepairControl({repairId,unit,onAdded}:Props){
-  const[open,setOpen]=useState(false),[issue,setIssue]=useState(""),[repairTypeId,setRepairTypeId]=useState(""),[repairTypes,setRepairTypes]=useState<RepairType[]>([]),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+  const[open,setOpen]=useState(false),[issue,setIssue]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
   const[tire,setTire]=useState<TireStatus|null>(null),[selectedPositions,setSelectedPositions]=useState<string[]>([]),[tireMessage,setTireMessage]=useState(""),[tireLoaded,setTireLoaded]=useState(false);
   const controlRef=useRef<HTMLDivElement|null>(null);
 
   useEffect(()=>{
     let cancelled=false;setTireLoaded(false);
     async function loadRepairDetails(){try{const response=await fetch(`/api/shop/found-repair?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});const result=await response.json() as Result;if(!response.ok||!result.ok)throw new Error(result.error||"Repair details could not be loaded.");if(cancelled)return;const next=result.tirePosition??null;setTire(next);setSelectedPositions(next?.positions??[]);setTireMessage("");setTireLoaded(true)}catch(error){if(!cancelled){setTireLoaded(false);setTireMessage(error instanceof Error?error.message:"Repair details could not be loaded.")}}}
-    async function loadTypes(){try{const response=await fetch("/api/repair-types",{cache:"no-store"});const payload=await response.json() as{types?:RepairType[]};if(!cancelled&&response.ok)setRepairTypes(payload.types??[])}catch{}}
-    void loadRepairDetails();void loadTypes();return()=>{cancelled=true};
+    void loadRepairDetails();return()=>{cancelled=true};
   },[repairId]);
 
   const savedPositions=tire?.positions??[];
@@ -39,9 +37,9 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
   async function saveTirePositions(){if(!selectedPositions.length){setTireMessage("Choose at least one tire position.");return}setBusy(true);setTireMessage("");try{const response=await fetch("/api/shop/found-repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"saveTirePositions",repairId,positions:selectedPositions})});const result=await response.json() as Result;if(!response.ok||!result.ok)throw new Error(result.error||"Tire positions could not be saved.");if(result.tirePosition){setTire(result.tirePosition);setSelectedPositions(result.tirePosition.positions);setTireLoaded(true)}setTireMessage(`Saved ${result.tirePosition?.positions.join(", ")||selectedPositions.join(", ")}. You can now mark the repair REPAIRED.`)}catch(error){setTireMessage(error instanceof Error?error.message:"Tire positions could not be saved.")}finally{setBusy(false)}}
 
   async function save(){
-    const value=issue.trim();if(!repairTypeId){setMessage("Choose a repair type.");return}if(!value){setMessage("Enter what you found.");return}
+    const value=issue.trim();if(!value){setMessage("Enter what you found.");return}
     setBusy(true);setMessage("");
-    try{const response=await fetch("/api/shop/found-repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"foundRepair",repairId,repairTypeId:Number(repairTypeId),issue:value})});const result=await response.json() as Result;if(!response.ok||!result.ok)throw new Error(result.error||"Repair could not be added.");setIssue("");setRepairTypeId("");setOpen(false);setMessage(`${result.repairType||"Repair"} added to Unit ${result.unit||unit}. Your current labor timer is still running.`);await onAdded()}catch(error){setMessage(error instanceof Error?error.message:"Repair could not be added.")}finally{setBusy(false)}
+    try{const response=await fetch("/api/shop/found-repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"foundRepair",repairId,issue:value})});const result=await response.json() as Result;if(!response.ok||!result.ok)throw new Error(result.error||"Repair could not be added.");setIssue("");setOpen(false);setMessage(`Repair added to Unit ${result.unit||unit}. The Repair Type will be selected when that repair is worked.`);await onAdded()}catch(error){setMessage(error instanceof Error?error.message:"Repair could not be added.")}finally{setBusy(false)}
   }
 
   return <>
@@ -54,7 +52,7 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
 
     <div ref={controlRef} style={{display:"grid",gap:8}}>
       <button disabled={busy} onClick={()=>{setOpen(current=>!current);setMessage("")}} style={foundButton}>FOUND SOMETHING ELSE<span style={foundHelp}>Add another Open repair to this unit · keep working</span></button>
-      {open&&<div style={formBox}><select value={repairTypeId} onChange={event=>setRepairTypeId(event.target.value)} style={inputStyle} disabled={busy}><option value="">Choose repair type…</option>{repairTypes.map(type=><option key={type.id} value={type.id}>{type.name}</option>)}</select><input value={issue} onChange={event=>setIssue(event.target.value)} placeholder="What else did you find?" style={inputStyle} autoFocus disabled={busy}/><div style={{display:"flex",gap:7}}><button type="button" onClick={()=>{setOpen(false);setIssue("");setRepairTypeId("");setMessage("")}} style={cancelButton} disabled={busy}>Cancel</button><button type="button" onClick={()=>void save()} style={saveButton} disabled={busy}>{busy?"Adding…":"Add repair"}</button></div></div>}
+      {open&&<div style={formBox}><input value={issue} onChange={event=>setIssue(event.target.value)} placeholder="What else did you find?" style={inputStyle} autoFocus disabled={busy}/><div style={{display:"flex",gap:7}}><button type="button" onClick={()=>{setOpen(false);setIssue("");setMessage("")}} style={cancelButton} disabled={busy}>Cancel</button><button type="button" onClick={()=>void save()} style={saveButton} disabled={busy}>{busy?"Adding…":"Add repair"}</button></div></div>}
       {message&&<div style={{fontSize:12,fontWeight:800,color:message.includes("added to Unit")?"#176440":"#8a3a2e"}}>{message}</div>}
       {!tire?.required&&tireMessage&&<div style={{fontSize:12,fontWeight:800,color:"#8a3a2e"}}>{tireMessage}</div>}
     </div>
