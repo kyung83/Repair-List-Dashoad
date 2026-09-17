@@ -39,9 +39,11 @@ function state(repair:Repair,activeId:string){if(repair.id===activeId)return "WO
 export default function CurrentWorkHome(props:Props){
   const {timer,repair,unitRepairs,requests,technicianId,now,busy}=props;
   const runningTime=duration(timer.startedAt,now);
-  const unitHref=`/unit?unit=${encodeURIComponent(repair.unit)}`;
+  const noUnit=!String(repair.unit||timer.unit||"").trim();
+  const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
   const repairMine=repair.technicianId===technicianId&&technicianId!==null;
   const otherRepairs=unitRepairs.filter(item=>item.id!==timer.repairId);
+  const visibleOtherRepairs=noUnit?[]:otherRepairs;
 
   function goToFinalReview(){window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
 
@@ -50,51 +52,51 @@ export default function CurrentWorkHome(props:Props){
       {props.message&&<div style={notice}>{props.message}</div>}
 
       <section style={unitStrip}>
-        <div><span style={crumb}>MY WORK · WORKING NOW</span><a href={unitHref} style={unitLink}>Unit {repair.unit||"—"} ↗</a></div>
-        <div style={unitStatus}><strong>REPAIR</strong><span>● Open</span></div>
+        <div><span style={crumb}>MY WORK · WORKING NOW</span>{noUnit?<strong style={unitLink}>SHOP / NO UNIT</strong>:<a href={unitHref} style={unitLink}>Unit {repair.unit} ↗</a>}</div>
+        <div style={unitStatus}><strong>{noUnit?"SHOP LABOR":"REPAIR"}</strong><span>● Open</span></div>
       </section>
 
       <section style={workingCard}>
-        <div style={{minWidth:0}}><p style={workingEyebrow}>WORKING NOW</p><h1 style={workingUnit}>Unit {timer.unit||repair.unit||"—"}</h1><div style={workingIssue}>{timer.title||repair.issue}</div><div style={tracking}>● &nbsp; Labor is tracking automatically while this unit is open.</div></div>
+        <div style={{minWidth:0}}><p style={workingEyebrow}>WORKING NOW</p><h1 style={workingUnit}>{noUnit?"SHOP / NO UNIT":`Unit ${timer.unit||repair.unit}`}</h1><div style={workingIssue}>{timer.title||repair.issue}</div><div style={tracking}>● &nbsp; Labor is tracking automatically {noUnit?"to you, not to a fleet unit.":"while this unit is open."}</div></div>
         <div style={timerStyle}>◷ {runningTime}</div>
       </section>
 
-      <section style={actionGrid}>
-        <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>REPAIRED</strong><small>Save labor & close this repair</small></button>
-        <button disabled={busy} onClick={props.onDoneWorking} style={doneButton}><span style={actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Hand off / leave unassigned</small></button>
-        <FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>
+      <section style={{...actionGrid,gridTemplateColumns:noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))"}}>
+        <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
+        <button disabled={busy} onClick={props.onDoneWorking} style={doneButton}><span style={actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Keep open / hand off</small></button>
+        {!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>} 
       </section>
 
       {props.handoffPanel}
 
       <RepairPhotoControl repairId={repair.id} canWork />
 
-      {repairMine&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
+      {repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
 
-      {otherRepairs.length>0&&<section style={card}>
-        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{otherRepairs.length}</span></div>
-        <div style={repairList}>{otherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
+      {visibleOtherRepairs.length>0&&<section style={card}>
+        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
+        <div style={repairList}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
       </section>}
 
       {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
 
       {repairMine&&<MaintenanceChecklistPanel repairId={repair.id} canWork>
         <section style={twoCol}>
-          <div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
+          {!noUnit&&<div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
             {requests.length>0&&<div style={requestList}>{requests.map(request=><div key={request.id} style={requestRow}><span><b>{request.partNumber}</b><br/><small>{numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</small></span>{request.reservedQuantity>0&&<button disabled={busy} onClick={()=>props.onUseReservedPart(request)} style={smallButton}>Use Reserved</button>}</div>)}</div>}
             {repair.plannedParts.length>0&&<div style={requestList}>{repair.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity);return <div key={planned.id} style={requestRow}><span><b>{planned.partNumber}</b><br/><small>{numberText(remaining)} remaining · {planned.description}</small></span>{remaining>0&&<button disabled={busy} onClick={()=>props.onUsePlannedPart(repair,planned)} style={smallButton}>Use / Request</button>}</div>})}</div>}
-          </div>
-          <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current Repair Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours on Unit</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
+          </div>}
+          <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current {noUnit?"Work":"Repair"} Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours {noUnit?"on Work Order":"on Unit"}</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
         </section>
       </MaintenanceChecklistPanel>}
 
-      <nav style={quickTools} aria-label="Current repair tools">
+      {!noUnit&&<nav style={quickTools} aria-label="Current repair tools">
         <a href="/repair-board" style={quickButton}>▣<span>DVIR</span></a>
         <button type="button" onClick={()=>window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})} style={quickButton}>▤<span>Photos</span></button>
         <a href={unitHref} style={quickButton}>◷<span>History</span></a>
         <a href={unitHref} style={quickButton}>▰<span>Unit Info</span></a>
         <button type="button" onClick={goToFinalReview} style={finalButton}>▧<span>Final Review</span></button>
-      </nav>
+      </nav>}
     </div>
   </main>;
 }
@@ -126,7 +128,7 @@ const repairRow={width:"100%",display:"grid",gridTemplateColumns:"minmax(0,1fr) 
 const repairMeta={marginTop:4,fontSize:11,color:"#667482",fontWeight:800} as const;
 const chevron={fontSize:28,color:"#102a53"} as const;
 const handoffNotice={padding:"12px",border:"1px solid #75a6df",borderRadius:11,background:"#f2f7fd",fontSize:12,color:"#24445f",display:"grid",gap:4} as const;
-const twoCol={display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginTop:12} as const;
+const twoCol={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginTop:12} as const;
 const miniCard={padding:"14px",borderRadius:13,background:"white",border:"1px solid #d8e0e7",minWidth:0} as const;
 const miniTitle={display:"block",fontSize:15,color:"#102a53",marginBottom:9} as const;
 const empty={fontSize:12,color:"#7a8791"} as const;
