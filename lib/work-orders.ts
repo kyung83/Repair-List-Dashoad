@@ -30,6 +30,7 @@ type DvirRow = { geotab_defect_id:string; asset_unit:string; driver:string|null;
 type LaborRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; labor_date:string; hours:number; rate:number; notes:string|null; started_at:string|null; ended_at:string|null };
 type LaborEventRow = { id:number; repair_id:number; user_id:number|null; technician_id:number|null; action:string; detail:string; created_at:string };
 type TechnicianNoteRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; detail:string; created_at:string };
+type RepairPhotoRow = { id:number; repair_id:number; object_key:string; file_name:string|null; content_type:string|null; note:string|null; created_at:string };
 type TimerSegment = { startedAt:string; endedAt:string; hours:number|null };
 
 function repairNumber(value:unknown){const match=String(value??'').match(/^repair-(\d+)$/);if(!match)throw new Error('Repair row not found');return Number(match[1]);}
@@ -47,9 +48,10 @@ function detroitDate(value:string){
 function laborSegmentKey(repairId:number,technicianId:number|null){return `${repairId}|${technicianId??'none'}`;}
 function laborActorKey(row:LaborEventRow){return `${row.repair_id}|${row.technician_id??'none'}|${row.user_id??'none'}`;}
 function hoursFromStopDetail(detail:string){const match=detail.match(/saved at\s+([0-9]+(?:\.[0-9]+)?)\s+hours/i);return match?Number(match[1]):null;}
+function repairPhotoUrl(key:string){return `/api/photos/${key.split('/').map(encodeURIComponent).join('/')}`;}
 
 export async function getWorkOrderData(db:D1Database){
- const [repairsResult,techniciansResult,partsResult,usageResult,dvirResult,laborResult,laborEventResult,noteResult,defaultLaborRate]=await Promise.all([
+ const [repairsResult,techniciansResult,partsResult,usageResult,dvirResult,laborResult,laborEventResult,noteResult,photoResult,defaultLaborRate]=await Promise.all([
   db.prepare(`
     SELECT r.id,r.equipment_id,COALESCE(e.unit,'') AS unit,r.title,r.status,r.parts_text,r.driver,r.location,
            r.technician_id,t.name AS technician_name,r.geotab_defect_id,r.labor_hours,r.labor_rate,r.outside_cost,
@@ -91,6 +93,11 @@ export async function getWorkOrderData(db:D1Database){
     WHERE e.action='technician_note'
     ORDER BY e.created_at,e.id
   `).all<TechnicianNoteRow>(),
+  db.prepare(`
+    SELECT id,repair_id,object_key,file_name,content_type,note,created_at
+    FROM repair_work_photos
+    ORDER BY created_at,id
+  `).all<RepairPhotoRow>(),
   getShopLaborRate(db),
  ]);
 
@@ -100,6 +107,8 @@ export async function getWorkOrderData(db:D1Database){
  for(const row of laborResult.results){const list=laborByRepair.get(row.repair_id)??[];list.push(row);laborByRepair.set(row.repair_id,list);}
  const notesByRepair=new Map<number,TechnicianNoteRow[]>();
  for(const row of noteResult.results){const list=notesByRepair.get(row.repair_id)??[];list.push(row);notesByRepair.set(row.repair_id,list);}
+ const photosByRepair=new Map<number,RepairPhotoRow[]>();
+ for(const row of photoResult.results){const list=photosByRepair.get(row.repair_id)??[];list.push(row);photosByRepair.set(row.repair_id,list);}
 
  const openTimerStarts=new Map<string,string>();
  const timerSegments=new Map<string,TimerSegment[]>();
@@ -156,11 +165,19 @@ export async function getWorkOrderData(db:D1Database){
   const technicianNotes=(notesByRepair.get(row.id)??[]).map(note=>({
     id:note.id,technicianId:note.technician_id,technician:note.technician_name??'Technician',detail:note.detail,createdAt:note.created_at
   }));
+  const repairPhotos=(photosByRepair.get(row.id)??[]).map(photo=>({
+    id:photo.id,
+    fileName:photo.file_name||'Repair photo',
+    contentType:photo.content_type||'',
+    note:photo.note||'',
+    createdAt:photo.created_at,
+    url:repairPhotoUrl(photo.object_key),
+  }));
   return {
     id:`repair-${row.id}`,numericId:row.id,equipmentId:row.equipment_id,unit:row.unit,issue:row.title,status:row.status,
     partsText:row.parts_text??'',assignedTo:row.technician_name??row.driver??'',technicianId:row.technician_id,
     location:row.location??'',relatedGeotabDefectId:row.geotab_defect_id??'',laborHours,laborRate:fallbackLaborRate,laborCost,
-    outsideCost,partCost,missingPartCostLines,totalCost:laborCost+partCost+outsideCost,usedParts,laborEntries,technicianNotes,
+    outsideCost,partCost,missingPartCostLines,totalCost:laborCost+partCost+outsideCost,usedParts,laborEntries,technicianNotes,repairPhotos,
     completedAt:timestamp(row.completed_at),reviewedAt:timestamp(row.reviewed_at),reviewedBy:row.reviewer_name??'',reviewNote:row.review_note??'',updatedAt:row.updated_at,
   };
  });
@@ -182,6 +199,7 @@ export async function getWorkOrderData(db:D1Database){
     .sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   const laborEntries=group.flatMap(item=>item.laborEntries.map(entry=>({...entry,repairId:item.id,repairIssue:item.issue})));
   const usedParts=group.flatMap(item=>item.usedParts.map(part=>({...part,repairId:item.id,repairIssue:item.issue})));
+  const repairPhotos=group.flatMap(item=>item.repairPhotos.map(photo=>({...photo,repairId:item.id,repairIssue:item.issue})));
   const completionDate=detroitDate(group[0]?.completedAt||group[0]?.updatedAt||'');
   const completedAt=group.map(item=>item.completedAt||item.updatedAt).sort().at(-1)??'';
   const reviewed=group.every(item=>Boolean(item.reviewedAt));
@@ -196,7 +214,7 @@ export async function getWorkOrderData(db:D1Database){
     id:`work-${key.replace(/[^a-z0-9_-]+/gi,'-')}`,
     repairIds,unit:group[0]?.unit??'',equipmentId:group[0]?.equipmentId??null,technician:group[0]?.assignedTo??'',
     technicianId:group[0]?.technicianId??null,completionDate,completedAt,reviewed,reviewedAt,reviewedBy,reviewNote,
-    repairs:group,technicianNotes:notes,laborEntries,usedParts,missingPartCostLines,
+    repairs:group,technicianNotes:notes,laborEntries,usedParts,repairPhotos,missingPartCostLines,
     laborHours:group.reduce((sum,item)=>sum+item.laborHours,0),laborCost,partCost,outsideCost,totalCost:laborCost+partCost+outsideCost,
   };
  }).sort((a,b)=>Number(a.reviewed)-Number(b.reviewed)||b.completedAt.localeCompare(a.completedAt));
