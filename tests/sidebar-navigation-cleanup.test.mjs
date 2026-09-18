@@ -25,7 +25,7 @@ test('sidebar only allows one expanded group at a time',()=>{
 
 test('sidebar hides detailed setup destinations while retaining them for active routing',()=>{
   assert.match(nav,/href: "\/setup-center", label: "Setup Home"/);
-  assert.match(nav,/href: "\/pm-schedules", label: "Maintenance Setup"/);
+  assert.match(nav,/href: "\/pm-schedules", label: "PM Schedule Setup"/);
   assert.match(nav,/Repair Types".*showInSidebar: false/);
   assert.match(nav,/Custom PM Builder".*showInSidebar: false/);
   assert.match(nav,/PM & Annual Checklists".*showInSidebar: false/);
