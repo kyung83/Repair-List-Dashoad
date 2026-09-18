@@ -4,7 +4,7 @@ import { applyPartToRepair } from '@/lib/inventory-operations';
 import { getDerivedPartAvailability, requestPartDerived } from '@/lib/derived-reservations';
 import { getRepairPartRequests } from '@/lib/parts-lifecycle';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
-import { normalizeYard } from '@/lib/yards';
+import { normalizeYard, yardWarehouseCode } from '@/lib/yards';
 import { completeRepairTypeChecklist, validateRepairTypeChecklistBeforeClose } from '@/lib/repair-types';
 import { GET as originalGET } from './original';
 import { GET as legacyGET, POST as legacyPOST } from './route-legacy';
@@ -30,6 +30,20 @@ type DvirRepairLink = {
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
   return match ? Number(match[1]) : 0;
+}
+
+async function assignedPartWarehouse(user:{id:number;role:string}) {
+  if (user.role !== 'mechanic' && user.role !== 'manager') return null;
+  const row=await env.DB.prepare("SELECT COALESCE(yard,'') AS yard FROM app_users WHERE id=?")
+    .bind(user.id)
+    .first<{yard:string}>();
+  const code=yardWarehouseCode(row?.yard);
+  if (!code) throw new Error('Your account needs an assigned yard/parts warehouse before you can use or request parts.');
+  const warehouse=await env.DB.prepare('SELECT id,code,name FROM warehouses WHERE code=? AND active=1')
+    .bind(code)
+    .first<{id:number;code:string;name:string}>();
+  if (!warehouse) throw new Error(`${code} is not configured as an active parts warehouse.`);
+  return warehouse;
 }
 
 async function requirePartAccess(request: Request, repairId: number) {
@@ -295,18 +309,26 @@ export async function POST(request: Request) {
     const repairId = numericRepairId(body.repairId);
     const partId = Number(body.partId ?? 0);
     const quantity = Number(body.quantity ?? 0);
-    const warehouseCode = String(body.warehouseCode ?? '').trim().toUpperCase();
+    const requestedWarehouseCode = String(body.warehouseCode ?? '').trim().toUpperCase();
     if (!repairId) throw new Error('Repair was not found.');
     if (!Number.isInteger(partId) || partId <= 0) throw new Error('Choose a catalog part.');
     if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Enter a positive quantity.');
-    if (!warehouseCode) throw new Error('Choose the warehouse that will supply this part.');
 
     const {user,repair} = await requirePartAccess(request.clone(),repairId);
+    const assignedWarehouse = await assignedPartWarehouse(user);
+    const warehouseCode = assignedWarehouse?.code ?? requestedWarehouseCode;
+    if (!warehouseCode) throw new Error('Choose the warehouse that will supply this part.');
+
     const availability = await getDerivedPartAvailability(env.DB);
     const stock = availability.find((row)=>row.partId === partId && row.warehouseCode === warehouseCode);
-    if (!stock) throw new Error('That part is not stocked in the selected warehouse.');
+    const part = stock
+      ? {partNumber:stock.partNumber}
+      : await env.DB.prepare('SELECT part_number AS partNumber FROM parts WHERE id=? AND active=1')
+          .bind(partId)
+          .first<{partNumber:string}>();
+    if (!part) throw new Error('Part was not found.');
 
-    if (stock.available + 0.000001 >= quantity) {
+    if ((stock?.available ?? 0) + 0.000001 >= quantity) {
       const operationKey = String(body.operationKey ?? request.headers.get('idempotency-key') ?? `shop-apply:${crypto.randomUUID()}`);
       const result = await applyPartToRepair(env.DB,{
         operationKey,
@@ -318,8 +340,8 @@ export async function POST(request: Request) {
         source:'technician',
         note:`Applied from technician repair tools by ${user.displayName || user.username}.`,
       });
-      await repairJobEvent(repairId,user.id,repair.technician_id,'part_used',`${quantity} x ${stock.partNumber} applied from ${warehouseCode} (inventory operation ${result.operationId}).`);
-      return Response.json({...result,partNumber:stock.partNumber,usedImmediately:quantity,awaitingParts:false});
+      await repairJobEvent(repairId,user.id,repair.technician_id,'part_used',`${quantity} x ${part.partNumber} applied from ${warehouseCode} (inventory operation ${result.operationId}).`);
+      return Response.json({...result,partNumber:part.partNumber,warehouseCode,usedImmediately:quantity,awaitingParts:false});
     }
 
     const requestResult = await requestPartDerived(env.DB,{
@@ -329,7 +351,7 @@ export async function POST(request: Request) {
       warehouseCode,
       userId:user.id,
     });
-    const shortageDetail = `${stock.partNumber}: ${quantity} requested from ${warehouseCode}; ${requestResult.shortageQuantity} currently short.`;
+    const shortageDetail = `${part.partNumber}: ${quantity} requested from ${warehouseCode}; ${requestResult.shortageQuantity} currently short.`;
     await repairJobEvent(repairId,user.id,repair.technician_id,'part_requested_awaiting',shortageDetail);
     const waitingResult = await autoWaitAfterPartShortage(
       request.clone(),
