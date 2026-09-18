@@ -187,12 +187,21 @@ export async function savePart(db: D1Database, body: Record<string, unknown>) {
   ] as const;
 
   if (id > 0) {
-    await db.prepare(`
-      UPDATE parts
-      SET part_number = ?, description = ?, quantity_on_hand = ?, reorder_level = ?,
-          preferred_vendor_id = ?, unit_cost = ?, location = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).bind(...values, id).run();
+    await db.batch([
+      db.prepare(`
+        UPDATE parts
+        SET part_number = ?, description = ?, quantity_on_hand = ?, reorder_level = ?,
+            preferred_vendor_id = ?, unit_cost = ?, location = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(...values, id),
+      db.prepare(`
+        UPDATE parts
+        SET quantity_on_hand = COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id = ?),quantity_on_hand),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND EXISTS (SELECT 1 FROM part_warehouse_stock WHERE part_id = ?)
+      `).bind(id,id,id),
+    ]);
     return { ok: true, id };
   }
 
