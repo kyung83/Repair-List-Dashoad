@@ -208,7 +208,7 @@ export default function PartsReceivingPage(){
               {chosen&&!autoSelected&&<small style={matchNote}>Selected → {chosen.partNumber}</small>}</td>
               <td style={td}><input type="number" min="0.01" step="any" value={line.quantityText} disabled={!line.receive} onChange={event=>updateLine(index,{quantityText:event.target.value})} style={{...input,width:90}}/></td>
               <td style={td}><input type="number" min="0" step="0.0001" value={line.unitCostText} disabled={!line.receive} onChange={event=>updateLine(index,{unitCostText:event.target.value})} placeholder="Optional" style={{...input,width:110}}/></td>
-              <td style={td}>{needsAlias?<label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,fontWeight:800}}><input type="checkbox" checked={line.rememberCrossReference} onChange={event=>updateLine(index,{rememberCrossReference:event.target.checked})}/>Remember {line.partNumber}</label>:exactAuto&&line.matchedBy!==line.canonicalPartNumber?<span style={good}>KNOWN</span>:"—"}</td>
+              <td style={td}>{needsAlias?<label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,fontWeight:800}}><input type="checkbox" checked={line.rememberCrossReference} onChange={event=>updateLine(index,{rememberCrossReference:event.target.checked})}/>Remember {line.partNumber}</label>:autoSelected&&line.matchedBy!==line.canonicalPartNumber?<span style={good}>KNOWN</span>:"—"}</td>
               <td style={td}>{line.partId?<span style={good}>READY</span>:<span style={needsReview}>MATCH NEEDED</span>}{line.manual&&lines.length>1&&<button type="button" onClick={()=>removeLine(index)} style={removeButton}>REMOVE</button>}</td>
             </tr>
           })}</tbody>
