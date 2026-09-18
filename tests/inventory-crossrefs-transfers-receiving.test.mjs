@@ -66,7 +66,7 @@ test('parts receiving reads invoice lines, matches cross references, and posts i
   assert.match(page,/TAKE PHOTO/);
   assert.match(page,/UPLOAD INVOICE/);
   assert.match(page,/Remember \{line\.partNumber\}/);
-  assert.match(page,/RECEIVE \{lines\.filter/);
+  assert.match(page,/lines\.filter\(line=>line\.receive\)\.length/);
   assert.match(nav,/\/parts-receiving/);
-  assert.match(nav,/\/inventory-controls/);
+  assert.match(nav,/\/inventory-transfer/);
 });
