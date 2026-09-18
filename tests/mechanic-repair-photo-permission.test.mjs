@@ -17,7 +17,10 @@ test('repair photo API still limits mechanics to their assigned repair',()=>{
   assert.match(photoRoute,/if \(!manager && !mechanicOwner\) throw new Error\('This repair is not assigned to you\.'\)/);
 });
 
-test('Current Work repair photo control posts to the allowed repair-photo API',()=>{
-  assert.match(photoControl,/fetch\("\/api\/shop\/repair-photos",\{method:"POST"/);
+test('Current Work repair photo control posts raw binary instead of Safari multipart FormData',()=>{
+  assert.match(photoControl,/new URLSearchParams\(\{raw:"1",repairId/);
+  assert.match(photoControl,/const bytes=await file\.arrayBuffer\(\)/);
+  assert.match(photoControl,/body:bytes/);
+  assert.doesNotMatch(photoControl,/new FormData\(\)/);
   assert.match(photoControl,/capture="environment"/);
 });
