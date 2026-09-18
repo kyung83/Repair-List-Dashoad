@@ -46,12 +46,14 @@ test('inventory transfers use one auditable operation and require notes',async()
 });
 
 test('parts receiving reads invoice lines, matches cross references, and posts inventory receipts',async()=>{
-  const [migration,reader,route,service,page,nav]=await Promise.all([
+  const [migration,reader,route,service,page,inventoryPage,historyButton,nav]=await Promise.all([
     read('migrations/0146_inventory_crossrefs_transfers_receiving.sql'),
     read('lib/parts-receiving-ai.ts'),
     read('app/api/parts-receiving/route.ts'),
     read('lib/parts-receiving.ts'),
     read('app/parts-receiving/page.tsx'),
+    read('app/inventory/page.tsx'),
+    read('app/inventory/receiving-history-button.tsx'),
     read('app/navigation-config.ts'),
   ]);
   assert.match(migration,/CREATE TABLE IF NOT EXISTS parts_receipts/);
@@ -64,6 +66,8 @@ test('parts receiving reads invoice lines, matches cross references, and posts i
   assert.match(route,/Invoice \/ packing slip number is required/);
   assert.match(service,/operation_type,user_id,note/);
   assert.match(service,/parts_receipt/);
+  assert.match(service,/WHERE \(\? IS NULL OR r\.part_id=\?\)/);
+  assert.match(route,/searchParams\.get\('partId'\)/);
   assert.match(service,/line_type\)\s*SELECT[\s\S]*'receipt'/);
   assert.match(page,/TAKE PHOTO/);
   assert.match(page,/UPLOAD INVOICE/);
@@ -73,6 +77,9 @@ test('parts receiving reads invoice lines, matches cross references, and posts i
   assert.doesNotMatch(page,/exactAuto/);
   assert.match(page,/VENDOR \/ SOURCE NAME — REQUIRED/);
   assert.match(page,/INVOICE \/ PACKING SLIP # — REQUIRED/);
+  assert.match(page,/Search existing vendors/);
+  assert.match(page,/SAVE & SELECT VENDOR/);
+  assert.match(page,/action:"saveVendor"/);
   assert.match(page,/Received \{row\.createdAt\}/);
   assert.match(page,/Remember \{line\.partNumber\}/);
   assert.match(page,/Search part #, cross-ref or description/);
@@ -80,6 +87,13 @@ test('parts receiving reads invoice lines, matches cross references, and posts i
   assert.match(page,/part\.crossReferences/);
   assert.doesNotMatch(page,/Choose inventory part…/);
   assert.match(page,/lines\.filter\(line=>line\.receive\)\.length/);
+  assert.match(inventoryPage,/ReceivingHistoryButton/);
+  assert.match(inventoryPage,/crossReferences/);
+  assert.match(inventoryPage,/Search part, cross-reference, vendor, equipment/);
+  assert.match(historyButton,/\/api\/parts-receiving\?partId=/);
+  assert.match(historyButton,/Vendor \/ source/);
+  assert.match(historyButton,/Invoice \/ slip #/);
+  assert.match(historyButton,/Received by/);
   assert.match(nav,/\/parts-receiving/);
   assert.match(nav,/\/inventory-transfer/);
 });

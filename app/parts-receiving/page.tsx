@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
 
 type Warehouse={id:number;code:string;name:string};
+type Vendor={id:number;name:string;phone:string;email:string;notes:string};
 type Part={id:number;partNumber:string;description:string;crossReferences?:string[]};
-type InventoryData={parts:Part[];warehouses:Warehouse[];error?:string};
+type InventoryData={parts:Part[];warehouses:Warehouse[];vendors:Vendor[];error?:string};
 type ReadingLine={partNumber:string;description:string;quantity:number;unitCost:number|null;lineTotal:number|null;matchedPartId:number|null;canonicalPartNumber:string;canonicalDescription:string;matchedBy:string;matchCount:number};
 type Reading={vendor:string;invoiceNumber:string;invoiceDate:string;totalAmount:number|null;lineItems:ReadingLine[];uncertain:string[]};
 type ScanResult={ok?:boolean;model?:string;reading?:Reading;error?:string};
@@ -77,6 +78,8 @@ export default function PartsReceivingPage(){
   const[warehouseCode,setWarehouseCode]=useState(""),[vendor,setVendor]=useState(""),[invoiceNumber,setInvoiceNumber]=useState(""),[invoiceDate,setInvoiceDate]=useState("");
   const[lines,setLines]=useState<EditableLine[]>([]),[uncertain,setUncertain]=useState<string[]>([]),[model,setModel]=useState(""),[fileName,setFileName]=useState(""),[receiptGroupKey,setReceiptGroupKey]=useState("");
   const[busy,setBusy]=useState<""|"scan"|"receive">(""),[message,setMessage]=useState(""),[activeSearchIndex,setActiveSearchIndex]=useState<number|null>(null),[entryMode,setEntryMode]=useState<""|"scan"|"manual">("");
+  const[vendorSearchOpen,setVendorSearchOpen]=useState(false),[showAddVendor,setShowAddVendor]=useState(false),[vendorBusy,setVendorBusy]=useState(false);
+  const[newVendor,setNewVendor]=useState({name:"",phone:"",email:"",notes:""});
 
   async function load(){
     const[inventoryResponse,receiptResponse]=await Promise.all([fetch("/api/inventory",{cache:"no-store"}),fetch("/api/parts-receiving",{cache:"no-store"})]);
@@ -94,11 +97,27 @@ export default function PartsReceivingPage(){
 
   const partOptions=useMemo(()=>(data?.parts??[]).slice().sort((a,b)=>a.partNumber.localeCompare(b.partNumber,undefined,{numeric:true})),[data]);
   const partById=useMemo(()=>new Map(partOptions.map(part=>[String(part.id),part])),[partOptions]);
+  const vendorMatches=useMemo(()=>{const q=vendor.trim().toLowerCase();return(data?.vendors??[]).filter(item=>!q||[item.name,item.phone,item.email].join(" ").toLowerCase().includes(q)).slice(0,8)},[data,vendor]);
   function searchParts(value:string){const term=value.trim().toLowerCase();if(!term)return[];return partOptions.filter(part=>`${part.partNumber} ${part.description} ${(part.crossReferences??[]).join(" ")}`.toLowerCase().includes(term)).slice(0,8)}
   function blankManualLine():EditableLine{return{partNumber:"",description:"",quantity:1,unitCost:null,lineTotal:null,matchedPartId:null,canonicalPartNumber:"",canonicalDescription:"",matchedBy:"",matchCount:0,receive:true,manual:true,partId:"",inventorySearch:"",quantityText:"1",unitCostText:"",rememberCrossReference:false}}
-  function startManual(){setBusy("");setMessage("Manual receiving started. Enter the vendor/source name, invoice or packing slip number, and the parts received.");setEntryMode("manual");setFileName("");setModel("");setUncertain([]);setReceiptGroupKey(crypto.randomUUID());setVendor("");setInvoiceNumber("");setInvoiceDate("");setLines([blankManualLine()]);setActiveSearchIndex(null)}
+  function startManual(){setBusy("");setMessage("Manual receiving started. Search an existing vendor or add one, enter the invoice or packing slip number, and the parts received.");setEntryMode("manual");setFileName("");setModel("");setUncertain([]);setReceiptGroupKey(crypto.randomUUID());setVendor("");setVendorSearchOpen(false);setShowAddVendor(false);setInvoiceNumber("");setInvoiceDate("");setLines([blankManualLine()]);setActiveSearchIndex(null)}
   function addManualLine(){setLines(current=>[...current,blankManualLine()])}
   function removeLine(index:number){setLines(current=>current.filter((_,i)=>i!==index));setActiveSearchIndex(null)}
+  async function saveQuickVendor(){
+    const name=newVendor.name.trim();
+    if(!name){setMessage("Vendor name is required.");return}
+    setVendorBusy(true);setMessage("");
+    try{
+      const response=await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"saveVendor",...newVendor})});
+      const result=await response.json() as {id?:number;canonicalName?:string;matchedExisting?:boolean;error?:string};
+      if(!response.ok||!result.id)throw new Error(result.error||"Vendor could not be saved.");
+      const selectedName=result.canonicalName||name;
+      setVendor(selectedName);setVendorSearchOpen(false);setShowAddVendor(false);setNewVendor({name:"",phone:"",email:"",notes:""});
+      await load();
+      setMessage(result.matchedExisting?`${selectedName} already existed and was selected.`:`${selectedName} was added and selected.`);
+    }catch(error){setMessage(error instanceof Error?error.message:"Vendor could not be saved.")}
+    finally{setVendorBusy(false)}
+  }
 
   async function readInvoice(file:File|null){
     if(!file)return;
@@ -168,7 +187,10 @@ export default function PartsReceivingPage(){
     {lines.length>0&&<section style={panel}>
       <div style={panelHead}><div><p style={eyebrow}>STEP 2</p><h2 style={title}>{entryMode==="manual"?"Enter receiving details":"Verify invoice and matches"}</h2></div><span style={pill}>{entryMode==="manual"?"MANUAL":modelName(model)}</span></div>
       <div style={invoiceGrid}>
-        <label style={label}>VENDOR / SOURCE NAME — REQUIRED<input required value={vendor} onChange={event=>setVendor(event.target.value)} placeholder="Vendor, supplier, transfer source…" style={input}/></label>
+        {entryMode==="manual"?<div style={label}><span>VENDOR / SOURCE NAME — REQUIRED</span><div style={vendorSearchWrap}>
+          <input required value={vendor} onFocus={()=>setVendorSearchOpen(true)} onBlur={()=>window.setTimeout(()=>setVendorSearchOpen(false),140)} onChange={event=>{setVendor(event.target.value);setVendorSearchOpen(true)}} placeholder="Search existing vendors…" style={{...input,width:"100%"}}/>
+          {vendorSearchOpen&&<div style={vendorSearchResults}>{vendorMatches.map(item=><button key={item.id} type="button" onMouseDown={event=>event.preventDefault()} onClick={()=>{setVendor(item.name);setVendorSearchOpen(false)}} style={vendorSearchResult}><b>{item.name}</b>{[item.phone,item.email].filter(Boolean).length>0&&<small style={small}>{[item.phone,item.email].filter(Boolean).join(" · ")}</small>}</button>)}{vendorMatches.length===0&&<div style={vendorEmpty}>No saved vendor matches.</div>}</div>}
+        </div><button type="button" onClick={()=>{setNewVendor(current=>({...current,name:vendor.trim()}));setVendorSearchOpen(false);setShowAddVendor(true)}} style={addVendorButton}>+ ADD VENDOR</button></div>:<label style={label}>VENDOR / SOURCE NAME — REQUIRED<input required value={vendor} onChange={event=>setVendor(event.target.value)} placeholder="Vendor, supplier, transfer source…" style={input}/></label>}
         <label style={label}>INVOICE / PACKING SLIP # — REQUIRED<input required value={invoiceNumber} onChange={event=>setInvoiceNumber(event.target.value)} placeholder="Invoice or packing slip number" style={input}/></label>
         <label style={label}>INVOICE DATE<input type="date" value={invoiceDate} onChange={event=>setInvoiceDate(event.target.value)} style={input}/></label>
       </div>
@@ -217,6 +239,15 @@ export default function PartsReceivingPage(){
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginTop:14,flexWrap:"wrap"}}>{entryMode==="manual"?<button type="button" disabled={Boolean(busy)} onClick={addManualLine} style={lightButton}>+ ADD ANOTHER PART</button>:<span/>}<button type="button" disabled={Boolean(busy)||!vendor.trim()||!invoiceNumber.trim()} onClick={()=>void receive()} style={orangeButton}>{busy==="receive"?"Receiving…":`RECEIVE ${lines.filter(line=>line.receive).length} LINE${lines.filter(line=>line.receive).length===1?"":"S"}`}</button></div>
     </section>}
 
+    {showAddVendor&&<div style={vendorBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget&&!vendorBusy)setShowAddVendor(false)}}><div style={vendorModal}>
+      <div><p style={eyebrow}>PARTS VENDOR</p><h2 style={{margin:"5px 0 4px"}}>Add Vendor</h2><p style={muted}>This vendor will be saved to the same Parts vendor list used in Inventory and will be selected for this receipt.</p></div>
+      <label style={label}>VENDOR NAME<input autoFocus value={newVendor.name} onChange={event=>setNewVendor(current=>({...current,name:event.target.value}))} style={input}/></label>
+      <label style={label}>PHONE<input value={newVendor.phone} onChange={event=>setNewVendor(current=>({...current,phone:event.target.value}))} style={input}/></label>
+      <label style={label}>EMAIL<input type="email" value={newVendor.email} onChange={event=>setNewVendor(current=>({...current,email:event.target.value}))} style={input}/></label>
+      <label style={label}>NOTES<textarea rows={3} value={newVendor.notes} onChange={event=>setNewVendor(current=>({...current,notes:event.target.value}))} style={{...input,resize:"vertical"}}/></label>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8}}><button type="button" disabled={vendorBusy} onClick={()=>setShowAddVendor(false)} style={lightButton}>CANCEL</button><button type="button" disabled={vendorBusy||!newVendor.name.trim()} onClick={()=>void saveQuickVendor()} style={orangeButton}>{vendorBusy?"Saving…":"SAVE & SELECT VENDOR"}</button></div>
+    </div></div>}
+
     <section style={panel}>
       <div style={panelHead}><div><p style={eyebrow}>RECEIVING RECORDS</p><h2 style={title}>Parts received</h2><p style={muted}>Vendor/source name, invoice or packing slip number, warehouse, received-by user, quantity and cost remain attached to each receipt.</p></div><span style={muted}>{receipts.length} lines shown</span></div>
       {!receipts.length?<div style={empty}>No invoice receipts recorded yet.</div>:<div style={{display:"grid",gap:7}}>{receipts.slice(0,50).map(row=><article key={row.id} style={receiptRow}>
@@ -242,6 +273,13 @@ const invoiceGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(19
 const darkButton={display:"inline-block",border:0,borderRadius:8,padding:"11px 14px",background:"#0d1b2b",color:"white",fontWeight:950,cursor:"pointer"} as const;
 const lightButton={...darkButton,border:"1px solid #aebac4",background:"white",color:"#173a5d"} as const;
 const manualButton={...darkButton,border:"1px solid #173a5d",background:"#eaf2f8",color:"#173a5d"} as const;
+const addVendorButton={border:"1px solid #173a5d",borderRadius:7,padding:"7px 9px",background:"#f4f8fb",color:"#173a5d",fontSize:10,fontWeight:950,cursor:"pointer"} as const;
+const vendorSearchWrap={position:"relative" as const} as const;
+const vendorSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:35,maxHeight:240,overflowY:"auto" as const,border:"1px solid #cbd5dd",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
+const vendorSearchResult={display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf0f2",background:"white",textAlign:"left" as const,cursor:"pointer",color:"#243341"} as const;
+const vendorEmpty={padding:10,fontSize:11,color:"#6c7886"} as const;
+const vendorBackdrop={position:"fixed" as const,inset:0,zIndex:10000,background:"rgba(8,20,32,.55)",display:"grid",placeItems:"center",padding:18} as const;
+const vendorModal={width:"min(540px,100%)",background:"white",borderRadius:14,padding:20,boxShadow:"0 24px 70px rgba(0,0,0,.28)",display:"grid",gap:11} as const;
 const orangeButton={...darkButton,background:"#f47b20"} as const;
 const pill={padding:"6px 10px",borderRadius:999,background:"#eaf2f8",color:"#173a5d",fontSize:12,fontWeight:950} as const;
 const warning={marginTop:12,padding:10,border:"1px solid #efc16c",borderRadius:8,background:"#fff8e6",display:"grid",gap:4,fontSize:12} as const;

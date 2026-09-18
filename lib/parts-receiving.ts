@@ -173,8 +173,9 @@ export async function receiveInventoryPart(
   };
 }
 
-export async function recentPartsReceipts(db:D1Database,limit=50){
-  const safeLimit=Math.min(100,Math.max(1,Math.trunc(limit)));
+export async function recentPartsReceipts(db:D1Database,limit=50,partId?:number|null){
+  const safeLimit=Math.min(250,Math.max(1,Math.trunc(limit)));
+  const partFilter=partId!=null&&Number.isInteger(Number(partId))&&Number(partId)>0?Number(partId):null;
   const rows=await db.prepare(`
     SELECT r.id,r.receipt_group_key,r.operation_id,r.vendor_name,r.invoice_number,r.invoice_date,
            r.source_part_number,r.source_description,r.received_quantity,r.unit_cost,r.created_at,
@@ -184,9 +185,10 @@ export async function recentPartsReceipts(db:D1Database,limit=50){
     JOIN parts p ON p.id=r.part_id
     JOIN warehouses w ON w.id=r.warehouse_id
     LEFT JOIN app_users u ON u.id=r.user_id
+    WHERE (? IS NULL OR r.part_id=?)
     ORDER BY r.id DESC
     LIMIT ?
-  `).bind(safeLimit).all<any>();
+  `).bind(partFilter,partFilter,safeLimit).all<any>();
   return rows.results.map((row:any)=>({
     id:Number(row.id),
     receiptGroupKey:row.receipt_group_key,

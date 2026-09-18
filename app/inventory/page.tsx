@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
+import ReceivingHistoryButton from "./receiving-history-button";
 
 type WarehouseStock = {
   id: number;
@@ -29,6 +30,7 @@ type Part = {
   warehouseStocks?: WarehouseStock[];
   compatibleEquipment?: CompatibleEquipment[];
   compatibleEquipmentIds?: number[];
+  crossReferences?: string[];
   lowStock: boolean;
 };
 
@@ -158,7 +160,7 @@ export default function InventoryPage() {
       if (stockFilter === "below-minimum" && stock.quantityOnHand >= stock.minimumQuantity) return false;
       const vendorNames = (vendorLinks[String(item.id)] ?? []).map((itemVendor) => itemVendor.name).join(" ");
       const equipmentNames = (item.compatibleEquipment ?? []).map((equipment) => equipment.unit).join(" ");
-      return [item.partNumber, item.description, item.location, item.vendorName, vendorNames, equipmentNames].join(" ").toLowerCase().includes(q);
+      return [item.partNumber, item.description, ...(item.crossReferences ?? []), item.location, item.vendorName, vendorNames, equipmentNames].join(" ").toLowerCase().includes(q);
     });
     rows.sort((a, b) => {
       const aQty = stockFor(a).quantityOnHand;
@@ -395,7 +397,7 @@ export default function InventoryPage() {
 
       <section style={{ marginTop: 22, background: "white", border: "1px solid #dce2e7", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: 18, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, vendor, equipment…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, cross-reference, vendor, equipment…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
           <span style={{ color: "#6c7886", fontSize: 13 }}><b>{selectedWarehouseName}</b> · {visibleParts.length} visible</span>
         </div>
         <div style={{ overflowX: "auto" }}>
@@ -420,6 +422,7 @@ export default function InventoryPage() {
                     <td style={{ padding: 13, maxWidth: 260 }}>{equipment.length ? `${equipment.slice(0, 5).map((entry) => entry.unit).join(", ")}${equipment.length > 5 ? ` +${equipment.length - 5}` : ""}` : "—"}</td>
                     <td style={{ padding: 13 }}>{stock.unitCost == null ? "—" : stock.unitCost.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
                     <td style={{ padding: 13, whiteSpace: "nowrap" }}>
+                      <ReceivingHistoryButton partId={item.id} partNumber={item.partNumber} description={item.description}/>
                       <button onClick={() => void physicalCount(item)} style={{ marginRight: 6 }} disabled={warehouseCode === "ALL"}>Physical Count</button>
                       <button onClick={() => editPart(item)}>Edit</button>
                     </td>

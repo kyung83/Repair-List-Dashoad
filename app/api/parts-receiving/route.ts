@@ -13,7 +13,11 @@ async function requireManager(request:Request){
 export async function GET(request:Request){
   try{
     await requireManager(request);
-    return Response.json({receipts:await recentPartsReceipts(env.DB,75)},{headers:{'cache-control':'no-store'}});
+    const url=new URL(request.url);
+    const partIdRaw=Number(url.searchParams.get('partId')??0);
+    const partId=Number.isInteger(partIdRaw)&&partIdRaw>0?partIdRaw:null;
+    const limit=partId?200:75;
+    return Response.json({receipts:await recentPartsReceipts(env.DB,limit,partId)},{headers:{'cache-control':'no-store'}});
   }catch(error){
     const message=error instanceof Error?error.message:'Parts receipts could not be loaded.';
     return Response.json({error:message},{status:/Authentication required/i.test(message)?401:403});
