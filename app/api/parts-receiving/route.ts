@@ -26,9 +26,13 @@ export async function POST(request:Request){
     const body=await request.json() as Record<string,unknown>;
     const receiptGroupKey=String(body.receiptGroupKey??'').trim().slice(0,160);
     const warehouseCode=String(body.warehouseCode??'').trim().toUpperCase();
+    const vendorName=String(body.vendorName??'').trim().replace(/\s+/g,' ').slice(0,180);
+    const invoiceNumber=String(body.invoiceNumber??'').trim().replace(/\s+/g,' ').slice(0,100);
     const lines=Array.isArray(body.lines)?body.lines as Array<Record<string,unknown>>:[];
     if(!receiptGroupKey)throw new Error('Receipt group key is required.');
     if(!warehouseCode)throw new Error('Choose the receiving warehouse.');
+    if(!vendorName)throw new Error('Vendor / source name is required.');
+    if(!invoiceNumber)throw new Error('Invoice / packing slip number is required.');
     if(!lines.length)throw new Error('Choose at least one invoice line to receive.');
     if(lines.length>100)throw new Error('Receive no more than 100 invoice lines at one time.');
 
@@ -49,8 +53,8 @@ export async function POST(request:Request){
         warehouseCode,
         quantity:line.quantity,
         unitCost:line.unitCost,
-        vendorName:body.vendorName,
-        invoiceNumber:body.invoiceNumber,
+        vendorName,
+        invoiceNumber,
         invoiceDate:body.invoiceDate,
         sourcePartNumber:line.sourcePartNumber,
         sourceDescription:line.sourceDescription,
