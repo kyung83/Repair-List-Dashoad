@@ -271,7 +271,7 @@ export default function InventoryPage() {
   }
 
   async function deletePart(item: Part) {
-    const typed = window.prompt(`PERMANENT DELETE is admin-only and cannot be undone.\n\nType the part number exactly to delete ${item.partNumber}:`);
+    const typed = window.prompt(`DELETE PART — ADMIN ONLY\n\nThis removes ${item.partNumber} from Inventory, mechanic searches, receiving, and future PM use. Existing repair, receiving, transfer, count, and inventory history stays intact.\n\nType the part number exactly to delete it:`);
     if (typed == null) return;
     if (typed.trim().toUpperCase() !== item.partNumber.trim().toUpperCase()) {
       setMessage("Delete cancelled because the part number did not match.");
@@ -279,9 +279,12 @@ export default function InventoryPage() {
     }
     setMessage("");
     const response = await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"deletePart",partId:item.id})});
-    const result = await response.json() as {ok?:boolean;error?:string};
-    if(!response.ok||!result.ok){setMessage(result.error||"Part could not be permanently deleted.");return}
-    setMessage(`${item.partNumber} permanently deleted.`);
+    const result = await response.json() as {ok?:boolean;historyPreserved?:boolean;error?:string};
+    if(!response.ok||!result.ok){setMessage(result.error||"Part could not be deleted.");return}
+    setShowPartForm(false);
+    setPart(blankPart);
+    setEquipmentQuery("");
+    setMessage(`${item.partNumber} deleted from Inventory. Existing history was preserved.`);
     await load();
   }
 
@@ -500,7 +503,10 @@ export default function InventoryPage() {
                       <ReceivingHistoryButton partId={item.id} partNumber={item.partNumber} description={item.description}/>
                       <button onClick={() => void physicalCount(item)} style={{ marginRight: 6 }} disabled={warehouseCode === "ALL"}>Physical Count</button>
                       <button onClick={() => editPart(item)} style={{ marginRight: 6 }}>Edit</button>
-                      {partStatus === "active" ? <button onClick={() => void archivePart(item)} style={{ marginRight: 6, border: "1px solid #8a5a00", color: "#8a5a00", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Archive</button> : <>
+                      {partStatus === "active" ? <>
+                        <button onClick={() => void archivePart(item)} style={{ marginRight: 6, border: "1px solid #8a5a00", color: "#8a5a00", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Archive</button>
+                        {data?.viewerRole === "admin" && <button onClick={() => void deletePart(item)} style={{ border: "1px solid #b42318", color: "#b42318", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 900 }}>Delete</button>}
+                      </> : <>
                         <button onClick={() => void restorePart(item)} style={{ marginRight: 6, border: "1px solid #176448", color: "#176448", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Restore</button>
                         {data?.viewerRole === "admin" && <button onClick={() => void deletePart(item)} style={{ border: "1px solid #b42318", color: "#b42318", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 900 }}>Delete</button>}
                       </>}
@@ -586,7 +592,14 @@ export default function InventoryPage() {
               </div>
             </fieldset>
 
-            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10 }}><button type="button" onClick={() => { setShowPartForm(false); setPart(blankPart); setEquipmentQuery(""); }} style={{ padding: "11px 16px" }}>Cancel</button><button type="submit" style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800 }}>Save part</button></div>
+            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                {part.id && editingItem && partStatus === "active" && <button type="button" onClick={() => void archivePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #8a5a00", borderRadius: 8, background: "white", color: "#8a5a00", fontWeight: 900 }}>Archive Part</button>}
+                {part.id && editingItem && partStatus === "archived" && <button type="button" onClick={() => void restorePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #176448", borderRadius: 8, background: "white", color: "#176448", fontWeight: 900 }}>Restore Part</button>}
+                {part.id && editingItem && data?.viewerRole === "admin" && <button type="button" onClick={() => void deletePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #b42318", borderRadius: 8, background: "#fff5f5", color: "#b42318", fontWeight: 950 }}>Delete Part</button>}
+              </div>
+              <div style={{ display: "flex", gap: 10 }}><button type="button" onClick={() => { setShowPartForm(false); setPart(blankPart); setEquipmentQuery(""); }} style={{ padding: "11px 16px" }}>Cancel</button><button type="submit" style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800 }}>Save part</button></div>
+            </div>
           </form>
         </div>
       )}
