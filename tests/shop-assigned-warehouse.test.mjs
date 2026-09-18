@@ -9,7 +9,7 @@ const unmatchedLib=readFileSync(new URL('../lib/unmatched-parts.ts',import.meta.
 const tools=readFileSync(new URL('../app/shop/technician-repair-tools-v2.tsx',import.meta.url),'utf8');
 
 test('mechanics and managers receive only their assigned warehouse stock in shop data',()=>{
-  assert.match(legacy,/yardWarehouseCode/);
+  assert.match(legacy,/parts_warehouse_id/);
   assert.match(legacy,/scopePartsToWarehouse/);
   assert.match(legacy,/assignedWarehouseCode:shopWarehouse\.code/);
   assert.match(legacy,/warehouseStocks:\[warehouseStock\]/);
@@ -20,7 +20,7 @@ test('mechanic and manager part use ignores browser warehouse choice and forces 
   assert.match(route,/assignedPartWarehouse\(user\)/);
   assert.match(route,/const warehouseCode = assignedWarehouse\?\.code \?\? requestedWarehouseCode/);
   assert.match(route,/user\.role !== 'mechanic' && user\.role !== 'manager'/);
-  assert.match(route,/needs an assigned yard\/parts warehouse/);
+  assert.match(route,/needs an active parts warehouse assignment/);
 });
 
 test('zero local stock can still create a request in the assigned warehouse',()=>{
@@ -32,7 +32,7 @@ test('zero local stock can still create a request in the assigned warehouse',()=
 
 test('typed unmatched parts are pinned to the assigned warehouse',()=>{
   assert.match(unmatchedRoute,/lockedToAssignedWarehouse/);
-  assert.match(unmatchedRoute,/yardWarehouseCode\(repair\.user_yard\)/);
+  assert.match(unmatchedRoute,/user_warehouse_code/);
   assert.match(unmatchedRoute,/warehouseCode:assignedWarehouseCode/);
   assert.match(unmatchedLib,/explicitWarehouseCode/);
   assert.match(unmatchedLib,/SELECT code FROM warehouses WHERE code=\? AND active=1/);

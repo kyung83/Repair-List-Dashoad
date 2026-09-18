@@ -19,8 +19,9 @@ type UnmatchedPart = {
   id:number;repairId:string;requestedText:string;requestedQuantity:number;warehouseCode:string;
   unit:string;assignedTo:string;priority:string;outOfService:boolean;createdAt:string;updatedAt:string;
 };
+type Warehouse={id:number;code:string;name:string};
 type DeskData = {
-  jobShortages:Group[]; requests:Job[]; lowStock:LowStock[]; unmatchedPartRequests?:UnmatchedPart[];
+  jobShortages:Group[]; requests:Job[]; lowStock:LowStock[]; unmatchedPartRequests?:UnmatchedPart[]; warehouses?:Warehouse[];
   summary:{shortageLines:number;waitingJobs:number;readyJobs:number;lowStockLines:number;unmatchedParts?:number}; updatedAt:string;
 };
 
@@ -68,8 +69,8 @@ export default function PartsDeskPage(){
   return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'36px 34px 100px',color:'#182331'}}>
     <ModuleTabs module="parts" />
     <header style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'end',flexWrap:'wrap'}}>
-      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#0d1b2b'}}>Parts Desk</h1><p style={{margin:0,color:'#667482'}}>One queue for repair shortages, unknown part requests, receiving, reservations, and yard-level replenishment.</p></div>
-      <div style={{display:'flex',gap:7}}>{['ALL','CLARE','CADILLAC'].map(code=><button key={code} onClick={()=>setYard(code)} style={yard===code?activeTab:tab}>{code==='ALL'?'All Yards':code[0]+code.slice(1).toLowerCase()}</button>)}</div>
+      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#0d1b2b'}}>Parts Desk</h1><p style={{margin:0,color:'#667482'}}>One queue for repair shortages, unknown part requests, receiving, reservations, and warehouse-level replenishment.</p></div>
+      <div style={{display:'flex',gap:7,flexWrap:'wrap'}}><button onClick={()=>setYard('ALL')} style={yard==='ALL'?activeTab:tab}>All Warehouses</button>{(data?.warehouses??[]).map(warehouse=><button key={warehouse.code} onClick={()=>setYard(warehouse.code)} style={yard===warehouse.code?activeTab:tab}>{warehouse.name}</button>)}</div>
     </header>
     {message&&<div style={notice}>{message}</div>}
 
@@ -78,7 +79,7 @@ export default function PartsDeskPage(){
     ].map(([label,value])=><article key={String(label)} style={metric}><span>{label}</span><strong>{value}</strong></article>)}</section>
 
     <section style={panel}><div style={panelHead}><div><p style={eyebrow}>NEEDS IDENTIFICATION</p><h2 style={title}>Technician requested parts not in the catalog</h2></div><span style={muted}>{unmatched.length} open request{unmatched.length===1?'':'s'}</span></div>
-      {!unmatched.length?<div style={empty}>No unmatched technician part requests in this yard.</div>:<div style={{display:'grid',gap:9}}>{unmatched.map(item=><article key={item.id} style={unmatchedCard}>
+      {!unmatched.length?<div style={empty}>No unmatched technician part requests in this warehouse.</div>:<div style={{display:'grid',gap:9}}>{unmatched.map(item=><article key={item.id} style={unmatchedCard}>
         <div style={{minWidth:0}}><strong style={{fontSize:18,color:'#0d1b2b'}}>{item.requestedText}</strong><div style={muted}>Typed by technician · Unit {item.unit||'—'} · {item.assignedTo||'Unassigned'} · {item.warehouseCode||'Unknown yard'}</div></div>
         <div style={{textAlign:'center'}}><span style={smallLabel}>QTY</span><strong style={{display:'block',fontSize:22}}>{n(item.requestedQuantity)}</strong></div>
         <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
@@ -86,8 +87,8 @@ export default function PartsDeskPage(){
       </article>)}</div>}
     </section>
 
-    <section style={panel}><div style={panelHead}><div><p style={eyebrow}>REORDER QUEUE</p><h2 style={title}>Waiting on parts</h2></div><span style={muted}>{groups.length} part / yard line{groups.length===1?'':'s'}</span></div>
-      {!groups.length?<div style={empty}>No repair shortages in this yard.</div>:groups.map(group=>{
+    <section style={panel}><div style={panelHead}><div><p style={eyebrow}>REORDER QUEUE</p><h2 style={title}>Waiting on parts</h2></div><span style={muted}>{groups.length} part / warehouse line{groups.length===1?'':'s'}</span></div>
+      {!groups.length?<div style={empty}>No repair shortages in this warehouse.</div>:groups.map(group=>{
         const key=`${group.partId}:${group.warehouseCode}`,stock=group.stock;
         const suggested=group.shortage;
         return <article key={key} style={queueCard}>
@@ -101,7 +102,7 @@ export default function PartsDeskPage(){
 
     <section style={panel}><div style={panelHead}><div><p style={eyebrow}>TECH HANDOFF</p><h2 style={title}>Reserved / ready for jobs</h2></div><span style={muted}>{ready.length} active line{ready.length===1?'':'s'}</span></div>{!ready.length?<div style={empty}>Nothing is currently reserved for a repair.</div>:<div style={{display:'grid',gap:8}}>{ready.map(job=><div key={job.id} style={jobRow}><b>{job.partNumber} · Unit {job.unit||'—'}</b><span>{job.warehouseName} · {job.assignedTo||'Unassigned'}</span><span>{n(job.reservedQuantity)} ready{job.shortageQuantity>0?` · ${n(job.shortageQuantity)} still awaiting`:''}</span></div>)}</div>}</section>
 
-    <section style={panel}><div style={panelHead}><div><p style={eyebrow}>MINIMUMS</p><h2 style={title}>Low-stock replenishment</h2></div><span style={muted}>Uses each warehouse's configured minimum</span></div>{!lows.length?<div style={empty}>No stock is at or below its minimum in this yard.</div>:<div style={{display:'grid',gap:8}}>{lows.slice(0,80).map(item=>{const key=`${item.partId}:${item.warehouseCode}`;return <div key={key} style={lowRow}><div><b>{item.partNumber}</b><span>{item.description} · {item.warehouseName}</span></div><div><span>Available</span><b>{n(item.available)}</b></div><div><span>Minimum</span><b>{n(item.minimumQuantity)}</b></div><div><span>On order</span><b>{n(item.onOrder)}</b></div><button disabled={item.reorderSuggested<=0||Boolean(busy)} onClick={()=>void action(item,'order',item.reorderSuggested)} style={darkButton}>{item.reorderSuggested>0?`Order ${n(item.reorderSuggested)}`:'Covered'}</button></div>})}</div>}</section>
+    <section style={panel}><div style={panelHead}><div><p style={eyebrow}>MINIMUMS</p><h2 style={title}>Low-stock replenishment</h2></div><span style={muted}>Uses each warehouse's configured minimum</span></div>{!lows.length?<div style={empty}>No stock is at or below its minimum in this warehouse.</div>:<div style={{display:'grid',gap:8}}>{lows.slice(0,80).map(item=>{const key=`${item.partId}:${item.warehouseCode}`;return <div key={key} style={lowRow}><div><b>{item.partNumber}</b><span>{item.description} · {item.warehouseName}</span></div><div><span>Available</span><b>{n(item.available)}</b></div><div><span>Minimum</span><b>{n(item.minimumQuantity)}</b></div><div><span>On order</span><b>{n(item.onOrder)}</b></div><button disabled={item.reorderSuggested<=0||Boolean(busy)} onClick={()=>void action(item,'order',item.reorderSuggested)} style={darkButton}>{item.reorderSuggested>0?`Order ${n(item.reorderSuggested)}`:'Covered'}</button></div>})}</div>}</section>
   </main>
 }
 

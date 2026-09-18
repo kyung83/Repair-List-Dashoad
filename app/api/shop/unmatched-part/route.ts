@@ -2,7 +2,6 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { normalizeWarehouseCode } from '@/lib/parts-lifecycle';
 import { requestUnmatchedPart } from '@/lib/unmatched-parts';
-import { yardWarehouseCode } from '@/lib/yards';
 import { POST as shopPOST } from '../route';
 
 type RequestContext = {
@@ -95,12 +94,14 @@ export async function POST(request: Request) {
              COALESCE(s.yard,'') AS live_yard,
              COALESCE(e.current_yard,'') AS current_yard,
              COALESCE(r.location,'') AS repair_location,
-             COALESCE(u.yard,'') AS user_yard
+             COALESCE(u.yard,'') AS user_yard,
+             COALESCE(uw.code,'') AS user_warehouse_code
       FROM repairs r
       LEFT JOIN equipment e ON e.id = r.equipment_id
       LEFT JOIN equipment_geotab_devices d ON d.equipment_id = e.id AND d.current = 1
       LEFT JOIN geotab_unit_state s ON s.equipment_id = e.id AND s.geotab_device_id = d.geotab_device_id
       LEFT JOIN app_users u ON u.id = ?
+      LEFT JOIN warehouses uw ON uw.id=u.parts_warehouse_id AND uw.active=1
       WHERE r.id = ?
     `).bind(user.id,repairId).first<{
       id:number;
@@ -110,15 +111,16 @@ export async function POST(request: Request) {
       current_yard:string;
       repair_location:string;
       user_yard:string;
+      user_warehouse_code:string;
     }>();
     if (!repair) throw new Error('Repair was not found.');
     if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
     if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
 
     const lockedToAssignedWarehouse = user.role === 'mechanic' || user.role === 'manager';
-    const assignedWarehouseCode = lockedToAssignedWarehouse ? yardWarehouseCode(repair.user_yard) : '';
+    const assignedWarehouseCode = lockedToAssignedWarehouse ? String(repair.user_warehouse_code??'').trim().toUpperCase() : '';
     if (lockedToAssignedWarehouse && !assignedWarehouseCode) {
-      throw new Error('Your account needs an assigned yard/parts warehouse before you can request parts.');
+      throw new Error('Your account needs an active parts warehouse assignment before you can request parts.');
     }
 
     const fallbackYard = lockedToAssignedWarehouse

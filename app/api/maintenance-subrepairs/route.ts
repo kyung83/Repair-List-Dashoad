@@ -37,9 +37,16 @@ async function requireUser(request: Request) {
   return user;
 }
 
-async function assignedYard(userId:number){
-  const row=await env.DB.prepare("SELECT COALESCE(yard,'') AS yard FROM app_users WHERE id=?").bind(userId).first<{yard:string}>();
-  return String(row?.yard??'');
+async function assignedWarehouseCode(userId:number){
+  const row=await env.DB.prepare(`
+    SELECT w.code
+    FROM app_users u
+    JOIN warehouses w ON w.id=u.parts_warehouse_id AND w.active=1
+    WHERE u.id=?
+  `).bind(userId).first<{code:string}>();
+  const code=String(row?.code??'').trim().toUpperCase();
+  if (!code) throw new Error('Your account needs an active parts warehouse assignment before you can use or request parts.');
+  return code;
 }
 
 async function loadParent(id: number) {
@@ -129,7 +136,7 @@ export async function POST(request: Request) {
         repairId: child.id,
         partId,
         quantity,
-        fallbackYard: await assignedYard(user.id),
+        warehouseCode: await assignedWarehouseCode(user.id),
         userId: user.id,
       });
       await recordEvent(

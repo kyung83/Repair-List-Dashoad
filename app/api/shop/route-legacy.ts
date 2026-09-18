@@ -9,7 +9,7 @@ import {
   releaseRepairPartRequests,
   requestPartForRepair,
 } from '@/lib/parts-lifecycle';
-import { normalizeYard, yardLabel, yardWarehouseCode, type YardSelection } from '@/lib/yards';
+import { normalizeYard, yardLabel, type YardSelection } from '@/lib/yards';
 
 type Yard = YardSelection;
 type ShopRepair = {
@@ -71,15 +71,14 @@ async function assignedYard(userId: number): Promise<Yard> {
 }
 
 async function assignedWarehouse(userId:number):Promise<AssignedWarehouse> {
-  const yard=await assignedYard(userId);
-  const code=yardWarehouseCode(yard);
-  if (!yard || !code) return {yard,code:'',name:''};
-  const warehouse=await env.DB.prepare('SELECT code,name FROM warehouses WHERE code=? AND active=1')
-    .bind(code)
-    .first<{code:string;name:string}>();
-  return warehouse
-    ? {yard,code:warehouse.code,name:warehouse.name}
-    : {yard,code:'',name:''};
+  const row=await env.DB.prepare(`
+    SELECT COALESCE(u.yard,'') AS yard,w.code,w.name
+    FROM app_users u
+    LEFT JOIN warehouses w ON w.id=u.parts_warehouse_id AND w.active=1
+    WHERE u.id=?
+  `).bind(userId).first<{yard:string;code:string|null;name:string|null}>();
+  const yard=normalizeYard(row?.yard);
+  return {yard,code:String(row?.code??''),name:String(row?.name??'')};
 }
 
 function scopePartsToWarehouse(parts:ShopPart[],warehouse:AssignedWarehouse) {
@@ -490,8 +489,9 @@ async function handleRepairOutcome(request:Request, body:Record<string,unknown>)
       if (!Number.isInteger(partId) || partId <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
         return { ok:false, needsPart:true, error:'Select the needed part and quantity.' };
       }
-      const yard = await assignedYard(user.id);
-      partResult = await requestPartForRepair(env.DB,{ repairId:id, partId, quantity, fallbackYard:yard, userId:user.id });
+      const warehouse = await assignedWarehouse(user.id);
+      if (!warehouse.code) throw new Error('Your account needs an active parts warehouse assignment before you can request parts.');
+      partResult = await requestPartForRepair(env.DB,{ repairId:id, partId, quantity, warehouseCode:warehouse.code, userId:user.id });
       shortage = Boolean(partResult.awaitingParts);
       if (!shortage) {
         await repairJobEvent(id,user.id,technician.id,'part_available',`${String(partResult.partNumber ?? 'Part')} was available and applied; labor kept running.`);
@@ -641,12 +641,13 @@ export async function POST(request: Request) {
       const id = numericRepairId(body.repairId);
       if (!id) throw new Error('Repair was not found.');
       const { user } = await requirePartAccess(request.clone(), id);
-      const yard = await assignedYard(user.id);
+      const warehouse = await assignedWarehouse(user.id);
+      if (!warehouse.code) throw new Error('Your account needs an active parts warehouse assignment before you can use or request parts.');
       const result = await requestPartForRepair(env.DB, {
         repairId: id,
         partId: Number(body.partId ?? 0),
         quantity: Number(body.quantity ?? 0),
-        fallbackYard: yard,
+        warehouseCode: warehouse.code,
         userId: user.id,
       });
       await repairJobEvent(
