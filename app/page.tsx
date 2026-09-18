@@ -59,7 +59,8 @@ export default function TodayPage(){
       <div className="easy-grid">
         <a className="easy-card easy-metric" href="/shop"><span>Work assigned to me</span><strong>My Jobs</strong><small>Open a repair, PM, or Annual.</small></a>
         <a className="easy-card easy-metric" href="/unit"><span>Truck or trailer</span><strong>Find Unit</strong><small>See work, maintenance, and forms.</small></a>
-        <a className="easy-card easy-metric" href="/annual-inspections"><span>Paperwork</span><strong>Forms</strong><small>Print or reprint completed Annuals.</small></a>
+        <a className="easy-card easy-metric" href="/pm-inspections"><span>Paperwork</span><strong>PM Forms</strong><small>Print or save completed PM sheets.</small></a>
+        <a className="easy-card easy-metric" href="/annual-inspections"><span>Paperwork</span><strong>Annual Forms</strong><small>Print or reprint completed Annuals.</small></a>
       </div>
     </div></main>;
   }
@@ -104,6 +105,7 @@ export default function TodayPage(){
           <a className="easy-button primary" href="/repair-board">Open Shop Board</a>
           <a className="easy-button orange" href="/next-pm-repairs">Add Future Repair</a>
           <a className="easy-button" href="/unit">Find a Unit</a>
+          <a className="easy-button" href="/pm-inspections">Print PM Form</a>
           <a className="easy-button" href="/annual-inspections">Print Annual Form</a>
           <a className="easy-button" href="/inventory">Parts Inventory</a>
         </div>
