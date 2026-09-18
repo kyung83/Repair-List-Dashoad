@@ -9,7 +9,7 @@ import {
   releaseRepairPartRequests,
   requestPartForRepair,
 } from '@/lib/parts-lifecycle';
-import { normalizeYard, yardLabel, type YardSelection } from '@/lib/yards';
+import { normalizeYard, yardLabel, yardWarehouseCode, type YardSelection } from '@/lib/yards';
 
 type Yard = YardSelection;
 type ShopRepair = {
@@ -28,6 +28,7 @@ type SessionUser = {
 };
 type Technician = { id:number; name:string };
 type LaborStop = { repairId:number; hours:number; rate:number };
+type AssignedWarehouse = { yard:Yard; code:string; name:string };
 
 type RepairUnit = {
   id:number;
@@ -67,6 +68,49 @@ async function assignedYard(userId: number): Promise<Yard> {
     .bind(userId)
     .first<{ yard: string }>();
   return normalizeYard(row?.yard);
+}
+
+async function assignedWarehouse(userId:number):Promise<AssignedWarehouse> {
+  const yard=await assignedYard(userId);
+  const code=yardWarehouseCode(yard);
+  if (!yard || !code) return {yard,code:'',name:''};
+  const warehouse=await env.DB.prepare('SELECT code,name FROM warehouses WHERE code=? AND active=1')
+    .bind(code)
+    .first<{code:string;name:string}>();
+  return warehouse
+    ? {yard,code:warehouse.code,name:warehouse.name}
+    : {yard,code:'',name:''};
+}
+
+function scopePartsToWarehouse(parts:ShopPart[],warehouse:AssignedWarehouse) {
+  if (!warehouse.code) return [];
+  return parts.map((part)=>{
+    const sourceStocks=Array.isArray(part.warehouseStocks) ? part.warehouseStocks as Array<Record<string,unknown>> : [];
+    const local=sourceStocks.find((stock)=>String(stock.warehouseCode??'').toUpperCase()===warehouse.code);
+    const available=Number(local?.available??local?.quantityOnHand??0);
+    const physicalOnHand=Number(local?.physicalOnHand??0);
+    const reserved=Number(local?.reserved??0);
+    const onOrder=Number(local?.onOrder??0);
+    const warehouseStock=local ?? {
+      warehouseCode:warehouse.code,
+      warehouseName:warehouse.name,
+      quantityOnHand:0,
+      physicalOnHand:0,
+      reserved:0,
+      available:0,
+      onOrder:0,
+      minimumQuantity:0,
+    };
+    return {
+      ...part,
+      quantityOnHand:available,
+      physicalOnHand,
+      reserved,
+      available,
+      onOrder,
+      warehouseStocks:[warehouseStock],
+    };
+  });
 }
 
 async function isDeferredRepair(value: unknown) {
@@ -504,8 +548,10 @@ export async function GET(request: Request) {
   const yards = await equipmentYards();
   let repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status));
 
+  let shopWarehouse:AssignedWarehouse|null=null;
   if (user && (user.role === 'mechanic' || user.role === 'manager')) {
-    const yard = await assignedYard(user.id);
+    shopWarehouse = await assignedWarehouse(user.id);
+    const yard = shopWarehouse.yard;
     if (user.role === 'mechanic' && user.technicianId) {
       const technicianId = Number(user.technicianId);
       repairs = repairs.filter((repair) => {
@@ -518,7 +564,14 @@ export async function GET(request: Request) {
     } else {
       repairs = [];
     }
-    payload.user = { ...(payload.user ?? {}), yard, yardAssigned: Boolean(yard) };
+    payload.user = {
+      ...(payload.user ?? {}),
+      yard,
+      yardAssigned:Boolean(yard),
+      assignedWarehouseCode:shopWarehouse.code,
+      assignedWarehouseName:shopWarehouse.name,
+      warehouseAssigned:Boolean(shopWarehouse.code),
+    };
     payload.yardScope = { yard, yardAssigned: Boolean(yard) };
   }
 
@@ -551,7 +604,8 @@ export async function GET(request: Request) {
   });
   payload.repairs = repairs;
   payload.technicians = technicians.results.map((row)=>({id:Number(row.id),name:row.name}));
-  payload.parts = await decorateShopParts(env.DB, payload.parts ?? []);
+  const decoratedParts = await decorateShopParts(env.DB, payload.parts ?? []);
+  payload.parts = shopWarehouse ? scopePartsToWarehouse(decoratedParts,shopWarehouse) : decoratedParts;
   const visibleIds = new Set(repairs.map((repair) => numericRepairId(repair.id)).filter(Boolean));
   const requests = (await getRepairPartRequests(env.DB)).filter((partRequest) => visibleIds.has(partRequest.repairNumericId));
   payload.partRequests = requests;
