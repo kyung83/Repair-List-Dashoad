@@ -69,6 +69,7 @@ const sidebarGroups: SidebarGroup[] = [
     links: [
       { href: "/unit", label: "Unit Hub", roles: allRoles },
       { href: "/equipment", label: "Master Equipment", roles: officeRoles },
+      { href: "/pm-inspections", label: "PM Records / Forms", roles: annualRecordRoles },
       { href: "/annual-inspections", label: "Annual Records / Forms", roles: annualRecordRoles },
     ],
   },

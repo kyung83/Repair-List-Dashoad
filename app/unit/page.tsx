@@ -7,8 +7,8 @@ type Equipment = { id:number; unit:string; category:string; equipmentType:string
 type EquipmentData = { equipment:Equipment[] };
 type Work = { id:string; source:string; unit:string; issue:string; status:string; assignedTo:string; technicianId:number|null; equipmentId:number|null; outOfService:boolean; oosReason:string };
 type Board = { user:{role:string}; repairs:Work[] };
-type AnnualForm = { reportNumber:string; repairId:string; inspectionDate:string; unit:string; inspector:string; printUrl:string };
-type AnnualData = { forms:AnnualForm[] };
+type MaintenanceForm = { reportNumber:string; repairId:string; inspectionDate:string; unit:string; inspector:string; printUrl:string };
+type MaintenanceFormData = { forms:MaintenanceForm[] };
 type FutureAction = { id:number; equipmentId:number; repairId:string; unit:string; location:string; description:string; targetEventType:"pm"|"annual"; repairStatus:string; taggedAt:string; plannedPartCount:number };
 type FutureData = { actions:FutureAction[] };
 
@@ -18,7 +18,8 @@ function dateText(value:string){if(!value)return 'Not recorded';const date=new D
 export default function UnitPage(){
   const [equipment,setEquipment]=useState<Equipment[]>([]);
   const [board,setBoard]=useState<Board|null>(null);
-  const [forms,setForms]=useState<AnnualForm[]>([]);
+  const [annualForms,setAnnualForms]=useState<MaintenanceForm[]>([]);
+  const [pmForms,setPmForms]=useState<MaintenanceForm[]>([]);
   const [futureActions,setFutureActions]=useState<FutureAction[]>([]);
   const [query,setQuery]=useState("");
   const [selectedUnit,setSelectedUnit]=useState("");
@@ -30,14 +31,16 @@ export default function UnitPage(){
     void Promise.all([
       fetch('/api/equipment',{cache:'no-store'}).then(async r=>{const p=await r.json() as EquipmentData&{error?:string};if(!r.ok)throw new Error(p.error||'Units could not be loaded.');return p;}),
       fetch('/api/repair-board',{cache:'no-store'}).then(async r=>{const p=await r.json() as Board&{error?:string};if(!r.ok)throw new Error(p.error||'Open work could not be loaded.');return p;}),
-      fetch('/api/annual-inspections',{cache:'no-store'}).then(async r=>r.ok?await r.json() as AnnualData:{forms:[]}),
+      fetch('/api/annual-inspections',{cache:'no-store'}).then(async r=>r.ok?await r.json() as MaintenanceFormData:{forms:[]}),
+      fetch('/api/pm-inspections',{cache:'no-store'}).then(async r=>r.ok?await r.json() as MaintenanceFormData:{forms:[]}),
       fetch('/api/maintenance-actions',{cache:'no-store'}).then(async r=>r.ok?await r.json() as FutureData:{actions:[]}).catch(()=>({actions:[]})),
-    ]).then(([eq,b,annual,future])=>{setEquipment(eq.equipment);setBoard(b);setForms(annual.forms||[]);setFutureActions(future.actions||[]);}).catch(error=>setMessage(error instanceof Error?error.message:'Unit information could not be loaded.'));
+    ]).then(([eq,b,annual,pm,future])=>{setEquipment(eq.equipment);setBoard(b);setAnnualForms(annual.forms||[]);setPmForms(pm.forms||[]);setFutureActions(future.actions||[]);}).catch(error=>setMessage(error instanceof Error?error.message:'Unit information could not be loaded.'));
   },[]);
 
   const selected=useMemo(()=>equipment.find(item=>sameUnit(item.unit,selectedUnit))??null,[equipment,selectedUnit]);
   const openWork=useMemo(()=>selected?(board?.repairs??[]).filter(item=>item.equipmentId===selected.id||sameUnit(item.unit,selected.unit)):[],[board,selected]);
-  const annuals=useMemo(()=>selected?forms.filter(item=>sameUnit(item.unit,selected.unit)):[],[forms,selected]);
+  const annuals=useMemo(()=>selected?annualForms.filter(item=>sameUnit(item.unit,selected.unit)):[],[annualForms,selected]);
+  const pms=useMemo(()=>selected?pmForms.filter(item=>sameUnit(item.unit,selected.unit)):[],[pmForms,selected]);
   const future=useMemo(()=>selected?futureActions.filter(item=>item.equipmentId===selected.id):[],[futureActions,selected]);
 
   function openUnit(){
@@ -51,8 +54,9 @@ export default function UnitPage(){
   const canWork=role==='mechanic'||role==='manager'||role==='admin';
   const canOpenBoard=role==='dispatch'||role==='manager'||role==='admin'||role==='viewer';
   const canOfficeTools=role==='viewer'||role==='manager'||role==='admin';
-  const canUseAnnualForms=role!=='dispatch';
+  const canUseMaintenanceForms=role!=='dispatch';
   const latestAnnual=annuals[0];
+  const latestPm=pms[0];
   const currentMaintenance=openWork.filter(item=>['pm','annual','pm-repair','annual-repair'].includes(item.source));
   const currentRepairs=openWork.filter(item=>!['pm','annual','pm-repair','annual-repair'].includes(item.source));
 
@@ -83,7 +87,8 @@ export default function UnitPage(){
           <div className="easy-actions">
             {canWork&&<a className="easy-button orange" href="/shop">Work on this Unit</a>}
             {canOpenBoard&&<a className="easy-button" href="/repair-board">Open Repair Board</a>}
-            {canUseAnnualForms&&latestAnnual&&<a className="easy-button" href={latestAnnual.printUrl}>Print Latest Annual</a>}
+            {canUseMaintenanceForms&&latestPm&&<a className="easy-button" href={latestPm.printUrl}>Print Latest PM</a>}
+            {canUseMaintenanceForms&&latestAnnual&&<a className="easy-button" href={latestAnnual.printUrl}>Print Latest Annual</a>}
           </div>
         </div>
         <div className="easy-card easy-card-body">
@@ -117,12 +122,28 @@ export default function UnitPage(){
           <p className="easy-section-copy">Items intentionally saved for the next PM or Annual.</p>
           <div className="easy-list">{future.map(item=><div key={item.id} className="easy-row"><div className="easy-row-main"><strong>{item.description}</strong><span>Waiting for next {item.targetEventType==='annual'?'Annual':'PM'}{item.plannedPartCount?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</span></div><span className="easy-badge orange">NEXT {item.targetEventType==='annual'?'ANNUAL':'PM'}</span></div>)}{!future.length&&<div className="easy-empty">Nothing is waiting for a future PM or Annual.</div>}</div>
         </div>
-        {canUseAnnualForms&&<div className="easy-card easy-card-body">
-          <h3 className="easy-section-title">Annual forms</h3>
-          <p className="easy-section-copy">Completed inspections stay here so a lost copy can be printed again.</p>
-          <div className="easy-form-list">{annuals.slice(0,6).map(item=><div className="easy-form-row" key={item.reportNumber}><div><strong>{dateText(item.inspectionDate)} Annual</strong><span>{item.inspector||'Inspector not listed'} · {item.reportNumber}</span></div><a className="easy-button" style={{minHeight:38,padding:'0 11px'}} href={item.printUrl}>Print</a></div>)}{!annuals.length&&<div className="easy-empty">No completed Annual form is stored for this unit yet.</div>}</div>
+        {canUseMaintenanceForms&&<div className="easy-card easy-card-body">
+          <h3 className="easy-section-title">PM forms</h3>
+          <p className="easy-section-copy">Completed PM sheets stay here so they can be printed or saved as PDF again.</p>
+          <div className="easy-form-list">{pms.slice(0,6).map(item=><div className="easy-form-row" key={item.reportNumber}><div><strong>{dateText(item.inspectionDate)} PM</strong><span>{item.inspector||'Mechanic not listed'} · {item.reportNumber}</span></div><a className="easy-button" style={{minHeight:38,padding:'0 11px'}} href={item.printUrl}>Print / PDF</a></div>)}{!pms.length&&<div className="easy-empty">No completed PM form is stored for this unit yet.</div>}</div>
         </div>}
       </section>
+
+      {canUseMaintenanceForms&&<section className="easy-attention">
+        <div className="easy-card easy-card-body">
+          <h3 className="easy-section-title">Annual forms</h3>
+          <p className="easy-section-copy">Completed Annual inspections stay here so a lost copy can be printed again.</p>
+          <div className="easy-form-list">{annuals.slice(0,6).map(item=><div className="easy-form-row" key={item.reportNumber}><div><strong>{dateText(item.inspectionDate)} Annual</strong><span>{item.inspector||'Inspector not listed'} · {item.reportNumber}</span></div><a className="easy-button" style={{minHeight:38,padding:'0 11px'}} href={item.printUrl}>Print / PDF</a></div>)}{!annuals.length&&<div className="easy-empty">No completed Annual form is stored for this unit yet.</div>}</div>
+        </div>
+        <div className="easy-card easy-card-body">
+          <h3 className="easy-section-title">All maintenance forms</h3>
+          <p className="easy-section-copy">Open the complete searchable records when you need older paperwork.</p>
+          <div className="easy-actions" style={{display:'grid'}}>
+            <a className="easy-button" href="/pm-inspections">Browse PM Records / Forms</a>
+            <a className="easy-button" href="/annual-inspections">Browse Annual Records / Forms</a>
+          </div>
+        </div>
+      </section>}
     </>}
   </div></main>;
 }

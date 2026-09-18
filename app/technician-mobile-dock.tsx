@@ -73,8 +73,10 @@ export default function TechnicianMobileDock(){
     ["Breakdowns","/breakdowns"],
     ["Parts Desk","/parts-desk"],
     ["Completed Work","/work-orders"],
+    ["PM Forms","/pm-inspections"],
     ["Annual Forms","/annual-inspections"],
   ]:[
+    ["PM Forms","/pm-inspections"],
     ["Annual Forms","/annual-inspections"],
   ],[manager]);
 
