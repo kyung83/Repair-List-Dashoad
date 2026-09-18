@@ -3,7 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getInventoryData, savePart, savePartSettings } from '@/lib/inventory-db';
 import { decorateInventoryDataDerived } from '@/lib/derived-reservations';
 import { recordPhysicalCount, resolvePhysicalCountIssue, saveNormalizedVendor } from '@/lib/inventory-operations';
-import { deleteUnusedPart, setPartArchived } from '@/lib/inventory-part-management';
+import { deletePartPreservingHistory, setPartArchived } from '@/lib/inventory-part-management';
 
 export async function GET(request: Request) {
   try {
@@ -39,8 +39,8 @@ export async function POST(request: Request) {
     if (action === 'deletePart') {
       const user = await getSessionUser(env.DB,request);
       if (!user) throw new Error('Authentication required.');
-      if (user.role !== 'admin') throw new Error('Administrator access is required to permanently delete a part.');
-      return Response.json(await deleteUnusedPart(env.DB,{partId:body.partId}));
+      if (user.role !== 'admin') throw new Error('Administrator access is required to delete a part.');
+      return Response.json(await deletePartPreservingHistory(env.DB,{partId:body.partId,userId:user.id}));
     }
 
     if (action === 'recordPhysicalCount') {

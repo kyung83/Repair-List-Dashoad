@@ -43,7 +43,11 @@ function finiteNumber(value: unknown, fallback = 0) {
 }
 
 export async function getInventoryData(db: D1Database, status: 'active'|'archived'|'all' = 'active') {
-  const partWhere = status === 'archived' ? 'WHERE p.active = 0' : status === 'all' ? '' : 'WHERE p.active = 1';
+  const partWhere = status === 'archived'
+    ? 'WHERE p.active = 0 AND p.deleted_at IS NULL'
+    : status === 'all'
+      ? 'WHERE p.deleted_at IS NULL'
+      : 'WHERE p.active = 1 AND p.deleted_at IS NULL';
   const [partsResult, vendorsResult, stockResult, warehousesResult, minimumsResult, equipmentResult, partEquipmentResult] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.part_number, p.description, p.quantity_on_hand, p.reorder_level,

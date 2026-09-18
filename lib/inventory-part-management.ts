@@ -5,9 +5,9 @@ function partIdValue(value: unknown) {
 }
 
 async function requirePart(db: D1Database, partId: number) {
-  const row = await db.prepare('SELECT id,part_number,description,active,core_return_part_id FROM parts WHERE id=?')
+  const row = await db.prepare('SELECT id,part_number,description,active,core_return_part_id,deleted_at FROM parts WHERE id=?')
     .bind(partId)
-    .first<{id:number;part_number:string;description:string;active:number;core_return_part_id:number|null}>();
+    .first<{id:number;part_number:string;description:string;active:number;core_return_part_id:number|null;deleted_at:string|null}>();
   if (!row) throw new Error('Part was not found.');
   return row;
 }
@@ -15,8 +15,9 @@ async function requirePart(db: D1Database, partId: number) {
 export async function setPartArchived(db: D1Database, input: {partId: unknown; archived: boolean}) {
   const partId = partIdValue(input.partId);
   const part = await requirePart(db, partId);
+  if (part.deleted_at) throw new Error('Deleted parts cannot be archived or restored.');
   const active = input.archived ? 0 : 1;
-  await db.prepare('UPDATE parts SET active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')
+  await db.prepare('UPDATE parts SET active=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL')
     .bind(active, partId).run();
   return {
     ok: true,
@@ -31,9 +32,13 @@ async function count(db: D1Database, sql: string, ...bindings: unknown[]) {
   return Number(row?.count ?? 0);
 }
 
-export async function deleteUnusedPart(db: D1Database, input: {partId: unknown}) {
+export async function deletePartPreservingHistory(
+  db: D1Database,
+  input: {partId: unknown; userId?: number|null},
+) {
   const partId = partIdValue(input.partId);
   const part = await requirePart(db, partId);
+  if (part.deleted_at) return {ok:true,partId,partNumber:part.part_number,deleted:true,idempotent:true};
 
   const stock = await db.prepare(`
     SELECT COALESCE(SUM(quantity_on_hand),0) AS quantity_on_hand,
@@ -44,46 +49,55 @@ export async function deleteUnusedPart(db: D1Database, input: {partId: unknown})
   const physical = Number(stock?.quantity_on_hand ?? 0);
   const onOrder = Number(stock?.on_order ?? 0);
   if (Math.abs(physical) > 0.000001 || Math.abs(onOrder) > 0.000001) {
-    throw new Error(`Permanent delete is blocked because ${part.part_number} still has warehouse stock or on-order quantity. Physical-count/transfer it to zero first, or archive it instead.`);
+    throw new Error(`Delete is blocked because ${part.part_number} still has warehouse stock or on-order quantity. Physical-count/transfer it to zero first. Its existing history will still be preserved after deletion.`);
   }
 
-  const blockers = [
-    ['repair history', await count(db,'SELECT COUNT(*) AS count FROM repair_parts WHERE part_id=?',partId)],
-    ['repair part requests', await count(db,'SELECT COUNT(*) AS count FROM repair_part_requests WHERE part_id=?',partId)],
-    ['part lifecycle history', await count(db,'SELECT COUNT(*) AS count FROM part_lifecycle_events WHERE part_id=?',partId)],
-    ['legacy transfers', await count(db,'SELECT COUNT(*) AS count FROM part_transfers WHERE part_id=?',partId)],
-    ['inventory operations', await count(db,'SELECT COUNT(*) AS count FROM inventory_operation_lines WHERE part_id=?',partId)],
-    ['physical-count history', await count(db,'SELECT COUNT(*) AS count FROM inventory_discrepancy_issues WHERE part_id=?',partId)],
-    ['core history', await count(db,'SELECT COUNT(*) AS count FROM part_core_obligations WHERE issued_part_id=? OR core_part_id=?',partId,partId)],
-    ['recovered tire history', await count(db,'SELECT COUNT(*) AS count FROM recovered_used_tires WHERE part_id=?',partId)],
-    ['inventory transfers', await count(db,'SELECT COUNT(*) AS count FROM inventory_transfers WHERE part_id=?',partId)],
-    ['receiving history', await count(db,'SELECT COUNT(*) AS count FROM parts_receipts WHERE part_id=?',partId)],
-    ['PM kit assignments', await count(db,'SELECT COUNT(*) AS count FROM pm_kit_parts WHERE part_id=?',partId)],
-    ['planned repair parts', await count(db,'SELECT COUNT(*) AS count FROM repair_planned_parts WHERE part_id=?',partId)],
-    ['core configuration on another part', await count(db,'SELECT COUNT(*) AS count FROM parts WHERE core_return_part_id=? AND id<>?',partId,partId)],
-  ].filter(([,value]) => Number(value) > 0) as Array<[string,number]>;
-
-  if (blockers.length) {
-    const detail = blockers.slice(0,3).map(([label,value]) => `${label} (${value})`).join(', ');
-    throw new Error(`Permanent delete is blocked because ${part.part_number} has linked records: ${detail}${blockers.length>3?' and more':''}. Archive it instead so history stays intact.`);
+  const openRequests = await count(db,`
+    SELECT COUNT(*) AS count
+    FROM repair_part_requests q
+    JOIN repairs r ON r.id=q.repair_id
+    WHERE q.part_id=? AND q.status='open'
+      AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+  `,partId);
+  if (openRequests > 0) {
+    throw new Error(`Delete is blocked because ${part.part_number} is still requested on an open repair. Close or remove the open request first; completed history does not block deletion.`);
   }
 
-  try {
-    await db.batch([
-      db.prepare('DELETE FROM part_vendors WHERE part_id=?').bind(partId),
-      db.prepare('DELETE FROM part_warehouse_minimums WHERE part_id=?').bind(partId),
-      db.prepare('DELETE FROM part_equipment WHERE part_id=?').bind(partId),
-      db.prepare('DELETE FROM part_cross_references WHERE part_id=?').bind(partId),
-      db.prepare('DELETE FROM part_warehouse_stock WHERE part_id=?').bind(partId),
-      db.prepare('DELETE FROM parts WHERE id=?').bind(partId),
-    ]);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/foreign key|constraint/i.test(message)) {
-      throw new Error(`Permanent delete is blocked because ${part.part_number} is still linked somewhere in the system. Archive it instead so history stays intact.`);
-    }
-    throw error;
+  const activePlanned = await count(db,`
+    SELECT COUNT(*) AS count
+    FROM repair_planned_parts pp
+    JOIN repairs r ON r.id=pp.repair_id
+    WHERE pp.part_id=? AND pp.removed_at IS NULL
+      AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+  `,partId);
+  if (activePlanned > 0) {
+    throw new Error(`Delete is blocked because ${part.part_number} is still planned on an open repair. Remove it from the open job first; completed history does not block deletion.`);
   }
 
-  return {ok:true,partId,partNumber:part.part_number,deleted:true};
+  await db.batch([
+    // Tombstone the catalog row so every historical FK keeps the same part identity.
+    db.prepare(`
+      UPDATE parts
+      SET active=0,deleted_at=CURRENT_TIMESTAMP,deleted_by_user_id=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND deleted_at IS NULL
+    `).bind(input.userId ?? null,partId),
+
+    // Stop future PM templates from placing the deleted part on new work orders.
+    db.prepare('DELETE FROM pm_kit_parts WHERE part_id=?').bind(partId),
+
+    // A deleted part must not remain configured as a future return core.
+    db.prepare('UPDATE parts SET core_return_part_id=NULL,core_return_quantity=0,updated_at=CURRENT_TIMESTAMP WHERE core_return_part_id=?').bind(partId),
+
+    // Free interchange numbers for future active catalog parts while retaining the rows for audit.
+    db.prepare('UPDATE part_cross_references SET active=0,updated_at=CURRENT_TIMESTAMP WHERE part_id=?').bind(partId),
+  ]);
+
+  return {
+    ok:true,
+    partId,
+    partNumber:part.part_number,
+    deleted:true,
+    idempotent:false,
+    historyPreserved:true,
+  };
 }
