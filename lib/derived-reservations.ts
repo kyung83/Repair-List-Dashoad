@@ -1,3 +1,5 @@
+import { getPartCrossReferencesByPart } from './part-cross-references';
+
 const EPSILON = 0.000001;
 const finite = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
@@ -100,9 +102,9 @@ export async function getPartsDeskDataDerived(db:D1Database) {
 }
 
 export async function decorateShopPartsDerived(db:D1Database,parts:any[]) {
-  const availability=await getDerivedPartAvailability(db); const byPart=new Map<number,DerivedAvailability[]>();
+  const [availability,crossReferences]=await Promise.all([getDerivedPartAvailability(db),getPartCrossReferencesByPart(db)]); const byPart=new Map<number,DerivedAvailability[]>();
   for(const row of availability){const list=byPart.get(row.partId)??[];list.push(row);byPart.set(row.partId,list);}
-  return parts.map((part)=>{const rows=byPart.get(Number(part.id))??[];const physicalOnHand=rows.reduce((s,r)=>s+r.physicalOnHand,0);const reserved=rows.reduce((s,r)=>s+r.reserved,0);const available=physicalOnHand-reserved;return {...part,quantityOnHand:rows.length?available:part.quantityOnHand,physicalOnHand,reserved,available,onOrder:rows.reduce((s,r)=>s+r.onOrder,0),warehouseStocks:rows.map((r)=>({warehouseId:r.warehouseId,warehouseCode:r.warehouseCode,warehouseName:r.warehouseName,quantityOnHand:r.available,physicalOnHand:r.physicalOnHand,reserved:r.reserved,available:r.available,onOrder:r.onOrder,minimumQuantity:r.minimumQuantity}))};});
+  return parts.map((part)=>{const rows=byPart.get(Number(part.id))??[];const physicalOnHand=rows.reduce((s,r)=>s+r.physicalOnHand,0);const reserved=rows.reduce((s,r)=>s+r.reserved,0);const available=physicalOnHand-reserved;return {...part,crossReferences:crossReferences.get(Number(part.id))??[],quantityOnHand:rows.length?available:part.quantityOnHand,physicalOnHand,reserved,available,onOrder:rows.reduce((s,r)=>s+r.onOrder,0),warehouseStocks:rows.map((r)=>({warehouseId:r.warehouseId,warehouseCode:r.warehouseCode,warehouseName:r.warehouseName,quantityOnHand:r.available,physicalOnHand:r.physicalOnHand,reserved:r.reserved,available:r.available,onOrder:r.onOrder,minimumQuantity:r.minimumQuantity}))};});
 }
 
 export async function decorateInventoryDataDerived(db:D1Database,data:any) {

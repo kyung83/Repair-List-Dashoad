@@ -4,7 +4,7 @@ import {useEffect,useMemo,useRef,useState} from "react";
 
 type RepairNote={id:number;detail:string;technician:string;createdAt:string};
 type WarehouseStock={warehouseCode:string;warehouseName?:string;available?:number;quantityOnHand?:number;physicalOnHand?:number;reserved?:number};
-type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string;warehouseStocks?:WarehouseStock[]};
+type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string;crossReferences?:string[];warehouseStocks?:WarehouseStock[]};
 type ShopPayload={parts?:Part[];error?:string};
 type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
 type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string;waitingOnPart?:boolean;nextRepairId?:string|null;hours?:number;laborStarted?:boolean;activeLaborContinues?:boolean};
@@ -34,7 +34,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
 
   useEffect(()=>{setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setWarehouseCode("");setQuantity(1);setPartMessage("");if(showNotes)void loadNotes().catch(error=>setNoteMessage(error instanceof Error?error.message:"Repair notes could not be loaded."));if(showParts)void loadParts().catch(error=>setPartMessage(error instanceof Error?error.message:"Parts could not be loaded."));return()=>{try{recognitionRef.current?.stop()}catch{}recognitionRef.current=null}},[repairId,showNotes,showParts]);
 
-  const matches=useMemo(()=>{const term=search.trim().toLowerCase();if(!term)return[];return parts.filter(part=>`${part.partNumber} ${part.description}`.toLowerCase().includes(term)).slice(0,8)},[parts,search]);
+  const matches=useMemo(()=>{const term=search.trim().toLowerCase();if(!term)return[];return parts.filter(part=>`${part.partNumber} ${part.description} ${(part.crossReferences??[]).join(" ")}`.toLowerCase().includes(term)).slice(0,8)},[parts,search]);
   const selectedWarehouse=(selectedPart?.warehouseStocks??[]).find(stock=>stock.warehouseCode===warehouseCode);
   const selectedAvailable=warehouseAvailable(selectedWarehouse);
 
@@ -76,7 +76,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
     {showParts&&<div style={toolCard}>
       <div><strong style={heading}>PART LOOKUP</strong><span style={help}>Choose the exact warehouse. In-stock parts are applied immediately. If the warehouse is short, requesting the part automatically saves labor and moves the repair to Waiting on Part.</span></div>
       <div style={searchRow}><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedPart(null);setWarehouseCode("");setPartMessage("")}} placeholder="Type part number or description…" style={input} disabled={partBusy||!canWork}/><input aria-label="Part quantity" type="number" min="0.01" step="any" value={quantity} onChange={event=>setQuantity(Number(event.target.value))} style={qtyInput} disabled={partBusy||!canWork}/></div>
-      {matches.length>0&&<div style={results}>{matches.map(part=><button key={part.id} type="button" onClick={()=>{setSelectedPart(part);setWarehouseCode("");setSearch(`${part.partNumber} — ${part.description}`);setPartMessage("")}} style={selectedPart?.id===part.id?selectedResult:resultButton}><span><strong>{part.partNumber}</strong> — {part.description}</span><span style={availability}>{qty(part.available??part.quantityOnHand)} total available</span></button>)}</div>}
+      {matches.length>0&&<div style={results}>{matches.map(part=><button key={part.id} type="button" onClick={()=>{setSelectedPart(part);setWarehouseCode("");setSearch(`${part.partNumber} — ${part.description}`);setPartMessage("")}} style={selectedPart?.id===part.id?selectedResult:resultButton}><span><strong>{part.partNumber}</strong> — {part.description}{(part.crossReferences??[]).length>0&&<small style={crossRef}>Cross: {(part.crossReferences??[]).join(" · ")}</small>}</span><span style={availability}>{qty(part.available??part.quantityOnHand)} total available</span></button>)}</div>}
       {selectedPart&&<>
         <label style={warehouseLabel}>SUPPLY WAREHOUSE<select value={warehouseCode} onChange={event=>{setWarehouseCode(event.target.value);setPartMessage("")}} style={select} disabled={partBusy||!canWork}><option value="">Choose warehouse…</option>{(selectedPart.warehouseStocks??[]).map(stock=><option key={stock.warehouseCode} value={stock.warehouseCode}>{stock.warehouseName||stock.warehouseCode} — {qty(warehouseAvailable(stock))} available</option>)}</select></label>
         <button type="button" onClick={()=>void useOrRequestPart()} style={partButton} disabled={partBusy||!canWork||!warehouseCode}>{partBusy?"Saving…":actionLabel}</button>
@@ -106,6 +106,7 @@ const results={display:"grid",gap:6,maxHeight:260,overflowY:"auto" as const} as 
 const resultButton={border:"1px solid #d4dde5",borderRadius:8,padding:"9px 10px",background:"white",color:"#243341",display:"flex",justifyContent:"space-between",gap:10,textAlign:"left" as const,cursor:"pointer"} as const;
 const selectedResult={...resultButton,border:"2px solid #173a5d",background:"#edf5fb"} as const;
 const availability={fontSize:11,color:"#667482",whiteSpace:"nowrap" as const} as const;
+const crossRef={display:"block",marginTop:3,fontSize:10,color:"#6d7b87",fontWeight:700} as const;
 const small={fontSize:11,color:"#667482",marginTop:2} as const;
 const qtyInput={width:"100%",boxSizing:"border-box" as const,padding:"10px",border:"1px solid #ccd4db",borderRadius:8,background:"white"} as const;
 const warehouseLabel={display:"grid",gap:4,fontSize:11,fontWeight:900,color:"#52616d"} as const;
