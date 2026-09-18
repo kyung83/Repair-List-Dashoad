@@ -4,7 +4,7 @@ import { applyPartToRepair } from '@/lib/inventory-operations';
 import { getDerivedPartAvailability, requestPartDerived } from '@/lib/derived-reservations';
 import { getRepairPartRequests } from '@/lib/parts-lifecycle';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
-import { normalizeYard, yardWarehouseCode } from '@/lib/yards';
+import { normalizeYard } from '@/lib/yards';
 import { completeRepairTypeChecklist, validateRepairTypeChecklistBeforeClose } from '@/lib/repair-types';
 import { GET as originalGET } from './original';
 import { GET as legacyGET, POST as legacyPOST } from './route-legacy';
@@ -34,15 +34,13 @@ function numericRepairId(value: unknown) {
 
 async function assignedPartWarehouse(user:{id:number;role:string}) {
   if (user.role !== 'mechanic' && user.role !== 'manager') return null;
-  const row=await env.DB.prepare("SELECT COALESCE(yard,'') AS yard FROM app_users WHERE id=?")
-    .bind(user.id)
-    .first<{yard:string}>();
-  const code=yardWarehouseCode(row?.yard);
-  if (!code) throw new Error('Your account needs an assigned yard/parts warehouse before you can use or request parts.');
-  const warehouse=await env.DB.prepare('SELECT id,code,name FROM warehouses WHERE code=? AND active=1')
-    .bind(code)
-    .first<{id:number;code:string;name:string}>();
-  if (!warehouse) throw new Error(`${code} is not configured as an active parts warehouse.`);
+  const warehouse=await env.DB.prepare(`
+    SELECT w.id,w.code,w.name
+    FROM app_users u
+    JOIN warehouses w ON w.id=u.parts_warehouse_id AND w.active=1
+    WHERE u.id=?
+  `).bind(user.id).first<{id:number;code:string;name:string}>();
+  if (!warehouse) throw new Error('Your account needs an active parts warehouse assignment before you can use or request parts.');
   return warehouse;
 }
 
