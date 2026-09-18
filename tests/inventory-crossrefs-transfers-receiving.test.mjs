@@ -27,7 +27,7 @@ test('inventory transfers use one auditable operation and require notes',async()
     read('migrations/0146_inventory_crossrefs_transfers_receiving.sql'),
     read('lib/inventory-transfers.ts'),
     read('app/api/inventory/transfer/route.ts'),
-    read('app/inventory-controls/page.tsx'),
+    read('app/inventory-transfer/page.tsx'),
   ]);
   assert.match(migration,/CREATE TABLE IF NOT EXISTS inventory_transfers/);
   assert.match(migration,/transfer_kind TEXT NOT NULL CHECK \(transfer_kind IN \('terminal','outside','remove'\)\)/);
