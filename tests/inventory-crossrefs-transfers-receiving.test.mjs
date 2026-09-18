@@ -60,11 +60,18 @@ test('parts receiving reads invoice lines, matches cross references, and posts i
   assert.match(reader,/matchPartReference/);
   assert.match(route,/receiveInventoryPart/);
   assert.match(route,/rememberCrossReference/);
+  assert.match(route,/Vendor \/ source name is required/);
+  assert.match(route,/Invoice \/ packing slip number is required/);
   assert.match(service,/operation_type,user_id,note/);
   assert.match(service,/parts_receipt/);
   assert.match(service,/line_type\)\s*SELECT[\s\S]*'receipt'/);
   assert.match(page,/TAKE PHOTO/);
   assert.match(page,/UPLOAD INVOICE/);
+  assert.match(page,/MANUAL ENTRY/);
+  assert.match(page,/\+ ADD ANOTHER PART/);
+  assert.match(page,/VENDOR \/ SOURCE NAME — REQUIRED/);
+  assert.match(page,/INVOICE \/ PACKING SLIP # — REQUIRED/);
+  assert.match(page,/Received \{row\.createdAt\}/);
   assert.match(page,/Remember \{line\.partNumber\}/);
   assert.match(page,/Search part #, cross-ref or description/);
   assert.match(page,/searchParts\(line\.inventorySearch\)/);
