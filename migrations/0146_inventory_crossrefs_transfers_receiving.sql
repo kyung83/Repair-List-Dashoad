@@ -5,13 +5,12 @@ CREATE TABLE IF NOT EXISTS part_cross_references (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   part_id INTEGER NOT NULL,
   cross_part_number TEXT NOT NULL,
-  normalized_cross_part_number TEXT NOT NULL,
+  normalized_cross_part_number TEXT NOT NULL UNIQUE,
   brand TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE,
-  UNIQUE (part_id, normalized_cross_part_number)
+  FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_part_cross_reference_lookup
