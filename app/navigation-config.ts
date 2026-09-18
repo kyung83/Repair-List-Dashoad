@@ -7,10 +7,11 @@ export type NavLink = {
   exact?: boolean;
   activeFor?: string[];
   view?: string;
+  showInSidebar?: boolean;
 };
 
 export type SidebarGroup = {
-  key: "today" | "repairs" | "breakdowns" | "units" | "parts" | "reports" | "settings";
+  key: "today" | "repairs" | "breakdowns" | "units" | "parts" | "billing" | "reports" | "settings";
   label: string;
   href: string;
   roles: Role[];
@@ -47,8 +48,6 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/next-pm-repairs", label: "Planned Repairs", roles: managerRoles },
       { href: "/outside-work", label: "Outside Repairs", exact: true, roles: managerRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
-      { href: "/invoices?view=ready", label: "Ready to Bill", view: "ready", roles: managerRoles },
-      { href: "/invoices?view=invoices", label: "Invoices", view: "invoices", roles: managerRoles },
     ],
   },
   {
@@ -87,6 +86,17 @@ const sidebarGroups: SidebarGroup[] = [
     ],
   },
   {
+    key: "billing",
+    label: "Billing",
+    href: "/invoices?view=ready",
+    roles: managerRoles,
+    links: [
+      { href: "/invoices?view=ready", label: "Ready to Bill", view: "ready", roles: managerRoles },
+      { href: "/invoices?view=invoices", label: "Invoices", view: "invoices", roles: managerRoles },
+      { href: "/invoices?view=settings", label: "Customers & Rates", view: "settings", roles: managerRoles },
+    ],
+  },
+  {
     key: "reports",
     label: "Reports",
     href: "/reports",
@@ -101,29 +111,30 @@ const sidebarGroups: SidebarGroup[] = [
   {
     key: "settings",
     label: "Setup",
-    href: "/pm-schedules",
+    href: "/setup-center",
     roles: managerRoles,
     links: [
-      { href: "/repair-types", label: "Repair Types", exact: true, roles: managerRoles },
-      { href: "/pm-schedules", label: "PM Schedule Setup", roles: managerRoles },
-      { href: "/maintenance-programs", label: "Custom PM Builder", roles: managerRoles },
-      { href: "/maintenance-checklists", label: "PM & Annual Checklists", roles: managerRoles },
-      { href: "/annual-schedules", label: "Annual Schedule Setup", roles: managerRoles },
-      { href: "/pm-kits", label: "PM Kits", roles: managerRoles },
+      { href: "/setup-center", label: "Setup Home", exact: true, roles: managerRoles },
+      { href: "/pm-schedules", label: "Maintenance Setup", roles: managerRoles },
       { href: "/admin/warehouses", label: "Parts Warehouses", exact: true, roles: adminRoles },
       { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
-      { href: "/admin/yard-check-api", label: "Yard Check API", exact: true, roles: managerRoles },
-      { href: "/invoices?view=settings", label: "Customers & Rates", view: "settings", roles: managerRoles },
       { href: "/admin/users", label: "Users & Access", roles: adminRoles },
-      { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles },
-      { href: "/admin/twilio", label: "Breakdown Texting", exact: true, roles: adminRoles },
-      { href: "/admin/geotab-review/health", label: "Fleet / Geotab Health", exact: true, roles: adminRoles },
-      { href: "/admin/geotab-review/assignments", label: "Device Assignments", exact: true, roles: adminRoles },
-      { href: "/admin/geotab-review", label: "Identity & Mileage", exact: true, roles: adminRoles },
-      { href: "/admin/geotab-review/connection", label: "Geotab Connection", exact: true, roles: adminRoles },
-      { href: "/admin/equipment-merge", label: "Duplicate Units", roles: adminRoles },
-      { href: "/admin/history-import", label: "History Import", roles: adminRoles },
-      { href: "/admin/go-live-cutover", label: "Go-Live Cutover", exact: true, roles: adminRoles },
+
+      { href: "/repair-types", label: "Repair Types", exact: true, roles: managerRoles, showInSidebar: false },
+      { href: "/maintenance-programs", label: "Custom PM Builder", roles: managerRoles, showInSidebar: false },
+      { href: "/maintenance-checklists", label: "PM & Annual Checklists", roles: managerRoles, showInSidebar: false },
+      { href: "/annual-schedules", label: "Annual Schedule Setup", roles: managerRoles, showInSidebar: false },
+      { href: "/pm-kits", label: "PM Kits", roles: managerRoles, showInSidebar: false },
+      { href: "/admin/yard-check-api", label: "Yard Check API", exact: true, roles: managerRoles, showInSidebar: false },
+      { href: "/admin/gmail", label: "Breakdown Email", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/admin/twilio", label: "Breakdown Texting", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/admin/geotab-review/health", label: "Fleet / Geotab Health", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/admin/geotab-review/assignments", label: "Device Assignments", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/admin/geotab-review", label: "Identity & Mileage", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/admin/geotab-review/connection", label: "Geotab Connection", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/admin/equipment-merge", label: "Duplicate Units", roles: adminRoles, showInSidebar: false },
+      { href: "/admin/history-import", label: "History Import", roles: adminRoles, showInSidebar: false },
+      { href: "/admin/go-live-cutover", label: "Go-Live Cutover", exact: true, roles: adminRoles, showInSidebar: false },
     ],
   },
 ];
