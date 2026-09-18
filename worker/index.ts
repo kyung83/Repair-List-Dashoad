@@ -87,7 +87,9 @@ const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/repair-review',
   '/api/shop/repair-photos',
   '/api/shop/repair-type',
+  '/api/shop/indirect-labor',
   '/api/repair-type-checklist',
+  '/api/repair-types/create-repair',
 ]);
 const DISPATCH_READ_PATHS = new Set([
   '/repair-board',

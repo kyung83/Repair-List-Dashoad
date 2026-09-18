@@ -14,6 +14,7 @@ type Props={
   initialEquipmentId:number|null;
   lockEquipment?:boolean;
   allowTechnicianAssignment?:boolean;
+  allowNewEquipment?:boolean;
   onClose:()=>void;
   onSaved:()=>Promise<void>|void;
 };
@@ -27,7 +28,7 @@ function kind(value:string):EquipmentKind{
 }
 function searchable(value:string){return value.trim().toLowerCase()}
 
-export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,onClose,onSaved}:Props){
+export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,allowNewEquipment=true,onClose,onSaved}:Props){
   const initial=equipment.find(item=>item.id===initialEquipmentId)??null;
   const[selected,setSelected]=useState<Equipment|null>(initial);
   const[search,setSearch]=useState(initial?.unit??"");
@@ -105,10 +106,10 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
       {noUnit?<div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",padding:"11px 12px",border:"1px solid #d5b27e",borderRadius:9,background:"#fff8ed"}}><div><strong>SHOP / NO UNIT</strong><div style={{fontSize:11,color:"#74604a",marginTop:2}}>Indirect labor will be recorded without charging a fleet unit.</div></div><button type="button" className={s.metaButton} onClick={changeUnit}>Use a unit instead</button></div>:selected?<div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",padding:"11px 12px",border:"1px solid #ccd5dd",borderRadius:9,background:"#f7f9fb"}}><div><strong>Unit {selected.unit}</strong><div style={{fontSize:11,color:"#667482",marginTop:2}}>{selected.equipmentType||"Equipment"}{selected.location?` · ${selected.location}`:""}</div></div>{!lockEquipment&&<button type="button" className={s.metaButton} onClick={changeUnit}>Change unit</button>}</div>:<>
         <label style={{gridColumn:"1 / -1"}}>Unit search<input className={s.fieldSelect} value={search} onChange={event=>{setSearch(event.target.value);setAddNew(false);setLastSavedUnit("");setMessage("")}} placeholder="Search unit #, location, driver…" autoFocus/></label>
         {matches.length>0&&<div style={{gridColumn:"1 / -1",display:"flex",gap:7,flexWrap:"wrap"}}>{matches.map(item=><button type="button" key={item.id} className={s.metaButton} onClick={()=>chooseEquipment(item)}>Unit {item.unit}{item.location?` · ${item.location}`:""}</button>)}</div>}
-        {search.trim()&&matches.length===0&&<div style={{gridColumn:"1 / -1"}}><button type="button" className={s.secondaryAction} onClick={()=>{setSelected(null);setAddNew(true);setNewType("other");setMessage("")}}>No match — add “{search.trim()}” as new</button></div>}
+        {search.trim()&&matches.length===0&&<div style={{gridColumn:"1 / -1"}}>{allowNewEquipment?<button type="button" className={s.secondaryAction} onClick={()=>{setSelected(null);setAddNew(true);setNewType("other");setMessage("")}}>No match — add “{search.trim()}” as new</button>:<span style={{fontSize:11,color:"#8b5b16",fontWeight:800}}>No matching active unit. Ask a manager to add the equipment first.</span>}</div>}
       </>}
 
-      {!noUnit&&!selected&&addNew&&<><label>Type<select className={s.fieldSelect} value={newType} onChange={event=>setNewType(event.target.value as EquipmentKind)}><option value="truck">Truck</option><option value="trailer">Trailer</option><option value="other">Other</option></select></label><label>Location<input className={s.fieldSelect} value={newLocation} onChange={event=>setNewLocation(event.target.value)} placeholder="Optional"/></label></>}
+      {allowNewEquipment&&!noUnit&&!selected&&addNew&&<><label>Type<select className={s.fieldSelect} value={newType} onChange={event=>setNewType(event.target.value as EquipmentKind)}><option value="truck">Truck</option><option value="trailer">Trailer</option><option value="other">Other</option></select></label><label>Location<input className={s.fieldSelect} value={newLocation} onChange={event=>setNewLocation(event.target.value)} placeholder="Optional"/></label></>}
       <label>Repair<input className={s.fieldSelect} value={issue} onChange={event=>setIssue(event.target.value)} placeholder={noUnit?"What work is being done?":"What needs repaired?"}/></label>
       <label>Parts<input className={s.fieldSelect} value={parts} onChange={event=>setParts(event.target.value)} placeholder="Optional"/></label>
       <label>Priority<select className={s.fieldSelect} value={priority} onChange={event=>setPriority(Number(event.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select></label>

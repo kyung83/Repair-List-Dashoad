@@ -405,12 +405,13 @@ export default function PlanningCenter(){
  }
 
  const syncLabel=sync?.updatedAt?`Geotab updated ${when(sync.updatedAt)}`:'Geotab yard sync not recorded';
+ const canCreateRepair=Boolean(data&&(data.canManage||(data.user.role==='mechanic'&&data.user.technicianId)));
  return <main className={s.page} data-planning-center="true"><div className={s.shell}>
   <header className={s.top}>
    <div className={s.brand}><p>NORTHERN LOGISTICS</p><h1>Planning Center</h1><span>Choose what needs attention, then act on the checked work.</span></div>
    <div className={s.actions}>
     <input className={s.search} value={q} onChange={event=>setQ(event.target.value)} placeholder="Search unit, issue, parts, driver, yard or tech…"/>
-    {data?.canManage&&<button type="button" className={s.primary} onClick={()=>{setUnitAddId(null);setAdd(current=>!current)}}>{add?'Close Add Repair':'+ Add Repair'}</button>}
+    {canCreateRepair&&<button type="button" className={s.primary} onClick={()=>{setUnitAddId(null);setAdd(current=>!current)}}>{add?'Close Add Repair':'+ Add Repair'}</button>}
     <button type="button" className={s.button} onClick={()=>void load()}>Refresh</button>
    </div>
   </header>
@@ -422,7 +423,7 @@ export default function PlanningCenter(){
   </nav>
   <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}>{data?.canManage&&<button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button>}<a className={s.link} href="/work-orders">Completed Work</a></div></div>
   {message&&<div className={s.notice}>{message}</div>}
-  {add&&data?.canManage&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={null} onClose={()=>setAdd(false)} onSaved={load}/></div>}
+  {add&&canCreateRepair&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={null} allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} onClose={()=>setAdd(false)} onSaved={load}/></div>}
 
   <div className={s.filters}>
    <label>Assigned to <select value={assignee} onChange={event=>setAssignee(event.target.value)}><option value="all">Anyone</option><option value="unassigned">Unassigned</option>{data?.technicians.map(tech=><option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>
@@ -465,10 +466,10 @@ export default function PlanningCenter(){
      <div className={s.drawerActions}>
       {detail.equipmentId&&<a className={s.button} style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}} href={`/unit?unit=${encodeURIComponent(detail.unit)}`}>Open Unit</a>}
       {data?.canManage&&detail.equipmentId&&<button className={s.button} type="button" onClick={()=>void setEta(detail.equipmentId!,detail.unit)}>Set ETA / Depart</button>}
-      {data?.canManage&&detail.equipmentId&&<button className={s.button} type="button" onClick={()=>{setAdd(false);setUnitAddId(current=>current===detail.equipmentId?null:detail.equipmentId)}}>{unitAddId===detail.equipmentId?'Close Add':'+ Add Repair'}</button>}
+      {canCreateRepair&&detail.equipmentId&&<button className={s.button} type="button" onClick={()=>{setAdd(false);setUnitAddId(current=>current===detail.equipmentId?null:detail.equipmentId)}}>{unitAddId===detail.equipmentId?'Close Add':'+ Add Repair'}</button>}
       {data?.canManage&&detail.equipmentId&&<button className={s.danger} type="button" onClick={()=>{const reason=window.prompt(`Why is Unit ${detail.unit} out of service?`,detail.rows[0]?.issue||'');if(reason?.trim())void change(`oos-${detail.equipmentId}`,{action:'setUnitOos',equipmentId:detail.equipmentId,unit:detail.unit,outOfService:true,reason:reason.trim()})}}>Mark OOS</button>}
      </div>
-     {data?.canManage&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
+     {canCreateRepair&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
      <div>{detail.rows.map(row=><article className={s.job} key={row.id}>
       <div className={s.jobHead}><div><div className={s.chips}><span className={s.source}>{sourceLabel(row.source)}</span><span className={`${s.status} ${statusClass(row)}`}>{nextStep(row)}</span></div><h3>{row.issue}</h3></div><span>{row.laborHours.toFixed(2)} hr</span></div>
       {row.dvirComments&&<p><strong>DVIR:</strong> {row.dvirComments}</p>}
