@@ -109,15 +109,17 @@ export async function POST(request: Request) {
     if (!String(file.type || '').toLowerCase().startsWith('image/')) throw new Error('Repair photo uploads must be image files.');
     const note = String(form.get('note') ?? '').trim().slice(0, 500);
     const cleanName = String(file.name || 'photo').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-120) || 'photo';
+    const contentType = String(file.type || '').trim().toLowerCase() || 'application/octet-stream';
+    const bytes = await file.arrayBuffer();
     uploadedKey = `repair-work/${id}/${crypto.randomUUID()}-${cleanName}`;
-    await env.FILES.put(uploadedKey, file.stream(), { httpMetadata:{ contentType:file.type || 'application/octet-stream' } });
+    await env.FILES.put(uploadedKey, bytes, { httpMetadata:{ contentType } });
 
     try {
       await env.DB.prepare(`
         INSERT INTO repair_work_photos (
           repair_id, object_key, file_name, content_type, note, uploaded_by_user_id, technician_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(id, uploadedKey, file.name || cleanName, file.type || null, note || null, user.id, user.technicianId ?? null).run();
+      `).bind(id, uploadedKey, file.name || cleanName, contentType, note || null, user.id, user.technicianId ?? null).run();
       await env.DB.prepare(`
         INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
         VALUES (?, ?, ?, 'work_photo_added', ?)
