@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useRef,useState} from "react";
 
 type RepairNote={id:number;detail:string;technician:string;createdAt:string};
-type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string};
+type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string;crossReferences?:string[]};
 type AppliedPart={partId:number;partNumber:string;description:string;quantity:number};
 type ShopPayload={parts?:Part[];repairs?:Array<{id:string;usedParts?:AppliedPart[]}>;error?:string};
 type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
@@ -64,7 +64,7 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
   const matches=useMemo(()=>{
     const term=search.trim().toLowerCase();
     if(!term)return [];
-    return parts.filter(part=>`${part.partNumber} ${part.description}`.toLowerCase().includes(term)).slice(0,8);
+    return parts.filter(part=>`${part.partNumber} ${part.description} ${(part.crossReferences??[]).join(" ")}`.toLowerCase().includes(term)).slice(0,8);
   },[parts,search]);
 
   async function saveNote(){
