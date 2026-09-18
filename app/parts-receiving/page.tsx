@@ -9,7 +9,7 @@ type InventoryData={parts:Part[];warehouses:Warehouse[];error?:string};
 type ReadingLine={partNumber:string;description:string;quantity:number;unitCost:number|null;lineTotal:number|null;matchedPartId:number|null;canonicalPartNumber:string;canonicalDescription:string;matchedBy:string;matchCount:number};
 type Reading={vendor:string;invoiceNumber:string;invoiceDate:string;totalAmount:number|null;lineItems:ReadingLine[];uncertain:string[]};
 type ScanResult={ok?:boolean;model?:string;reading?:Reading;error?:string};
-type EditableLine=ReadingLine&{receive:boolean;partId:string;quantityText:string;unitCostText:string;rememberCrossReference:boolean};
+type EditableLine=ReadingLine&{receive:boolean;partId:string;inventorySearch:string;quantityText:string;unitCostText:string;rememberCrossReference:boolean};
 type Receipt={id:number;vendorName:string;invoiceNumber:string;invoiceDate:string;sourcePartNumber:string;sourceDescription:string;receivedQuantity:number;unitCost:number|null;createdAt:string;partNumber:string;description:string;warehouseCode:string;warehouseName:string;userName:string};
 type PdfLib={GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}};
 type BrowserTools=Window&{pdfjsLib?:PdfLib};
@@ -21,6 +21,8 @@ const MAX_PAGES=3;
 function qty(value:number){return Number.isInteger(value)?String(value):value.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")}
 function money(value:number|null){return value==null?"—":value.toLocaleString(undefined,{style:"currency",currency:"USD"})}
 function modelName(value:string){return value==="openai/gpt-5.6-sol"?"GPT-5.6 Sol":value==="@cf/qwen/qwen3.8-27b"?"Qwen fallback":value||"AI"}
+function normalizePartLookup(value:string){return value.toUpperCase().replace(/[^A-Z0-9]/g,"")}
+function isKnownPartReference(part:Part,value:string){const key=normalizePartLookup(value);if(!key)return false;return normalizePartLookup(part.partNumber)===key||(part.crossReferences??[]).some(reference=>normalizePartLookup(reference)===key)}
 
 function loadPdfScript(){
   return new Promise<void>((resolve,reject)=>{
@@ -74,7 +76,7 @@ export default function PartsReceivingPage(){
   const[data,setData]=useState<InventoryData|null>(null),[receipts,setReceipts]=useState<Receipt[]>([]);
   const[warehouseCode,setWarehouseCode]=useState(""),[vendor,setVendor]=useState(""),[invoiceNumber,setInvoiceNumber]=useState(""),[invoiceDate,setInvoiceDate]=useState("");
   const[lines,setLines]=useState<EditableLine[]>([]),[uncertain,setUncertain]=useState<string[]>([]),[model,setModel]=useState(""),[fileName,setFileName]=useState(""),[receiptGroupKey,setReceiptGroupKey]=useState("");
-  const[busy,setBusy]=useState<""|"scan"|"receive">(""),[message,setMessage]=useState("");
+  const[busy,setBusy]=useState<""|"scan"|"receive">(""),[message,setMessage]=useState(""),[activeSearchIndex,setActiveSearchIndex]=useState<number|null>(null);
 
   async function load(){
     const[inventoryResponse,receiptResponse]=await Promise.all([fetch("/api/inventory",{cache:"no-store"}),fetch("/api/parts-receiving",{cache:"no-store"})]);
@@ -92,6 +94,7 @@ export default function PartsReceivingPage(){
 
   const partOptions=useMemo(()=>(data?.parts??[]).slice().sort((a,b)=>a.partNumber.localeCompare(b.partNumber,undefined,{numeric:true})),[data]);
   const partById=useMemo(()=>new Map(partOptions.map(part=>[String(part.id),part])),[partOptions]);
+  function searchParts(value:string){const term=value.trim().toLowerCase();if(!term)return[];return partOptions.filter(part=>`${part.partNumber} ${part.description} ${(part.crossReferences??[]).join(" ")}`.toLowerCase().includes(term)).slice(0,8)}
 
   async function readInvoice(file:File|null){
     if(!file)return;
@@ -106,7 +109,7 @@ export default function PartsReceivingPage(){
       setVendor(reading.vendor);setInvoiceNumber(reading.invoiceNumber);setInvoiceDate(reading.invoiceDate);setUncertain(reading.uncertain);setModel(result.model??"");
       setReceiptGroupKey(crypto.randomUUID());
       setLines(reading.lineItems.map(line=>({
-        ...line,receive:true,partId:line.matchedPartId?String(line.matchedPartId):"",quantityText:String(line.quantity),unitCostText:line.unitCost==null?"":String(line.unitCost),
+        ...line,receive:true,partId:line.matchedPartId?String(line.matchedPartId):"",inventorySearch:line.matchedPartId?`${line.canonicalPartNumber} — ${line.canonicalDescription}`:"",quantityText:String(line.quantity),unitCostText:line.unitCost==null?"":String(line.unitCost),
         rememberCrossReference:!line.matchedPartId&&Boolean(line.partNumber),
       })));
       const matched=reading.lineItems.filter(line=>line.matchedPartId).length;
@@ -169,17 +172,33 @@ export default function PartsReceivingPage(){
           <thead><tr>{["Receive","Invoice part","Description","Inventory match","Qty","Unit cost","Cross-ref","Status"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{lines.map((line,index)=>{
             const chosen=partById.get(line.partId);
-            const exactAuto=Boolean(line.matchedPartId);
-            const sourceNorm=line.partNumber.toUpperCase().replace(/[^A-Z0-9]/g,"");
-            const chosenNorm=(chosen?.partNumber??"").toUpperCase().replace(/[^A-Z0-9]/g,"");
-            const needsAlias=Boolean(line.partNumber&&chosen&&sourceNorm!==chosenNorm&&!exactAuto);
+            const autoSelected=Boolean(line.matchedPartId&&line.partId===String(line.matchedPartId));
+            const needsAlias=Boolean(line.partNumber&&chosen&&!isKnownPartReference(chosen,line.partNumber));
+            const searchResults=activeSearchIndex===index&&!line.partId?searchParts(line.inventorySearch):[];
             return <tr key={index} style={{borderTop:"1px solid #e8edf1",background:line.receive?"white":"#f7f8f9"}}>
               <td style={td}><input type="checkbox" checked={line.receive} onChange={event=>updateLine(index,{receive:event.target.checked})}/></td>
               <td style={td}><b>{line.partNumber||"—"}</b>{line.matchCount>1&&<small style={small}>Multiple matches — choose manually</small>}</td>
               <td style={td}>{line.description||"—"}</td>
-              <td style={td}><select value={line.partId} disabled={!line.receive} onChange={event=>updateLine(index,{partId:event.target.value,rememberCrossReference:Boolean(line.partNumber&&event.target.value)})} style={{...input,minWidth:230}}>
-                <option value="">Choose inventory part…</option>{partOptions.map(part=><option key={part.id} value={part.id}>{part.partNumber} — {part.description}</option>)}
-              </select>{exactAuto&&line.canonicalPartNumber&&<small style={matchNote}>{line.matchedBy===line.canonicalPartNumber?"Exact part match":`Cross-reference ${line.matchedBy}`} → {line.canonicalPartNumber}</small>}</td>
+              <td style={td}><div style={partSearchWrap}>
+                <input
+                  value={line.inventorySearch}
+                  disabled={!line.receive}
+                  placeholder="Search part #, cross-ref or description…"
+                  onFocus={()=>setActiveSearchIndex(index)}
+                  onBlur={()=>window.setTimeout(()=>setActiveSearchIndex(current=>current===index?null:current),120)}
+                  onChange={event=>{setActiveSearchIndex(index);updateLine(index,{inventorySearch:event.target.value,partId:"",rememberCrossReference:false})}}
+                  style={{...input,minWidth:245,width:"100%"}}
+                />
+                {searchResults.length>0&&<div style={partSearchResults}>{searchResults.map(part=><button
+                  key={part.id}
+                  type="button"
+                  onMouseDown={event=>event.preventDefault()}
+                  onClick={()=>{updateLine(index,{partId:String(part.id),inventorySearch:`${part.partNumber} — ${part.description}`,rememberCrossReference:Boolean(line.partNumber&&!isKnownPartReference(part,line.partNumber))});setActiveSearchIndex(null)}}
+                  style={partSearchResult}
+                ><span><b>{part.partNumber}</b> — {part.description}{(part.crossReferences??[]).length>0&&<small style={small}>Cross: {(part.crossReferences??[]).join(" · ")}</small>}</span></button>)}</div>}
+              </div>
+              {autoSelected&&line.canonicalPartNumber&&<small style={matchNote}>{line.matchedBy===line.canonicalPartNumber?"Exact part match":`Cross-reference ${line.matchedBy}`} → {line.canonicalPartNumber}</small>}
+              {chosen&&!autoSelected&&<small style={matchNote}>Selected → {chosen.partNumber}</small>}</td>
               <td style={td}><input type="number" min="0.01" step="any" value={line.quantityText} disabled={!line.receive} onChange={event=>updateLine(index,{quantityText:event.target.value})} style={{...input,width:90}}/></td>
               <td style={td}><input type="number" min="0" step="0.0001" value={line.unitCostText} disabled={!line.receive} onChange={event=>updateLine(index,{unitCostText:event.target.value})} placeholder="Optional" style={{...input,width:110}}/></td>
               <td style={td}>{needsAlias?<label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,fontWeight:800}}><input type="checkbox" checked={line.rememberCrossReference} onChange={event=>updateLine(index,{rememberCrossReference:event.target.checked})}/>Remember {line.partNumber}</label>:exactAuto&&line.matchedBy!==line.canonicalPartNumber?<span style={good}>KNOWN</span>:"—"}</td>
@@ -224,5 +243,8 @@ const small={display:"block",marginTop:3,fontSize:10,color:"#6c7886",fontWeight:
 const matchNote={display:"block",marginTop:4,fontSize:10,color:"#176448",fontWeight:800} as const;
 const good={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#eaf7ef",color:"#155f3d",fontSize:10,fontWeight:950} as const;
 const needsReview={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#fff0d7",color:"#9a5a05",fontSize:10,fontWeight:950} as const;
+const partSearchWrap={position:"relative" as const,minWidth:245} as const;
+const partSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:20,maxHeight:260,overflowY:"auto" as const,border:"1px solid #cbd5dd",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
+const partSearchResult={display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf0f2",background:"white",textAlign:"left" as const,cursor:"pointer",fontSize:12,color:"#243341"} as const;
 const receiptRow={display:"grid",gridTemplateColumns:"minmax(180px,1.3fr) minmax(140px,.8fr) minmax(190px,1fr) minmax(150px,.7fr)",gap:12,alignItems:"center",padding:"10px 11px",border:"1px solid #e5e9ed",borderRadius:9,background:"#fbfcfd"} as const;
 const empty={padding:20,textAlign:"center" as const,color:"#71808e",border:"1px dashed #d2d9df",borderRadius:9} as const;
