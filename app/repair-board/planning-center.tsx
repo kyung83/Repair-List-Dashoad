@@ -20,7 +20,8 @@ type Group={key:string;unit:string;equipmentId:number|null;equipmentType:string;
 type Tech={id:number;name:string};
 type Equip={id:number;unit:string;equipmentType:string;driver:string;location:string};
 type Oos={equipmentId:number;unit:string;equipmentType:string;driver:string;location:string;reason:string;since:string|null;openWork:{id:string;source:Src;issue:string;assignedTo:string;status:string}[]};
-type Data={canManage:boolean;technicians:Tech[];equipment:Equip[];repairs:Row[];oosUnits:Oos[];updatedAt:string};
+type BoardUser={id:number;username:string;displayName:string;role:'viewer'|'mechanic'|'dispatch'|'manager'|'admin';technicianId:number|null};
+type Data={user:BoardUser;canManage:boolean;technicians:Tech[];equipment:Equip[];repairs:Row[];oosUnits:Oos[];updatedAt:string};
 type YardInfo={currentYard:YardSelection;zoneName:string;positionAt:string;yardUpdatedAt:string};
 type Sync={status:string;message:string;positions:number;clare:number;cadillac:number;gr:number;taylor:number;boyne:number;outside:number;updatedAt:string};
 type Review={
@@ -360,7 +361,9 @@ export default function PlanningCenter(){
      const yard=top.equipmentId?yards[String(top.equipmentId)]?.currentYard:'';
      const etaValue=top.equipmentId?etas[String(top.equipmentId)]||'':'';
      return <div key={`${name}-${group.key}`} className={`${s.row} ${checked?s.rowSelected:''}`} role="button" tabIndex={0} onClick={()=>setDetailKey(group.key)} onKeyDown={event=>{if(event.key==='Enter')setDetailKey(group.key)}}>
-      <input aria-label={`Select Unit ${group.unit} ${title}`} className={s.rowCheck} type="checkbox" checked={checked} onClick={event=>event.stopPropagation()} onChange={()=>toggleGroup(group)}/>
+      {data?.canManage
+       ? <input aria-label={`Select Unit ${group.unit} ${title}`} className={s.rowCheck} type="checkbox" checked={checked} onClick={event=>event.stopPropagation()} onChange={()=>toggleGroup(group)}/>
+       : <span aria-hidden="true"/>}
       <div className={s.unit}><strong>{group.unit||'—'}</strong><small>{kind(group.equipmentType)}</small></div>
       <div className={s.issue}><strong>{groupIssue(group)||'Open work'}</strong><small>{groupParts(group)}</small></div>
       <div className={`${s.meta} ${s.hideMobile}`}><strong>{yard?`${yardLabel(yard)} Yard`:group.location||'No location'}</strong><small>{group.driver||'No driver'}</small></div>
@@ -376,6 +379,16 @@ export default function PlanningCenter(){
  }
 
  function detailActions(row:Row){
+  if(!data?.canManage){
+   const myTechId=Number(data?.user.technicianId??0);
+   const mine=myTechId>0&&Number(row.technicianId??0)===myTechId;
+   const unassigned=row.technicianId===null&&!row.activeTimer;
+   return <>
+    {unassigned&&<button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'assignToMe'})}>Assign to Me</button>}
+    {mine&&<a className={s.link} href="/shop">Open My Work</a>}
+    {!mine&&!unassigned&&<span style={{fontSize:9,color:'#708190',fontWeight:800}}>View only</span>}
+   </>;
+  }
   if(row.source==='dvir')return <>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'createDvirRepair',defectId:row.dvirDefectId})}>Create Job</button>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'markDvirRepaired',defectId:row.dvirDefectId,logId:row.dvirLogId})}>Mark DVIR Repaired</button>
@@ -407,7 +420,7 @@ export default function PlanningCenter(){
    <strong style={{fontSize:10,color:'#526576',marginRight:3}}>SHOW</strong>
    {ATTENTION_OPTIONS.map(({value,label})=><button type="button" key={value} className={attention===value?s.active:''} onClick={()=>setAttention(value)}>{label} <b>{focusCounts[value]}</b></button>)}
   </nav>
-  <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}><button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button><a className={s.link} href="/work-orders">Completed Work</a></div></div>
+  <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}>{data?.canManage&&<button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button>}<a className={s.link} href="/work-orders">Completed Work</a></div></div>
   {message&&<div className={s.notice}>{message}</div>}
   {add&&data?.canManage&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={null} onClose={()=>setAdd(false)} onSaved={load}/></div>}
 
@@ -416,7 +429,7 @@ export default function PlanningCenter(){
    {(attention!=='all'||assignee!=='all'||q.trim())&&<button className={s.quiet} type="button" onClick={()=>{setAttention('all');setAssignee('all');setQ('')}}>Clear filters</button>}
   </div>
 
-  {selected.size>0&&<div className={s.bulk}>
+  {data?.canManage&&selected.size>0&&<div className={s.bulk}>
    <strong>{selected.size} selected</strong><span>Action for checked work:</span>
    <select aria-label="Bulk action for checked work" value={bulkAction} onChange={event=>setBulkAction(event.target.value)}>
     <option value="">Choose action…</option>
@@ -451,11 +464,11 @@ export default function PlanningCenter(){
      </div>
      <div className={s.drawerActions}>
       {detail.equipmentId&&<a className={s.button} style={{textDecoration:'none',display:'inline-flex',alignItems:'center'}} href={`/unit?unit=${encodeURIComponent(detail.unit)}`}>Open Unit</a>}
-      {detail.equipmentId&&<button className={s.button} type="button" onClick={()=>void setEta(detail.equipmentId!,detail.unit)}>Set ETA / Depart</button>}
-      {detail.equipmentId&&<button className={s.button} type="button" onClick={()=>{setAdd(false);setUnitAddId(current=>current===detail.equipmentId?null:detail.equipmentId)}}>{unitAddId===detail.equipmentId?'Close Add':'+ Add Repair'}</button>}
-      {detail.equipmentId&&<button className={s.danger} type="button" onClick={()=>{const reason=window.prompt(`Why is Unit ${detail.unit} out of service?`,detail.rows[0]?.issue||'');if(reason?.trim())void change(`oos-${detail.equipmentId}`,{action:'setUnitOos',equipmentId:detail.equipmentId,unit:detail.unit,outOfService:true,reason:reason.trim()})}}>Mark OOS</button>}
+      {data?.canManage&&detail.equipmentId&&<button className={s.button} type="button" onClick={()=>void setEta(detail.equipmentId!,detail.unit)}>Set ETA / Depart</button>}
+      {data?.canManage&&detail.equipmentId&&<button className={s.button} type="button" onClick={()=>{setAdd(false);setUnitAddId(current=>current===detail.equipmentId?null:detail.equipmentId)}}>{unitAddId===detail.equipmentId?'Close Add':'+ Add Repair'}</button>}
+      {data?.canManage&&detail.equipmentId&&<button className={s.danger} type="button" onClick={()=>{const reason=window.prompt(`Why is Unit ${detail.unit} out of service?`,detail.rows[0]?.issue||'');if(reason?.trim())void change(`oos-${detail.equipmentId}`,{action:'setUnitOos',equipmentId:detail.equipmentId,unit:detail.unit,outOfService:true,reason:reason.trim()})}}>Mark OOS</button>}
      </div>
-     {detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
+     {data?.canManage&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
      <div>{detail.rows.map(row=><article className={s.job} key={row.id}>
       <div className={s.jobHead}><div><div className={s.chips}><span className={s.source}>{sourceLabel(row.source)}</span><span className={`${s.status} ${statusClass(row)}`}>{nextStep(row)}</span></div><h3>{row.issue}</h3></div><span>{row.laborHours.toFixed(2)} hr</span></div>
       {row.dvirComments&&<p><strong>DVIR:</strong> {row.dvirComments}</p>}
@@ -475,7 +488,7 @@ export default function PlanningCenter(){
     </div>}
    </aside>
   </div>
-  <div className={s.classicHint}>Checkboxes select the exact work shown in that queue. Use one action in the blue bar for everything checked.</div>
+  {data?.canManage&&<div className={s.classicHint}>Checkboxes select the exact work shown in that queue. Use one action in the blue bar for everything checked.</div>}
   <footer className={s.footer}>{data?`Updated ${when(data.updatedAt)}`:'Loading Planning Center…'}</footer>
 
   {outside&&<div style={modalBackdrop} role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&busy!=='outside-send')setOutside(null)}}>
