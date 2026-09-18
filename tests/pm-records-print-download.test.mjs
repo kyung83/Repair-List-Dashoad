@@ -34,7 +34,7 @@ test('PM Records and Forms is available anywhere Annual forms are surfaced',()=>
 });
 
 test('Unit Hub loads, lists, and prints PM forms alongside Annual forms',()=>{
-  assert.match(unit,/fetch\('\/api\/pm-inspections'/);
+  assert.match(unit,/api\/pm-inspections\?unit=/);
   assert.match(unit,/Print Latest PM/);
   assert.match(unit,/PM forms/);
   assert.match(unit,/Print \/ PDF/);
