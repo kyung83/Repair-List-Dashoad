@@ -86,6 +86,8 @@ const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/remove-applied-part',
   '/api/shop/repair-review',
   '/api/shop/repair-photos',
+  '/api/shop/repair-type',
+  '/api/repair-type-checklist',
 ]);
 const DISPATCH_READ_PATHS = new Set([
   '/repair-board',
