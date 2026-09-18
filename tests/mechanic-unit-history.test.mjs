@@ -32,7 +32,7 @@ test('mechanic history includes repair notes parts photos and historical ROs',()
 
 test('Current Work shows related all and PM Annual history without leaving the job',()=>{
   assert.match(currentWork,/MechanicUnitHistory/);
-  assert.match(currentWork,/id="unit-work-history"/);
+  assert.match(panel,/id="unit-work-history"/);
   assert.match(panel,/RELATED \(\{relatedCount\}\)/);
   assert.match(panel,/ALL HISTORY \(\{totalCount\}\)/);
   assert.match(panel,/PM \/ ANNUAL \(\{maintenanceCount\}\)/);
