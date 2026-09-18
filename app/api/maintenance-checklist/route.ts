@@ -571,14 +571,16 @@ export async function POST(request: Request) {
       if (!file.size || file.size > 12 * 1024 * 1024) throw new Error('Checklist photos must be between 1 byte and 12 MB.');
       if (!String(file.type || '').toLowerCase().startsWith('image/')) throw new Error('Checklist uploads must be image files.');
       const cleanName = String(file.name || 'photo').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-120) || 'photo';
+      const contentType = String(file.type || '').trim().toLowerCase() || 'application/octet-stream';
+      const bytes = await file.arrayBuffer();
       const key = `maintenance-checklists/${run.id}/${itemNumber}/${crypto.randomUUID()}-${cleanName}`;
-      await env.FILES.put(key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } });
+      await env.FILES.put(key, bytes, { httpMetadata: { contentType } });
       try {
         await env.DB.prepare(`
           INSERT INTO maintenance_checklist_photos (
             checklist_run_id, checklist_item_id, object_key, file_name, content_type, uploaded_by_user_id
           ) VALUES (?, ?, ?, ?, ?, ?)
-        `).bind(run.id, item.id, key, file.name || cleanName, file.type || null, user.id).run();
+        `).bind(run.id, item.id, key, file.name || cleanName, contentType, user.id).run();
       } catch (error) {
         await env.FILES.delete(key);
         throw error;
