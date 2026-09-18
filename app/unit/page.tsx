@@ -28,14 +28,46 @@ export default function UnitPage(){
   useEffect(()=>{
     const initial=new URLSearchParams(window.location.search).get('unit')||'';
     setQuery(initial);setSelectedUnit(initial);
-    void Promise.all([
-      fetch('/api/equipment',{cache:'no-store'}).then(async r=>{const p=await r.json() as EquipmentData&{error?:string};if(!r.ok)throw new Error(p.error||'Units could not be loaded.');return p;}),
-      fetch('/api/repair-board',{cache:'no-store'}).then(async r=>{const p=await r.json() as Board&{error?:string};if(!r.ok)throw new Error(p.error||'Open work could not be loaded.');return p;}),
-      fetch('/api/annual-inspections',{cache:'no-store'}).then(async r=>r.ok?await r.json() as MaintenanceFormData:{forms:[]}),
-      fetch('/api/pm-inspections',{cache:'no-store'}).then(async r=>r.ok?await r.json() as MaintenanceFormData:{forms:[]}),
-      fetch('/api/maintenance-actions',{cache:'no-store'}).then(async r=>r.ok?await r.json() as FutureData:{actions:[]}).catch(()=>({actions:[]})),
-    ]).then(([eq,b,annual,pm,future])=>{setEquipment(eq.equipment);setBoard(b);setAnnualForms(annual.forms||[]);setPmForms(pm.forms||[]);setFutureActions(future.actions||[]);}).catch(error=>setMessage(error instanceof Error?error.message:'Unit information could not be loaded.'));
+
+    let cancelled=false;
+
+    void fetch('/api/equipment',{cache:'no-store'})
+      .then(async r=>{const p=await r.json() as EquipmentData&{error?:string};if(!r.ok)throw new Error(p.error||'Units could not be loaded.');return p;})
+      .then(eq=>{if(!cancelled)setEquipment(eq.equipment);})
+      .catch(error=>{if(!cancelled)setMessage(error instanceof Error?error.message:'Units could not be loaded.');});
+
+    void fetch('/api/repair-board',{cache:'no-store'})
+      .then(async r=>{const p=await r.json() as Board&{error?:string};if(!r.ok)throw new Error(p.error||'Open work could not be loaded.');return p;})
+      .then(payload=>{if(!cancelled)setBoard(payload);})
+      .catch(()=>undefined);
+
+    void fetch('/api/maintenance-actions',{cache:'no-store'})
+      .then(async r=>r.ok?await r.json() as FutureData:{actions:[]})
+      .then(payload=>{if(!cancelled)setFutureActions(payload.actions||[]);})
+      .catch(()=>undefined);
+
+    return()=>{cancelled=true};
   },[]);
+
+  useEffect(()=>{
+    const selected=equipment.find(item=>sameUnit(item.unit,selectedUnit));
+    if(!selected){setAnnualForms([]);setPmForms([]);return;}
+
+    let cancelled=false;
+    const encoded=encodeURIComponent(selected.unit);
+
+    void fetch(`/api/annual-inspections?unit=${encoded}`,{cache:'no-store'})
+      .then(async r=>r.ok?await r.json() as MaintenanceFormData:{forms:[]})
+      .then(payload=>{if(!cancelled)setAnnualForms(payload.forms||[]);})
+      .catch(()=>{if(!cancelled)setAnnualForms([]);});
+
+    void fetch(`/api/pm-inspections?unit=${encoded}`,{cache:'no-store'})
+      .then(async r=>r.ok?await r.json() as MaintenanceFormData:{forms:[]})
+      .then(payload=>{if(!cancelled)setPmForms(payload.forms||[]);})
+      .catch(()=>{if(!cancelled)setPmForms([]);});
+
+    return()=>{cancelled=true};
+  },[equipment,selectedUnit]);
 
   const selected=useMemo(()=>equipment.find(item=>sameUnit(item.unit,selectedUnit))??null,[equipment,selectedUnit]);
   const openWork=useMemo(()=>selected?(board?.repairs??[]).filter(item=>item.equipmentId===selected.id||sameUnit(item.unit,selected.unit)):[],[board,selected]);
