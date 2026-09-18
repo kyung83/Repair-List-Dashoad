@@ -115,7 +115,7 @@ const sidebarGroups: SidebarGroup[] = [
     roles: managerRoles,
     links: [
       { href: "/setup-center", label: "Setup Home", exact: true, roles: managerRoles },
-      { href: "/pm-schedules", label: "Maintenance Setup", roles: managerRoles },
+      { href: "/pm-schedules", label: "PM Schedule Setup", roles: managerRoles },
       { href: "/admin/warehouses", label: "Parts Warehouses", exact: true, roles: adminRoles },
       { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
       { href: "/admin/users", label: "Users & Access", roles: adminRoles },
