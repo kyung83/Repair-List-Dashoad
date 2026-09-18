@@ -26,7 +26,7 @@ test('mechanic and manager part use ignores browser warehouse choice and forces 
 test('zero local stock can still create a request in the assigned warehouse',()=>{
   assert.match(route,/const stock = availability\.find/);
   assert.match(route,/const part = stock/);
-  assert.match(route,/\(stock\?\.available \?\? 0\)/);
+  assert.match(route,/stock && stock\.available \+ 0\.000001 >= quantity/);
   assert.match(route,/requestPartDerived\(env\.DB/);
 });
 
