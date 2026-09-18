@@ -17,13 +17,16 @@ async function requirePartsDeskUser(request: Request) {
 export async function GET(request: Request) {
   try {
     await requirePartsDeskUser(request);
-    const [data, unmatchedPartRequests] = await Promise.all([
+    const [data, unmatchedPartRequests, warehouses] = await Promise.all([
       getPartsDeskData(env.DB),
       getUnmatchedPartRequests(env.DB),
+      env.DB.prepare('SELECT id,code,name FROM warehouses WHERE active=1 ORDER BY name COLLATE NOCASE')
+        .all<{id:number;code:string;name:string}>(),
     ]);
     return Response.json({
       ...data,
       unmatchedPartRequests,
+      warehouses:warehouses.results.map(row=>({id:Number(row.id),code:row.code,name:row.name})),
       summary:{...data.summary,unmatchedParts:unmatchedPartRequests.length},
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
