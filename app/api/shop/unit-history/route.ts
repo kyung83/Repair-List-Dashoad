@@ -156,6 +156,8 @@ export async function GET(request:Request) {
         SELECT name AS value FROM technicians WHERE trim(COALESCE(name,''))<>''
         UNION
         SELECT display_name AS value FROM app_users WHERE trim(COALESCE(display_name,''))<>''
+        UNION
+        SELECT username AS value FROM app_users WHERE trim(COALESCE(username,''))<>''
       `).all<IdentityRow>(),
     ]);
 
