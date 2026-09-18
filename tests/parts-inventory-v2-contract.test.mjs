@@ -14,6 +14,7 @@ const workOrders=await readFile(new URL('app/api/work-orders/route.ts',root),'ut
 const review=await readFile(new URL('app/api/work-orders/review-part-correction.ts',root),'utf8');
 const inventory=await readFile(new URL('app/api/inventory/route.ts',root),'utf8');
 const inventoryPage=await readFile(new URL('app/inventory/page.tsx',root),'utf8');
+const countSnapshot=await readFile(new URL('app/api/inventory/count-snapshot/route.ts',root),'utf8');
 const controls=await readFile(new URL('app/api/inventory-controls/route.ts',root),'utf8');
 const controlsPage=await readFile(new URL('app/inventory-controls/page.tsx',root),'utf8');
 const coreApi=await readFile(new URL('app/api/cores/route.ts',root),'utf8');
@@ -55,12 +56,15 @@ check('31 undo restores physical stock',stockOps,/quantity_on_hand = quantity_on
 check('32 undo removes only the linked repair usage',stockOps,/DELETE FROM repair_parts WHERE id = \? AND inventory_operation_id = \?/);
 check('33 undo marks original operation as undone',stockOps,/SET status = 'undone',undone_at = CURRENT_TIMESTAMP/);
 check('34 physical count requires observed stock version',ops,/Inventory changed after this count screen was loaded/);
+check('34b physical count snapshot aggregates every warehouse stock row',ops,/warehousePhysicalCountSnapshotById[\s\S]*reduce\(\(sum,row\)=>sum\+finite\(row\.quantity_on_hand\),0\)/);
+check('34c aggregate count snapshot fingerprints every stock row',ops,/stockVersion='agg:'[\s\S]*row\.id[\s\S]*row\.updated_at[\s\S]*row\.quantity_on_hand/);
+check('34d count snapshot API uses aggregate warehouse helper',countSnapshot,/getWarehousePhysicalCountSnapshot/);
 check('35 discrepancy creation records expected and counted quantities',ops,/expected_quantity,counted_quantity,difference_quantity/);
 check('36 discrepancy resolution rejects stale stock',ops,/Inventory changed after the discrepancy was recorded/);
 check('37 count resolution update matches observed version',ops,/WHERE id = \? AND updated_at = \?/);
 check('38 count resolution writes an operation line',ops,/physical_count_resolution/);
 check('39 count resolution has the same D1 commit guard',ops,/inventory_operation_commits[\s\S]*inventory_discrepancy_issues/);
-check('39b applying a count cancels older open issues for the same stock row',ops,/status='cancelled'[\s\S]*warehouse_stock_id=\?/);
+check('39b applying a count cancels older open issues for the same part and warehouse',ops,/status='cancelled'[\s\S]*part_id=\?[\s\S]*warehouse_id=\?/);
 check('40 vendor normalization canonicalizes punctuation and ampersands',ops,/normalize\('NFKD'\)[\s\S]*replace\(\/&\/g, ' and '\)/);
 check('41 manual vendor save reuses normalized existing vendor',ops,/normalized_name = \?[\s\S]*matchedExisting:true/);
 check('42 availability subtracts only derived reservations',derived,/FROM derived_repair_part_reservations GROUP BY part_id,warehouse_id/);
@@ -71,6 +75,8 @@ check('45 lifecycle compatibility layer disables reservation allocation mutation
 check('inventory API exposes controlled physical-count recording',inventory,/recordPhysicalCount/);
 check('inventory page applies a manager-entered physical count immediately',inventoryPage,/action:"resolvePhysicalCount"[\s\S]*Physical count applied:/);
 check('inventory page keeps count resolution idempotent',inventoryPage,/count-resolution:\$\{crypto\.randomUUID\(\)\}/);
+check('inventory count resolution adjusts the aggregate through its primary stock row',ops,/quantity_on_hand=quantity_on_hand\+\?[\s\S]*stock\.primaryStockId/);
+check('aggregate count commit guard verifies warehouse total equals counted quantity',ops,/SUM\(quantity_on_hand\)[\s\S]*issue\.counted_quantity/);
 check('inventory API blocks all direct manual stock adjustments',inventory,/Manual \+\/− stock adjustments are disabled/);
 
 check('46 core-return configuration is stored on parts',operational,/core_return_part_id[\s\S]*core_return_quantity/);
