@@ -91,7 +91,6 @@ export default function UnitPage(){
   },[equipment,query]);
 
   const role=board?.user?.role||'';
-  const canWork=role==='mechanic'||role==='manager'||role==='admin';
   const canOpenBoard=role==='dispatch'||role==='manager'||role==='admin'||role==='viewer';
   const canOfficeTools=role==='viewer'||role==='manager'||role==='admin';
   const canUseMaintenanceForms=role!=='dispatch';
@@ -129,7 +128,6 @@ export default function UnitPage(){
             <div className="easy-unit-stat"><span>Mileage source</span><strong>{selected.source}</strong></div>
           </div>
           <div className="easy-actions">
-            {canWork&&<a className="easy-button orange" href="/shop">Work on this Unit</a>}
             {canOpenBoard&&<a className="easy-button" href="/repair-board">Open Repair Board</a>}
             {canUseMaintenanceForms&&latestPm&&<a className="easy-button" href={latestPm.printUrl}>Print Latest PM</a>}
             {canUseMaintenanceForms&&latestAnnual&&<a className="easy-button" href={latestAnnual.printUrl}>Print Latest Annual</a>}
