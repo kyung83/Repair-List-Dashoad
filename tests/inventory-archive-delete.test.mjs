@@ -21,24 +21,32 @@ test('Inventory managers can archive and restore parts while delete stays admin-
   assert.match(page,/Archived Parts/);
   assert.match(page,/archivePart\(item\)/);
   assert.match(page,/restorePart\(item\)/);
-  assert.match(page,/data\?\.viewerRole === "admin"[\s\S]*deletePart\(item\)/);
+  assert.match(page,/partStatus === "active"[\s\S]*data\?\.viewerRole === "admin"[\s\S]*deletePart\(item\)/);
+  assert.match(page,/Delete Part/);
+  assert.match(page,/Existing repair, receiving, transfer, count, and inventory history stays intact/);
 
   assert.match(service,/UPDATE parts SET active=\?,updated_at=CURRENT_TIMESTAMP/);
 });
 
-test('Permanent part delete preserves inventory and repair history',async()=>{
-  const service=await read('lib/inventory-part-management.ts');
+test('Admin delete removes a part operationally while preserving historical foreign keys',async()=>{
+  const [service,migration]=await Promise.all([
+    read('lib/inventory-part-management.ts'),
+    read('migrations/0147_parts_soft_delete.sql'),
+  ]);
 
+  assert.match(migration,/ALTER TABLE parts ADD COLUMN deleted_at TEXT/);
+  assert.match(migration,/deleted_by_user_id INTEGER REFERENCES app_users\(id\)/);
+  assert.match(service,/deletePartPreservingHistory/);
   assert.match(service,/still has warehouse stock or on-order quantity/);
-  assert.match(service,/repair_parts WHERE part_id=\?/);
-  assert.match(service,/inventory_operation_lines WHERE part_id=\?/);
-  assert.match(service,/parts_receipts WHERE part_id=\?/);
-  assert.match(service,/inventory_transfers WHERE part_id=\?/);
-  assert.match(service,/pm_kit_parts WHERE part_id=\?/);
-  assert.match(service,/Archive it instead so history stays intact/);
-  assert.match(service,/DELETE FROM part_cross_references WHERE part_id=\?/);
-  assert.match(service,/DELETE FROM part_warehouse_stock WHERE part_id=\?/);
-  assert.match(service,/DELETE FROM parts WHERE id=\?/);
+  assert.match(service,/repair_part_requests[\s\S]*status='open'/);
+  assert.match(service,/repair_planned_parts[\s\S]*removed_at IS NULL/);
+  assert.match(service,/SET active=0,deleted_at=CURRENT_TIMESTAMP,deleted_by_user_id=\?/);
+  assert.match(service,/DELETE FROM pm_kit_parts WHERE part_id=\?/);
+  assert.match(service,/UPDATE part_cross_references SET active=0/);
+  assert.doesNotMatch(service,/DELETE FROM parts WHERE id=\?/);
+  assert.doesNotMatch(service,/DELETE FROM repair_parts/);
+  assert.doesNotMatch(service,/DELETE FROM parts_receipts/);
+  assert.doesNotMatch(service,/DELETE FROM inventory_operation_lines/);
 });
 
 test('Inventory can explicitly load archived parts without changing active-only default',async()=>{
@@ -48,7 +56,8 @@ test('Inventory can explicitly load archived parts without changing active-only 
   ]);
 
   assert.match(db,/status: 'active'\|'archived'\|'all' = 'active'/);
-  assert.match(db,/status === 'archived' \? 'WHERE p\.active = 0'/);
+  assert.match(db,/p\.active = 0 AND p\.deleted_at IS NULL/);
+  assert.match(db,/p\.active = 1 AND p\.deleted_at IS NULL/);
   assert.match(db,/active: Number\(row\.active\) === 1/);
   assert.match(route,/searchParams\.get\('status'\)/);
   assert.match(route,/viewerRole:user\.role/);
