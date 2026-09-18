@@ -334,7 +334,7 @@ export async function POST(request: Request) {
           .first<{partNumber:string}>();
     if (!part) throw new Error('Part was not found.');
 
-    if ((stock?.available ?? 0) + 0.000001 >= quantity) {
+    if (stock && stock.available + 0.000001 >= quantity) {
       const operationKey = String(body.operationKey ?? request.headers.get('idempotency-key') ?? `shop-apply:${crypto.randomUUID()}`);
       const result = await applyPartToRepair(env.DB,{
         operationKey,
