@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import RepairBoardDashboard from "./dashboard-v2";
 import PlanningCenter from "./planning-center";
-import RepairBoardSelfAssignPanel from "./self-assign-panel";
 import RepairCardOutsideVendor from "./repair-card-outside-vendor";
 import OutsideVendorQuickAdd from "./outside-vendor-quick-add";
 import RepairBoardAddRepair from "./add-repair-form";
@@ -70,8 +69,8 @@ export default function RepairBoardRoleAwareContent(){
     </>;
   }
 
-  if(role==='manager'||role==='admin'){
-    return <div className={merge.managerBoard}><PlanningCenter/><OutsideVendorQuickAdd/></div>;
+  if(role==='manager'||role==='admin'||role==='mechanic'){
+    return <div className={merge.managerBoard}><PlanningCenter/>{(role==='manager'||role==='admin')&&<OutsideVendorQuickAdd/>}</div>;
   }
 
   return <>
@@ -82,7 +81,6 @@ export default function RepairBoardRoleAwareContent(){
       .${s.detailGrid} > div:nth-child(2) > b:first-child { display: none !important; }
       .${s.detailGrid} > div:nth-child(2) > select.${s.fieldSelect}:first-of-type { display: none !important; }
     `}</style>
-    <RepairBoardSelfAssignPanel />
     <RepairBoardDashboard />
     <RepairCardOutsideVendor />
   </>;
