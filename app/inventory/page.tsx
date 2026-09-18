@@ -35,6 +35,7 @@ type Part = {
   compatibleEquipmentIds?: number[];
   crossReferences?: string[];
   lowStock: boolean;
+  active?: boolean;
 };
 
 type Vendor = { id: number; name: string; phone: string; email: string; notes: string };
@@ -47,6 +48,8 @@ type InventoryData = {
   equipment?: Equipment[];
   summary: { partCount: number; lowStockCount: number; totalUnits: number; inventoryValue: number };
   updatedAt: string;
+  viewerRole?: "manager" | "admin";
+  partStatus?: "active" | "archived" | "all";
 };
 
 type PartForm = {
@@ -102,6 +105,7 @@ export default function InventoryPage() {
   const [warehouseCode, setWarehouseCode] = useState("ALL");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("description");
+  const [partStatus, setPartStatus] = useState<"active" | "archived">("active");
   const [message, setMessage] = useState("");
   const [part, setPart] = useState<PartForm>(blankPart);
   const [vendor, setVendor] = useState<VendorForm>(blankVendor);
@@ -111,7 +115,7 @@ export default function InventoryPage() {
 
   async function load() {
     const [inventoryResponse, linksResponse] = await Promise.all([
-      fetch("/api/inventory", { cache: "no-store" }),
+      fetch(`/api/inventory?status=${partStatus}`, { cache: "no-store" }),
       fetch("/api/inventory/part-vendors", { cache: "no-store" }),
     ]);
     if (!inventoryResponse.ok) throw new Error("Unable to load inventory");
@@ -123,7 +127,7 @@ export default function InventoryPage() {
 
   useEffect(() => {
     void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Unable to load inventory"));
-  }, []);
+  }, [partStatus]);
 
   function vendorsForPart(item: Part) {
     const linked = vendorLinks[String(item.id)] ?? [];
@@ -242,6 +246,42 @@ export default function InventoryPage() {
     setVendor(blankVendor);
     setShowVendorForm(false);
     setMessage("Vendor added. It is now available on every part.");
+    await load();
+  }
+
+  async function archivePart(item: Part) {
+    const stock = stockFor(item).quantityOnHand;
+    const warning = stock !== 0 ? `\n\nThis part currently shows ${stock} available in the selected view. Archiving hides it from active inventory and mechanic part search, but does not delete its history or stock records.` : "";
+    if (!window.confirm(`Archive ${item.partNumber} — ${item.description}?${warning}`)) return;
+    setMessage("");
+    const response = await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"archivePart",partId:item.id})});
+    const result = await response.json() as {ok?:boolean;error?:string};
+    if(!response.ok||!result.ok){setMessage(result.error||"Part could not be archived.");return}
+    setMessage(`${item.partNumber} archived. It is hidden from active inventory and mechanic searches but all history is preserved.`);
+    await load();
+  }
+
+  async function restorePart(item: Part) {
+    setMessage("");
+    const response = await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"restorePart",partId:item.id})});
+    const result = await response.json() as {ok?:boolean;error?:string};
+    if(!response.ok||!result.ok){setMessage(result.error||"Part could not be restored.");return}
+    setMessage(`${item.partNumber} restored to active inventory.`);
+    await load();
+  }
+
+  async function deletePart(item: Part) {
+    const typed = window.prompt(`PERMANENT DELETE is admin-only and cannot be undone.\n\nType the part number exactly to delete ${item.partNumber}:`);
+    if (typed == null) return;
+    if (typed.trim().toUpperCase() !== item.partNumber.trim().toUpperCase()) {
+      setMessage("Delete cancelled because the part number did not match.");
+      return;
+    }
+    setMessage("");
+    const response = await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"deletePart",partId:item.id})});
+    const result = await response.json() as {ok?:boolean;error?:string};
+    if(!response.ok||!result.ok){setMessage(result.error||"Part could not be permanently deleted.");return}
+    setMessage(`${item.partNumber} permanently deleted.`);
     await load();
   }
 
@@ -409,6 +449,10 @@ export default function InventoryPage() {
         <button onClick={() => { setWarehouseCode("CLARE"); setStockFilter("all"); }} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === "CLARE" ? "#0d1b2b" : "white", color: warehouseCode === "CLARE" ? "white" : "#182331", fontWeight: 800 }}>Clare</button>
         <button onClick={() => { setWarehouseCode("BOYNE"); setStockFilter("all"); }} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === "BOYNE" ? "#0d1b2b" : "white", color: warehouseCode === "BOYNE" ? "white" : "#182331", fontWeight: 800 }}>Boyne</button>
         <button onClick={() => { setStockFilter("negative"); setSortMode("negative-first"); }} style={{ padding: "10px 14px", border: "1px solid #b42318", borderRadius: 8, background: stockFilter === "negative" ? "#b42318" : "white", color: stockFilter === "negative" ? "white" : "#b42318", fontWeight: 800 }}>Negative only</button>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
+          <button onClick={() => setPartStatus("active")} style={{ padding: "10px 14px", border: "1px solid #0d1b2b", borderRadius: 8, background: partStatus === "active" ? "#0d1b2b" : "white", color: partStatus === "active" ? "white" : "#0d1b2b", fontWeight: 800 }}>Active Parts</button>
+          <button onClick={() => setPartStatus("archived")} style={{ padding: "10px 14px", border: "1px solid #6c7886", borderRadius: 8, background: partStatus === "archived" ? "#6c7886" : "white", color: partStatus === "archived" ? "white" : "#44515e", fontWeight: 800 }}>Archived Parts</button>
+        </div>
       </section>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px,1fr))", gap: 14 }}>
@@ -429,7 +473,7 @@ export default function InventoryPage() {
       <section style={{ marginTop: 22, background: "white", border: "1px solid #dce2e7", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: 18, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, cross-reference, vendor, equipment…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
-          <span style={{ color: "#6c7886", fontSize: 13 }}><b>{selectedWarehouseName}</b> · {visibleParts.length} visible</span>
+          <span style={{ color: "#6c7886", fontSize: 13 }}><b>{partStatus === "archived" ? "Archived Parts" : selectedWarehouseName}</b> · {visibleParts.length} visible</span>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
@@ -455,7 +499,11 @@ export default function InventoryPage() {
                     <td style={{ padding: 13, whiteSpace: "nowrap" }}>
                       <ReceivingHistoryButton partId={item.id} partNumber={item.partNumber} description={item.description}/>
                       <button onClick={() => void physicalCount(item)} style={{ marginRight: 6 }} disabled={warehouseCode === "ALL"}>Physical Count</button>
-                      <button onClick={() => editPart(item)}>Edit</button>
+                      <button onClick={() => editPart(item)} style={{ marginRight: 6 }}>Edit</button>
+                      {partStatus === "active" ? <button onClick={() => void archivePart(item)} style={{ marginRight: 6, border: "1px solid #8a5a00", color: "#8a5a00", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Archive</button> : <>
+                        <button onClick={() => void restorePart(item)} style={{ marginRight: 6, border: "1px solid #176448", color: "#176448", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Restore</button>
+                        {data?.viewerRole === "admin" && <button onClick={() => void deletePart(item)} style={{ border: "1px solid #b42318", color: "#b42318", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 900 }}>Delete</button>}
+                      </>}
                     </td>
                   </tr>
                 );
