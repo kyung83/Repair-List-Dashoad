@@ -18,6 +18,8 @@ test('mechanic history response does not return technician identity metadata',()
   assert.doesNotMatch(route,/uploadedBy/);
   assert.doesNotMatch(route,/uploadedByUserId/);
   assert.match(route,/fileName:'Repair photo'/);
+  assert.match(route,/historyPhotoUrl\(currentRepairId,row\.photo_key\)/);
+  assert.match(route,/content-disposition','inline'/);
   assert.match(route,/redactIdentity\(row\.detail,identitiesList\)/);
 });
 
