@@ -1,4 +1,4 @@
-import { resolveRepairWarehouse } from './parts-lifecycle';
+import { normalizeWarehouseCode, resolveRepairWarehouse } from './parts-lifecycle';
 
 function finite(value: unknown) {
   const number = Number(value);
@@ -9,7 +9,15 @@ function cleanText(value: unknown) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 180);
 }
 
-async function optionalWarehouseCode(db:D1Database, repairId:number, fallbackYard:string) {
+async function optionalWarehouseCode(db:D1Database, repairId:number, fallbackYard:string, explicitWarehouseCode='') {
+  const explicit=normalizeWarehouseCode(explicitWarehouseCode);
+  if (explicit) {
+    const warehouse=await db.prepare('SELECT code FROM warehouses WHERE code=? AND active=1')
+      .bind(explicit)
+      .first<{code:string}>();
+    if (!warehouse) throw new Error(`${explicit} is not configured as an active parts warehouse.`);
+    return warehouse.code;
+  }
   try {
     const warehouse = await resolveRepairWarehouse(db, repairId, fallbackYard);
     return warehouse.code;
@@ -43,7 +51,7 @@ export type UnmatchedPartRequestView = {
 
 export async function requestUnmatchedPart(
   db:D1Database,
-  input:{repairId:number;requestedText:string;quantity:number;userId?:number|null;technicianId?:number|null;fallbackYard?:string},
+  input:{repairId:number;requestedText:string;quantity:number;userId?:number|null;technicianId?:number|null;fallbackYard?:string;warehouseCode?:string},
 ) {
   const text = cleanText(input.requestedText);
   const quantity = finite(input.quantity);
@@ -56,7 +64,7 @@ export async function requestUnmatchedPart(
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('Completed repairs cannot request parts.');
 
-  const warehouseCode = await optionalWarehouseCode(db, input.repairId, input.fallbackYard ?? '');
+  const warehouseCode = await optionalWarehouseCode(db, input.repairId, input.fallbackYard ?? '', input.warehouseCode ?? '');
   const existing = await db.prepare(`
     SELECT id, requested_quantity, COALESCE(warehouse_code,'') AS warehouse_code
     FROM unmatched_part_requests

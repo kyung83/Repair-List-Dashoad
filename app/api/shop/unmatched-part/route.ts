@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { normalizeWarehouseCode } from '@/lib/parts-lifecycle';
 import { requestUnmatchedPart } from '@/lib/unmatched-parts';
+import { yardWarehouseCode } from '@/lib/yards';
 import { POST as shopPOST } from '../route';
 
 type RequestContext = {
@@ -114,12 +115,20 @@ export async function POST(request: Request) {
     if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
     if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
 
-    const fallbackYard = firstRecognizedWarehouse(
-      repair.live_yard,
-      repair.current_yard,
-      repair.repair_location,
-      repair.user_yard,
-    );
+    const lockedToAssignedWarehouse = user.role === 'mechanic' || user.role === 'manager';
+    const assignedWarehouseCode = lockedToAssignedWarehouse ? yardWarehouseCode(repair.user_yard) : '';
+    if (lockedToAssignedWarehouse && !assignedWarehouseCode) {
+      throw new Error('Your account needs an assigned yard/parts warehouse before you can request parts.');
+    }
+
+    const fallbackYard = lockedToAssignedWarehouse
+      ? repair.user_yard
+      : firstRecognizedWarehouse(
+          repair.live_yard,
+          repair.current_yard,
+          repair.repair_location,
+          repair.user_yard,
+        );
 
     const result = await requestUnmatchedPart(env.DB, {
       repairId,
@@ -128,6 +137,7 @@ export async function POST(request: Request) {
       userId:user.id,
       technicianId:Number(user.technicianId),
       fallbackYard,
+      warehouseCode:assignedWarehouseCode,
     });
 
     const yardDetail = result.warehouseCode
