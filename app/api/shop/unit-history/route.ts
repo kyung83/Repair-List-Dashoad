@@ -333,7 +333,7 @@ export async function GET(request:Request) {
       unit:current.unit,
       current:{repairId:'repair-'+current.id,issue:redactIdentity(current.title,identitiesList),repairType:currentType},
       relatedCount,
-      repeatRepair:relatedCount>=2,
+      repeatRepair:relatedCount>=1,
       entries,
       privacy:{technicianIdentityIncluded:false},
       updatedAt:new Date().toISOString(),
