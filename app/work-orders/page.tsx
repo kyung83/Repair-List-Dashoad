@@ -8,6 +8,7 @@ type PartOption = {id:number;partNumber:string;description:string;quantityOnHand
 type UsedPart = {usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean};
 type LaborEntry = {repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string};
 type TechnicianNote = {repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;detail:string;createdAt:string};
+type RepairPhoto = {repairId:string;repairIssue:string;id:number;fileName:string;contentType:string;note:string;createdAt:string;url:string};
 type Repair = {
   id:string;numericId:number;equipmentId:number|null;unit:string;issue:string;status:string;assignedTo:string;technicianId:number|null;
   repairType:string;location:string;laborHours:number;laborRate:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;completedAt:string;reviewedAt:string;
@@ -15,7 +16,7 @@ type Repair = {
 type ReviewPackage = {
   id:string;repairIds:string[];unit:string;equipmentId:number|null;technician:string;technicianId:number|null;completionDate:string;completedAt:string;
   reviewed:boolean;reviewedAt:string;reviewedBy:string;reviewNote:string;repairs:Repair[];technicianNotes:TechnicianNote[];laborEntries:LaborEntry[];
-  usedParts:UsedPart[];missingPartCostLines:number;laborHours:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;
+  usedParts:UsedPart[];repairPhotos:RepairPhoto[];missingPartCostLines:number;laborHours:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;
 };
 type WorkOrderData = {
   defaultLaborRate:number;parts:PartOption[];repairs:Repair[];reviewPackages:ReviewPackage[];
@@ -61,6 +62,7 @@ export default function WorkOrdersPage(){
         ...item.repairs.flatMap((repair)=>[repair.id,repair.issue,repair.status,repair.repairType]),
         ...item.technicianNotes.flatMap((note)=>[note.technician,note.detail]),
         ...item.usedParts.flatMap((part)=>[part.partNumber,part.description]),
+        ...item.repairPhotos.flatMap((photo)=>[photo.fileName,photo.note,photo.repairIssue]),
       ].join(" ").toLowerCase().includes(needle);
     });
   },[data,query,reviewFilter]);
@@ -117,17 +119,36 @@ export default function WorkOrdersPage(){
       </div>
 
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:1380}}>
-        <thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Completed</th><th style={thStyle}>Technician</th><th style={thStyle}>Repairs</th><th style={thStyle}>Repair Types</th><th style={thStyle}>Notes</th><th style={thStyle}>Labor</th><th style={thStyle}>Parts</th><th style={thStyle}>Outside</th><th style={thStyle}>Total</th><th style={thStyle}>Review status</th><th style={thStyle}>Action</th></tr></thead>
+        <thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Completed</th><th style={thStyle}>Technician</th><th style={thStyle}>Repairs</th><th style={thStyle}>Repair Types</th><th style={thStyle}>Notes</th><th style={thStyle}>Photos</th><th style={thStyle}>Labor</th><th style={thStyle}>Parts</th><th style={thStyle}>Outside</th><th style={thStyle}>Total</th><th style={thStyle}>Review status</th><th style={thStyle}>Action</th></tr></thead>
         <tbody>{visiblePackages.map((item)=>{
           const open=expanded.has(item.id);
           return <Fragment key={item.id}>
             <tr style={{borderTop:"1px solid #e7ebee",background:item.reviewed?"#f8faf9":"#fffdf6"}}>
-              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={{...tdStyle,fontWeight:850}}>{repairTypes(item)}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#64748b"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button>{item.reviewed&&<a href={billingHref(item)} style={billingSmallStyle}>Create Invoice</a>}</div></td>
+              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={{...tdStyle,fontWeight:850}}>{repairTypes(item)}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.repairPhotos.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#64748b"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button>{item.reviewed&&<a href={billingHref(item)} style={billingSmallStyle}>Create Invoice</a>}</div></td>
             </tr>
-            {open&&<tr style={{borderTop:"1px solid #e7ebee",background:"#fafbfc"}}><td colSpan={12} style={{padding:14}}>
+            {open&&<tr style={{borderTop:"1px solid #e7ebee",background:"#fafbfc"}}><td colSpan={13} style={{padding:14}}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(6,minmax(140px,1fr))",gap:10}}><Detail label="Unit" value={item.unit||"—"}/><Detail label="Repair Types" value={repairTypes(item)}/><Detail label="Technician" value={item.technician||"Unassigned"}/><Detail label="Completed" value={dateTime(item.completedAt)}/><Detail label="Labor cost" value={money(item.laborCost)}/><Detail label={item.missingPartCostLines?"Recorded total":"Total cost"} value={money(item.totalCost)}/></div>
 
               <InlineWorkOrderReviewEditor item={item} canManage={Boolean(data?.canApprove)} defaultLaborRate={data?.defaultLaborRate??0} parts={data?.parts??[]} onChanged={load}/>
+
+              <section style={{marginTop:12,padding:12,border:"1px solid #cfd8df",background:"white"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <strong style={{fontSize:11}}>REPAIR PHOTOS</strong>
+                  <span style={{fontSize:10,color:"#6b7782",fontWeight:850}}>{item.repairPhotos.length} photo{item.repairPhotos.length===1?"":"s"}</span>
+                </div>
+                {item.repairPhotos.length
+                  ? <div style={{marginTop:10,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,220px))",gap:10}}>
+                      {item.repairPhotos.map((photo)=><a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{display:"block",border:"1px solid #d9e0e5",borderRadius:8,overflow:"hidden",background:"#f8fafb",textDecoration:"none",color:"#243746"}}>
+                        <img src={photo.url} alt={photo.note||photo.fileName||"Repair photo"} loading="lazy" style={{display:"block",width:"100%",height:140,objectFit:"cover",background:"#e9eef2"}}/>
+                        <div style={{padding:8}}>
+                          <strong style={{display:"block",fontSize:10,lineHeight:1.3}}>{photo.repairIssue||"Repair photo"}</strong>
+                          <span style={{display:"block",marginTop:3,fontSize:10,color:"#657481",lineHeight:1.35}}>{photo.note||"No photo note"}</span>
+                          <small style={{display:"block",marginTop:5,color:"#87929b"}}>{dateTime(photo.createdAt)}</small>
+                        </div>
+                      </a>)}
+                    </div>
+                  : <div style={{marginTop:8,color:"#7a858d",fontSize:11}}>No repair photos were attached to this work order.</div>}
+              </section>
 
               {!item.reviewed&&<div style={{marginTop:12,padding:12,border:"1px solid #e0c47a",background:"#fffaf0"}}><strong style={{fontSize:11}}>MANAGER / ADMIN REVIEW</strong><textarea value={reviewNotes[item.id]??""} onChange={(event)=>setReviewNotes((current)=>({...current,[item.id]:event.target.value}))} placeholder="Optional review note" maxLength={1000} style={{...inputStyle,width:"100%",minHeight:60,marginTop:7,resize:"vertical"}}/>{data?.canApprove?<button type="button" disabled={saving===item.id} onClick={()=>void approve(item)} style={{...buttonStyle,marginTop:7,fontWeight:900}}>{saving===item.id?"Saving...":"APPROVE WORK ORDER"}</button>:<div style={{marginTop:7,fontSize:11,color:"#7a858d"}}>Manager or administrator access is required to approve.</div>}</div>}
               {item.reviewed&&<div style={{marginTop:12,padding:12,border:"1px solid #a9cfb9",background:"#f2fbf5",display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}><div><strong style={{fontSize:11}}>APPROVED</strong><span style={{display:"block",marginTop:3,fontSize:11,color:"#557065"}}>This work order is eligible for invoicing.</span></div><a href={billingHref(item)} style={billingButtonStyle}>Create Invoice</a></div>}
