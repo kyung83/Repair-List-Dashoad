@@ -73,6 +73,60 @@ async function warehouseStock(db: D1Database, partId: number, warehouseCode: str
   }>();
 }
 
+type WarehousePhysicalCountSnapshot = {
+  partId:number;
+  partNumber:string;
+  description:string;
+  warehouseId:number;
+  warehouseCode:string;
+  warehouseName:string;
+  primaryStockId:number;
+  primaryUpdatedAt:string;
+  primaryQuantity:number;
+  expectedQuantity:number;
+  stockVersion:string;
+};
+
+async function warehousePhysicalCountSnapshotById(db:D1Database,partId:number,warehouseId:number):Promise<WarehousePhysicalCountSnapshot|null>{
+  const rows=await db.prepare(`
+    SELECT s.id,s.part_id,s.warehouse_id,s.variant_key,s.quantity_on_hand,s.updated_at,
+           w.code AS warehouse_code,w.name AS warehouse_name,p.part_number,p.description
+    FROM part_warehouse_stock s
+    JOIN warehouses w ON w.id=s.warehouse_id
+    JOIN parts p ON p.id=s.part_id
+    WHERE s.part_id=? AND s.warehouse_id=? AND w.active=1 AND p.active=1
+    ORDER BY CASE WHEN s.variant_key='' THEN 0 ELSE 1 END,s.id
+  `).bind(partId,warehouseId).all<{
+    id:number;part_id:number;warehouse_id:number;variant_key:string;quantity_on_hand:number;updated_at:string;
+    warehouse_code:string;warehouse_name:string;part_number:string;description:string;
+  }>();
+  if(!rows.results.length)return null;
+  const primary=rows.results[0];
+  const expectedQuantity=rows.results.reduce((sum,row)=>sum+finite(row.quantity_on_hand),0);
+  const stockVersion='agg:'+rows.results.map((row)=>`${row.id}:${row.updated_at}:${finite(row.quantity_on_hand)}`).join('|');
+  return{
+    partId:Number(primary.part_id),
+    partNumber:primary.part_number,
+    description:primary.description,
+    warehouseId:Number(primary.warehouse_id),
+    warehouseCode:primary.warehouse_code,
+    warehouseName:primary.warehouse_name,
+    primaryStockId:Number(primary.id),
+    primaryUpdatedAt:primary.updated_at,
+    primaryQuantity:finite(primary.quantity_on_hand),
+    expectedQuantity,
+    stockVersion,
+  };
+}
+
+export async function getWarehousePhysicalCountSnapshot(db:D1Database,partId:number,warehouseCode:string){
+  const code=String(warehouseCode??'').trim().toUpperCase();
+  if(!Number.isInteger(partId)||partId<=0||!code)throw new Error('Part and warehouse are required.');
+  const warehouse=await db.prepare('SELECT id FROM warehouses WHERE code=? AND active=1').bind(code).first<{id:number}>();
+  if(!warehouse)throw new Error('That warehouse is not active.');
+  return warehousePhysicalCountSnapshotById(db,partId,warehouse.id);
+}
+
 async function refreshPartTotal(db: D1Database, partId: number) {
   await db.prepare(`
     UPDATE parts
@@ -237,19 +291,19 @@ export async function recordPhysicalCount(
   const partId = Number(input.partId ?? 0);
   const counted = finite(input.countedQuantity,NaN);
   if (!Number.isInteger(partId) || partId <= 0 || !Number.isFinite(counted) || counted < 0) throw new Error('Part and a non-negative physical count are required.');
-  const stock = await warehouseStock(db,partId,String(input.warehouseCode ?? '').trim().toUpperCase());
-  if (!stock) throw new Error('That part is not stocked in the selected warehouse.');
-  const stockVersion = String(input.stockVersion ?? '').trim();
-  if (!stockVersion || stock.updated_at !== stockVersion) throw new Error('Inventory changed after this count screen was loaded. Refresh before recording the physical count.');
-  const expected = finite(stock.quantity_on_hand);
-  const difference = counted - expected;
-  if (Math.abs(difference) <= EPSILON) return {ok:true,matched:true,expectedQuantity:expected,countedQuantity:counted,stockVersion};
-  const result = await db.prepare(`
+  const stock=await getWarehousePhysicalCountSnapshot(db,partId,String(input.warehouseCode ?? ''));
+  if(!stock)throw new Error('That part is not stocked in the selected warehouse.');
+  const stockVersion=String(input.stockVersion??'').trim();
+  if(!stockVersion||stock.stockVersion!==stockVersion)throw new Error('Inventory changed after this count screen was loaded. Refresh before recording the physical count.');
+  const expected=stock.expectedQuantity;
+  const difference=counted-expected;
+  if(Math.abs(difference)<=EPSILON)return{ok:true,matched:true,expectedQuantity:expected,countedQuantity:counted,stockVersion};
+  const result=await db.prepare(`
     INSERT INTO inventory_discrepancy_issues
       (part_id,warehouse_id,warehouse_stock_id,expected_quantity,counted_quantity,difference_quantity,reason,stock_version,created_by_user_id)
     VALUES (?,?,?,?,?,?,?,?,?)
-  `).bind(partId,stock.warehouse_id,stock.id,expected,counted,difference,String(input.reason ?? 'Physical count discrepancy').trim().slice(0,500),stockVersion,input.userId ?? null).run();
-  return {ok:true,matched:false,issueId:Number(result.meta.last_row_id),expectedQuantity:expected,countedQuantity:counted,differenceQuantity:difference};
+  `).bind(partId,stock.warehouseId,stock.primaryStockId,expected,counted,difference,String(input.reason??'Physical count discrepancy').trim().slice(0,500),stockVersion,input.userId??null).run();
+  return{ok:true,matched:false,issueId:Number(result.meta.last_row_id),expectedQuantity:expected,countedQuantity:counted,differenceQuantity:difference};
 }
 
 export async function resolvePhysicalCountIssue(
@@ -261,39 +315,78 @@ export async function resolvePhysicalCountIssue(
   if (!Number.isInteger(issueId) || issueId <= 0 || !operationKey) throw new Error('Discrepancy issue and idempotency key are required.');
   const prior = await operationByKey(db,operationKey);
   if (prior) return {ok:true,idempotent:true,operationId:prior.id,issueId};
-  const issue = await db.prepare(`
-    SELECT i.*,s.quantity_on_hand,s.updated_at
-    FROM inventory_discrepancy_issues i JOIN part_warehouse_stock s ON s.id = i.warehouse_stock_id
-    WHERE i.id = ? AND i.status = 'open'
-  `).bind(issueId).first<{id:number;part_id:number;warehouse_id:number;warehouse_stock_id:number;counted_quantity:number;stock_version:string;quantity_on_hand:number;updated_at:string}>();
-  if (!issue) throw new Error('Open physical-count discrepancy was not found.');
-  if (issue.updated_at !== issue.stock_version) throw new Error('Inventory changed after the discrepancy was recorded. Recount before resolving it.');
-  const delta = finite(issue.counted_quantity)-finite(issue.quantity_on_hand);
-  const dependsOn = await latestStockOperation(db,issue.warehouse_stock_id);
+  const issue=await db.prepare(`
+    SELECT i.*
+    FROM inventory_discrepancy_issues i
+    WHERE i.id=? AND i.status='open'
+  `).bind(issueId).first<{id:number;part_id:number;warehouse_id:number;warehouse_stock_id:number;expected_quantity:number;counted_quantity:number;stock_version:string}>();
+  if(!issue)throw new Error('Open physical-count discrepancy was not found.');
+
+  const aggregateIssue=String(issue.stock_version??'').startsWith('agg:');
+  if(!aggregateIssue){
+    const legacy=await db.prepare('SELECT quantity_on_hand,updated_at FROM part_warehouse_stock WHERE id=?').bind(issue.warehouse_stock_id).first<{quantity_on_hand:number;updated_at:string}>();
+    if(!legacy)throw new Error('The stock row for this count no longer exists.');
+    if(legacy.updated_at!==issue.stock_version)throw new Error('Inventory changed after the discrepancy was recorded. Recount before resolving it.');
+    const delta=finite(issue.counted_quantity)-finite(legacy.quantity_on_hand);
+    const dependsOn=await latestStockOperation(db,issue.warehouse_stock_id);
+    await db.batch([
+      db.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,user_id,note) VALUES (?,'physical_count_resolution',?,?)`).bind(operationKey,input.userId??null,String(input.note??'').slice(0,500)),
+      db.prepare('UPDATE part_warehouse_stock SET quantity_on_hand=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND updated_at=?').bind(issue.counted_quantity,issue.warehouse_stock_id,issue.stock_version),
+      db.prepare(`
+        INSERT INTO inventory_operation_lines (operation_id,part_id,warehouse_stock_id,warehouse_id,quantity_delta,line_type)
+        SELECT id,?,?,?,?,'physical_count_resolution' FROM inventory_operations WHERE operation_key=? AND changes()=1
+      `).bind(issue.part_id,issue.warehouse_stock_id,issue.warehouse_id,delta,operationKey),
+      ...(dependsOn?[db.prepare(`INSERT INTO inventory_operation_dependencies (operation_id,depends_on_operation_id,reason) SELECT id,?,'Physical count followed this stock operation.' FROM inventory_operations WHERE operation_key=?`).bind(dependsOn.id,operationKey)]:[]),
+      db.prepare(`UPDATE inventory_discrepancy_issues SET status='resolved',resolved_by_user_id=?,resolved_at=CURRENT_TIMESTAMP WHERE id=? AND status='open' AND EXISTS (SELECT 1 FROM inventory_operation_lines l JOIN inventory_operations o ON o.id=l.operation_id WHERE o.operation_key=?)`).bind(input.userId??null,issueId,operationKey),
+      db.prepare(`UPDATE inventory_discrepancy_issues SET status='cancelled',resolved_by_user_id=?,resolved_at=CURRENT_TIMESTAMP WHERE part_id=? AND warehouse_id=? AND id<>? AND status='open' AND (SELECT status FROM inventory_discrepancy_issues WHERE id=?)='resolved'`).bind(input.userId??null,issue.part_id,issue.warehouse_id,issueId,issueId),
+      db.prepare(`INSERT INTO inventory_operation_commits (operation_id,applied) SELECT id,CASE WHEN (SELECT status FROM inventory_discrepancy_issues WHERE id=?)='resolved' THEN 1 ELSE 0 END FROM inventory_operations WHERE operation_key=?`).bind(issueId,operationKey),
+    ]);
+    await refreshPartTotal(db,issue.part_id);
+    const operation=await operationByKey(db,operationKey);
+    return{ok:true,idempotent:false,operationId:operation?.id,issueId,quantityDelta:delta};
+  }
+
+  const stock=await warehousePhysicalCountSnapshotById(db,issue.part_id,issue.warehouse_id);
+  if(!stock)throw new Error('That part is no longer stocked in the selected warehouse.');
+  if(stock.stockVersion!==issue.stock_version)throw new Error('Inventory changed after the discrepancy was recorded. Recount before resolving it.');
+  const delta=finite(issue.counted_quantity)-stock.expectedQuantity;
+  const dependsOn=await latestStockOperation(db,stock.primaryStockId);
 
   await db.batch([
     db.prepare(`INSERT INTO inventory_operations (operation_key,operation_type,user_id,note) VALUES (?,'physical_count_resolution',?,?)`)
-      .bind(operationKey,input.userId ?? null,String(input.note ?? '').slice(0,500)),
-    db.prepare(`UPDATE part_warehouse_stock SET quantity_on_hand = ?,updated_at = CURRENT_TIMESTAMP WHERE id = ? AND updated_at = ?`)
-      .bind(issue.counted_quantity,issue.warehouse_stock_id,issue.stock_version),
+      .bind(operationKey,input.userId??null,String(input.note??'').slice(0,500)),
+    db.prepare(`
+      UPDATE part_warehouse_stock
+      SET quantity_on_hand=quantity_on_hand+?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND updated_at=? AND quantity_on_hand=?
+    `).bind(delta,stock.primaryStockId,stock.primaryUpdatedAt,stock.primaryQuantity),
     db.prepare(`
       INSERT INTO inventory_operation_lines (operation_id,part_id,warehouse_stock_id,warehouse_id,quantity_delta,line_type)
-      SELECT id,?,?,?,?,'physical_count_resolution' FROM inventory_operations WHERE operation_key = ? AND changes() = 1
-    `).bind(issue.part_id,issue.warehouse_stock_id,issue.warehouse_id,delta,operationKey),
-    ...(dependsOn ? [db.prepare(`INSERT INTO inventory_operation_dependencies (operation_id,depends_on_operation_id,reason) SELECT id,?,'Physical count followed this stock operation.' FROM inventory_operations WHERE operation_key = ?`).bind(dependsOn.id,operationKey)] : []),
-    db.prepare(`UPDATE inventory_discrepancy_issues SET status = 'resolved',resolved_by_user_id = ?,resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'open' AND EXISTS (SELECT 1 FROM inventory_operation_lines l JOIN inventory_operations o ON o.id=l.operation_id WHERE o.operation_key = ?)`)
-      .bind(input.userId ?? null,issueId,operationKey),
+      SELECT id,?,?,?,?,'physical_count_resolution'
+      FROM inventory_operations
+      WHERE operation_key=? AND changes()=1
+    `).bind(issue.part_id,stock.primaryStockId,issue.warehouse_id,delta,operationKey),
+    ...(dependsOn?[db.prepare(`INSERT INTO inventory_operation_dependencies (operation_id,depends_on_operation_id,reason) SELECT id,?,'Physical count followed this stock operation.' FROM inventory_operations WHERE operation_key=?`).bind(dependsOn.id,operationKey)]:[]),
+    db.prepare(`
+      UPDATE inventory_discrepancy_issues
+      SET status='resolved',resolved_by_user_id=?,resolved_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='open'
+        AND EXISTS(SELECT 1 FROM inventory_operation_lines l JOIN inventory_operations o ON o.id=l.operation_id WHERE o.operation_key=?)
+    `).bind(input.userId??null,issueId,operationKey),
     db.prepare(`
       UPDATE inventory_discrepancy_issues
       SET status='cancelled',resolved_by_user_id=?,resolved_at=CURRENT_TIMESTAMP
-      WHERE warehouse_stock_id=? AND id<>? AND status='open'
+      WHERE part_id=? AND warehouse_id=? AND id<>? AND status='open'
         AND (SELECT status FROM inventory_discrepancy_issues WHERE id=?)='resolved'
-    `).bind(input.userId ?? null,issue.warehouse_stock_id,issueId,issueId),
+    `).bind(input.userId??null,issue.part_id,issue.warehouse_id,issueId,issueId),
     db.prepare(`
-      INSERT INTO inventory_operation_commits (operation_id,applied)
-      SELECT id,CASE WHEN (SELECT status FROM inventory_discrepancy_issues WHERE id = ?) = 'resolved' THEN 1 ELSE 0 END
-      FROM inventory_operations WHERE operation_key = ?
-    `).bind(issueId,operationKey),
+      INSERT INTO inventory_operation_commits(operation_id,applied)
+      SELECT id,CASE WHEN
+        (SELECT status FROM inventory_discrepancy_issues WHERE id=?)='resolved'
+        AND ABS(COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id=? AND warehouse_id=?),0)-?)<0.000001
+      THEN 1 ELSE 0 END
+      FROM inventory_operations WHERE operation_key=?
+    `).bind(issueId,issue.part_id,issue.warehouse_id,issue.counted_quantity,operationKey),
   ]);
   await refreshPartTotal(db,issue.part_id);
   const operation = await operationByKey(db,operationKey);
