@@ -31,3 +31,19 @@ test('slow maintenance form history cannot prevent equipment from loading',()=>{
   assert.ok(annualIndex>equipmentIndex);
   assert.match(unit,/setEquipment\(eq\.equipment\)/);
 });
+
+
+test('mobile Unit lookup avoids fleet-wide native datalist and uses native GET navigation',()=>{
+  assert.doesNotMatch(unit,/<datalist/);
+  assert.doesNotMatch(unit,/list="unit-list"/);
+  assert.match(unit,/<form className="easy-finder" action="\/unit" method="get">/);
+  assert.match(unit,/name="unit"/);
+  assert.match(unit,/type="submit"/);
+  assert.match(unit,/slice\(0,8\)/);
+});
+
+test('Unit Hub tolerates missing role and malformed unit text without crashing client controls',()=>{
+  assert.match(unit,/board\?\.user\?\.role/);
+  assert.match(unit,/function safeText\(value:unknown\)/);
+  assert.match(unit,/filter\(item=>item&&safeText\(item\.unit\)\)/);
+});
