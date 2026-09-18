@@ -61,7 +61,7 @@ check('34c aggregate count snapshot fingerprints every stock row',ops,/stockVers
 check('34d count snapshot API uses aggregate warehouse helper',countSnapshot,/getWarehousePhysicalCountSnapshot/);
 check('35 discrepancy creation records expected and counted quantities',ops,/expected_quantity,counted_quantity,difference_quantity/);
 check('36 discrepancy resolution rejects stale stock',ops,/Inventory changed after the discrepancy was recorded/);
-check('37 count resolution update matches observed version',ops,/WHERE id = \? AND updated_at = \?/);
+check('37 count resolution update matches observed version',ops,/WHERE id\s*=\s*\? AND updated_at\s*=\s*\?/);
 check('38 count resolution writes an operation line',ops,/physical_count_resolution/);
 check('39 count resolution has the same D1 commit guard',ops,/inventory_operation_commits[\s\S]*inventory_discrepancy_issues/);
 check('39b applying a count cancels older open issues for the same part and warehouse',ops,/status='cancelled'[\s\S]*part_id=\?[\s\S]*warehouse_id=\?/);
