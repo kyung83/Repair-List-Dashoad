@@ -31,7 +31,7 @@ type HistoricalRow = {
 
 type NoteRow = { repair_id:number; detail:string; created_at:string };
 type PartRow = { repair_id:number; part_number:string; description:string; quantity:number };
-type PhotoRow = { repair_id:number; photo_key:string; object_key:string; file_name:string|null; content_type:string|null; note:string; created_at:string };
+type PhotoRow = { repair_id:number; photo_key:string; object_key:string; content_type:string|null; note:string; created_at:string };
 type IdentityRow = { value:string };
 
 function numericRepairId(value: unknown) {
@@ -182,14 +182,14 @@ export async function GET(request:Request) {
           ORDER BY rp.repair_id,p.part_number
         `.replace('__IDS__',placeholders);
       const workPhotosSql=`
-          SELECT repair_id,'work-'||id AS photo_key,object_key,file_name,content_type,
+          SELECT repair_id,'work-'||id AS photo_key,object_key,content_type,
                  COALESCE(note,'') AS note,created_at
           FROM repair_work_photos
           WHERE repair_id IN (__IDS__)
           ORDER BY repair_id,created_at,id
         `.replace('__IDS__',placeholders);
       const maintenancePhotosSql=`
-          SELECT r.repair_id,'maintenance-'||p.id AS photo_key,p.object_key,p.file_name,p.content_type,
+          SELECT r.repair_id,'maintenance-'||p.id AS photo_key,p.object_key,p.content_type,
                  COALESCE(i.item_text,'') AS note,p.created_at
           FROM maintenance_checklist_photos p
           JOIN maintenance_checklist_runs r ON r.id=p.checklist_run_id
@@ -198,7 +198,7 @@ export async function GET(request:Request) {
           ORDER BY r.repair_id,p.created_at,p.id
         `.replace('__IDS__',placeholders);
       const typePhotosSql=`
-          SELECT r.repair_id,'type-'||p.id AS photo_key,p.object_key,p.file_name,p.content_type,
+          SELECT r.repair_id,'type-'||p.id AS photo_key,p.object_key,p.content_type,
                  COALESCE(i.item_text,'') AS note,p.created_at
           FROM repair_type_checklist_photos p
           JOIN repair_type_checklist_runs r ON r.id=p.checklist_run_id
@@ -229,7 +229,7 @@ export async function GET(request:Request) {
         const list=photosByRepair.get(Number(row.repair_id))??[];
         list.push({
           id:row.photo_key,
-          fileName:row.file_name||'Photo',
+          fileName:'Repair photo',
           contentType:row.content_type||'',
           note:redactIdentity(row.note,identitiesList),
           createdAt:row.created_at,
