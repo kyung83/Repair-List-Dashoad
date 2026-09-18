@@ -31,7 +31,8 @@ type HistoricalRow = {
 
 type NoteRow = { repair_id:number; detail:string; created_at:string };
 type PartRow = { repair_id:number; part_number:string; description:string; quantity:number };
-type PhotoRow = { repair_id:number; photo_key:string; object_key:string; content_type:string|null; note:string; created_at:string };
+type PhotoRow = { repair_id:number; photo_key:string; content_type:string|null; note:string; created_at:string };
+type PhotoObjectRow = { object_key:string; content_type:string|null; equipment_id:number|null };
 type IdentityRow = { value:string };
 
 function numericRepairId(value: unknown) {
@@ -39,8 +40,50 @@ function numericRepairId(value: unknown) {
   return match ? Number(match[1]) : 0;
 }
 
-function photoUrl(key:string) {
-  return '/api/photos/' + key.split('/').map(encodeURIComponent).join('/');
+function historyPhotoUrl(currentRepairId:number,photoId:string) {
+  return '/api/shop/unit-history?repairId='+encodeURIComponent('repair-'+currentRepairId)+'&photoId='+encodeURIComponent(photoId);
+}
+
+async function historyPhoto(equipmentId:number,photoId:string) {
+  const match=photoId.match(/^(work|maintenance|type)-(\d+)$/);
+  if (!match) return new Response('Photo was not found.',{status:404});
+  const id=Number(match[2]);
+  let row:PhotoObjectRow|null=null;
+
+  if (match[1]==='work') {
+    row=await env.DB.prepare(`
+      SELECT p.object_key,p.content_type,r.equipment_id
+      FROM repair_work_photos p
+      JOIN repairs r ON r.id=p.repair_id
+      WHERE p.id=?
+    `).bind(id).first<PhotoObjectRow>();
+  } else if (match[1]==='maintenance') {
+    row=await env.DB.prepare(`
+      SELECT p.object_key,p.content_type,r.equipment_id
+      FROM maintenance_checklist_photos p
+      JOIN maintenance_checklist_runs c ON c.id=p.checklist_run_id
+      JOIN repairs r ON r.id=c.repair_id
+      WHERE p.id=?
+    `).bind(id).first<PhotoObjectRow>();
+  } else {
+    row=await env.DB.prepare(`
+      SELECT p.object_key,p.content_type,r.equipment_id
+      FROM repair_type_checklist_photos p
+      JOIN repair_type_checklist_runs c ON c.id=p.checklist_run_id
+      JOIN repairs r ON r.id=c.repair_id
+      WHERE p.id=?
+    `).bind(id).first<PhotoObjectRow>();
+  }
+
+  if (!row || Number(row.equipment_id??0)!==equipmentId) return new Response('Photo was not found.',{status:404});
+  const object=await env.FILES.get(row.object_key);
+  if (!object) return new Response('Photo was not found.',{status:404});
+  const headers=new Headers();
+  object.writeHttpMetadata(headers);
+  if (!headers.get('content-type')&&row.content_type) headers.set('content-type',row.content_type);
+  headers.set('cache-control','private, max-age=3600');
+  headers.set('content-disposition','inline');
+  return new Response(object.body,{headers});
 }
 
 function escapeRegExp(value:string) {
@@ -96,7 +139,8 @@ export async function GET(request:Request) {
     if (!user) throw new Error('Authentication required.');
     if (!['mechanic','manager','admin'].includes(user.role)) throw new Error('This account cannot view unit work history.');
 
-    const currentRepairId=numericRepairId(new URL(request.url).searchParams.get('repairId'));
+    const url=new URL(request.url);
+    const currentRepairId=numericRepairId(url.searchParams.get('repairId'));
     if (!currentRepairId) throw new Error('The current repair was not found.');
 
     const active=await env.DB.prepare(`
@@ -126,6 +170,9 @@ export async function GET(request:Request) {
     )) {
       throw new Error('This repair is not assigned to you.');
     }
+
+    const requestedPhotoId=String(url.searchParams.get('photoId')??'').trim();
+    if (requestedPhotoId) return historyPhoto(Number(current.equipment_id),requestedPhotoId);
 
     const [live, historical, identities] = await Promise.all([
       env.DB.prepare(`
@@ -184,14 +231,14 @@ export async function GET(request:Request) {
           ORDER BY rp.repair_id,p.part_number
         `.replace('__IDS__',placeholders);
       const workPhotosSql=`
-          SELECT repair_id,'work-'||id AS photo_key,object_key,content_type,
+          SELECT repair_id,'work-'||id AS photo_key,content_type,
                  COALESCE(note,'') AS note,created_at
           FROM repair_work_photos
           WHERE repair_id IN (__IDS__)
           ORDER BY repair_id,created_at,id
         `.replace('__IDS__',placeholders);
       const maintenancePhotosSql=`
-          SELECT r.repair_id,'maintenance-'||p.id AS photo_key,p.object_key,p.content_type,
+          SELECT r.repair_id,'maintenance-'||p.id AS photo_key,p.content_type,
                  COALESCE(i.item_text,'') AS note,p.created_at
           FROM maintenance_checklist_photos p
           JOIN maintenance_checklist_runs r ON r.id=p.checklist_run_id
@@ -200,7 +247,7 @@ export async function GET(request:Request) {
           ORDER BY r.repair_id,p.created_at,p.id
         `.replace('__IDS__',placeholders);
       const typePhotosSql=`
-          SELECT r.repair_id,'type-'||p.id AS photo_key,p.object_key,p.content_type,
+          SELECT r.repair_id,'type-'||p.id AS photo_key,p.content_type,
                  COALESCE(i.item_text,'') AS note,p.created_at
           FROM repair_type_checklist_photos p
           JOIN repair_type_checklist_runs r ON r.id=p.checklist_run_id
@@ -235,7 +282,7 @@ export async function GET(request:Request) {
           contentType:row.content_type||'',
           note:redactIdentity(row.note,identitiesList),
           createdAt:row.created_at,
-          url:photoUrl(row.object_key),
+          url:historyPhotoUrl(currentRepairId,row.photo_key),
         });
         photosByRepair.set(Number(row.repair_id),list);
       }
