@@ -29,7 +29,7 @@ test('slow maintenance form history cannot prevent equipment from loading',()=>{
   assert.ok(equipmentIndex>=0);
   assert.ok(pmIndex>equipmentIndex);
   assert.ok(annualIndex>equipmentIndex);
-  assert.match(unit,/setEquipment\(eq\.equipment\)/);
+  assert.match(unit,/setEquipment\(rows/);
 });
 
 
