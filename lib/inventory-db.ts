@@ -10,6 +10,7 @@ type PartRow = {
   location: string | null;
   preferred_vendor_id: number | null;
   vendor_name: string | null;
+  active: number;
 };
 
 type VendorRow = {
@@ -41,14 +42,15 @@ function finiteNumber(value: unknown, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-export async function getInventoryData(db: D1Database) {
+export async function getInventoryData(db: D1Database, status: 'active'|'archived'|'all' = 'active') {
+  const partWhere = status === 'archived' ? 'WHERE p.active = 0' : status === 'all' ? '' : 'WHERE p.active = 1';
   const [partsResult, vendorsResult, stockResult, warehousesResult, minimumsResult, equipmentResult, partEquipmentResult] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.part_number, p.description, p.quantity_on_hand, p.reorder_level,
-             p.unit_cost, p.location, p.preferred_vendor_id, v.name AS vendor_name
+             p.unit_cost, p.location, p.preferred_vendor_id, v.name AS vendor_name, p.active
       FROM parts p
       LEFT JOIN vendors v ON v.id = p.preferred_vendor_id
-      WHERE p.active = 1
+      ${partWhere}
       ORDER BY p.description, p.part_number
     `).all<PartRow>(),
     db.prepare('SELECT id, name, phone, email, notes FROM vendors WHERE COALESCE(active, 1) = 1 ORDER BY name').all<VendorRow>(),
@@ -136,6 +138,7 @@ export async function getInventoryData(db: D1Database) {
       location,
       preferredVendorId: row.preferred_vendor_id,
       vendorName: row.vendor_name ?? '',
+      active: Number(row.active) === 1,
       warehouseStocks,
       compatibleEquipment,
       compatibleEquipmentIds: compatibleEquipment.map((item) => item.id),
