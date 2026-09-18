@@ -73,11 +73,11 @@ export default function CurrentWorkHome(props:Props){
 
       {props.handoffPanel}
 
+      {repairMine&&!noUnit&&<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>}
+
       <RepairPhotoControl repairId={repair.id} canWork />
 
       {repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
-
-      {repairMine&&!noUnit&&<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>}
 
       {visibleOtherRepairs.length>0&&<section style={card}>
         <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
