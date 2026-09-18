@@ -29,7 +29,7 @@ function reportNumber(runId:number){
   return `NLW-PM-${String(runId).padStart(6,'0')}`;
 }
 
-async function listForms(){
+async function listForms(unit=''){
   const result=await env.DB.prepare(`
     SELECT c.id AS run_id,c.repair_id,c.completed_at,c.ready_at,
            c.mileage_at_completion,c.mileage_at_start,
@@ -48,9 +48,10 @@ async function listForms(){
       AND c.status='completed'
       AND r.source='scheduled-pm'
       AND lower(COALESCE(r.status,'')) LIKE '%complete%'
+      AND (? = '' OR e.unit = ? COLLATE NOCASE)
     ORDER BY COALESCE(c.completed_at,c.ready_at,c.started_at) DESC,c.id DESC
     LIMIT 1000
-  `).all<PmHeaderRow>();
+  `).bind(unit,unit).all<PmHeaderRow>();
 
   return result.results.map(row=>({
     reportNumber:reportNumber(row.run_id),
@@ -77,7 +78,8 @@ async function listForms(){
 export async function GET(request:Request){
   try{
     await requireUser(request);
-    return Response.json({forms:await listForms(),updatedAt:new Date().toISOString()},{headers:{'cache-control':'no-store'}});
+    const unit=new URL(request.url).searchParams.get('unit')?.trim()??'';
+    return Response.json({forms:await listForms(unit),updatedAt:new Date().toISOString()},{headers:{'cache-control':'no-store'}});
   }catch(error){
     console.error(JSON.stringify({event:'pm_inspection_get_failed',error:String(error)}));
     return Response.json({error:error instanceof Error?error.message:'PM forms could not be loaded.'},{status:400});
