@@ -10,6 +10,28 @@ export function normalizePartReference(value: unknown) {
   return normalized(value);
 }
 
+async function canonicalConflict(db:D1Database,partId:number,key:string){
+  const rows=await db.prepare('SELECT id,part_number FROM parts WHERE active=1').all<{id:number;part_number:string}>();
+  return rows.results.find((row)=>Number(row.id)!==partId&&normalized(row.part_number)===key)??null;
+}
+
+async function aliasConflict(db:D1Database,partId:number,key:string){
+  return db.prepare(`
+    SELECT x.part_id,p.part_number
+    FROM part_cross_references x
+    JOIN parts p ON p.id=x.part_id
+    WHERE x.active=1 AND x.normalized_cross_part_number=? AND x.part_id<>?
+    LIMIT 1
+  `).bind(key,partId).first<{part_id:number;part_number:string}>();
+}
+
+async function assertReferenceAvailable(db:D1Database,partId:number,label:string,key:string){
+  const canonical=await canonicalConflict(db,partId,key);
+  if(canonical)throw new Error(`${label} is already the inventory part number ${canonical.part_number}.`);
+  const alias=await aliasConflict(db,partId,key);
+  if(alias)throw new Error(`${label} is already a cross-reference for ${alias.part_number}.`);
+}
+
 export async function getPartCrossReferencesByPart(db: D1Database) {
   const rows = await db.prepare(`
     SELECT part_id,cross_part_number
@@ -46,6 +68,7 @@ export async function replacePartCrossReferences(
     if (!unique.has(key)) unique.set(key,label);
     if (unique.size >= 100) break;
   }
+  for(const [key,label] of unique)await assertReferenceAvailable(db,partId,label,key);
 
   const statements: D1PreparedStatement[] = [
     db.prepare('DELETE FROM part_cross_references WHERE part_id=?').bind(partId),
@@ -73,14 +96,20 @@ export async function addPartCrossReference(
   const part = await db.prepare('SELECT part_number FROM parts WHERE id=? AND active=1')
     .bind(partId).first<{part_number:string}>();
   if (!part || normalized(part.part_number) === key) return false;
+  try{
+    await assertReferenceAvailable(db,partId,label,key);
+  }catch{
+    return false;
+  }
   await db.prepare(`
     INSERT INTO part_cross_references
       (part_id,cross_part_number,normalized_cross_part_number,active,updated_at)
     VALUES (?,?,?,1,CURRENT_TIMESTAMP)
-    ON CONFLICT(part_id,normalized_cross_part_number) DO UPDATE SET
+    ON CONFLICT(normalized_cross_part_number) DO UPDATE SET
       cross_part_number=excluded.cross_part_number,
       active=1,
       updated_at=CURRENT_TIMESTAMP
+    WHERE part_cross_references.part_id=excluded.part_id
   `).bind(partId,label,key).run();
   return true;
 }
