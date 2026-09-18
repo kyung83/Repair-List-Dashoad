@@ -233,7 +233,8 @@ async function restoreWorkingManagerAssignments(request:Request,response:Respons
 
   const payload = await response.json() as {
     repairs?:ShopRepair[];
-    partRequests?:Array<{repairNumericId:number;reservedQuantity:number;[key:string]:unknown}>;
+    user?:{assignedWarehouseCode?:string;[key:string]:unknown};
+    partRequests?:Array<{repairNumericId:number;reservedQuantity:number;warehouseCode?:string;[key:string]:unknown}>;
     partsReadyCount?:number;
     [key:string]:unknown;
   };
@@ -262,7 +263,12 @@ async function restoreWorkingManagerAssignments(request:Request,response:Respons
   payload.repairs = [...visible,...restored];
 
   const repairIds = new Set(payload.repairs.map((repair)=>numericRepairId(repair.id)).filter(Boolean));
-  const requests = (await getRepairPartRequests(env.DB)).filter((partRequest)=>repairIds.has(partRequest.repairNumericId));
+  const assignedWarehouseCode=String(payload.user?.assignedWarehouseCode??'');
+  const requests = (await getRepairPartRequests(env.DB)).filter((partRequest)=>
+    repairIds.has(partRequest.repairNumericId)
+    && Boolean(assignedWarehouseCode)
+    && partRequest.warehouseCode===assignedWarehouseCode
+  );
   payload.partRequests = requests;
   payload.partsReadyCount = requests.filter((partRequest)=>partRequest.reservedQuantity > 0).length;
   return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
