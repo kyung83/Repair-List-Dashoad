@@ -6,6 +6,7 @@ import FoundRepairControl from "./found-repair-control";
 import RepairPhotoControl from "./repair-photo-control";
 import TechnicianRepairTools from "./technician-repair-tools-v2";
 import CurrentRepairTypeControl from "./current-repair-type-control";
+import MechanicUnitHistory from "./mechanic-unit-history";
 
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
@@ -72,6 +73,8 @@ export default function CurrentWorkHome(props:Props){
 
       {props.handoffPanel}
 
+      {repairMine&&!noUnit&&<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>}
+
       <RepairPhotoControl repairId={repair.id} canWork />
 
       {repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
@@ -96,7 +99,7 @@ export default function CurrentWorkHome(props:Props){
       {!noUnit&&<nav style={quickTools} aria-label="Current repair tools">
         <a href="/repair-board" style={quickButton}>▣<span>DVIR</span></a>
         <button type="button" onClick={()=>window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})} style={quickButton}>▤<span>Photos</span></button>
-        <a href={unitHref} style={quickButton}>◷<span>History</span></a>
+        <button type="button" onClick={()=>document.getElementById("unit-work-history")?.scrollIntoView({behavior:"smooth",block:"start"})} style={quickButton}>◷<span>History</span></button>
         <a href={unitHref} style={quickButton}>▰<span>Unit Info</span></a>
         <button type="button" onClick={goToFinalReview} style={finalButton}>▧<span>Final Review</span></button>
       </nav>}
