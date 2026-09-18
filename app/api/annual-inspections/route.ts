@@ -52,7 +52,7 @@ function reportNumber(runId: number) {
   return `NLW-ANNUAL-${String(runId).padStart(6, '0')}`;
 }
 
-async function listForms() {
+async function listForms(unit = '') {
   const result = await env.DB.prepare(`
     SELECT c.id AS run_id, c.repair_id, c.status AS checklist_status,
            COALESCE(r.status,'') AS repair_status, c.ready_at, c.completed_at,
@@ -70,9 +70,10 @@ async function listForms() {
       AND c.status = 'completed'
       AND r.source = 'scheduled-annual'
       AND lower(COALESCE(r.status,'')) LIKE '%complete%'
+      AND (? = '' OR e.unit = ? COLLATE NOCASE)
     ORDER BY COALESCE(c.completed_at, c.ready_at, c.started_at) DESC, c.id DESC
     LIMIT 1000
-  `).all<AnnualHeaderRow>();
+  `).bind(unit, unit).all<AnnualHeaderRow>();
 
   return result.results.map((row) => ({
     reportNumber: reportNumber(row.run_id),
@@ -179,7 +180,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requested = url.searchParams.get('repairId');
     if (!requested) {
-      return Response.json({ forms: await listForms(), updatedAt: new Date().toISOString() }, { headers: { 'cache-control': 'no-store' } });
+      const unit = url.searchParams.get('unit')?.trim() ?? '';
+      return Response.json({ forms: await listForms(unit), updatedAt: new Date().toISOString() }, { headers: { 'cache-control': 'no-store' } });
     }
     return Response.json(await detailFor(repairId(requested)), { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
