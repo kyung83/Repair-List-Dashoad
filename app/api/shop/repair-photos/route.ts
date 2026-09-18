@@ -96,22 +96,60 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   let uploadedKey = '';
   try {
-    const form = await request.formData();
-    const id = numericRepairId(form.get('repairId'));
+    const url = new URL(request.url);
+    const rawUpload = url.searchParams.get('raw') === '1';
+
+    let id = 0;
+    let note = '';
+    let fileName = 'repair-photo';
+    let contentType = '';
+    let bytes: ArrayBuffer;
+
+    if (rawUpload) {
+      id = numericRepairId(url.searchParams.get('repairId'));
+      note = String(url.searchParams.get('note') ?? '').trim().slice(0, 500);
+      fileName = String(url.searchParams.get('fileName') ?? 'repair-photo')
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .slice(-120) || 'repair-photo';
+      contentType = String(request.headers.get('content-type') ?? '').trim().toLowerCase();
+      bytes = await request.arrayBuffer();
+    } else {
+      const form = await request.formData();
+      id = numericRepairId(form.get('repairId'));
+      note = String(form.get('note') ?? '').trim().slice(0, 500);
+      const fileValue = form.get('photo');
+      if (!fileValue || typeof fileValue === 'string') throw new Error('Choose a photo to upload.');
+      const file = fileValue as File;
+      fileName = String(file.name || 'repair-photo')
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .slice(-120) || 'repair-photo';
+      contentType = String(file.type || '').trim().toLowerCase();
+      bytes = await file.arrayBuffer();
+    }
+
     if (!id) throw new Error('Repair was not found.');
     const { user, repair } = await requireAccess(request, id);
     if (repair.status.toLowerCase().includes('complete')) throw new Error('Completed repairs cannot accept new work photos.');
 
-    const fileValue = form.get('photo');
-    if (!fileValue || typeof fileValue === 'string') throw new Error('Choose a photo to upload.');
-    const file = fileValue as File;
-    if (!file.size || file.size > 12 * 1024 * 1024) throw new Error('Repair photos must be between 1 byte and 12 MB.');
-    if (!String(file.type || '').toLowerCase().startsWith('image/')) throw new Error('Repair photo uploads must be image files.');
-    const note = String(form.get('note') ?? '').trim().slice(0, 500);
-    const cleanName = String(file.name || 'photo').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(-120) || 'photo';
-    const contentType = String(file.type || '').trim().toLowerCase() || 'application/octet-stream';
-    const bytes = await file.arrayBuffer();
-    uploadedKey = `repair-work/${id}/${crypto.randomUUID()}-${cleanName}`;
+    if (!bytes.byteLength || bytes.byteLength > 12 * 1024 * 1024) {
+      throw new Error('Repair photos must be between 1 byte and 12 MB.');
+    }
+
+    if (!contentType.startsWith('image/')) {
+      const extension = fileName.toLowerCase().split('.').pop() ?? '';
+      const byExtension: Record<string,string> = {
+        jpg:'image/jpeg',
+        jpeg:'image/jpeg',
+        png:'image/png',
+        webp:'image/webp',
+        heic:'image/heic',
+        heif:'image/heif',
+      };
+      contentType = byExtension[extension] ?? '';
+    }
+    if (!contentType.startsWith('image/')) throw new Error('Repair photo uploads must be image files.');
+
+    uploadedKey = `repair-work/${id}/${crypto.randomUUID()}-${fileName}`;
     await env.FILES.put(uploadedKey, bytes, { httpMetadata:{ contentType } });
 
     try {
@@ -119,7 +157,7 @@ export async function POST(request: Request) {
         INSERT INTO repair_work_photos (
           repair_id, object_key, file_name, content_type, note, uploaded_by_user_id, technician_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(id, uploadedKey, file.name || cleanName, contentType, note || null, user.id, user.technicianId ?? null).run();
+      `).bind(id, uploadedKey, fileName, contentType, note || null, user.id, user.technicianId ?? null).run();
       await env.DB.prepare(`
         INSERT INTO repair_job_events (repair_id, user_id, technician_id, action, detail)
         VALUES (?, ?, ?, 'work_photo_added', ?)
