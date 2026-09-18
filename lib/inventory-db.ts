@@ -1,3 +1,5 @@
+import { getPartCrossReferencesByPart } from './part-cross-references';
+
 type PartRow = {
   id: number;
   part_number: string;
@@ -80,6 +82,7 @@ export async function getInventoryData(db: D1Database) {
       ORDER BY pe.part_id, e.unit
     `).all<PartEquipmentRow>(),
   ]);
+  const crossReferencesByPart = await getPartCrossReferencesByPart(db);
 
   const stockByPart = new Map<number, WarehouseStockRow[]>();
   for (const stock of stockResult.results) {
@@ -136,6 +139,7 @@ export async function getInventoryData(db: D1Database) {
       warehouseStocks,
       compatibleEquipment,
       compatibleEquipmentIds: compatibleEquipment.map((item) => item.id),
+      crossReferences: crossReferencesByPart.get(row.id) ?? [],
       lowStock: quantityOnHand <= Number(row.reorder_level),
     };
   });
