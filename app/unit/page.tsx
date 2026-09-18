@@ -144,7 +144,6 @@ export default function UnitPage(){
           </div>
         </div>
       </section>}
-      </section>
     </>}
   </div></main>;
 }
