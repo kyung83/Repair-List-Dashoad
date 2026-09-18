@@ -9,6 +9,9 @@ type WarehouseStock = {
   warehouseCode: string;
   warehouseName: string;
   quantityOnHand: number;
+  physicalOnHand?: number;
+  reserved?: number;
+  available?: number;
   unitOfMeasure: string;
   unitCost: number | null;
   onOrder: number;
@@ -354,6 +357,7 @@ export default function InventoryPage() {
 
   const editingItem = part.id ? (data?.parts ?? []).find((item) => item.id === part.id) ?? null : null;
   const editingWarehouseStocks = editingItem?.warehouseStocks ?? [];
+  const editingPhysicalTotal = editingWarehouseStocks.reduce((sum, stock) => sum + Number(stock.physicalOnHand ?? stock.quantityOnHand), 0);
   const selectedVendors = (data?.vendors ?? []).filter((itemVendor) => part.vendorIds.includes(itemVendor.id));
   const selectedEquipment = (data?.equipment ?? []).filter((equipment) => part.equipmentIds.includes(equipment.id));
   const equipmentMatches = (data?.equipment ?? []).filter((equipment) => {
@@ -483,7 +487,7 @@ export default function InventoryPage() {
             <input required placeholder="Description" value={part.description} onChange={(event) => setPart({ ...part, description: event.target.value })} style={{ padding: 11 }} />
             {part.id ? <div style={{ padding: 11, border: "1px solid #dce2e7", borderRadius: 8, background: "#f7f9fa" }}>
               <span style={{ display: "block", color: "#657383", fontSize: 10, fontWeight: 900, letterSpacing: ".08em" }}>TOTAL WAREHOUSE STOCK — READ ONLY</span>
-              <strong style={{ display: "block", marginTop: 5, fontSize: 20, color: Number(editingItem?.quantityOnHand ?? part.quantityOnHand) < 0 ? "#b42318" : "#182331" }}>{editingItem?.quantityOnHand ?? part.quantityOnHand}</strong>
+              <strong style={{ display: "block", marginTop: 5, fontSize: 20, color: Number(editingWarehouseStocks.length ? editingPhysicalTotal : (editingItem?.quantityOnHand ?? part.quantityOnHand)) < 0 ? "#b42318" : "#182331" }}>{editingWarehouseStocks.length ? editingPhysicalTotal : (editingItem?.quantityOnHand ?? part.quantityOnHand)}</strong>
               <small style={{ display: "block", marginTop: 4, color: "#6c7886" }}>Use Warehouse physical stock below to correct inventory. Editing the part record does not change warehouse counts.</small>
             </div> : <input type="number" step="any" placeholder="Initial quantity on hand" value={part.quantityOnHand} onChange={(event) => setPart({ ...part, quantityOnHand: Number(event.target.value) })} style={{ padding: 11 }} />}
             <input type="number" step="any" placeholder="Fallback reorder level" value={part.reorderLevel} onChange={(event) => setPart({ ...part, reorderLevel: Number(event.target.value) })} style={{ padding: 11 }} />
@@ -495,8 +499,8 @@ export default function InventoryPage() {
               <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>These warehouse quantities are what Inventory actually totals. Use <b>Physical Count</b> on the terminal you counted.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 9 }}>
                 {editingWarehouseStocks.length ? editingWarehouseStocks.map((stock) => <div key={stock.warehouseCode} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: 10, border: "1px solid #edf0f2", borderRadius: 8, background: Number(stock.quantityOnHand) < 0 ? "#fff0f0" : "white" }}>
-                  <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}</small></span>
-                  <span style={{ textAlign: "right" }}><strong style={{ display: "block", color: Number(stock.quantityOnHand) < 0 ? "#b42318" : "#182331", fontSize: 18 }}>{stock.quantityOnHand}</strong><button type="button" onClick={() => void physicalCount(editingItem, stock.warehouseCode)} style={{ marginTop: 4, padding: "6px 9px", border: "1px solid #0d1b2b", borderRadius: 7, background: "white", color: "#0d1b2b", fontSize: 10, fontWeight: 900 }}>PHYSICAL COUNT</button></span>
+                  <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}{Number(stock.reserved ?? 0) > 0 ? ` · ${stock.reserved} reserved` : ""}</small></span>
+                  <span style={{ textAlign: "right" }}><strong style={{ display: "block", color: Number(stock.physicalOnHand ?? stock.quantityOnHand) < 0 ? "#b42318" : "#182331", fontSize: 18 }}>{stock.physicalOnHand ?? stock.quantityOnHand}</strong><small style={{ display: "block", color: "#6c7886" }}>physical</small><button type="button" onClick={() => void physicalCount(editingItem, stock.warehouseCode)} style={{ marginTop: 4, padding: "6px 9px", border: "1px solid #0d1b2b", borderRadius: 7, background: "white", color: "#0d1b2b", fontSize: 10, fontWeight: 900 }}>PHYSICAL COUNT</button></span>
                 </div>) : <div style={{ color: "#6c7886", fontSize: 12 }}>No warehouse stock rows exist for this part yet.</div>}
               </div>
             </fieldset>}
