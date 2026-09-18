@@ -14,6 +14,7 @@ const workOrders=await readFile(new URL('app/api/work-orders/route.ts',root),'ut
 const review=await readFile(new URL('app/api/work-orders/review-part-correction.ts',root),'utf8');
 const inventory=await readFile(new URL('app/api/inventory/route.ts',root),'utf8');
 const inventoryPage=await readFile(new URL('app/inventory/page.tsx',root),'utf8');
+const inventoryDb=await readFile(new URL('lib/inventory-db.ts',root),'utf8');
 const countSnapshot=await readFile(new URL('app/api/inventory/count-snapshot/route.ts',root),'utf8');
 const controls=await readFile(new URL('app/api/inventory-controls/route.ts',root),'utf8');
 const controlsPage=await readFile(new URL('app/inventory-controls/page.tsx',root),'utf8');
@@ -75,6 +76,10 @@ check('45 lifecycle compatibility layer disables reservation allocation mutation
 check('inventory API exposes controlled physical-count recording',inventory,/recordPhysicalCount/);
 check('inventory page applies a manager-entered physical count immediately',inventoryPage,/action:"resolvePhysicalCount"[\s\S]*Physical count applied:/);
 check('inventory page keeps count resolution idempotent',inventoryPage,/count-resolution:\$\{crypto\.randomUUID\(\)\}/);
+check('inventory edit makes existing warehouse quantity read only',inventoryPage,/TOTAL WAREHOUSE STOCK — READ ONLY/);
+check('inventory edit exposes physical count for each stocked warehouse',inventoryPage,/Warehouse physical stock[\s\S]*physicalCount\(editingItem, stock\.warehouseCode\)/);
+check('inventory physical count supports an explicit warehouse override',inventoryPage,/physicalCount\(item: Part, warehouseOverride\?: string\)[\s\S]*countWarehouseCode/);
+check('editing part details re-syncs legacy total from warehouse stock',inventoryDb,/SUM\(quantity_on_hand\) FROM part_warehouse_stock WHERE part_id = \?/);
 check('inventory count resolution adjusts the aggregate through its primary stock row',ops,/quantity_on_hand=quantity_on_hand\+\?[\s\S]*stock\.primaryStockId/);
 check('aggregate count commit guard verifies warehouse total equals counted quantity',ops,/SUM\(quantity_on_hand\)[\s\S]*issue\.counted_quantity/);
 check('inventory API blocks all direct manual stock adjustments',inventory,/Manual \+\/− stock adjustments are disabled/);
