@@ -449,8 +449,7 @@ export default function InventoryPage() {
             <option value="part-number">Part number</option>
           </select>
         </label>
-        <button onClick={() => { setWarehouseCode("CLARE"); setStockFilter("all"); }} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === "CLARE" ? "#0d1b2b" : "white", color: warehouseCode === "CLARE" ? "white" : "#182331", fontWeight: 800 }}>Clare</button>
-        <button onClick={() => { setWarehouseCode("BOYNE"); setStockFilter("all"); }} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === "BOYNE" ? "#0d1b2b" : "white", color: warehouseCode === "BOYNE" ? "white" : "#182331", fontWeight: 800 }}>Boyne</button>
+        {(data?.warehouses ?? []).map((warehouse) => <button key={warehouse.code} onClick={() => { setWarehouseCode(warehouse.code); setStockFilter("all"); }} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === warehouse.code ? "#0d1b2b" : "white", color: warehouseCode === warehouse.code ? "white" : "#182331", fontWeight: 800 }}>{warehouse.name}</button>)}
         <button onClick={() => { setStockFilter("negative"); setSortMode("negative-first"); }} style={{ padding: "10px 14px", border: "1px solid #b42318", borderRadius: 8, background: stockFilter === "negative" ? "#b42318" : "white", color: stockFilter === "negative" ? "white" : "#b42318", fontWeight: 800 }}>Negative only</button>
         <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
           <button onClick={() => setPartStatus("active")} style={{ padding: "10px 14px", border: "1px solid #0d1b2b", borderRadius: 8, background: partStatus === "active" ? "#0d1b2b" : "white", color: partStatus === "active" ? "white" : "#0d1b2b", fontWeight: 800 }}>Active Parts</button>
