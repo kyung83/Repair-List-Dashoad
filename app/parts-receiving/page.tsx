@@ -9,7 +9,7 @@ type InventoryData={parts:Part[];warehouses:Warehouse[];error?:string};
 type ReadingLine={partNumber:string;description:string;quantity:number;unitCost:number|null;lineTotal:number|null;matchedPartId:number|null;canonicalPartNumber:string;canonicalDescription:string;matchedBy:string;matchCount:number};
 type Reading={vendor:string;invoiceNumber:string;invoiceDate:string;totalAmount:number|null;lineItems:ReadingLine[];uncertain:string[]};
 type ScanResult={ok?:boolean;model?:string;reading?:Reading;error?:string};
-type EditableLine=ReadingLine&{receive:boolean;partId:string;inventorySearch:string;quantityText:string;unitCostText:string;rememberCrossReference:boolean};
+type EditableLine=ReadingLine&{receive:boolean;manual:boolean;partId:string;inventorySearch:string;quantityText:string;unitCostText:string;rememberCrossReference:boolean};
 type Receipt={id:number;vendorName:string;invoiceNumber:string;invoiceDate:string;sourcePartNumber:string;sourceDescription:string;receivedQuantity:number;unitCost:number|null;createdAt:string;partNumber:string;description:string;warehouseCode:string;warehouseName:string;userName:string};
 type PdfLib={GlobalWorkerOptions:{workerSrc:string};getDocument:(options:{data:Uint8Array})=>{promise:Promise<any>}};
 type BrowserTools=Window&{pdfjsLib?:PdfLib};
@@ -76,7 +76,7 @@ export default function PartsReceivingPage(){
   const[data,setData]=useState<InventoryData|null>(null),[receipts,setReceipts]=useState<Receipt[]>([]);
   const[warehouseCode,setWarehouseCode]=useState(""),[vendor,setVendor]=useState(""),[invoiceNumber,setInvoiceNumber]=useState(""),[invoiceDate,setInvoiceDate]=useState("");
   const[lines,setLines]=useState<EditableLine[]>([]),[uncertain,setUncertain]=useState<string[]>([]),[model,setModel]=useState(""),[fileName,setFileName]=useState(""),[receiptGroupKey,setReceiptGroupKey]=useState("");
-  const[busy,setBusy]=useState<""|"scan"|"receive">(""),[message,setMessage]=useState(""),[activeSearchIndex,setActiveSearchIndex]=useState<number|null>(null);
+  const[busy,setBusy]=useState<""|"scan"|"receive">(""),[message,setMessage]=useState(""),[activeSearchIndex,setActiveSearchIndex]=useState<number|null>(null),[entryMode,setEntryMode]=useState<""|"scan"|"manual">("");
 
   async function load(){
     const[inventoryResponse,receiptResponse]=await Promise.all([fetch("/api/inventory",{cache:"no-store"}),fetch("/api/parts-receiving",{cache:"no-store"})]);
@@ -95,10 +95,14 @@ export default function PartsReceivingPage(){
   const partOptions=useMemo(()=>(data?.parts??[]).slice().sort((a,b)=>a.partNumber.localeCompare(b.partNumber,undefined,{numeric:true})),[data]);
   const partById=useMemo(()=>new Map(partOptions.map(part=>[String(part.id),part])),[partOptions]);
   function searchParts(value:string){const term=value.trim().toLowerCase();if(!term)return[];return partOptions.filter(part=>`${part.partNumber} ${part.description} ${(part.crossReferences??[]).join(" ")}`.toLowerCase().includes(term)).slice(0,8)}
+  function blankManualLine():EditableLine{return{partNumber:"",description:"",quantity:1,unitCost:null,lineTotal:null,matchedPartId:null,canonicalPartNumber:"",canonicalDescription:"",matchedBy:"",matchCount:0,receive:true,manual:true,partId:"",inventorySearch:"",quantityText:"1",unitCostText:"",rememberCrossReference:false}}
+  function startManual(){setBusy("");setMessage("Manual receiving started. Enter the vendor/source name, invoice or packing slip number, and the parts received.");setEntryMode("manual");setFileName("");setModel("");setUncertain([]);setReceiptGroupKey(crypto.randomUUID());setVendor("");setInvoiceNumber("");setInvoiceDate("");setLines([blankManualLine()]);setActiveSearchIndex(null)}
+  function addManualLine(){setLines(current=>[...current,blankManualLine()])}
+  function removeLine(index:number){setLines(current=>current.filter((_,i)=>i!==index));setActiveSearchIndex(null)}
 
   async function readInvoice(file:File|null){
     if(!file)return;
-    setBusy("scan");setMessage("");setFileName(file.name);setLines([]);setUncertain([]);setModel("");
+    setBusy("scan");setMessage("");setEntryMode("scan");setFileName(file.name);setLines([]);setUncertain([]);setModel("");
     try{
       const pages=await preparedPages(file);
       const form=new FormData();pages.forEach((page,index)=>form.append("image",page,`parts-invoice-${index+1}.jpg`));
@@ -109,7 +113,7 @@ export default function PartsReceivingPage(){
       setVendor(reading.vendor);setInvoiceNumber(reading.invoiceNumber);setInvoiceDate(reading.invoiceDate);setUncertain(reading.uncertain);setModel(result.model??"");
       setReceiptGroupKey(crypto.randomUUID());
       setLines(reading.lineItems.map(line=>({
-        ...line,receive:true,partId:line.matchedPartId?String(line.matchedPartId):"",inventorySearch:line.matchedPartId?`${line.canonicalPartNumber} — ${line.canonicalDescription}`:"",quantityText:String(line.quantity),unitCostText:line.unitCost==null?"":String(line.unitCost),
+        ...line,receive:true,manual:false,partId:line.matchedPartId?String(line.matchedPartId):"",inventorySearch:line.matchedPartId?`${line.canonicalPartNumber} — ${line.canonicalDescription}`:"",quantityText:String(line.quantity),unitCostText:line.unitCost==null?"":String(line.unitCost),
         rememberCrossReference:!line.matchedPartId&&Boolean(line.partNumber),
       })));
       const matched=reading.lineItems.filter(line=>line.matchedPartId).length;
@@ -122,8 +126,10 @@ export default function PartsReceivingPage(){
 
   async function receive(){
     const chosen=lines.filter(line=>line.receive);
-    if(!chosen.length){setMessage("Select at least one invoice line to receive.");return}
+    if(!chosen.length){setMessage("Select at least one line to receive.");return}
     if(!warehouseCode){setMessage("Choose the receiving warehouse.");return}
+    if(!vendor.trim()){setMessage("Vendor / source name is required so the receiving record can be found later.");return}
+    if(!invoiceNumber.trim()){setMessage("Invoice / packing slip number is required so the receiving record can be found later.");return}
     if(chosen.some(line=>!line.partId)){setMessage("Every selected invoice line needs an inventory match.");return}
     if(chosen.some(line=>!Number.isFinite(Number(line.quantityText))||Number(line.quantityText)<=0)){setMessage("Every selected line needs a positive quantity.");return}
     setBusy("receive");setMessage("");
@@ -135,7 +141,7 @@ export default function PartsReceivingPage(){
       const result=await response.json() as {ok?:boolean;received?:unknown[];error?:string};
       if(!response.ok||!result.ok)throw new Error(result.error||"Parts could not be received.");
       setMessage(`Received ${chosen.length} invoice line${chosen.length===1?"":"s"} into ${warehouseCode}. Inventory and on-order quantities were updated.`);
-      setLines([]);setUncertain([]);setFileName("");setReceiptGroupKey("");setVendor("");setInvoiceNumber("");setInvoiceDate("");setModel("");
+      setLines([]);setUncertain([]);setFileName("");setReceiptGroupKey("");setVendor("");setInvoiceNumber("");setInvoiceDate("");setModel("");setEntryMode("");
       await load();
     }catch(error){setMessage(error instanceof Error?error.message:"Parts could not be received.")}
     finally{setBusy("")}
@@ -144,25 +150,26 @@ export default function PartsReceivingPage(){
   return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"38px 34px 100px",color:"#182331"}}>
     <ModuleTabs module="parts"/>
     <header style={{display:"flex",justifyContent:"space-between",gap:18,alignItems:"end",flexWrap:"wrap"}}>
-      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"}}>Parts Receiving</h1><p style={muted}>Take a picture or upload an invoice. The reader pulls the parts lines, matches your inventory and cross-references, then you approve what gets received.</p></div>
+      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"}}>Parts Receiving</h1><p style={muted}>Scan an invoice or enter a receipt manually. Vendor/source name, invoice number, who received it, and every received part stay in the receiving record.</p></div>
       <label style={warehouseLabel}>RECEIVING WAREHOUSE<select value={warehouseCode} onChange={event=>setWarehouseCode(event.target.value)} style={input}><option value="">Choose warehouse…</option>{(data?.warehouses??[]).filter(row=>row.code!=="NO_WAREHOUSE").map(row=><option key={row.code} value={row.code}>{row.name}</option>)}</select></label>
     </header>
     {message&&<div style={notice}>{message}</div>}
 
     <section style={panel}>
-      <div style={panelHead}><div><p style={eyebrow}>STEP 1</p><h2 style={title}>Scan the parts invoice</h2><p style={muted}>PDF, photo, or saved image. Up to {MAX_PAGES} pages are read per invoice.</p></div>{fileName&&<span style={pill}>{fileName}</span>}</div>
+      <div style={panelHead}><div><p style={eyebrow}>STEP 1</p><h2 style={title}>Start receiving</h2><p style={muted}>Scan a PDF/photo or choose Manual Entry. Up to {MAX_PAGES} invoice pages are read per scan.</p></div>{fileName&&<span style={pill}>{fileName}</span>}</div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         <label style={darkButton}>📷 TAKE PHOTO<input type="file" accept="image/*" capture="environment" hidden disabled={Boolean(busy)} onChange={event=>{const file=event.target.files?.[0]??null;void readInvoice(file);event.target.value=""}}/></label>
         <label style={lightButton}>UPLOAD INVOICE<input type="file" accept="image/*,application/pdf" hidden disabled={Boolean(busy)} onChange={event=>{const file=event.target.files?.[0]??null;void readInvoice(file);event.target.value=""}}/></label>
+        <button type="button" style={manualButton} disabled={Boolean(busy)} onClick={startManual}>MANUAL ENTRY</button>
         {busy==="scan"&&<strong style={{alignSelf:"center"}}>Reading invoice…</strong>}
       </div>
     </section>
 
     {lines.length>0&&<section style={panel}>
-      <div style={panelHead}><div><p style={eyebrow}>STEP 2</p><h2 style={title}>Verify invoice and matches</h2></div><span style={pill}>{modelName(model)}</span></div>
+      <div style={panelHead}><div><p style={eyebrow}>STEP 2</p><h2 style={title}>{entryMode==="manual"?"Enter receiving details":"Verify invoice and matches"}</h2></div><span style={pill}>{entryMode==="manual"?"MANUAL":modelName(model)}</span></div>
       <div style={invoiceGrid}>
-        <label style={label}>VENDOR<input value={vendor} onChange={event=>setVendor(event.target.value)} style={input}/></label>
-        <label style={label}>INVOICE #<input value={invoiceNumber} onChange={event=>setInvoiceNumber(event.target.value)} style={input}/></label>
+        <label style={label}>VENDOR / SOURCE NAME — REQUIRED<input required value={vendor} onChange={event=>setVendor(event.target.value)} placeholder="Vendor, supplier, transfer source…" style={input}/></label>
+        <label style={label}>INVOICE / PACKING SLIP # — REQUIRED<input required value={invoiceNumber} onChange={event=>setInvoiceNumber(event.target.value)} placeholder="Invoice or packing slip number" style={input}/></label>
         <label style={label}>INVOICE DATE<input type="date" value={invoiceDate} onChange={event=>setInvoiceDate(event.target.value)} style={input}/></label>
       </div>
       {uncertain.length>0&&<div style={warning}><strong>VERIFY FROM ORIGINAL:</strong>{uncertain.map((item,index)=><span key={index}>• {item}</span>)}</div>}
@@ -177,8 +184,8 @@ export default function PartsReceivingPage(){
             const searchResults=activeSearchIndex===index&&!line.partId?searchParts(line.inventorySearch):[];
             return <tr key={index} style={{borderTop:"1px solid #e8edf1",background:line.receive?"white":"#f7f8f9"}}>
               <td style={td}><input type="checkbox" checked={line.receive} onChange={event=>updateLine(index,{receive:event.target.checked})}/></td>
-              <td style={td}><b>{line.partNumber||"—"}</b>{line.matchCount>1&&<small style={small}>Multiple matches — choose manually</small>}</td>
-              <td style={td}>{line.description||"—"}</td>
+              <td style={td}>{line.manual?<input value={line.partNumber} onChange={event=>updateLine(index,{partNumber:event.target.value,rememberCrossReference:false})} placeholder="Vendor / invoice part #" style={{...input,width:150}}/>:<><b>{line.partNumber||"—"}</b>{line.matchCount>1&&<small style={small}>Multiple matches — choose manually</small>}</>}</td>
+              <td style={td}>{line.manual?<input value={line.description} onChange={event=>updateLine(index,{description:event.target.value})} placeholder="Description (optional)" style={{...input,minWidth:170,width:"100%"}}/>:(line.description||"—")}</td>
               <td style={td}><div style={partSearchWrap}>
                 <input
                   value={line.inventorySearch}
@@ -202,21 +209,21 @@ export default function PartsReceivingPage(){
               <td style={td}><input type="number" min="0.01" step="any" value={line.quantityText} disabled={!line.receive} onChange={event=>updateLine(index,{quantityText:event.target.value})} style={{...input,width:90}}/></td>
               <td style={td}><input type="number" min="0" step="0.0001" value={line.unitCostText} disabled={!line.receive} onChange={event=>updateLine(index,{unitCostText:event.target.value})} placeholder="Optional" style={{...input,width:110}}/></td>
               <td style={td}>{needsAlias?<label style={{display:"flex",gap:6,alignItems:"center",fontSize:11,fontWeight:800}}><input type="checkbox" checked={line.rememberCrossReference} onChange={event=>updateLine(index,{rememberCrossReference:event.target.checked})}/>Remember {line.partNumber}</label>:exactAuto&&line.matchedBy!==line.canonicalPartNumber?<span style={good}>KNOWN</span>:"—"}</td>
-              <td style={td}>{line.partId?<span style={good}>READY</span>:<span style={needsReview}>MATCH NEEDED</span>}</td>
+              <td style={td}>{line.partId?<span style={good}>READY</span>:<span style={needsReview}>MATCH NEEDED</span>}{line.manual&&lines.length>1&&<button type="button" onClick={()=>removeLine(index)} style={removeButton}>REMOVE</button>}</td>
             </tr>
           })}</tbody>
         </table>
       </div>
-      <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}><button type="button" disabled={Boolean(busy)} onClick={()=>void receive()} style={orangeButton}>{busy==="receive"?"Receiving…":`RECEIVE ${lines.filter(line=>line.receive).length} LINE${lines.filter(line=>line.receive).length===1?"":"S"}`}</button></div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginTop:14,flexWrap:"wrap"}}>{entryMode==="manual"?<button type="button" disabled={Boolean(busy)} onClick={addManualLine} style={lightButton}>+ ADD ANOTHER PART</button>:<span/>}<button type="button" disabled={Boolean(busy)||!vendor.trim()||!invoiceNumber.trim()} onClick={()=>void receive()} style={orangeButton}>{busy==="receive"?"Receiving…":`RECEIVE ${lines.filter(line=>line.receive).length} LINE${lines.filter(line=>line.receive).length===1?"":"S"}`}</button></div>
     </section>}
 
     <section style={panel}>
-      <div style={panelHead}><div><p style={eyebrow}>RECENT</p><h2 style={title}>Parts received</h2></div><span style={muted}>{receipts.length} lines shown</span></div>
+      <div style={panelHead}><div><p style={eyebrow}>RECEIVING RECORDS</p><h2 style={title}>Parts received</h2><p style={muted}>Vendor/source name, invoice or packing slip number, warehouse, received-by user, quantity and cost remain attached to each receipt.</p></div><span style={muted}>{receipts.length} lines shown</span></div>
       {!receipts.length?<div style={empty}>No invoice receipts recorded yet.</div>:<div style={{display:"grid",gap:7}}>{receipts.slice(0,50).map(row=><article key={row.id} style={receiptRow}>
         <div><b>{row.partNumber}</b><small style={small}>{row.description}{row.sourcePartNumber&&row.sourcePartNumber!==row.partNumber?` · Invoice # ${row.sourcePartNumber}`:""}</small></div>
         <div><b>{qty(row.receivedQuantity)} received</b><small style={small}>{row.warehouseName} · {money(row.unitCost)}</small></div>
-        <div><b>{row.vendorName||"Vendor not captured"}</b><small style={small}>{row.invoiceNumber?`Invoice ${row.invoiceNumber}`:"No invoice #"}{row.invoiceDate?` · ${row.invoiceDate}`:""}</small></div>
-        <small style={small}>{row.createdAt}{row.userName?` · ${row.userName}`:""}</small>
+        <div><b>{row.vendorName||"Vendor not captured"}</b><small style={small}>{row.invoiceNumber?`Invoice / slip ${row.invoiceNumber}`:"No invoice #"}{row.invoiceDate?` · ${row.invoiceDate}`:""}</small></div>
+        <small style={small}>Received {row.createdAt}{row.userName?` · by ${row.userName}`:""}</small>
       </article>)}</div>}
     </section>
   </main>
@@ -234,6 +241,7 @@ const label={display:"grid",gap:5,fontSize:11,fontWeight:900,color:"#52616d"} as
 const invoiceGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10} as const;
 const darkButton={display:"inline-block",border:0,borderRadius:8,padding:"11px 14px",background:"#0d1b2b",color:"white",fontWeight:950,cursor:"pointer"} as const;
 const lightButton={...darkButton,border:"1px solid #aebac4",background:"white",color:"#173a5d"} as const;
+const manualButton={...darkButton,border:"1px solid #173a5d",background:"#eaf2f8",color:"#173a5d"} as const;
 const orangeButton={...darkButton,background:"#f47b20"} as const;
 const pill={padding:"6px 10px",borderRadius:999,background:"#eaf2f8",color:"#173a5d",fontSize:12,fontWeight:950} as const;
 const warning={marginTop:12,padding:10,border:"1px solid #efc16c",borderRadius:8,background:"#fff8e6",display:"grid",gap:4,fontSize:12} as const;
@@ -243,6 +251,7 @@ const small={display:"block",marginTop:3,fontSize:10,color:"#6c7886",fontWeight:
 const matchNote={display:"block",marginTop:4,fontSize:10,color:"#176448",fontWeight:800} as const;
 const good={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#eaf7ef",color:"#155f3d",fontSize:10,fontWeight:950} as const;
 const needsReview={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#fff0d7",color:"#9a5a05",fontSize:10,fontWeight:950} as const;
+const removeButton={display:"block",marginTop:7,padding:"4px 7px",border:"1px solid #d7a3a3",borderRadius:6,background:"white",color:"#8a2f2f",fontSize:9,fontWeight:900,cursor:"pointer"} as const;
 const partSearchWrap={position:"relative" as const,minWidth:245} as const;
 const partSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:20,maxHeight:260,overflowY:"auto" as const,border:"1px solid #cbd5dd",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
 const partSearchResult={display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf0f2",background:"white",textAlign:"left" as const,cursor:"pointer",fontSize:12,color:"#243341"} as const;
