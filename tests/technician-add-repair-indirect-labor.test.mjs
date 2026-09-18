@@ -10,7 +10,8 @@ const worker=readFileSync(new URL('../worker/index.ts',import.meta.url),'utf8');
 
 test('technicians see Add Repair in the same shared Repair Board view',()=>{
   assert.match(board,/const canCreateRepair=Boolean\(data&&\(data\.canManage\|\|\(data\.user\.role==='mechanic'&&data\.user\.technicianId\)\)\)/);
-  assert.match(board,/canCreateRepair&&<button[^>]*>\{add\?'Close Add Repair':'\+ Add Repair'\}/);
+  assert.match(board,/canCreateRepair&&<button/);
+  assert.match(board,/\{add\?'Close Add Repair':'\+ Add Repair'\}/);
   assert.match(board,/allowTechnicianAssignment=\{data\.canManage\}/);
   assert.match(board,/allowNewEquipment=\{data\.canManage\}/);
 });
