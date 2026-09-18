@@ -69,6 +69,8 @@ test('parts receiving reads invoice lines, matches cross references, and posts i
   assert.match(page,/UPLOAD INVOICE/);
   assert.match(page,/MANUAL ENTRY/);
   assert.match(page,/\+ ADD ANOTHER PART/);
+  assert.match(page,/autoSelected&&line\.matchedBy/);
+  assert.doesNotMatch(page,/exactAuto/);
   assert.match(page,/VENDOR \/ SOURCE NAME — REQUIRED/);
   assert.match(page,/INVOICE \/ PACKING SLIP # — REQUIRED/);
   assert.match(page,/Received \{row\.createdAt\}/);
