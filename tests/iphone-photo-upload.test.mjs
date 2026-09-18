@@ -7,9 +7,10 @@ const maintenance=readFileSync(new URL('../app/api/maintenance-checklist/route.t
 const repairType=readFileSync(new URL('../app/api/repair-type-checklist/route.ts',import.meta.url),'utf8');
 const breakdowns=readFileSync(new URL('../app/api/breakdowns/route.ts',import.meta.url),'utf8');
 
-test('repair photo upload uses the same buffered R2 pattern as working breakdown photos',()=>{
+test('repair photo API accepts buffered raw binary and never streams Safari File objects to R2',()=>{
   assert.match(breakdowns,/const bytes = await file\.arrayBuffer\(\)/);
-  assert.match(repairPhotos,/const bytes = await file\.arrayBuffer\(\)/);
+  assert.match(repairPhotos,/const rawUpload = url\.searchParams\.get\('raw'\) === '1'/);
+  assert.match(repairPhotos,/bytes = await request\.arrayBuffer\(\)/);
   assert.match(repairPhotos,/env\.FILES\.put\(uploadedKey, bytes,/);
   assert.doesNotMatch(repairPhotos,/file\.stream\(\)/);
 });
@@ -25,7 +26,8 @@ test('mobile checklist photo uploads also avoid direct Safari file streams',()=>
 });
 
 test('buffered photo uploads preserve validated image content type metadata',()=>{
-  assert.match(repairPhotos,/const contentType = String\(file\.type \|\| ''\)\.trim\(\)\.toLowerCase\(\) \|\| 'application\/octet-stream'/);
+  assert.match(repairPhotos,/contentType = String\(request\.headers\.get\('content-type'\) \?\? ''\)\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(repairPhotos,/if \(!contentType\.startsWith\('image\/'\)\)/);
   assert.match(repairPhotos,/httpMetadata:\{ contentType \}/);
   assert.match(maintenance,/httpMetadata: \{ contentType \}/);
   assert.match(repairType,/httpMetadata:\{contentType\}/);
