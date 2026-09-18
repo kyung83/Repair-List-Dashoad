@@ -281,9 +281,33 @@ export default function InventoryPage() {
       setMessage(result.error || "Physical count could not be recorded.");
       return;
     }
-    setMessage(result.matched
-      ? `Count confirmed: ${snapshot.partNumber} matches the system quantity.`
-      : `Count discrepancy recorded for review${result.issueId ? ` as issue #${result.issueId}` : ""}. Stock was not silently changed.`);
+    if (result.matched) {
+      setMessage(`Count confirmed: ${snapshot.partNumber} matches the system quantity.`);
+      await load();
+      return;
+    }
+    if (!result.issueId) {
+      setMessage("Physical count was recorded but the stock update could not be completed.");
+      return;
+    }
+    const operationKey=`count-resolution:${crypto.randomUUID()}`;
+    const applyResponse=await fetch("/api/inventory",{
+      method:"POST",
+      headers:{"content-type":"application/json","idempotency-key":operationKey},
+      body:JSON.stringify({
+        action:"resolvePhysicalCount",
+        issueId:result.issueId,
+        operationKey,
+        note:`Physical count applied directly from Inventory for ${snapshot.partNumber} at ${snapshot.warehouseName}: ${snapshot.expectedQuantity} → ${countedQuantity}.`,
+      }),
+    });
+    const applied=await applyResponse.json() as {ok?:boolean;error?:string};
+    if(!applyResponse.ok||!applied.ok){
+      setMessage(applied.error||`Physical count issue #${result.issueId} was recorded but could not be applied. Use Core → Count Issues to review it.`);
+      await load();
+      return;
+    }
+    setMessage(`Physical count applied: ${snapshot.partNumber} at ${snapshot.warehouseName} changed from ${snapshot.expectedQuantity} to ${countedQuantity}.`);
     await load();
   }
 

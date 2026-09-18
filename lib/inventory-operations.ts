@@ -284,6 +284,12 @@ export async function resolvePhysicalCountIssue(
     db.prepare(`UPDATE inventory_discrepancy_issues SET status = 'resolved',resolved_by_user_id = ?,resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'open' AND EXISTS (SELECT 1 FROM inventory_operation_lines l JOIN inventory_operations o ON o.id=l.operation_id WHERE o.operation_key = ?)`)
       .bind(input.userId ?? null,issueId,operationKey),
     db.prepare(`
+      UPDATE inventory_discrepancy_issues
+      SET status='cancelled',resolved_by_user_id=?,resolved_at=CURRENT_TIMESTAMP
+      WHERE warehouse_stock_id=? AND id<>? AND status='open'
+        AND (SELECT status FROM inventory_discrepancy_issues WHERE id=?)='resolved'
+    `).bind(input.userId ?? null,issue.warehouse_stock_id,issueId,issueId),
+    db.prepare(`
       INSERT INTO inventory_operation_commits (operation_id,applied)
       SELECT id,CASE WHEN (SELECT status FROM inventory_discrepancy_issues WHERE id = ?) = 'resolved' THEN 1 ELSE 0 END
       FROM inventory_operations WHERE operation_key = ?
