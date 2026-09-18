@@ -6,13 +6,14 @@ type History = { repairs:number; maintenanceEvents:number; historicalRos:number;
 type Equipment = { id:number; unit:string; category:string; equipmentType:string; active:boolean; archived:boolean; source:"Geotab"|"Manual"; currentMileage:number|null; mileageUpdatedAt:string; serviceDate:string; annualDate:string; notes:string; driver:string; location:string; vin:string; licensePlate:string; licenseState:string; modelYear:number|null; make:string; model:string; history:History };
 type EquipmentData = { equipment:Equipment[] };
 type Work = { id:string; source:string; unit:string; issue:string; status:string; assignedTo:string; technicianId:number|null; equipmentId:number|null; outOfService:boolean; oosReason:string };
-type Board = { user:{role:string}; repairs:Work[] };
+type Board = { user?:{role?:string}; repairs?:Work[] };
 type MaintenanceForm = { reportNumber:string; repairId:string; inspectionDate:string; unit:string; inspector:string; printUrl:string };
 type MaintenanceFormData = { forms:MaintenanceForm[] };
 type FutureAction = { id:number; equipmentId:number; repairId:string; unit:string; location:string; description:string; targetEventType:"pm"|"annual"; repairStatus:string; taggedAt:string; plannedPartCount:number };
 type FutureData = { actions:FutureAction[] };
 
-function sameUnit(a:string,b:string){return a.trim().toLowerCase()===b.trim().toLowerCase();}
+function safeText(value:unknown){return String(value??'').trim();}
+function sameUnit(a:unknown,b:unknown){return safeText(a).toLowerCase()===safeText(b).toLowerCase();}
 function dateText(value:string){if(!value)return 'Not recorded';const date=new Date(value.includes('T')?value:`${value}T12:00:00`);return Number.isNaN(date.getTime())?value:date.toLocaleDateString();}
 
 export default function UnitPage(){
@@ -33,7 +34,13 @@ export default function UnitPage(){
 
     void fetch('/api/equipment',{cache:'no-store'})
       .then(async r=>{const p=await r.json() as EquipmentData&{error?:string};if(!r.ok)throw new Error(p.error||'Units could not be loaded.');return p;})
-      .then(eq=>{if(!cancelled)setEquipment(eq.equipment);})
+      .then(eq=>{
+        if(cancelled)return;
+        const rows=Array.isArray(eq.equipment)?eq.equipment:[];
+        setEquipment(rows
+          .filter(item=>item&&safeText(item.unit))
+          .map(item=>({...item,unit:safeText(item.unit)})));
+      })
       .catch(error=>{if(!cancelled)setMessage(error instanceof Error?error.message:'Units could not be loaded.');});
 
     void fetch('/api/repair-board',{cache:'no-store'})
@@ -75,14 +82,15 @@ export default function UnitPage(){
   const pms=useMemo(()=>selected?pmForms.filter(item=>sameUnit(item.unit,selected.unit)):[],[pmForms,selected]);
   const future=useMemo(()=>selected?futureActions.filter(item=>item.equipmentId===selected.id):[],[futureActions,selected]);
 
-  function openUnit(){
-    const value=query.trim();if(!value)return setMessage('Enter a unit number.');
-    const found=equipment.find(item=>sameUnit(item.unit,value));
-    if(!found){setSelectedUnit('');return setMessage(`Unit ${value} was not found.`);}
-    setMessage('');setSelectedUnit(found.unit);window.history.replaceState(null,'',`/unit?unit=${encodeURIComponent(found.unit)}`);
-  }
+  const suggestions=useMemo(()=>{
+    const needle=safeText(query).toLowerCase();
+    if(!needle)return[];
+    return equipment
+      .filter(item=>!item.archived&&safeText(item.unit).toLowerCase().includes(needle))
+      .slice(0,8);
+  },[equipment,query]);
 
-  const role=board?.user.role||'';
+  const role=board?.user?.role||'';
   const canWork=role==='mechanic'||role==='manager'||role==='admin';
   const canOpenBoard=role==='dispatch'||role==='manager'||role==='admin'||role==='viewer';
   const canOfficeTools=role==='viewer'||role==='manager'||role==='admin';
@@ -96,13 +104,17 @@ export default function UnitPage(){
     <p className="easy-eyebrow">FIND A UNIT</p><h1 className="easy-title">Truck & trailer lookup</h1>
     <p className="easy-subtitle">If you know the unit number, you should be able to get to everything you are allowed to use from here.</p>
     {message&&<div className="easy-notice">{message}</div>}
-    <section className="easy-finder">
+    <form className="easy-finder" action="/unit" method="get">
       <label>Unit number
-        <input list="unit-list" value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==='Enter')openUnit();}} placeholder="Type unit number" autoFocus />
+        <input name="unit" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Type unit number" autoComplete="off" inputMode="text" />
       </label>
-      <datalist id="unit-list">{equipment.filter(item=>!item.archived).map(item=><option key={item.id} value={item.unit}>{item.location}</option>)}</datalist>
-      <button type="button" className="easy-button orange" onClick={openUnit}>Open Unit</button>
-    </section>
+      <button type="submit" className="easy-button orange">Open Unit</button>
+    </form>
+    {suggestions.length>0&&<div className="easy-card" style={{marginTop:10,padding:8,display:'grid',gap:6}}>
+      {suggestions.map(item=><a key={item.id} href={`/unit?unit=${encodeURIComponent(item.unit)}`} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'10px 11px',border:'1px solid #e1e6ea',borderRadius:8,textDecoration:'none',color:'#182331',background:'#fff'}}>
+        <strong>Unit {item.unit}</strong><span style={{color:'#6c7886',fontSize:12}}>{item.location||item.equipmentType}</span>
+      </a>)}
+    </div>}
 
     {!selected&&<div className="easy-card easy-empty" style={{marginTop:16}}>Search for a unit above. Its repairs, maintenance, future work, and available forms will appear on one page.</div>}
 
