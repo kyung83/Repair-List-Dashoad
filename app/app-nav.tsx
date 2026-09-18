@@ -38,6 +38,7 @@ function SidebarIcon({name}:{name:IconName}){
   if(name==="breakdowns")return <svg {...common}><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>;
   if(name==="units")return <svg {...common}><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7z"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>;
   if(name==="parts")return <svg {...common}><path d="m12 2 8 4-8 4-8-4 8-4Z"/><path d="m4 10 8 4 8-4M4 14l8 4 8-4"/></svg>;
+  if(name==="billing")return <svg {...common}><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h4"/><path d="M15.5 14.5v4M13.5 16.5h4"/></svg>;
   if(name==="reports")return <svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>;
   return <svg {...common}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
 }
@@ -100,8 +101,8 @@ export default function AppNav(){
     const active=groups.find(group=>groupActive(pathname,currentView,group));
     if(!active)return;
     setOpenGroups(current=>{
-      if(current.has(active.key))return current;
-      const next=new Set(current);next.add(active.key);return next;
+      if(current.size===1&&current.has(active.key))return current;
+      return new Set([active.key]);
     });
   },[groups,pathname,currentView]);
 
@@ -117,9 +118,7 @@ export default function AppNav(){
     });
   }
   function toggleGroup(key:string){
-    setOpenGroups(current=>{
-      const next=new Set(current);next.has(key)?next.delete(key):next.add(key);return next;
-    });
+    setOpenGroups(current=>current.has(key)?new Set():new Set([key]));
   }
   function openUnit(event:React.FormEvent){
     event.preventDefault();
@@ -154,16 +153,17 @@ export default function AppNav(){
       {groups.map(group=>{
         const active=groupActive(pathname,currentView,group);
         const open=!collapsed&&openGroups.has(group.key);
+        const visibleLinks=group.links.filter(link=>link.showInSidebar!==false);
         return <div className={`app-sidebar-group ${active?'active':''}`} key={group.key}>
           <div className="app-sidebar-main-row">
             <a className={`app-sidebar-main-link ${active?'active':''}`} href={group.href} title={collapsed?group.label:undefined} aria-current={active?'page':undefined}>
               <span className="app-sidebar-icon"><SidebarIcon name={group.key}/></span>
               {!collapsed&&<span className="app-sidebar-label">{group.label}</span>}
             </a>
-            {!collapsed&&group.links.length>1&&<button className="app-sidebar-chevron" type="button" onClick={()=>toggleGroup(group.key)} aria-label={`${open?'Collapse':'Expand'} ${group.label}`}>{open?'⌄':'›'}</button>}
+            {!collapsed&&visibleLinks.length>1&&<button className="app-sidebar-chevron" type="button" onClick={()=>toggleGroup(group.key)} aria-label={`${open?'Collapse':'Expand'} ${group.label}`}>{open?'⌄':'›'}</button>}
           </div>
-          {open&&<div className="app-sidebar-subnav">
-            {group.links.map(link=><a key={link.href} href={link.href} className={linkActive(pathname,currentView,link)?'active':''}>{link.label}</a>)}
+          {open&&visibleLinks.length>1&&<div className="app-sidebar-subnav">
+            {visibleLinks.map(link=><a key={link.href} href={link.href} className={linkActive(pathname,currentView,link)?'active':''}>{link.label}</a>)}
           </div>}
         </div>;
       })}
