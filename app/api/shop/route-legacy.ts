@@ -607,7 +607,10 @@ export async function GET(request: Request) {
   const decoratedParts = await decorateShopParts(env.DB, payload.parts ?? []);
   payload.parts = shopWarehouse ? scopePartsToWarehouse(decoratedParts,shopWarehouse) : decoratedParts;
   const visibleIds = new Set(repairs.map((repair) => numericRepairId(repair.id)).filter(Boolean));
-  const requests = (await getRepairPartRequests(env.DB)).filter((partRequest) => visibleIds.has(partRequest.repairNumericId));
+  const requests = (await getRepairPartRequests(env.DB)).filter((partRequest) =>
+    visibleIds.has(partRequest.repairNumericId)
+    && (!shopWarehouse || Boolean(shopWarehouse.code) && partRequest.warehouseCode === shopWarehouse.code)
+  );
   payload.partRequests = requests;
   payload.partsReadyCount = requests.filter((partRequest) => partRequest.reservedQuantity > 0).length;
   return Response.json(payload, { status: response.status, headers: { 'cache-control': 'no-store' } });
@@ -658,10 +661,21 @@ export async function POST(request: Request) {
 
     if (action === 'useReservedPart') {
       const requestId = Number(body.requestId ?? 0);
-      const requestRow = await env.DB.prepare('SELECT repair_id FROM repair_part_requests WHERE id = ?')
-        .bind(requestId).first<{repair_id:number}>();
+      const requestRow = await env.DB.prepare(`
+        SELECT q.repair_id,w.code AS warehouse_code
+        FROM repair_part_requests q
+        JOIN warehouses w ON w.id=q.warehouse_id
+        WHERE q.id=?
+      `).bind(requestId).first<{repair_id:number;warehouse_code:string}>();
       if (!requestRow) throw new Error('Part request was not found.');
       const { user } = await requirePartAccess(request.clone(), Number(requestRow.repair_id));
+      if (user.role === 'mechanic' || user.role === 'manager') {
+        const warehouse = await assignedWarehouse(user.id);
+        if (!warehouse.code) throw new Error('Your account needs an assigned yard/parts warehouse before you can use reserved parts.');
+        if (requestRow.warehouse_code !== warehouse.code) {
+          throw new Error(`This reserved part belongs to ${requestRow.warehouse_code}. Your assigned parts warehouse is ${warehouse.code}.`);
+        }
+      }
       const result = await consumeReservedPart(env.DB, { requestId, quantity: body.quantity == null ? undefined : Number(body.quantity), userId: user.id });
       await repairJobEvent(result.repairId,user.id,user.technicianId??null,'reserved_part_used',`${result.quantity} reserved part unit(s) used.`);
       return Response.json({ ...result, repairId: `repair-${result.repairId}` });
