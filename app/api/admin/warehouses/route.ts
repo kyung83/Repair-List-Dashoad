@@ -21,6 +21,7 @@ type WarehouseRow = {
   used_tire_rows:number;
   inventory_transfer_rows:number;
   receipt_rows:number;
+  unmatched_request_rows:number;
 };
 
 function cleanCode(value:unknown) {
@@ -68,7 +69,8 @@ async function loadWarehouses() {
         SELECT COUNT(*) FROM inventory_transfers t
         WHERE t.source_warehouse_id=w.id OR t.destination_warehouse_id=w.id
       ) AS inventory_transfer_rows,
-      (SELECT COUNT(*) FROM parts_receipts r WHERE r.warehouse_id=w.id) AS receipt_rows
+      (SELECT COUNT(*) FROM parts_receipts r WHERE r.warehouse_id=w.id) AS receipt_rows,
+      (SELECT COUNT(*) FROM unmatched_part_requests q WHERE upper(trim(COALESCE(q.warehouse_code,'')))=w.code) AS unmatched_request_rows
     FROM warehouses w
     ORDER BY w.active DESC,w.name COLLATE NOCASE,w.code
   `).all<WarehouseRow>();
@@ -81,7 +83,8 @@ async function loadWarehouses() {
       Number(row.discrepancy_rows??0)+
       Number(row.used_tire_rows??0)+
       Number(row.inventory_transfer_rows??0)+
-      Number(row.receipt_rows??0);
+      Number(row.receipt_rows??0)+
+      Number(row.unmatched_request_rows??0);
     const canArchive=
       Number(row.assigned_users??0)===0 &&
       Number(row.stock_units??0)<0.000001 &&
