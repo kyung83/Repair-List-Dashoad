@@ -120,6 +120,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
       { href: "/admin/users", label: "Users & Access", roles: adminRoles },
 
+      { href: "/breakdown-vendors", label: "Breakdown Vendors", exact: true, roles: managerRoles, showInSidebar: false },
       { href: "/repair-types", label: "Repair Types", exact: true, roles: managerRoles, showInSidebar: false },
       { href: "/maintenance-programs", label: "Custom PM Builder", roles: managerRoles, showInSidebar: false },
       { href: "/maintenance-checklists", label: "PM & Annual Checklists", roles: managerRoles, showInSidebar: false },
