@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../../module-tabs";
 import EditBreakdownButton from "./edit-breakdown-button";
+import { breakdownEquipmentLabel, breakdownTirePositionOptions, changeBreakdownEquipmentFilter } from "@/lib/breakdown-report-filters.js";
 
 type BreakdownRow = {
   id: number;
@@ -10,6 +11,8 @@ type BreakdownRow = {
   equipmentId: number;
   unit: string;
   equipmentType: string;
+  tireDetails: Array<{ positionCode: string; tireSize: string; label: string }>;
+  tirePositions: string;
   driverName: string;
   category: string;
   repairNeeded: string;
@@ -37,6 +40,7 @@ type BreakdownRow = {
 type GroupRow = { label: string; breakdownCount: number; totalCost: number; averageCost: number; averageArrivalMinutes: number | null; averageDowntimeMinutes: number | null };
 type Data = {
   range: { startDate: string; endDate: string };
+  filters: { equipmentType: string; tirePosition: string };
   summary: {
     breakdownCount: number;
     completedCount: number;
@@ -56,14 +60,14 @@ type Data = {
   byProvider: GroupRow[];
   byLocation: GroupRow[];
   monthlyTrend: Array<GroupRow & { month: string }>;
-  filterOptions: { equipment: Array<{ id: number; unit: string }>; categories: string[]; providers: string[]; statuses: string[]; locations: string[] };
+  filterOptions: { equipment: Array<{ id: number; unit: string; equipmentType: string }>; categories: string[]; providers: string[]; statuses: string[]; locations: string[] };
   truncated: boolean;
   updatedAt: string;
   permissions: { canDeleteRecords: boolean };
 };
 
-type Filters = { start: string; end: string; unit: string; category: string; provider: string; status: string; location: string; q: string };
-type SortKey = "createdAt" | "unit" | "category" | "serviceProvider" | "location" | "status" | "arrivalMinutes" | "downtimeMinutes" | "totalCost";
+type Filters = { start: string; end: string; unit: string; equipmentType: string; tirePosition: string; category: string; provider: string; status: string; location: string; q: string };
+type SortKey = "createdAt" | "unit" | "equipmentType" | "tirePositions" | "category" | "serviceProvider" | "location" | "status" | "arrivalMinutes" | "downtimeMinutes" | "totalCost";
 
 const panel = { background: "white", border: "1px solid #dce2e7", borderRadius: 14, padding: 18 } as const;
 const input = { width: "100%", boxSizing: "border-box", padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white" } as const;
@@ -111,7 +115,7 @@ function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
 }
 
 const initialRange = rangeFor("ytd");
-const blank: Filters = { start: initialRange.start, end: initialRange.end, unit: "", category: "", provider: "", status: "", location: "", q: "" };
+const blank: Filters = { start: initialRange.start, end: initialRange.end, unit: "", equipmentType: "", tirePosition: "", category: "", provider: "", status: "", location: "", q: "" };
 
 function Select({ title, value, values, onChange }: { title: string; value: string; values: string[]; onChange: (value: string) => void }) {
   return <label style={label}>{title}<select style={input} value={value} onChange={(event) => onChange(event.target.value)}><option value="">All</option>{values.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>;
@@ -126,12 +130,13 @@ export default function BreakdownReportsPage() {
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [showTireDetails, setShowTireDetails] = useState(false);
 
   async function load(next = filters) {
     setLoading(true); setMessage("");
     try {
       const params = new URLSearchParams({ start: next.start, end: next.end });
-      for (const [key, value] of Object.entries({ unit: next.unit, category: next.category, provider: next.provider, status: next.status, location: next.location, q: next.q })) if (value) params.set(key, value);
+      for (const [key, value] of Object.entries({ unit: next.unit, equipmentType: next.equipmentType, tirePosition: next.tirePosition, category: next.category, provider: next.provider, status: next.status, location: next.location, q: next.q })) if (value) params.set(key, value);
       const response = await fetch(`/api/reports/breakdowns?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json() as Data & { error?: string };
       if (!response.ok) throw new Error(payload.error || "Breakdown reports could not be loaded.");
@@ -176,16 +181,19 @@ export default function BreakdownReportsPage() {
       setMessage(`Deleted test breakdown #${row.id} for Unit ${row.unit}. The linked repair record was removed too.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Breakdown record could not be deleted.");
-    } finally {
-      setDeletingId(null);
-    }
+    } finally { setDeletingId(null); }
   }
 
   if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading breakdown reports…</main>;
   if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>{message || "Breakdown reports are unavailable."}</main>;
 
+  const tireOptions = breakdownTirePositionOptions(filters.equipmentType);
+  const unitOptions = data.filterOptions.equipment.filter((row) => !filters.equipmentType || String(row.equipmentType).trim().toLowerCase() === filters.equipmentType);
+  const appliedType = data.filters?.equipmentType || "";
+  const appliedPosition = breakdownTirePositionOptions().find((option) => option.value === data.filters?.tirePosition);
   const csvRows = sorted.map((row) => ({
-    Breakdown: row.id, Date: row.createdAt, Unit: row.unit, Driver: row.driverName, Category: row.category, Provider: row.serviceProvider,
+    Breakdown: row.id, Date: row.createdAt, Unit: row.unit, "Equipment Type": breakdownEquipmentLabel(row.equipmentType),
+    "Tire Positions / Sizes": row.tirePositions || "Not recorded", Driver: row.driverName, Category: row.category, Provider: row.serviceProvider,
     Location: row.location, Status: row.status, "Arrival Minutes": row.arrivalMinutes, "Downtime Minutes": row.downtimeMinutes,
     Parts: row.partsCost, Labor: row.laborCost, Outside: row.outsideCost, Total: row.totalCost, Description: row.description,
   }));
@@ -211,14 +219,22 @@ export default function BreakdownReportsPage() {
           <label style={label}>Date preset<select style={input} value={preset} onChange={(event) => applyPreset(event.target.value)}><option value="today">Today</option><option value="last_7">Last 7 days</option><option value="this_month">This month</option><option value="last_30">Last 30 days</option><option value="last_90">Last 90 days</option><option value="ytd">Year to date</option><option value="last_year">Last calendar year</option><option value="all">All history</option><option value="custom">Custom dates</option></select></label>
           <label style={label}>Start date<input type="date" style={input} value={filters.start} onChange={(event) => { setPreset("custom"); set("start", event.target.value); }} /></label>
           <label style={label}>End date<input type="date" style={input} value={filters.end} onChange={(event) => { setPreset("custom"); set("end", event.target.value); }} /></label>
-          <label style={label}>Unit<select style={input} value={filters.unit} onChange={(event) => set("unit", event.target.value)}><option value="">All units</option>{data.filterOptions.equipment.map((row) => <option key={row.id} value={row.id}>{row.unit}</option>)}</select></label>
+          <label style={label}>Equipment<select style={input} value={filters.equipmentType} onChange={(event) => setFilters((current) => changeBreakdownEquipmentFilter(current, event.target.value, data.filterOptions.equipment))}><option value="">All equipment</option><option value="truck">Trucks</option><option value="trailer">Trailers</option></select></label>
+          <label style={label}>Unit<select style={input} value={filters.unit} onChange={(event) => set("unit", event.target.value)}><option value="">All units</option>{unitOptions.map((row) => <option key={row.id} value={row.id}>{row.unit}</option>)}</select></label>
+          <label style={label}>Tire position (optional)<select style={input} value={filters.tirePosition} onChange={(event) => { set("tirePosition", event.target.value); if (event.target.value) setShowTireDetails(true); }}><option value="">All positions / no tire filter</option>{tireOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           <Select title="Breakdown category" value={filters.category} values={data.filterOptions.categories} onChange={(value) => set("category", value)} />
           <Select title="Service provider" value={filters.provider} values={data.filterOptions.providers} onChange={(value) => set("provider", value)} />
           <Select title="Status" value={filters.status} values={data.filterOptions.statuses} onChange={(value) => set("status", value)} />
           <Select title="Location" value={filters.location} values={data.filterOptions.locations} onChange={(value) => set("location", value)} />
         </div>
         <label style={{ ...label, marginTop: 12 }}>Search breakdown data<input style={input} value={filters.q} onChange={(event) => set("q", event.target.value)} placeholder="Unit, driver, problem, provider, city, state…" onKeyDown={(event) => { if (event.key === "Enter") void load(); }} /></label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}><button style={button} onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Run Breakdown Report"}</button><button style={lightButton} onClick={() => { const next = { ...blank, ...rangeFor("ytd") }; setPreset("ytd"); setFilters(next); void load(next); }} disabled={loading}>Reset</button></div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+          <button style={button} onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Run Breakdown Report"}</button>
+          <button style={lightButton} onClick={() => { const next = { ...blank, ...rangeFor("ytd") }; setPreset("ytd"); setFilters(next); setShowTireDetails(false); void load(next); }} disabled={loading}>Reset</button>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 750 }}><input type="checkbox" checked={showTireDetails} onChange={(event) => setShowTireDetails(event.target.checked)} />Show tire positions / sizes</label>
+        </div>
+        <p style={{ margin: "12px 0 0", fontSize: 12, color: "#64748b" }}>Showing report for: <strong>{appliedType ? `${breakdownEquipmentLabel(appliedType)}s` : "All equipment"}</strong>{appliedPosition ? ` · ${appliedPosition.label}` : " · No tire-position filter"}. Change filters, then select Run Breakdown Report.</p>
+        {(showTireDetails || appliedPosition) && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Tire positions and sizes are the saved breakdown details. Missing details show as Not recorded. Each matching breakdown is counted once; costs are full breakdown totals, not per-tire prices. CSV includes the equipment type and recorded tire details.</p>}
       </section>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(165px,1fr))", gap: 12 }}>
@@ -233,9 +249,9 @@ export default function BreakdownReportsPage() {
 
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#64748b" }}>Click a column heading to sort this breakdown data on its own.</small></div><strong>{num(data.summary.breakdownCount)} breakdowns</strong></div>
-        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: data.permissions.canDeleteRecords ? 1960 : 1700 }}><thead><tr>
-          <th style={th}>{sortHead("Date", "createdAt")}</th><th style={th}>{sortHead("Unit", "unit")}</th><th style={th}>Driver</th><th style={th}>{sortHead("Category", "category")}</th><th style={th}>{sortHead("Provider", "serviceProvider")}</th><th style={th}>{sortHead("Location", "location")}</th><th style={th}>{sortHead("Status", "status")}</th><th style={th}>{sortHead("Arrival", "arrivalMinutes")}</th><th style={th}>{sortHead("Downtime", "downtimeMinutes")}</th><th style={th}>Parts</th><th style={th}>Labor</th><th style={th}>Outside</th><th style={th}>{sortHead("Total", "totalCost")}</th><th style={th}>Repair Needed / Description</th>{data.permissions.canDeleteRecords && <th style={th}>Actions</th>}
-        </tr></thead><tbody>{sorted.map((row) => <tr key={row.id}><td style={td}>{shortDateTime(row.createdAt)}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.driverName || "—"}</td><td style={td}>{row.category || "—"}</td><td style={td}>{row.serviceProvider || "Unassigned"}</td><td style={td}>{row.location || "—"}</td><td style={td}>{row.status}</td><td style={td}>{hoursFromMinutes(row.arrivalMinutes)}</td><td style={td}>{hoursFromMinutes(row.downtimeMinutes)}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td><td style={{ ...td, minWidth: 300 }}>{row.repairNeeded || row.description || "—"}</td>{data.permissions.canDeleteRecords && <td style={td}><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 230 }}>{row.stage >= 5 && <EditBreakdownButton breakdownId={row.id} unit={row.unit} onSaved={async () => { await load(filters); setMessage(`Saved correction for breakdown #${row.id} on Unit ${row.unit}. Report totals were recalculated.`); }} />}<button type="button" style={{ ...deleteButton, opacity: deletingId === row.id ? .6 : 1 }} disabled={deletingId !== null} onClick={() => void deleteRecord(row)}>{deletingId === row.id ? "Deleting…" : "Delete Record"}</button></div></td>}</tr>)}</tbody></table></div>
+        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: (data.permissions.canDeleteRecords ? 1960 : 1700) + (showTireDetails ? 340 : 100) }}><thead><tr>
+          <th style={th}>{sortHead("Date", "createdAt")}</th><th style={th}>{sortHead("Unit", "unit")}</th><th style={th}>{sortHead("Type", "equipmentType")}</th>{showTireDetails && <th style={th}>{sortHead("Tire positions / sizes", "tirePositions")}</th><th style={th}>Driver</th><th style={th}>{sortHead("Category", "category")}</th><th style={th}>{sortHead("Provider", "serviceProvider")}</th><th style={th}>{sortHead("Location", "location")}</th><th style={th}>{sortHead("Status", "status")}</th><th style={th}>{sortHead("Arrival", "arrivalMinutes")}</th><th style={th}>{sortHead("Downtime", "downtimeMinutes")}</th><th style={th}>Parts</th><th style={th}>Labor</th><th style={th}>Outside</th><th style={th}>{sortHead("Total", "totalCost")}</th><th style={th}>Repair Needed / Description</th>{data.permissions.canDeleteRecords && <th style={th}>Actions</th>}
+        </tr></thead><tbody>{sorted.map((row) => <tr key={row.id}><td style={td}>{shortDateTime(row.createdAt)}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{breakdownEquipmentLabel(row.equipmentType)}</td>{showTireDetails && <td style={{ ...td, minWidth: 240 }}>{row.tirePositions || "Not recorded"}</td>}<td style={td}>{row.driverName || "—"}</td><td style={td}>{row.category || "—"}</td><td style={td}>{row.serviceProvider || "Unassigned"}</td><td style={td}>{row.location || "—"}</td><td style={td}>{row.status}</td><td style={td}>{hoursFromMinutes(row.arrivalMinutes)}</td><td style={td}>{hoursFromMinutes(row.downtimeMinutes)}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td><td style={{ ...td, minWidth: 300 }}>{row.repairNeeded || row.description || "—"}</td>{data.permissions.canDeleteRecords && <td style={td}><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 230 }}>{row.stage >= 5 && <EditBreakdownButton breakdownId={row.id} unit={row.unit} onSaved={async () => { await load(filters); setMessage(`Saved correction for breakdown #${row.id} on Unit ${row.unit}. Report totals were recalculated.`); }} />}<button type="button" style={{ ...deleteButton, opacity: deletingId === row.id ? .6 : 1 }} disabled={deletingId !== null} onClick={() => void deleteRecord(row)}>{deletingId === row.id ? "Deleting…" : "Delete Record"}</button></div></td>}</tr>)}</tbody></table></div>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))", gap: 18, marginTop: 18 }}>
