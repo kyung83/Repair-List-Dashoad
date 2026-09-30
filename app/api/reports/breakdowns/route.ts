@@ -13,6 +13,8 @@ export async function GET(request: Request) {
       startDate: params.get('start'),
       endDate: params.get('end'),
       equipmentId: params.get('unit'),
+      equipmentType: params.get('equipmentType'),
+      tirePosition: params.get('tirePosition'),
       category: params.get('category'),
       provider: params.get('provider'),
       status: params.get('status'),
@@ -25,6 +27,9 @@ export async function GET(request: Request) {
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     console.error(JSON.stringify({ event: 'breakdown_report_failed', error: String(error) }));
-    return Response.json({ error: error instanceof Error ? error.message : 'Breakdown reports could not be loaded.' }, { status: 500 });
+    return Response.json({ error: error instanceof Error ? error.message : 'Breakdown reports could not be loaded.' }, {
+      status: error instanceof RangeError ? 400 : 500,
+      headers: { 'cache-control': 'no-store' },
+    });
   }
 }
