@@ -34,6 +34,7 @@ const groups:SetupGroup[]=[
     description:"Breakdown workflow rules, yard integrations, email, and texting.",
     links:[
       {label:"Breakdown Setup",href:"/breakdowns/setup",description:"Breakdown categories and workflow configuration."},
+      {label:"Breakdown Vendors",href:"/breakdown-vendors",description:"View, add, edit, archive, and manage roadside vendors."},
       {label:"Yard Check API",href:"/admin/yard-check-api",description:"Manage Yard Check API access and integration."},
       {label:"Breakdown Email",href:"/admin/gmail",description:"Breakdown email connection and settings.",adminOnly:true},
       {label:"Breakdown Texting",href:"/admin/twilio",description:"SMS/Twilio configuration.",adminOnly:true},
