@@ -1,7 +1,11 @@
+import { normalizeEquipmentFilter, normalizeTirePositionFilter, parseBreakdownTireDetails, breakdownTireDetailsText } from './breakdown-report-filters.js';
+
 type BreakdownReportInput = {
   startDate?: unknown;
   endDate?: unknown;
   equipmentId?: unknown;
+  equipmentType?: unknown;
+  tirePosition?: unknown;
   category?: unknown;
   provider?: unknown;
   status?: unknown;
@@ -15,6 +19,7 @@ type BreakdownDataRow = {
   equipment_id: number;
   unit: string;
   equipment_type: string;
+  tire_details_json: string | null;
   driver_name: string;
   report_category: string;
   repair_category: string;
@@ -73,8 +78,7 @@ type GroupSummaryRow = {
 };
 
 type MonthSummaryRow = GroupSummaryRow & { month: string };
-
-type EquipmentOption = { id: number; unit: string };
+type EquipmentOption = { id: number; unit: string; equipment_type: string };
 
 const MAX_ROWS = 5000;
 const REPORT_CATEGORY_SQL = "COALESCE(NULLIF(trim(b.repair_needed),''),NULLIF(trim(b.repair_category),''),'')";
@@ -100,27 +104,18 @@ const REPORT_CATEGORY_OPTION_SQL = `
 function text(value: unknown, max = 160) {
   return String(value ?? '').trim().slice(0, max);
 }
-
 function integer(value: unknown) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
+function today() { return new Date().toISOString().slice(0, 10); }
 function dateValue(value: unknown, fallback: string) {
   const candidate = text(value, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return fallback;
   const parsed = Date.parse(`${candidate}T12:00:00Z`);
   return Number.isFinite(parsed) ? candidate : fallback;
 }
-
-function roundMoney(value: unknown) {
-  return Math.round((Number(value) || 0) * 100) / 100;
-}
-
+function roundMoney(value: unknown) { return Math.round((Number(value) || 0) * 100) / 100; }
 function roundMinutes(value: unknown) {
   if (value == null || !Number.isFinite(Number(value))) return null;
   return Math.round(Number(value));
@@ -131,10 +126,13 @@ function normalizeInput(raw: BreakdownReportInput) {
   let endDate = dateValue(raw.endDate, endFallback);
   let startDate = dateValue(raw.startDate, `${endDate.slice(0, 4)}-01-01`);
   if (startDate > endDate) [startDate, endDate] = [endDate, startDate];
+  const equipmentType = normalizeEquipmentFilter(raw.equipmentType);
+  const tirePosition = normalizeTirePositionFilter(raw.tirePosition, equipmentType);
   return {
-    startDate,
-    endDate,
+    startDate, endDate,
     equipmentId: integer(raw.equipmentId),
+    equipmentType,
+    tirePosition: tirePosition?.value ?? '',
     category: text(raw.category, 100),
     provider: text(raw.provider, 160),
     status: text(raw.status, 100),
@@ -147,6 +145,19 @@ function filterSql(input: ReturnType<typeof normalizeInput>) {
   const clauses = [`substr(b.created_at,1,10) BETWEEN ? AND ?`];
   const binds: unknown[] = [input.startDate, input.endDate];
   if (input.equipmentId) { clauses.push(`b.equipment_id=?`); binds.push(input.equipmentId); }
+  if (input.equipmentType) { clauses.push(`lower(trim(COALESCE(e.equipment_type,'')))=?`); binds.push(input.equipmentType); }
+  const tirePosition = normalizeTirePositionFilter(input.tirePosition, input.equipmentType);
+  if (tirePosition) {
+    // Filter the affected unit only, never its associated tractor. EXISTS avoids
+    // multiplying a breakdown's count/cost when more than one tire was recorded.
+    clauses.push(`lower(trim(COALESCE(e.equipment_type,'')))=?`);
+    binds.push(tirePosition.equipmentType);
+    clauses.push(`EXISTS (
+      SELECT 1 FROM roadside_breakdown_tires tire
+      WHERE tire.breakdown_id=b.id AND upper(trim(tire.position_code))=?
+    )`);
+    binds.push(tirePosition.positionCode);
+  }
   if (input.category) { clauses.push(`lower(trim(${REPORT_CATEGORY_SQL}))=lower(trim(?))`); binds.push(input.category); }
   if (input.provider) { clauses.push(`lower(trim(COALESCE(b.service_provider,'')))=lower(trim(?))`); binds.push(input.provider); }
   if (input.status) { clauses.push(`lower(trim(COALESCE(b.status,'')))=lower(trim(?))`); binds.push(input.status); }
@@ -207,7 +218,11 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
   const cte = dataCte(clauses);
 
   const rowsPromise = db.prepare(`${cte}
-    SELECT * FROM breakdown_data ORDER BY created_at DESC,id DESC LIMIT ${MAX_ROWS + 1}
+    SELECT breakdown_data.*, (
+      SELECT json_group_array(json_object('positionCode',t.position_code,'tireSize',t.tire_size))
+      FROM roadside_breakdown_tires t WHERE t.breakdown_id=breakdown_data.id
+    ) AS tire_details_json
+    FROM breakdown_data ORDER BY created_at DESC,id DESC LIMIT ${MAX_ROWS + 1}
   `).bind(...binds).all<BreakdownDataRow>();
 
   const summaryPromise = db.prepare(`${cte}
@@ -265,7 +280,7 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
   `).bind(...binds).all<MonthSummaryRow>();
 
   const equipmentPromise = db.prepare(`
-    SELECT DISTINCT e.id,e.unit
+    SELECT DISTINCT e.id,e.unit,COALESCE(e.equipment_type,'') AS equipment_type
     FROM roadside_breakdowns b JOIN equipment e ON e.id=b.equipment_id
     ORDER BY e.unit COLLATE NOCASE
   `).all<EquipmentOption>();
@@ -285,7 +300,6 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
     breakdown_count: 0,completed_count: 0,units_affected: 0,total_cost: 0,average_cost: 0,
     average_claim_minutes: null,average_arrival_minutes: null,average_repair_minutes: null,average_downtime_minutes: null,total_downtime_hours: 0,
   };
-
   const group = (row: GroupSummaryRow) => ({
     label: row.label,
     breakdownCount: Number(row.breakdown_count ?? 0),
@@ -311,35 +325,40 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
       averageDowntimeMinutes: roundMinutes(summary.average_downtime_minutes),
       totalDowntimeHours: Math.round((Number(summary.total_downtime_hours) || 0)*10)/10,
     },
-    breakdowns: rowsResult.results.slice(0,MAX_ROWS).map((row) => ({
-      id: row.id,
-      repairId: row.repair_id,
-      equipmentId: row.equipment_id,
-      unit: row.unit,
-      equipmentType: row.equipment_type,
-      driverName: row.driver_name,
-      category: row.report_category,
-      repairNeeded: row.repair_needed ?? '',
-      description: row.description,
-      status: row.status,
-      stage: Number(row.stage ?? 0),
-      serviceProvider: row.service_provider ?? '',
-      location: [row.city,row.state].filter(Boolean).join(', '),
-      createdAt: row.created_at,
-      claimedAt: row.claimed_at,
-      arrivalAt: row.arrival_at,
-      repairFinishedAt: row.repair_finished_at,
-      rollingAt: row.rolling_at,
-      completedAt: row.completed_at,
-      partsCost: roundMoney(row.parts_cost),
-      laborCost: roundMoney(row.labor_cost),
-      outsideCost: roundMoney(row.outside_cost),
-      totalCost: roundMoney(row.total_cost),
-      claimMinutes: roundMinutes(row.claim_minutes),
-      arrivalMinutes: roundMinutes(row.arrival_minutes),
-      repairMinutes: roundMinutes(row.repair_minutes),
-      downtimeMinutes: roundMinutes(row.downtime_minutes),
-    })),
+    breakdowns: rowsResult.results.slice(0,MAX_ROWS).map((row) => {
+      const tireDetails = parseBreakdownTireDetails(row.tire_details_json, row.equipment_type);
+      return {
+        id: row.id,
+        repairId: row.repair_id,
+        equipmentId: row.equipment_id,
+        unit: row.unit,
+        equipmentType: row.equipment_type,
+        tireDetails,
+        tirePositions: breakdownTireDetailsText(tireDetails),
+        driverName: row.driver_name,
+        category: row.report_category,
+        repairNeeded: row.repair_needed ?? '',
+        description: row.description,
+        status: row.status,
+        stage: Number(row.stage ?? 0),
+        serviceProvider: row.service_provider ?? '',
+        location: [row.city,row.state].filter(Boolean).join(', '),
+        createdAt: row.created_at,
+        claimedAt: row.claimed_at,
+        arrivalAt: row.arrival_at,
+        repairFinishedAt: row.repair_finished_at,
+        rollingAt: row.rolling_at,
+        completedAt: row.completed_at,
+        partsCost: roundMoney(row.parts_cost),
+        laborCost: roundMoney(row.labor_cost),
+        outsideCost: roundMoney(row.outside_cost),
+        totalCost: roundMoney(row.total_cost),
+        claimMinutes: roundMinutes(row.claim_minutes),
+        arrivalMinutes: roundMinutes(row.arrival_minutes),
+        repairMinutes: roundMinutes(row.repair_minutes),
+        downtimeMinutes: roundMinutes(row.downtime_minutes),
+      };
+    }),
     byUnit: unitsResult.results.map((row) => ({
       equipmentId: row.equipment_id,unit: row.unit,breakdownCount: Number(row.breakdown_count ?? 0),
       totalCost: roundMoney(row.total_cost),averageCost: roundMoney(row.average_cost),downtimeHours: Math.round((Number(row.downtime_hours)||0)*10)/10,
@@ -349,11 +368,8 @@ export async function getBreakdownReportData(db: D1Database, raw: BreakdownRepor
     byLocation: locationsResult.results.map(group),
     monthlyTrend: monthlyResult.results.map((row) => ({ month: row.month, ...group(row) })),
     filterOptions: {
-      equipment: equipmentResult.results.map((row) => ({ id: row.id, unit: row.unit })),
-      categories: options[0],
-      providers: options[1],
-      statuses: options[2],
-      locations: options[3],
+      equipment: equipmentResult.results.map((row) => ({ id: row.id, unit: row.unit, equipmentType: row.equipment_type })),
+      categories: options[0],providers: options[1],statuses: options[2],locations: options[3],
     },
     truncated: rowsResult.results.length > MAX_ROWS,
     updatedAt: new Date().toISOString(),
