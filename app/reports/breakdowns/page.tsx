@@ -250,7 +250,21 @@ export default function BreakdownReportsPage() {
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#64748b" }}>Click a column heading to sort this breakdown data on its own.</small></div><strong>{num(data.summary.breakdownCount)} breakdowns</strong></div>
         <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: (data.permissions.canDeleteRecords ? 1960 : 1700) + (showTireDetails ? 340 : 100) }}><thead><tr>
-          <th style={th}>{sortHead("Date", "createdAt")}</th><th style={th}>{sortHead("Unit", "unit")}</th><th style={th}>{sortHead("Type", "equipmentType")}</th>{showTireDetails && <th style={th}>{sortHead("Tire positions / sizes", "tirePositions")}</th><th style={th}>Driver</th><th style={th}>{sortHead("Category", "category")}</th><th style={th}>{sortHead("Provider", "serviceProvider")}</th><th style={th}>{sortHead("Location", "location")}</th><th style={th}>{sortHead("Status", "status")}</th><th style={th}>{sortHead("Arrival", "arrivalMinutes")}</th><th style={th}>{sortHead("Downtime", "downtimeMinutes")}</th><th style={th}>Parts</th><th style={th}>Labor</th><th style={th}>Outside</th><th style={th}>{sortHead("Total", "totalCost")}</th><th style={th}>Repair Needed / Description</th>{data.permissions.canDeleteRecords && <th style={th}>Actions</th>}
+          <th style={th}>{sortHead("Date", "createdAt")}</th>
+          <th style={th}>{sortHead("Unit", "unit")}</th>
+          <th style={th}>{sortHead("Type", "equipmentType")}</th>
+          {showTireDetails && <th style={th}>{sortHead("Tire positions / sizes", "tirePositions")}</th>}
+          <th style={th}>Driver</th>
+          <th style={th}>{sortHead("Category", "category")}</th>
+          <th style={th}>{sortHead("Provider", "serviceProvider")}</th>
+          <th style={th}>{sortHead("Location", "location")}</th>
+          <th style={th}>{sortHead("Status", "status")}</th>
+          <th style={th}>{sortHead("Arrival", "arrivalMinutes")}</th>
+          <th style={th}>{sortHead("Downtime", "downtimeMinutes")}</th>
+          <th style={th}>Parts</th><th style={th}>Labor</th><th style={th}>Outside</th>
+          <th style={th}>{sortHead("Total", "totalCost")}</th>
+          <th style={th}>Repair Needed / Description</th>
+          {data.permissions.canDeleteRecords && <th style={th}>Actions</th>}
         </tr></thead><tbody>{sorted.map((row) => <tr key={row.id}><td style={td}>{shortDateTime(row.createdAt)}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{breakdownEquipmentLabel(row.equipmentType)}</td>{showTireDetails && <td style={{ ...td, minWidth: 240 }}>{row.tirePositions || "Not recorded"}</td>}<td style={td}>{row.driverName || "—"}</td><td style={td}>{row.category || "—"}</td><td style={td}>{row.serviceProvider || "Unassigned"}</td><td style={td}>{row.location || "—"}</td><td style={td}>{row.status}</td><td style={td}>{hoursFromMinutes(row.arrivalMinutes)}</td><td style={td}>{hoursFromMinutes(row.downtimeMinutes)}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td><td style={{ ...td, minWidth: 300 }}>{row.repairNeeded || row.description || "—"}</td>{data.permissions.canDeleteRecords && <td style={td}><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 230 }}>{row.stage >= 5 && <EditBreakdownButton breakdownId={row.id} unit={row.unit} onSaved={async () => { await load(filters); setMessage(`Saved correction for breakdown #${row.id} on Unit ${row.unit}. Report totals were recalculated.`); }} />}<button type="button" style={{ ...deleteButton, opacity: deletingId === row.id ? .6 : 1 }} disabled={deletingId !== null} onClick={() => void deleteRecord(row)}>{deletingId === row.id ? "Deleting…" : "Delete Record"}</button></div></td>}</tr>)}</tbody></table></div>
       </section>
 
