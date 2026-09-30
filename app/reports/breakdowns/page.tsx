@@ -131,6 +131,8 @@ export default function BreakdownReportsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [showTireDetails, setShowTireDetails] = useState(false);
+  const [exporting, setExporting] = useState<"" | "print" | "xlsx" | "csv">("");
+  const [exportMessage, setExportMessage] = useState("");
 
   async function load(next = filters) {
     setLoading(true); setMessage("");
@@ -158,6 +160,39 @@ export default function BreakdownReportsPage() {
     });
     return rows;
   }, [data?.breakdowns, sortKey, sortDir]);
+
+  async function exportDetail(format: "print" | "xlsx" | "csv") {
+    if (!data || loading || exporting || !sorted.length) return;
+    if (data.truncated && !window.confirm(`Only ${sorted.length.toLocaleString()} of ${data.summary.breakdownCount.toLocaleString()} matching breakdowns are loaded. Continue with a clearly marked partial report? Narrow the filters for a complete export.`)) return;
+    let popup: Window | null = null;
+    setExportMessage("");
+    if (format === "print") {
+      popup = window.open("", "_blank", "width=1400,height=900");
+      if (!popup) { setExportMessage("The browser blocked the print window. Allow pop-ups for this site, then try again."); return; }
+      popup.opener = null;
+      popup.document.body.textContent = "Preparing Breakdown Detail for printing...";
+    }
+    setExporting(format);
+    try {
+      const tools = await import("@/lib/breakdown-detail-export.js");
+      const report = tools.buildBreakdownDetailExport(sorted, {
+        showTireDetails, range: data.range, filters: data.filters,
+        totalCount: data.summary.breakdownCount, truncated: data.truncated,
+        sortKey, sortDir, units: data.filterOptions.equipment,
+        source: window.location.origin + window.location.pathname,
+      });
+      if (format === "print") {
+        tools.printBreakdownDetail(report, window, popup);
+        setExportMessage(`Print view opened for ${sorted.length.toLocaleString()} breakdowns. Choose a printer or Save as PDF.`);
+      } else {
+        tools.saveBreakdownDetail(report, format);
+        setExportMessage(`${format === "xlsx" ? "Excel" : "CSV"} download started for ${sorted.length.toLocaleString()} breakdowns.`);
+      }
+    } catch (error) {
+      popup?.close();
+      setExportMessage(error instanceof Error ? error.message : "The detail report could not be exported. Please try again.");
+    } finally { setExporting(""); }
+  }
 
   function set<K extends keyof Filters>(key: K, value: Filters[K]) { setFilters((current) => ({ ...current, [key]: value })); }
   function applyPreset(value: string) {
@@ -248,7 +283,19 @@ export default function BreakdownReportsPage() {
       {data.truncated && <div style={{ ...panel, marginTop: 18, borderColor: "#f2c66d", background: "#fff8e6" }}>More than 5,000 breakdowns match. Summary totals and analysis tables cover the full match; narrow the filters to inspect every individual breakdown row.</div>}
 
       <section style={{ ...panel, marginTop: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#64748b" }}>Click a column heading to sort this breakdown data on its own.</small></div><strong>{num(data.summary.breakdownCount)} breakdowns</strong></div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#64748b" }}>Click a column heading to sort this breakdown data on its own.</small></div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <strong>{num(data.summary.breakdownCount)} breakdowns</strong>
+            <div className="breakdown-summary-section-actions breakdown-detail-actions" role="group" aria-label="Breakdown Detail exports" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" style={lightButton} disabled={loading || Boolean(exporting) || !sorted.length} onClick={() => void exportDetail("print")}>{exporting === "print" ? "Preparing print..." : "Print / Save PDF"}</button>
+              <button type="button" style={button} disabled={loading || Boolean(exporting) || !sorted.length} onClick={() => void exportDetail("xlsx")}>{exporting === "xlsx" ? "Preparing Excel..." : "Download Excel"}</button>
+              <button type="button" style={lightButton} disabled={loading || Boolean(exporting) || !sorted.length} onClick={() => void exportDetail("csv")}>{exporting === "csv" ? "Preparing CSV..." : "Export CSV"}</button>
+            </div>
+          </div>
+        </div>
+        <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: 12 }}>These buttons export the loaded detail rows in the displayed sort order. Tire positions / sizes are included when shown. Run the report after changing filters.</p>
+        {exportMessage && <div role="status" style={{ marginTop: 8, padding: 10, background: "#fff8e6", border: "1px solid #f2c66d", borderRadius: 8, fontSize: 13 }}>{exportMessage}</div>}
         <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: (data.permissions.canDeleteRecords ? 1960 : 1700) + (showTireDetails ? 340 : 100) }}><thead><tr>
           <th style={th}>{sortHead("Date", "createdAt")}</th>
           <th style={th}>{sortHead("Unit", "unit")}</th>
