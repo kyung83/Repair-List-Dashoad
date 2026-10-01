@@ -49,7 +49,11 @@ const raw=(source:Src)=>source==='pm'||source==='annual';
 const scheduled=(source:Src)=>source==='dvir'||raw(source);
 const kind=(value:string)=>/trailer/i.test(value)?'trailer':/truck|tractor|vehicle/i.test(value)?'truck':'other';
 const glass=(row:Row)=>!pm(row.source)&&!annual(row.source)&&/\b(glass|windshield|windscreen|window|backlite|side glass)\b/i.test(`${row.issue} ${row.parts}`);
-const rowKey=(row:Row)=>row.equipmentId?`e-${row.equipmentId}`:`u-${row.unit.trim().toLowerCase()||row.id}`;
+const normalizedBoardUnit=(value:string)=>value.trim().toLowerCase().replace(/[\s\-()]/g,'');
+const rowKey=(row:Row)=>{
+ const unit=normalizedBoardUnit(row.unit);
+ return unit?`u-${kind(row.equipmentType)}-${unit}`:row.equipmentId?`e-${row.equipmentId}`:`r-${row.id}`;
+};
 const sourceLabel=(source:Src)=>source==='dvir'?'DVIR':source==='dvir-repair'?'DVIR Job':source==='pm'?'PM Due':source==='annual'?'Annual Due':source==='pm-repair'?'PM Job':source==='annual-repair'?'Annual Job':'Repair';
 const displayDriver=(value:string)=>value.includes('@')?'':value.trim();
 const lower=(value:unknown)=>String(value??'').trim().toLowerCase();
