@@ -94,7 +94,14 @@ async function equipmentIdForUnit(unitValue: string, equipmentTypeValue: unknown
     SELECT id
     FROM equipment
     WHERE lower(replace(replace(replace(replace(trim(unit), ' ', ''), '-', ''), '(', ''), ')', '')) = ?
-    ORDER BY active DESC, id
+      AND merged_into_equipment_id IS NULL
+    ORDER BY
+      CASE WHEN EXISTS (
+        SELECT 1 FROM equipment_geotab_devices assignment
+        WHERE assignment.equipment_id = equipment.id AND assignment.current = 1
+      ) THEN 0 ELSE 1 END,
+      active DESC,
+      id
     LIMIT 1
   `).bind(key).first<{ id: number }>();
   if (existing) {
@@ -169,7 +176,20 @@ export async function GET(request: Request) {
                COALESCE(e.out_of_service,0) AS out_of_service,
                COALESCE(e.out_of_service_reason,'') AS out_of_service_reason, e.out_of_service_at
         FROM dvir_defects d
-        LEFT JOIN equipment e ON lower(trim(e.unit)) = lower(trim(d.asset_unit))
+        LEFT JOIN equipment e ON e.id = (
+          SELECT e2.id
+          FROM equipment e2
+          WHERE lower(trim(e2.unit)) = lower(trim(d.asset_unit))
+            AND e2.merged_into_equipment_id IS NULL
+          ORDER BY
+            CASE WHEN EXISTS (
+              SELECT 1 FROM equipment_geotab_devices assignment
+              WHERE assignment.equipment_id = e2.id AND assignment.current = 1
+            ) THEN 0 ELSE 1 END,
+            e2.active DESC,
+            e2.id
+          LIMIT 1
+        )
         WHERE d.repaired = 0
           AND NOT EXISTS (SELECT 1 FROM repairs r WHERE r.geotab_defect_id = d.geotab_defect_id)
         ORDER BY d.asset_unit, d.updated_at DESC
