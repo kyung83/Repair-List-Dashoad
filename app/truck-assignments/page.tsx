@@ -7,7 +7,7 @@ type Assignment={
   status:string;truckClass:string;flatbed:boolean;automatic:boolean;notes:string;coverageForEquipmentId:number|null;coverageForDriver:string;
   outOfService:boolean;outOfServiceReason:string;shopEta:string;openRepairCount:number;repairState:string;readyToReturn:boolean;
 };
-type Swap={id:number;driver:string;homeEquipmentId:number;homeUnit:string;coverageEquipmentId:number;coverageUnit:string;workingLocation:string;serviceLocation:string;reason:string;coverageReturnPool:string;openedAt:string;readyToReturn:boolean};
+type Swap={id:number;driver:string;homeEquipmentId:number;homeUnit:string;coverageEquipmentId:number;coverageUnit:string;workingLocation:string;serviceLocation:string;reason:string;coverageReturnPool:string;openedAt:string;repairClear:boolean;readyToReturn:boolean};
 type EventRow={id:number;action:string;driver:string;from_location:string;to_location:string;detail:string;created_at:string;primary_unit:string;secondary_unit:string;by_name:string};
 type Payload={permissions:{canOperate:boolean;canEditMaster:boolean};assignments:Assignment[];activeSwaps:Swap[];events:EventRow[];summary:Record<string,number>;updatedAt:string;error?:string};
 
@@ -175,7 +175,11 @@ export default function TruckAssignmentsPage(){
               {(data?.activeSwaps??[]).slice(0,6).map(s=><div key={s.id} style={{border:"1px solid #e2e8f0",borderRadius:10,padding:10}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8}}><strong>{s.driver}</strong><span style={s.readyToReturn?badge("#dcfce7","#166534"):badge("#ffedd5","#c2410c")}>{s.readyToReturn?"Ready to Return":"Active"}</span></div>
                 <div style={{fontSize:12,marginTop:5}}>Home {s.homeUnit} → Clare/service</div><div style={{fontSize:12}}>Coverage {s.coverageUnit} → {s.workingLocation}</div>
-                {s.readyToReturn&&<button style={{...green,width:"100%",marginTop:8}} disabled={busy} onClick={()=>void act({action:"completeCoverageSwap",swapId:s.id})}>Return {s.homeUnit} to {s.driver}</button>}
+                {s.readyToReturn
+                  ? <button style={{...green,width:"100%",marginTop:8}} disabled={busy} onClick={()=>void act({action:"completeCoverageSwap",swapId:s.id})}>Return {s.homeUnit} to {s.driver}</button>
+                  : s.repairClear
+                    ? <button style={{...button,width:"100%",marginTop:8}} disabled={busy} onClick={()=>void act({action:"markCoverageReady",swapId:s.id})}>Mark {s.homeUnit} Ready to Return</button>
+                    : <div style={{fontSize:11,color:"#b45309",marginTop:7}}>Waiting on Repair Board / OOS clearance.</div>}
               </div>)}
               {!data?.activeSwaps.length&&<div style={{fontSize:13,color:"#64748b"}}>No active coverage swaps.</div>}
             </div>
