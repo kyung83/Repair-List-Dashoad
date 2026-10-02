@@ -26,6 +26,7 @@ const workingRoles: Role[] = ["mechanic", "manager", "admin"];
 const officeRoles: Role[] = ["viewer", "manager", "admin"];
 const repairBoardRoles: Role[] = ["mechanic", "dispatch", "manager", "admin"];
 const breakdownOperatorRoles: Role[] = ["dispatch", "manager", "admin"];
+const assignmentRoles: Role[] = ["dispatch", "manager", "admin"];
 const repairGroupRoles: Role[] = ["viewer", "mechanic", "dispatch", "manager", "admin"];
 const annualRecordRoles: Role[] = ["viewer", "mechanic", "manager", "admin"];
 
@@ -68,6 +69,7 @@ const sidebarGroups: SidebarGroup[] = [
     links: [
       { href: "/unit", label: "Unit Hub", roles: allRoles },
       { href: "/equipment", label: "Master Equipment", roles: officeRoles },
+      { href: "/truck-assignments", label: "Truck Assignments", exact: true, roles: assignmentRoles },
       { href: "/pm-inspections", label: "PM Records / Forms", roles: annualRecordRoles },
       { href: "/annual-inspections", label: "Annual Records / Forms", roles: annualRecordRoles },
     ],
