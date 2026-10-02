@@ -22,11 +22,13 @@ test('technician shared Add Repair uses existing units and cannot create equipme
   assert.match(createRoute,/if\(mechanic\)throw new Error\('Technicians can add repairs only to an existing active unit\.'/);
 });
 
-test('technician Repair Board submissions are forced to their own linked technician record',()=>{
+test('technician Repair Board submissions are forced to their own linked technician record without requiring yard placement',()=>{
   assert.match(createRoute,/\['mechanic','manager','admin'\]\.includes\(user\.role\)/);
   assert.match(createRoute,/const mechanicTechnician=mechanic\?await linkedTechnician\(user\):null/);
   assert.match(createRoute,/let technician:Technician\|null=mechanicTechnician/);
-  assert.match(createRoute,/enforceTechnicianUnitAccess\(user,mechanicTechnician\.id,equipment\)/);
+  assert.doesNotMatch(createRoute,/enforceTechnicianUnitAccess/);
+  assert.doesNotMatch(createRoute,/does not have a yard assignment/);
+  assert.doesNotMatch(createRoute,/add repair work only in your assigned/);
 });
 
 test('indirect labor and shared Add Repair are allowed through the mechanic worker gate',()=>{

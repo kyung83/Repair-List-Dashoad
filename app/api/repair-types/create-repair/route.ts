@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { requireRepairType, type RepairType } from '@/lib/repair-types';
-import { normalizeYard, yardLabel } from '@/lib/yards';
 
 type Technician={id:number;name:string};
 type Equipment={id:number;unit:string;location:string;current_yard:string};
@@ -28,34 +27,6 @@ async function linkedTechnician(user:AppUser){
     .bind(user.technicianId).first<Technician>();
   if(!technician)throw new Error('Your linked technician record is not active.');
   return technician;
-}
-
-async function enforceTechnicianUnitAccess(user:AppUser,technicianId:number,equipment:Equipment){
-  const alreadyMine=await env.DB.prepare(`
-    SELECT 1 AS allowed
-    WHERE EXISTS (
-      SELECT 1 FROM repairs
-      WHERE equipment_id=? AND technician_id=?
-        AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
-    ) OR EXISTS (
-      SELECT 1
-      FROM repair_labor_timers rt
-      JOIN repairs r ON r.id=rt.repair_id
-      WHERE rt.user_id=? AND r.equipment_id=?
-    )
-  `).bind(equipment.id,technicianId,user.id,equipment.id).first<{allowed:number}>();
-  if(alreadyMine?.allowed)return;
-
-  const account=await env.DB.prepare("SELECT COALESCE(yard,'') AS yard FROM app_users WHERE id=?")
-    .bind(user.id).first<{yard:string}>();
-  const assigned=normalizeYard(account?.yard);
-  if(!assigned)throw new Error('Your account needs a yard assignment before you can add repair work.');
-
-  const unitYard=normalizeYard(equipment.current_yard)||normalizeYard(equipment.location);
-  if(!unitYard)throw new Error('This unit does not have a yard assignment yet. Ask a manager to place the unit first.');
-  if(unitYard!==assigned){
-    throw new Error(`Unit ${equipment.unit} is in the ${yardLabel(unitYard)} yard. You can add repair work only in your assigned ${yardLabel(assigned)} yard unless that unit is already assigned to you.`);
-  }
 }
 
 export async function POST(request:Request){
@@ -102,9 +73,6 @@ export async function POST(request:Request){
         WHERE id=? AND active=1 AND merged_into_equipment_id IS NULL
       `).bind(id).first<Equipment>();
       if(!equipment)throw new Error('Equipment was not found or is inactive.');
-      if(mechanic&&mechanicTechnician){
-        await enforceTechnicianUnitAccess(user,mechanicTechnician.id,equipment);
-      }
       equipmentId=equipment.id;
       unit=equipment.unit;
       location=equipment.location;
