@@ -51,6 +51,7 @@ test('scheduler reads Repair Board state and blocks premature return',()=>{
   assert.match(api,/COALESCE\(e\.out_of_service,0\)/);
   assert.match(api,/if\(Boolean\(repair\?\.oos\)\|\|Number\(repair\?\.open_repairs\|\|0\)>0\)throw new Error/);
   assert.match(api,/still has open Repair Board work or is out of service/);
+  assert.match(api,/must be marked Ready to Return, or have completed Repair Board work from this swap/);
 });
 
 test('temporary coverage swap preserves permanent home assignment',()=>{
@@ -77,6 +78,7 @@ test('simplified UI keeps board, master and history views',()=>{
   assert.match(page,/Open \/ Spare Trucks/);
   assert.match(page,/In Shop \/ Cleaning/);
   assert.match(page,/Ready to Return/);
+  assert.match(page,/Mark \{s\.homeUnit\} Ready to Return/);
   assert.match(page,/Open Repair Board/);
 });
 
@@ -84,7 +86,7 @@ test('dispatch can use operational scheduler actions but cannot update master',(
   assert.match(nav,/Truck Assignments/);
   assert.match(worker,/'\/truck-assignments'/);
   assert.match(worker,/'\/api\/truck-assignments'/);
-  const allow=worker.match(/new Set\(\['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','completeCoverageSwap'\]\)/);
+  const allow=worker.match(/new Set\(\['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','markCoverageReady','completeCoverageSwap'\]\)/);
   assert.ok(allow);
   assert.doesNotMatch(allow[0],/updateMaster/);
 });
