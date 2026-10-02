@@ -1,6 +1,5 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
-import { normalizeYard, yardLabel } from '@/lib/yards';
 
 type Technician = { id:number; name:string };
 type Equipment = {
@@ -51,27 +50,11 @@ async function hasAssignedUnitAccess(user: AppUser, technicianId: number, equipm
   return Boolean(row?.allowed);
 }
 
-async function enforceYardForNewWork(user: AppUser, equipment: Equipment) {
-  if (user.role !== 'mechanic' && user.role !== 'manager') return;
-  const account = await env.DB.prepare(`SELECT COALESCE(yard,'') AS yard FROM app_users WHERE id = ?`)
-    .bind(user.id).first<{yard:string}>();
-  const assigned = normalizeYard(account?.yard);
-  if (!assigned) throw new Error('Your account needs a yard assignment before you can add work to another unit.');
-  const unitYard = normalizeYard(equipment.current_yard) || normalizeYard(equipment.location);
-  if (!unitYard) throw new Error('This unit does not have a yard assignment yet. Ask a manager to place the unit first.');
-  if (unitYard !== assigned) {
-    throw new Error(`Unit ${equipment.unit} is in the ${yardLabel(unitYard)} yard. You can add new work only in your assigned ${yardLabel(assigned)} yard unless that unit is already assigned to you.`);
-  }
-}
-
 export async function createRepairForTechnician(request: Request, body: Record<string, unknown>) {
   const user = await getSessionUser(env.DB,request);
   if (!user) throw new Error('Authentication required.');
   const technician = await linkedTechnician(user);
   const equipment = await loadEquipment(body.equipmentId);
-  const alreadyMine = await hasAssignedUnitAccess(user,technician.id,equipment.id);
-  if (!alreadyMine) await enforceYardForNewWork(user,equipment);
-
   const issue = String(body.issue ?? '').trim().slice(0,500);
   const parts = String(body.parts ?? '').trim().slice(0,1000);
   if (!issue) throw new Error('Enter the repair needed.');
