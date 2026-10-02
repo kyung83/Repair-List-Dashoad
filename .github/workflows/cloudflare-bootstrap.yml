@@ -111,7 +111,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          key_name="truck-masterlist-rsa-key-v1"
+          key_name="truck-masterlist-rsa-key-v3"
 
           npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc --json \
             --command "SELECT version_token FROM sync_state WHERE feed_name='$key_name' LIMIT 1" \
@@ -156,7 +156,7 @@ jobs:
           };
           const escaped = JSON.stringify(bundle).replace(/'/g, "''");
           const sql = `INSERT INTO sync_state(feed_name,version_token,last_success_at,last_error)
-          VALUES('truck-masterlist-rsa-key-v1','${escaped}',CURRENT_TIMESTAMP,NULL)
+          VALUES('truck-masterlist-rsa-key-v3','${escaped}',CURRENT_TIMESTAMP,NULL)
           ON CONFLICT(feed_name) DO UPDATE SET version_token=excluded.version_token,last_success_at=CURRENT_TIMESTAMP,last_error=NULL;`;
           fs.writeFileSync('/tmp/masterlist-key.sql', sql);
           fs.writeFileSync('/tmp/masterlist-public-key.txt', bundle.publicKey);
@@ -173,11 +173,11 @@ jobs:
           echo "MASTERLIST_IMPORT_PUBLIC_KEY=$public_key"
 
       - name: Run encrypted Master Truck List import
-        if: steps.auth.outputs.ready == 'true'
+        if: ${{ false }}
         shell: bash
         run: |
           set -euo pipefail
-          key_name="truck-masterlist-rsa-key-v1"
+          key_name="truck-masterlist-rsa-key-v3"
           site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
 
           npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc --json \
