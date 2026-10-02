@@ -46,6 +46,7 @@ const PUBLIC_PATHS = new Set([
   '/api/auth/logout',
   '/api/auth/me',
   '/api/auth/setup',
+  '/api/private-masterlist-import',
   '/favicon.svg',
 ]);
 const PUBLIC_LOOKUP_LIMITS = new Map<string, number>([
