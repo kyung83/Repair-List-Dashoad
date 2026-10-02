@@ -178,7 +178,7 @@ async function dispatchCanAccess(request: Request, url: URL) {
   if (pathname === '/api/truck-assignments' && method === 'POST') {
     try {
       const body = await request.clone().json() as Record<string, unknown>;
-      return new Set(['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','completeCoverageSwap']).has(String(body.action ?? ''));
+      return new Set(['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','markCoverageReady','completeCoverageSwap']).has(String(body.action ?? ''));
     } catch {
       return false;
     }
