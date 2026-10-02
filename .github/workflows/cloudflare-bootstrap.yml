@@ -111,22 +111,66 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${AUTH_BOOTSTRAP_TOKEN:-}" ]; then
-            echo "AUTH_BOOTSTRAP_TOKEN is required for the private Master Truck List import key."
-            exit 1
-          fi
-          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
-          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-            -H "Authorization: Bearer $AUTH_BOOTSTRAP_TOKEN" \
-            "$site_url/api/private-masterlist-key" -o /tmp/masterlist-key.json
+          key_name="truck-masterlist-rsa-key-v1"
+
+          npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc --json \
+            --command "SELECT version_token FROM sync_state WHERE feed_name='$key_name' LIMIT 1" \
+            > /tmp/masterlist-existing.json
+
           node - <<'NODE'
           const fs = require('fs');
-          const payload = JSON.parse(fs.readFileSync('/tmp/masterlist-key.json', 'utf8'));
-          if (payload.ok !== true || typeof payload.publicKey !== 'string' || payload.publicKey.length < 300) {
-            throw new Error('Master Truck List import public key response is invalid.');
+          const raw = JSON.parse(fs.readFileSync('/tmp/masterlist-existing.json', 'utf8'));
+          function findToken(value) {
+            if (!value || typeof value !== 'object') return '';
+            if (typeof value.version_token === 'string') return value.version_token;
+            if (Array.isArray(value)) {
+              for (const item of value) { const found = findToken(item); if (found) return found; }
+            } else {
+              for (const item of Object.values(value)) { const found = findToken(item); if (found) return found; }
+            }
+            return '';
           }
-          console.log('MASTERLIST_IMPORT_PUBLIC_KEY=' + payload.publicKey);
+          const token = findToken(raw);
+          if (token) {
+            const bundle = JSON.parse(token);
+            if (typeof bundle.publicKey === 'string' && bundle.publicKey.length > 300) {
+              fs.writeFileSync('/tmp/masterlist-public-key.txt', bundle.publicKey);
+            }
+          }
           NODE
+
+          if [ ! -s /tmp/masterlist-public-key.txt ]; then
+            node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+            modulusLength: 2048,
+            publicKeyEncoding: { type: 'spki', format: 'der' },
+            privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+          });
+          const bundle = {
+            alg: 'RSA-OAEP-2048-SHA256',
+            publicKey: publicKey.toString('base64'),
+            privateKey: privateKey.toString('base64'),
+            callToken: crypto.randomBytes(32).toString('base64url'),
+          };
+          const escaped = JSON.stringify(bundle).replace(/'/g, "''");
+          const sql = `INSERT INTO sync_state(feed_name,version_token,last_success_at,last_error)
+          VALUES('truck-masterlist-rsa-key-v1','${escaped}',CURRENT_TIMESTAMP,NULL)
+          ON CONFLICT(feed_name) DO UPDATE SET version_token=excluded.version_token,last_success_at=CURRENT_TIMESTAMP,last_error=NULL;`;
+          fs.writeFileSync('/tmp/masterlist-key.sql', sql);
+          fs.writeFileSync('/tmp/masterlist-public-key.txt', bundle.publicKey);
+          NODE
+            npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc \
+              --file /tmp/masterlist-key.sql >/tmp/masterlist-key-write.log
+          fi
+
+          public_key="$(cat /tmp/masterlist-public-key.txt)"
+          if [ "${#public_key}" -lt 300 ]; then
+            echo "Master Truck List import public key is invalid."
+            exit 1
+          fi
+          echo "MASTERLIST_IMPORT_PUBLIC_KEY=$public_key"
 
       - name: Verify authentication and deployment health
         if: steps.auth.outputs.ready == 'true'
