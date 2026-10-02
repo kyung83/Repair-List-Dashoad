@@ -106,6 +106,28 @@ jobs:
           NODE
           echo "Dashboard bootstrap secret installed."
 
+      - name: Initialize private Master Truck List import key
+        if: steps.auth.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTH_BOOTSTRAP_TOKEN:-}" ]; then
+            echo "AUTH_BOOTSTRAP_TOKEN is required for the private Master Truck List import key."
+            exit 1
+          fi
+          site_url="https://norlow-repair-dashboard.norlo-repair-system.workers.dev"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            -H "Authorization: Bearer $AUTH_BOOTSTRAP_TOKEN" \
+            "$site_url/api/private-masterlist-key" -o /tmp/masterlist-key.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const payload = JSON.parse(fs.readFileSync('/tmp/masterlist-key.json', 'utf8'));
+          if (payload.ok !== true || typeof payload.publicKey !== 'string' || payload.publicKey.length < 300) {
+            throw new Error('Master Truck List import public key response is invalid.');
+          }
+          console.log('MASTERLIST_IMPORT_PUBLIC_KEY=' + payload.publicKey);
+          NODE
+
       - name: Verify authentication and deployment health
         if: steps.auth.outputs.ready == 'true'
         shell: bash
