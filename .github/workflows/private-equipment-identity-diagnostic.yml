@@ -1,0 +1,89 @@
+name: Private Equipment Identity Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/private-equipment-identity-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Query and encrypt live equipment identity
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLOUDFLARE_API_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#CLOUDFLARE_API_TOKEN=}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#Bearer}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN#\"}"
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN%\"}"
+          export CLOUDFLARE_API_TOKEN
+
+          ACCOUNT_ARG=()
+          if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            ACCOUNT_ARG=(--account-id "$CLOUDFLARE_ACCOUNT_ID")
+          fi
+
+          list_output="$(npx wrangler d1 list --json "${ACCOUNT_ARG[@]}")"
+          DB_ID="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(0,"utf8")); const row=data.find(x=>x.name==="norlow-repair-production"); if(row) process.stdout.write(row.uuid||row.id||row.database_id||"");' <<<"$list_output")"
+          if [ -z "$DB_ID" ]; then
+            echo "Could not determine production D1 database ID."
+            exit 1
+          fi
+
+          sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" wrangler.template.jsonc > wrangler.jsonc
+
+          sql="SELECT id,unit,COALESCE(equipment_type,'') AS equipment_type,active,merged_into_equipment_id,COALESCE(archived_at,'') AS archived_at FROM equipment ORDER BY id;"
+          npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc "${ACCOUNT_ARG[@]}" --json --command "$sql" > /tmp/equipment.json
+
+          node - <<'NODE'
+          const fs=require('fs');
+          const crypto=require('crypto');
+          const zlib=require('zlib');
+
+          const publicKeyB64='MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApBtIo68ADWIkpxInzKOSxs3l6GnfzLVjrZBiP0H1s074b5vzpHRKZLmtpxny+SbthUM4dHGNf2oXadRBEjtZOasHKIIaEgmW2PTz0n4z9EQnmaufV72EvNduKLiXYh4R/7hbUN8eRQhetHejjPFTaKN0rDbn/XOLoCzvfKhwVXiujec2xrF95RheUUFOt3vnBK5EPQeiFV+1HK4IRX5dA8LBZsIRL1fDFI9fP2Uq04eRmj1dha1SeGKtOVwJZWWR6sqhHkwkRZCtGkGaZZfa0P0p+hiHk2LmzYKTUEU+QtpZveGf2b/erkhCNZsGtcR4zWnnetzJn/qv+R5PZ0kdtQIDAQAB';
+          const publicKey=crypto.createPublicKey({key:Buffer.from(publicKeyB64,'base64'),format:'der',type:'spki'});
+          const source=fs.readFileSync('/tmp/equipment.json');
+          const compressed=zlib.gzipSync(source);
+          const aesKey=crypto.randomBytes(32);
+          const iv=crypto.randomBytes(12);
+          const aad=Buffer.from('northern-equipment-diagnostic-v1','utf8');
+          const cipher=crypto.createCipheriv('aes-256-gcm',aesKey,iv);
+          cipher.setAAD(aad);
+          const ciphertext=Buffer.concat([cipher.update(compressed),cipher.final()]);
+          const tag=cipher.getAuthTag();
+          const wrappedKey=crypto.publicEncrypt({
+            key:publicKey,
+            oaepHash:'sha256',
+            padding:crypto.constants.RSA_PKCS1_OAEP_PADDING,
+          },aesKey);
+
+          const pkg={
+            alg:'RSA-OAEP-2048-SHA256+AES-256-GCM+gzip',
+            wrappedKey:wrappedKey.toString('base64'),
+            iv:iv.toString('base64'),
+            aad:aad.toString('utf8'),
+            ciphertext:ciphertext.toString('base64'),
+            tag:tag.toString('base64'),
+          };
+          console.log('EQUIPMENT_DIAGNOSTIC_B64='+Buffer.from(JSON.stringify(pkg),'utf8').toString('base64'));
+          NODE
