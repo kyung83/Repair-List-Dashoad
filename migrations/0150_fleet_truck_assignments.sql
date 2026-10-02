@@ -40,12 +40,15 @@ CREATE TABLE IF NOT EXISTS fleet_coverage_swaps (
     CHECK (coverage_return_pool IN ('open','spare')),
   opened_by_user_id INTEGER,
   closed_by_user_id INTEGER,
+  ready_by_user_id INTEGER,
   opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ready_at TEXT,
   closed_at TEXT,
   FOREIGN KEY (home_equipment_id) REFERENCES equipment(id),
   FOREIGN KEY (coverage_equipment_id) REFERENCES equipment(id),
   FOREIGN KEY (opened_by_user_id) REFERENCES app_users(id),
-  FOREIGN KEY (closed_by_user_id) REFERENCES app_users(id)
+  FOREIGN KEY (closed_by_user_id) REFERENCES app_users(id),
+  FOREIGN KEY (ready_by_user_id) REFERENCES app_users(id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_fleet_coverage_swaps_open_home
