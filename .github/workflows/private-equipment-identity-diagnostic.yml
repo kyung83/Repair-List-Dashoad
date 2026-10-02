@@ -52,6 +52,16 @@ jobs:
 
           sed "s/REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID/$DB_ID/g" wrangler.template.jsonc > wrangler.jsonc
 
+          aggregate_sql="SELECT lower(trim(COALESCE(equipment_type,''))) AS equipment_type, active, CASE WHEN merged_into_equipment_id IS NULL THEN 0 ELSE 1 END AS merged, COUNT(*) AS equipment_count FROM equipment GROUP BY 1,2,3 ORDER BY 1,2,3;"
+          echo "LIVE_EQUIPMENT_TYPE_COUNTS_BEGIN"
+          npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc "${ACCOUNT_ARG[@]}" --json --command "$aggregate_sql"
+          echo "LIVE_EQUIPMENT_TYPE_COUNTS_END"
+
+          filter_sql="SELECT COUNT(*) AS all_active_unmerged, SUM(CASE WHEN lower(trim(COALESCE(equipment_type,''))) IN ('truck','vehicle','glider','switcher') THEN 1 ELSE 0 END) AS original_import_filter, SUM(CASE WHEN lower(trim(COALESCE(equipment_type,'')))='other' THEN 1 ELSE 0 END) AS other_type, SUM(CASE WHEN lower(trim(COALESCE(equipment_type,'')))='trailer' THEN 1 ELSE 0 END) AS trailer_type FROM equipment WHERE active=1 AND merged_into_equipment_id IS NULL;"
+          echo "LIVE_EQUIPMENT_FILTER_SUMMARY_BEGIN"
+          npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc "${ACCOUNT_ARG[@]}" --json --command "$filter_sql"
+          echo "LIVE_EQUIPMENT_FILTER_SUMMARY_END"
+
           sql="SELECT id,unit,COALESCE(equipment_type,'') AS equipment_type,active,merged_into_equipment_id,COALESCE(archived_at,'') AS archived_at FROM equipment ORDER BY id;"
           npx wrangler d1 execute norlow-repair-production --remote --config wrangler.jsonc "${ACCOUNT_ARG[@]}" --json --command "$sql" > /tmp/equipment.json
 
