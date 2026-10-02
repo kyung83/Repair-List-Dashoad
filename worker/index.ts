@@ -95,6 +95,8 @@ const DISPATCH_READ_PATHS = new Set([
   '/repair-board',
   '/breakdowns',
   '/unit',
+  '/truck-assignments',
+  '/api/truck-assignments',
   '/api/repair-board',
   '/api/repair-board/eta',
   '/api/repair-board/order',
@@ -171,6 +173,15 @@ async function dispatchCanAccess(request: Request, url: URL) {
     if (pathname.startsWith('/api/photos/')) return true;
     if (pathname === '/api/geotab-photo-ids' || pathname.startsWith('/api/geotab-media/')) return true;
     return false;
+  }
+
+  if (pathname === '/api/truck-assignments' && method === 'POST') {
+    try {
+      const body = await request.clone().json() as Record<string, unknown>;
+      return new Set(['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','markCoverageReady','completeCoverageSwap']).has(String(body.action ?? ''));
+    } catch {
+      return false;
+    }
   }
 
   if (pathname === '/api/repair-board' && method === 'POST') {
