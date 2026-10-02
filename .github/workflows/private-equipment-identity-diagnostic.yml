@@ -67,6 +67,38 @@ jobs:
 
           node - <<'NODE'
           const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync('/tmp/equipment.json','utf8'));
+          const rows=[];
+          function walk(v){
+            if(Array.isArray(v)){for(const x of v)walk(x);return;}
+            if(!v||typeof v!=='object')return;
+            if(Object.prototype.hasOwnProperty.call(v,'unit')&&Object.prototype.hasOwnProperty.call(v,'equipment_type')) rows.push(v);
+            for(const x of Object.values(v))walk(x);
+          }
+          walk(raw);
+          const trucks=rows.filter(r=>Number(r.active)===1&&!r.merged_into_equipment_id&&['truck','vehicle','glider','switcher'].includes(String(r.equipment_type||'').trim().toLowerCase()));
+          const shape=s=>String(s??'').trim().replace(/[0-9]/g,'#').replace(/[A-Za-z]/g,'A');
+          const shapes=new Map(), digitLengths=new Map(), digitKeys=new Map();
+          let pureNumeric=0, hasLetters=0, hasHyphen=0, blank=0;
+          for(const r of trucks){
+            const u=String(r.unit??'').trim();
+            if(!u){blank++;continue;}
+            const sh=shape(u);shapes.set(sh,(shapes.get(sh)||0)+1);
+            if(/^[0-9]+$/.test(u))pureNumeric++;
+            if(/[A-Za-z]/.test(u))hasLetters++;
+            if(u.includes('-'))hasHyphen++;
+            const digits=u.replace(/\D/g,'');
+            digitLengths.set(digits.length,(digitLengths.get(digits.length)||0)+1);
+            if(digits)digitKeys.set(digits,(digitKeys.get(digits)||0)+1);
+          }
+          const topShapes=[...shapes.entries()].sort((a,b)=>b[1]-a[1]).slice(0,25).map(([shape,count])=>({shape,count}));
+          const lengthCounts=[...digitLengths.entries()].sort((a,b)=>a[0]-b[0]).map(([digits,count])=>({digits,count}));
+          const duplicateDigitKeys=[...digitKeys.values()].filter(n=>n>1).length;
+          console.log('LIVE_TRUCK_UNIT_SHAPES='+JSON.stringify({count:trucks.length,pureNumeric,hasLetters,hasHyphen,blank,duplicateDigitKeys,digitLengths:lengthCounts,topShapes}));
+          NODE
+
+          node - <<'NODE'
+          const fs=require('fs');
           const crypto=require('crypto');
           const zlib=require('zlib');
 
