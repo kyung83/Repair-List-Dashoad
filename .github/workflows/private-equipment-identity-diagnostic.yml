@@ -6,7 +6,7 @@ on:
       - ops/private-equipment-identity-diagnostic
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   diagnostic:
@@ -85,5 +85,13 @@ jobs:
             ciphertext:ciphertext.toString('base64'),
             tag:tag.toString('base64'),
           };
-          console.log('EQUIPMENT_DIAGNOSTIC_B64='+Buffer.from(JSON.stringify(pkg),'utf8').toString('base64'));
+          fs.mkdirSync('data',{recursive:true});
+          fs.writeFileSync('data/private-equipment-diagnostic.enc.json',JSON.stringify(pkg));
+          console.log('Encrypted equipment diagnostic prepared.');
           NODE
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/private-equipment-diagnostic.enc.json
+          git commit -m "Store encrypted equipment identity diagnostic" || true
+          git push origin HEAD:ops/private-equipment-identity-diagnostic
