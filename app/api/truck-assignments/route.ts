@@ -34,6 +34,8 @@ type SwapRow = {
   reason:string;
   coverage_return_pool:string;
   opened_at:string;
+  ready_at:string|null;
+  completed_service_work:number;
 };
 
 function text(value:unknown,max=200){return String(value??'').trim().slice(0,max);}
@@ -101,7 +103,8 @@ export async function GET(request:Request){
       env.DB.prepare(`
         SELECT s.id,s.driver,s.home_equipment_id,home.unit AS home_unit,
                s.coverage_equipment_id,coverage.unit AS coverage_unit,
-               s.working_location,s.service_location,s.reason,s.coverage_return_pool,s.opened_at
+               s.working_location,s.service_location,s.reason,s.coverage_return_pool,s.opened_at,s.ready_at,
+               EXISTS(SELECT 1 FROM repairs sr WHERE sr.equipment_id=s.home_equipment_id AND sr.completed_at IS NOT NULL AND sr.completed_at>=s.opened_at) AS completed_service_work
         FROM fleet_coverage_swaps s
         JOIN equipment home ON home.id=s.home_equipment_id
         JOIN equipment coverage ON coverage.id=s.coverage_equipment_id
@@ -134,7 +137,8 @@ export async function GET(request:Request){
       coverageEquipmentId:row.coverage_equipment_id,coverageUnit:row.coverage_unit,
       workingLocation:row.working_location,serviceLocation:row.service_location,reason:row.reason,
       coverageReturnPool:row.coverage_return_pool,openedAt:row.opened_at,
-      readyToReturn:Boolean(rows.find(x=>x.equipmentId===row.home_equipment_id)?.readyToReturn),
+      repairClear:Boolean(rows.find(x=>x.equipmentId===row.home_equipment_id)?.readyToReturn),
+      readyToReturn:Boolean(rows.find(x=>x.equipmentId===row.home_equipment_id)?.readyToReturn)&&(Boolean(row.ready_at)||Boolean(row.completed_service_work)),
     }));
     return Response.json({
       permissions:{canOperate:true,canEditMaster:canEditMaster(user)},
@@ -254,6 +258,19 @@ export async function POST(request:Request){
       return Response.json({ok:true});
     }
 
+    if(action==='markCoverageReady'){
+      const swapId=id(body.swapId);
+      const swap=await env.DB.prepare('SELECT id,home_equipment_id FROM fleet_coverage_swaps WHERE id=? AND closed_at IS NULL').bind(swapId).first<{id:number;home_equipment_id:number}>();
+      if(!swap)throw new Error('Active coverage swap was not found.');
+      const home=await equipment(swap.home_equipment_id);
+      const repair=await env.DB.prepare(`SELECT COALESCE(e.out_of_service,0) AS oos,(SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs FROM equipment e WHERE e.id=?`)
+        .bind(home.id).first<{oos:number;open_repairs:number}>();
+      if(Boolean(repair?.oos)||Number(repair?.open_repairs||0)>0)throw new Error(`${home.unit} still has open Repair Board work or is out of service.`);
+      await env.DB.prepare('UPDATE fleet_coverage_swaps SET ready_at=CURRENT_TIMESTAMP,ready_by_user_id=? WHERE id=?').bind(user.id,swapId).run();
+      await logEvent(user,'ready_to_return',home.id,null,'','','',`${home.unit} marked ready to return to its permanent driver.`);
+      return Response.json({ok:true});
+    }
+
     if(action==='completeCoverageSwap'){
       const swapId=id(body.swapId);
       const swap=await env.DB.prepare(`SELECT id,driver,home_equipment_id,coverage_equipment_id,working_location,service_location,coverage_return_pool FROM fleet_coverage_swaps WHERE id=? AND closed_at IS NULL`).bind(swapId)
@@ -263,6 +280,8 @@ export async function POST(request:Request){
       const repair=await env.DB.prepare(`SELECT COALESCE(e.out_of_service,0) AS oos,(SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs FROM equipment e WHERE e.id=?`)
         .bind(home.id).first<{oos:number;open_repairs:number}>();
       if(Boolean(repair?.oos)||Number(repair?.open_repairs||0)>0)throw new Error(`${home.unit} still has open Repair Board work or is out of service.`);
+      const readiness=await env.DB.prepare(`SELECT ready_at,EXISTS(SELECT 1 FROM repairs r WHERE r.equipment_id=? AND r.completed_at IS NOT NULL AND r.completed_at>=opened_at) AS completed_service_work FROM fleet_coverage_swaps WHERE id=?`).bind(home.id,swapId).first<{ready_at:string|null;completed_service_work:number}>();
+      if(!readiness?.ready_at&&!readiness?.completed_service_work)throw new Error(`${home.unit} must be marked Ready to Return, or have completed Repair Board work from this swap, before it can go back to the driver.`);
       await env.DB.batch([
         env.DB.prepare(`UPDATE fleet_coverage_swaps SET closed_at=CURRENT_TIMESTAMP,closed_by_user_id=? WHERE id=?`).bind(user.id,swapId),
         env.DB.prepare(`UPDATE fleet_truck_assignments SET current_driver=?,current_location=?,pool_status='assigned',coverage_for_equipment_id=NULL,coverage_for_driver='',updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP WHERE equipment_id=?`)
