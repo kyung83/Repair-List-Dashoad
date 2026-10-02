@@ -1,0 +1,33 @@
+name: Test Master Truck List Source Access
+
+on:
+  push:
+    branches:
+      - ops/test-masterlist-source-access
+
+permissions:
+  contents: read
+
+jobs:
+  source-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Google Sheet export access
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://docs.google.com/spreadsheets/d/1smI6W94lDTSjP4U_4Z1er5vl-LJd3Ucwi9SQcr0YyzI/export?format=xlsx"
+          code="$(curl -L --silent --show-error -o /tmp/master.xlsx -w '%{http_code}' "$url")"
+          size="$(wc -c < /tmp/master.xlsx | tr -d ' ')"
+          echo "http_status=$code"
+          echo "download_bytes=$size"
+          if [ "$code" != "200" ]; then exit 2; fi
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/master.xlsx')
+          b=p.read_bytes()[:4]
+          if b != b'PK\x03\x04':
+              raise SystemExit('not_xlsx_zip')
+          print('xlsx_zip=true')
+          PY
