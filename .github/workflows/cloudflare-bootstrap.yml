@@ -172,8 +172,8 @@ jobs:
           fi
           echo "MASTERLIST_IMPORT_PUBLIC_KEY=$public_key"
 
-      - name: Run encrypted Master Truck List import
-        if: ${{ false }}
+      - name: Preflight encrypted Master Truck List import
+        if: steps.auth.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -223,10 +223,11 @@ jobs:
             console.log('Master Truck List import was already completed.');
             process.exit(0);
           }
-          for (const key of ['totalRows','matched','changed','unmatchedCount','preservedActiveSwaps']) {
+          for (const key of ['totalRows','matched','changed','unmatchedCount','ambiguousCount','preservedActiveSwaps']) {
             if (!Number.isInteger(payload[key])) throw new Error('Master Truck List import summary is invalid.');
           }
-          console.log(`MASTERLIST_IMPORT_SUMMARY total=${payload.totalRows} matched=${payload.matched} changed=${payload.changed} unmatched=${payload.unmatchedCount} preserved_swaps=${payload.preservedActiveSwaps}`);
+          if (payload.preflight !== true) throw new Error('Master Truck List preflight did not stay read-only.');
+          console.log(`MASTERLIST_PREFLIGHT_SUMMARY total=${payload.totalRows} matched=${payload.matched} changed=${payload.changed} unmatched=${payload.unmatchedCount} ambiguous=${payload.ambiguousCount} preserved_swaps=${payload.preservedActiveSwaps}`);
           if (!payload.encryptedReport || typeof payload.encryptedReport !== 'object') throw new Error('Encrypted Master Truck List report is missing.');
           const encoded = Buffer.from(JSON.stringify(payload.encryptedReport), 'utf8').toString('base64');
           console.log('MASTERLIST_ENCRYPTED_REPORT_B64=' + encoded);
