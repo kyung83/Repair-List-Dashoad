@@ -14,7 +14,7 @@ type Bundle={publicKey:string;privateKey:string;callToken:string};
 function fromBase64(value:string){return Uint8Array.from(atob(value),c=>c.charCodeAt(0));}
 function toBase64(bytes:ArrayBuffer|Uint8Array){const view=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);let s='';for(const b of view)s+=String.fromCharCode(b);return btoa(s);}
 function baseUnit(value:string){
-  const match=value.trim().match(/^0*(\\d+)(?:\\D|$)/);
+  const match=value.trim().match(/^0*(\d+)(?:\D|$)/);
   if(!match)return '';
   return String(Number(match[1]));
 }
