@@ -38,7 +38,7 @@ test('migration bootstraps assigned, open and floater trucks without storing fle
       (4,'T-9','trailer','','Clare');
   `);
   db.exec(migration);
-  const rows=db.prepare('SELECT equipment_id,home_driver,current_driver,pool_status FROM fleet_truck_assignments ORDER BY equipment_id').all();
+  const rows=db.prepare('SELECT equipment_id,home_driver,current_driver,pool_status FROM fleet_truck_assignments ORDER BY equipment_id').all().map(row=>({...row}));
   assert.deepEqual(rows,[
     {equipment_id:1,home_driver:'Jane Driver',current_driver:'Jane Driver',pool_status:'assigned'},
     {equipment_id:2,home_driver:'',current_driver:'',pool_status:'open'},
@@ -59,7 +59,8 @@ test('temporary coverage swap preserves permanent home assignment',()=>{
   assert.match(api,/pool_status='coverage'/);
   assert.match(api,/action==='completeCoverageSwap'/);
   assert.match(api,/returned to \$\{swap\.driver\}/);
-  assert.doesNotMatch(api,/UPDATE fleet_truck_assignments SET home_driver=.*startCoverageSwap/s);
+  const swapSection=api.split("if(action==='startCoverageSwap')")[1].split("if(action==='completeCoverageSwap')")[0];
+  assert.doesNotMatch(swapSection,/home_driver\s*=/);
 });
 
 test('only managers and admins can edit permanent assignments',()=>{
