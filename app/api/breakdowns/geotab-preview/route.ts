@@ -14,14 +14,28 @@ export async function GET(request: Request) {
     if (unitType !== 'truck' && unitType !== 'trailer') throw new Error('Pick Truck or Trailer.');
     if (!unitNumber) throw new Error('Unit # is required.');
 
-    const equipment = await env.DB.prepare(`
-      SELECT id, equipment_type
+    const equipmentRows = await env.DB.prepare(`
+      SELECT id, unit, equipment_type
       FROM equipment
-      WHERE unit = ? AND active = 1 AND archived_at IS NULL
-    `).bind(unitNumber).first<{ id: number; equipment_type: string }>();
-    if (!equipment) throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${unitNumber}" was not found.`);
-    if (equipment.equipment_type !== unitType) {
-      throw new Error(`"${unitNumber}" is on file as a ${equipment.equipment_type}, not a ${unitType}.`);
+      WHERE lower(trim(COALESCE(unit,''))) = lower(?)
+        AND active = 1
+        AND archived_at IS NULL
+      ORDER BY id DESC
+      LIMIT 4
+    `).bind(unitNumber).all<{ id: number; unit: string; equipment_type: string }>();
+    const typedEquipment = equipmentRows.results.filter(
+      (row) => String(row.equipment_type || '').trim().toLowerCase() === unitType,
+    );
+    if (typedEquipment.length > 1) {
+      throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${unitNumber}" has duplicate active equipment records.`);
+    }
+    const equipment = typedEquipment[0];
+    if (!equipment) {
+      if (equipmentRows.results.length) {
+        const actualType = String(equipmentRows.results[0].equipment_type || '').trim().toLowerCase() || 'other';
+        throw new Error(`"${unitNumber}" is on file as a ${actualType}, not a ${unitType}.`);
+      }
+      throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${unitNumber}" was not found.`);
     }
 
     const preview = await resolveBreakdownGeotabPreview(env, {
