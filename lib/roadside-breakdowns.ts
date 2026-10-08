@@ -114,13 +114,29 @@ export async function getBreakdown(id: number): Promise<BreakdownRow | null> {
 
 /** Finds active equipment by unit number and confirms it matches the type the driver picked (truck vs trailer). */
 async function resolveUnit(unit: string, unitType: UnitType): Promise<number> {
-  const row = await env.DB.prepare(`SELECT id, equipment_type FROM equipment WHERE unit = ? AND active = 1`)
-    .bind(unit.trim()).first<{ id: number; equipment_type: string }>();
-  if (!row) throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${unit}" was not found. Check the number and try again.`);
-  if (row.equipment_type !== unitType) {
-    throw new Error(`"${unit}" is on file as a ${row.equipment_type}, not a ${unitType}. Double-check the number.`);
+  const normalizedUnit = unit.trim();
+  const rows = await env.DB.prepare(`
+    SELECT id, unit, equipment_type
+    FROM equipment
+    WHERE lower(trim(COALESCE(unit,''))) = lower(?)
+      AND active = 1
+      AND archived_at IS NULL
+    ORDER BY id DESC
+    LIMIT 4
+  `).bind(normalizedUnit).all<{ id: number; unit: string; equipment_type: string }>();
+
+  const typed = rows.results.filter(
+    (row) => String(row.equipment_type || '').trim().toLowerCase() === unitType,
+  );
+  if (typed.length === 1) return typed[0].id;
+  if (typed.length > 1) {
+    throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${normalizedUnit}" has duplicate active equipment records. Contact the shop office.`);
   }
-  return row.id;
+  if (rows.results.length) {
+    const actualType = String(rows.results[0].equipment_type || '').trim().toLowerCase() || 'other';
+    throw new Error(`"${normalizedUnit}" is on file as a ${actualType}, not a ${unitType}. Double-check the number.`);
+  }
+  throw new Error(`${unitType === 'truck' ? 'Truck' : 'Trailer'} "${normalizedUnit}" was not found. Check the number and try again.`);
 }
 
 export async function previewBreakdownGeotab(unitNumber: string, unitType: UnitType) {
@@ -176,17 +192,17 @@ function validatedTireDetails(input: CreateBreakdownInput) {
  */
 export async function createBreakdown(input: CreateBreakdownInput) {
   const equipmentId = await resolveUnit(input.unitNumber, input.unitType);
-  const geotabSnapshot = await resolveBreakdownGeotabSnapshot(env, {
-    equipmentId,
-    unitType: input.unitType,
-  });
-
   const manualDriver = String(input.driverName ?? '').trim().slice(0, 120);
   const manualPhone = String(input.driverPhone ?? '').trim().slice(0, 60);
   const manualState = String(input.state ?? '').trim().toUpperCase().slice(0, 2);
   const manualCity = String(input.city ?? '').trim().slice(0, 120);
   const wantsCorrection = input.snapshotVerification === 'corrected';
+  const manualFallback = input.snapshotVerification === 'unavailable';
   const hasManualSnapshot = Boolean(manualDriver && manualState && manualCity);
+  const geotabSnapshot = manualFallback ? null : await resolveBreakdownGeotabSnapshot(env, {
+    equipmentId,
+    unitType: input.unitType,
+  });
 
   if (wantsCorrection && !hasManualSnapshot) {
     throw new Error('Enter the corrected driver, city, and state before submitting.');
