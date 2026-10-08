@@ -73,7 +73,7 @@ export default function ShopPage(){
   async function handoff(){
     const note=handoffNote.trim();
     if(!note){setMessage("Enter what is left to do for the next shift.");window.requestAnimationFrame(()=>document.querySelector<HTMLTextAreaElement>('[aria-label="Shift handoff note"]')?.focus());return}
-    const result=await action({action:"doneUnit",handoff:true,targetTechnicianId:handoffTechId?Number(handoffTechId):null,handoffNote:note});
+    const result=await action({action:"doneUnit",handoff:true,targetTechnicianId:data?.user.role==="manager"||data?.user.role==="admin"?(handoffTechId?Number(handoffTechId):null):null,handoffNote:note});
     if(result){setHandoffOpen(false);setHandoffNote("");setHandoffTechId("")}
   }
   async function usePlannedPart(repair:Repair,planned:PlannedPart){const remaining=Math.max(0,planned.quantity-planned.usedQuantity);if(remaining<=0)return;const result=await action({action:"usePart",repairId:repair.id,partId:planned.partId,quantity:remaining});if(result)setMessage(result.awaitingParts?`${planned.partNumber}: Parts Desk updated automatically.`:`${numberText(result.quantity||remaining)} × ${planned.partNumber} applied${result.warehouseCode?` from ${result.warehouseCode}`:""}.`)}
@@ -89,16 +89,17 @@ export default function ShopPage(){
   const mineGroups=useMemo(()=>groupByUnit(mine),[mine]);
   const availableGroups=useMemo(()=>groupByUnit(available),[available]);
   const allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
-  const techOptions=useMemo(()=>(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId),[data]);
+  const canAssignHandoff=data?.user.role==="manager"||data?.user.role==="admin";
+  const techOptions=useMemo(()=>canAssignHandoff?(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId):[],[data,canAssignHandoff]);
 
   if(data?.activeTimer&&activeRepair){
     const handoffPanel=handoffOpen?<section style={handoffPanelStyle}>
       <div><strong style={{fontSize:16,color:"#17324a"}}>Done working on this unit</strong><div style={helper}>Keep it assigned to yourself, or hand the unfinished work to the next shift.</div></div>
       <button type="button" disabled={busy} onClick={()=>void doneForNow()} style={keepButton}>DONE FOR NOW — KEEP ASSIGNED TO ME</button>
       <div style={orLine}>OR HAND OFF</div>
-      <label style={label}>Hand off to<select value={handoffTechId} onChange={event=>setHandoffTechId(event.target.value)} style={input} disabled={busy}><option value="">Leave Unassigned — next shift can pick it up</option>{techOptions.map(tech=><option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>
+      {canAssignHandoff?<label style={label}>Hand off to<select value={handoffTechId} onChange={event=>setHandoffTechId(event.target.value)} style={input} disabled={busy}><option value="">Leave Unassigned — next shift can pick it up</option>{techOptions.map(tech=><option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>:<div style={helper}>Leave Unassigned — the next shift can pick up the unfinished work.</div>}
       <label style={label}>What is left to do? *<textarea aria-label="Shift handoff note" value={handoffNote} onChange={event=>setHandoffNote(event.target.value)} maxLength={500} rows={3} placeholder="What still needs to be completed?" style={{...input,resize:"vertical"}} disabled={busy}/></label>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>HAND OFF TO NEXT SHIFT</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>{canAssignHandoff?"HAND OFF TO NEXT SHIFT":"LEAVE UNASSIGNED"}</button></div>
     </section>:null;
 
     return <CurrentWorkHome
