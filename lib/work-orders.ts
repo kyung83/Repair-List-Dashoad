@@ -175,7 +175,7 @@ export async function getWorkOrderData(db:D1Database){
   }));
   return {
     id:`repair-${row.id}`,numericId:row.id,equipmentId:row.equipment_id,unit:row.unit,issue:row.title,status:row.status,
-    partsText:row.parts_text??'',assignedTo:row.technician_name??row.driver??'',technicianId:row.technician_id,
+    partsText:row.parts_text??'',assignedTo:row.technician_name??'',technicianId:row.technician_id,
     location:row.location??'',relatedGeotabDefectId:row.geotab_defect_id??'',laborHours,laborRate:fallbackLaborRate,laborCost,
     outsideCost,partCost,missingPartCostLines,totalCost:laborCost+partCost+outsideCost,usedParts,laborEntries,technicianNotes,repairPhotos,
     completedAt:timestamp(row.completed_at),reviewedAt:timestamp(row.reviewed_at),reviewedBy:row.reviewer_name??'',reviewNote:row.review_note??'',updatedAt:row.updated_at,
@@ -188,7 +188,7 @@ export async function getWorkOrderData(db:D1Database){
   if(!completeStatus(repair.status))continue;
   const completionDate=detroitDate(repair.completedAt||repair.updatedAt);
   const equipmentKey=repair.equipmentId===null?repair.unit:`equipment-${repair.equipmentId}`;
-  const technicianKey=repair.technicianId===null?repair.assignedTo:`technician-${repair.technicianId}`;
+  const technicianKey=repair.technicianId===null?'unassigned':`technician-${repair.technicianId}`;
   const key=`${equipmentKey}|${technicianKey}|${completionDate}`;
   const list=packageMap.get(key)??[];list.push(repair);packageMap.set(key,list);
  }
