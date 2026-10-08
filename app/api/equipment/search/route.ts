@@ -38,8 +38,8 @@ export async function GET(request: Request) {
     `).bind(unitType, like, RESULT_LIMIT + 1).all<{ unit: string; equipment_type: string }>();
 
     const rows = result.results.slice(0, RESULT_LIMIT).map((row) => ({
-      unit: row.unit,
-      equipmentType: row.equipment_type,
+      unit: String(row.unit || '').trim(),
+      equipmentType: String(row.equipment_type || '').trim().toLowerCase(),
     }));
 
     return Response.json(
