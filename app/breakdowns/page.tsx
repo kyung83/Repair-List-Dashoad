@@ -142,8 +142,8 @@ export default function BreakdownsPage(){
   const[query,setQuery]=useState('');
   const[loading,setLoading]=useState(true);
   const[busyAction,setBusyAction]=useState<BusyAction>(null);
-  const[editingTrailer,setEditingTrailer]=useState(false);
-  const[trailerDraft,setTrailerDraft]=useState('');
+  const[editingUnit,setEditingUnit]=useState(false);
+  const[unitDraft,setUnitDraft]=useState('');
   const[message,setMessage]=useState('');
   const initialLoadDone=useRef(false);
 
@@ -225,12 +225,12 @@ export default function BreakdownsPage(){
   },[breakdowns,filter,categoryFilter,query]);
 
   function openBreakdown(id:number){
-    setSelectedId(id);setEditingTrailer(false);setTrailerDraft('');setMessage('');
+    setSelectedId(id);setEditingUnit(false);setUnitDraft('');setMessage('');
     const url=new URL(window.location.href);url.searchParams.set('id',String(id));window.history.pushState(null,'',url);
     window.scrollTo({top:0,behavior:'smooth'});
   }
   function backToList(){
-    setSelectedId(null);setEditingTrailer(false);setTrailerDraft('');setMessage('');
+    setSelectedId(null);setEditingUnit(false);setUnitDraft('');setMessage('');
     const url=new URL(window.location.href);url.searchParams.delete('id');window.history.pushState(null,'',url);
     window.scrollTo({top:0,behavior:'smooth'});
   }
@@ -288,20 +288,22 @@ export default function BreakdownsPage(){
     finally{setBusyAction(null);}
   }
 
-  async function correctTrailer(row:BreakdownViewRow){
-    const next=trailerDraft.trim();
-    if(!next){setMessage('Enter the correct trailer number.');return;}
-    if(!window.confirm(`Change breakdown #${row.id} from Trailer ${row.unit} to Trailer ${next}?\n\nThe linked repair, costs, photos, and breakdown history stay together and move to the corrected trailer.`))return;
+  async function correctUnit(row:BreakdownViewRow){
+    const next=unitDraft.trim();
+    const unitType=String(row.equipment_type||'').toLowerCase()==='trailer'?'trailer':'truck';
+    const unitName=unitType==='trailer'?'Trailer':'Truck';
+    if(!next){setMessage(`Enter the correct ${unitType} number.`);return;}
+    if(!window.confirm(`Change breakdown #${row.id} from ${unitName} ${row.unit} to ${unitName} ${next}?\n\nThe linked repair, costs, photos, and breakdown history stay together and move to the corrected ${unitType}.`))return;
     setBusyAction('unit');setMessage('');
     try{
-      const response=await fetch(`/api/breakdowns/${row.id}/unit`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({trailerNumber:next})});
-      const payload=await response.json() as {ok?:boolean;changed?:boolean;trailerNumber?:string;previousTrailerNumber?:string;error?:string};
-      if(!response.ok||!payload.ok)throw new Error(payload.error||'Trailer number could not be corrected.');
-      await load();setSelectedId(row.id);setEditingTrailer(false);setTrailerDraft('');
+      const response=await fetch(`/api/breakdowns/${row.id}/unit`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({unitNumber:next})});
+      const payload=await response.json() as {ok?:boolean;changed?:boolean;unitType?:'truck'|'trailer';unitNumber?:string;previousUnitNumber?:string;error?:string};
+      if(!response.ok||!payload.ok)throw new Error(payload.error||`${unitName} number could not be corrected.`);
+      await load();setSelectedId(row.id);setEditingUnit(false);setUnitDraft('');
       setMessage(payload.changed===false
-        ? `Breakdown #${row.id} is already assigned to Trailer ${payload.trailerNumber||row.unit}.`
-        : `Breakdown #${row.id} changed from Trailer ${payload.previousTrailerNumber||row.unit} to Trailer ${payload.trailerNumber||next}. Linked repair and costs moved with it.`);
-    }catch(error){setMessage(error instanceof Error?error.message:'Trailer number could not be corrected.');}
+        ? `Breakdown #${row.id} is already assigned to ${unitName} ${payload.unitNumber||row.unit}.`
+        : `Breakdown #${row.id} changed from ${unitName} ${payload.previousUnitNumber||row.unit} to ${unitName} ${payload.unitNumber||next}. Linked repair and costs moved with it.`);
+    }catch(error){setMessage(error instanceof Error?error.message:`${unitName} number could not be corrected.`);}
     finally{setBusyAction(null);}
   }
 
@@ -356,19 +358,23 @@ export default function BreakdownsPage(){
       <div className={s.workflow}>
         <section className={s.card}>
           <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>1</span><div><h2 className={s.cardTitle}>Driver Report & Our Diagnosis</h2><p className={s.cardHelp}>The driver report stays read-only. Choose our repair category and write our own notes below it.</p></div></div></div>
-          {String(selected.equipment_type||'').toLowerCase()==='trailer'?<div className={s.statusBox} style={{marginBottom:14}}>
-            <div className={s.statusRow}><span>Affected trailer</span><strong>{selected.unit}</strong></div>
-            {!editingTrailer?<div className={s.actions} style={{marginTop:10}}><button type="button" className={s.button} disabled={anyActionBusy} onClick={()=>{setTrailerDraft(selected.unit);setEditingTrailer(true);setMessage('');}}>Change Trailer #</button></div>:<>
-              <label className={s.field} style={{marginTop:10}}>Correct trailer number
-                <input className={s.input} value={trailerDraft} disabled={unitBusy} onChange={event=>setTrailerDraft(event.target.value.replace(/[^a-zA-Z0-9()\- ]/g,'').slice(0,40))} placeholder="Example: 53027 or TRL 211"/>
-              </label>
-              <div className={s.actions} style={{marginTop:10}}>
-                <button type="button" className={s.orangeButton} disabled={anyActionBusy||!trailerDraft.trim()} onClick={()=>void correctTrailer(selected)}>{unitBusy?'Saving…':'Save Correct Trailer'}</button>
-                <button type="button" className={s.button} disabled={unitBusy} onClick={()=>{setEditingTrailer(false);setTrailerDraft('');}}>Cancel</button>
-              </div>
-              <p className={s.cardHelp} style={{marginTop:8}}>This changes only the affected trailer. The linked repair, photos, costs, and breakdown history stay with this breakdown.</p>
-            </>}
-          </div>:null}
+          {(()=>{
+            const correctionType=String(selected.equipment_type||'').toLowerCase()==='trailer'?'trailer':'truck';
+            const correctionName=correctionType==='trailer'?'Trailer':'Truck';
+            return <div className={s.statusBox} style={{marginBottom:14}}>
+              <div className={s.statusRow}><span>Affected {correctionType}</span><strong>{selected.unit}</strong></div>
+              {!editingUnit?<div className={s.actions} style={{marginTop:10}}><button type="button" className={s.button} disabled={anyActionBusy} onClick={()=>{setUnitDraft(selected.unit);setEditingUnit(true);setMessage('');}}>Change {correctionName} #</button></div>:<>
+                <label className={s.field} style={{marginTop:10}}>Correct {correctionType} number
+                  <input className={s.input} value={unitDraft} disabled={unitBusy} onChange={event=>setUnitDraft(event.target.value.replace(/[^a-zA-Z0-9()\- ]/g,'').slice(0,40))} placeholder={correctionType==='trailer'?'Example: 53027 or TRL 211':'Example: 227 or 227(DC)'}/>
+                </label>
+                <div className={s.actions} style={{marginTop:10}}>
+                  <button type="button" className={s.orangeButton} disabled={anyActionBusy||!unitDraft.trim()} onClick={()=>void correctUnit(selected)}>{unitBusy?'Saving…':`Save Correct ${correctionName}`}</button>
+                  <button type="button" className={s.button} disabled={unitBusy} onClick={()=>{setEditingUnit(false);setUnitDraft('');}}>Cancel</button>
+                </div>
+                <p className={s.cardHelp} style={{marginTop:8}}>This changes only the affected {correctionType}. The linked repair, photos, costs, and breakdown history stay with this breakdown.</p>
+              </>}
+            </div>;
+          })()}
           <div className={s.reported}>
             <strong>Driver Report — Read Only</strong><br/>
             <b>Category:</b> {selected.repair_category||'Not entered'}
