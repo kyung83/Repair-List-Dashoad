@@ -9,7 +9,7 @@ test('breakdown actions show loading text only for the action being saved', asyn
   assert.match(page, /diagnosticsBusy\?'Saving…':'Save Our Diagnosis'/);
   assert.match(page, /providerBusy\?'Saving…':selected\.stage<3\?'Save & Mark En Route':'Save Provider \/ ETA'/);
   assert.match(page, /onLocationBusy\?'Saving…':'Mark On Location'/);
-  assert.match(page, /unitBusy\?'Saving…':'Save Correct Trailer'/);
+  assert.match(page, /unitBusy\?'Saving…':`Save Correct \$\{correctionName\}`/);
   assert.match(page, /clearBusy\?'Clearing…':'Clear — Not a Breakdown'/);
   assert.doesNotMatch(page, /const\[busy,setBusy\]=useState<number\|null>/);
 });
