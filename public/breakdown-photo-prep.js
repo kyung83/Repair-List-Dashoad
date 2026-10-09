@@ -280,8 +280,10 @@
 
     void Promise.all(additions.map(function (item) {
       return preparePhoto(item.file)
-        .catch(function () { return item.file; })
-        .then(function (prepared) { return { key: item.key, file: prepared }; });
+        .then(function (prepared) {
+          if (prepared.size > TARGET_BYTES) throw new Error('Photo could not be resized enough.');
+          return { key: item.key, file: prepared };
+        });
     })).then(function (preparedAdditions) {
       if (input.dataset.photoPrepRun !== runId) return;
       var current = photoState.get(input) || previous;
@@ -302,7 +304,7 @@
       if (input.dataset.photoPrepRun === runId) {
         input.dataset.photoPrep = 'failed';
         syncInputFiles(input, previous);
-        renderManager(input, previous, 'A photo could not be prepared. Try adding it again.');
+        renderManager(input, previous, 'A selected photo is too large or cannot be converted on this phone. Choose a smaller JPG photo and try again. Your other form details are still here.');
       }
     }).finally(function () {
       if (input.dataset.photoPrepRun === runId) {
