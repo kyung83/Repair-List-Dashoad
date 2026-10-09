@@ -27,3 +27,11 @@ test('large roadside photos are compressed only in the outgoing breakdown reques
   assert.match(source, /new File\(\[best\]/);
   assert.match(source, /type: 'image\/jpeg'/);
 });
+
+test('driver breakdowns show the original clear red warning for any photo-size 413 response', async () => {
+  const page = await read('app/report-breakdown/page.tsx');
+  const compressor = await read('app/report-breakdown/breakdown-photo-request-compressor.tsx');
+  assert.match(page, /if \(response\.status===413\) throw new Error\('That photo is too large to upload\. Choose a smaller photo and try again\.'\)/);
+  assert.match(page, /setResult\(\{ error:/);
+  assert.match(compressor, /status: 413/);
+});
