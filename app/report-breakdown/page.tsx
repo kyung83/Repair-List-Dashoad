@@ -210,12 +210,13 @@ export default function ReportBreakdownPage() {
     try {
       const form = new FormData(event.currentTarget);
       const response = await fetch('/api/breakdowns', { method:'POST', body:form });
+      // Show the same clear photo-size warning for both JSON and non-JSON 413 responses.
+      if (response.status===413) throw new Error('That photo is too large to upload. Choose a smaller photo and try again.');
       const responseText = await response.text();
       let payload:BreakdownSubmitPayload={};
       if (responseText) {
         try { payload=JSON.parse(responseText) as BreakdownSubmitPayload; }
         catch {
-          if (response.status===413) throw new Error('That photo is too large to upload. Choose a smaller photo and try again.');
           if (response.ok) throw new Error('The breakdown may have been saved, but the confirmation could not be read. Check the breakdown dashboard before submitting again.');
           throw new Error(`The breakdown service returned an unreadable response (HTTP ${response.status}). Try again.`);
         }
