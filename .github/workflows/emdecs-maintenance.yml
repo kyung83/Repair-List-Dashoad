@@ -1,0 +1,31 @@
+name: EMDECS controlled maintenance
+on:
+  push:
+    branches: [agent/emdecs-refresh-20261009]
+    paths: ['maintenance/**', '.github/workflows/emdecs-maintenance.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: emdecs-controlled-maintenance-20261009
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Read production import state and encrypt report
+        run: node maintenance/preflight.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emdecs-preflight-encrypted
+          path: maintenance-output/*.json
+          retention-days: 2
+          if-no-files-found: error
