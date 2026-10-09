@@ -7,7 +7,7 @@ const MAX_PER_PHOTO_BYTES = 700_000;
 const TARGET_TOTAL_PHOTO_BYTES = 4_000_000;
 const MAX_DIMENSION = 1600;
 const MIN_DIMENSION = 720;
-const JPEG_QUALITIES = [0.82, 0.72, 0.62, 0.52, 0.44, 0.36];
+const JPEG_QUALITIES = [0.82, 0.72, 0.62, 0.52, 0.44, 0.36, 0.28, 0.2];
 
 function requestPath(input: RequestInfo | URL) {
   try {
@@ -53,7 +53,8 @@ function safeBaseName(file: File) {
 }
 
 async function compressPhoto(file: File, targetBytes: number) {
-  if (!file.type.startsWith('image/') || file.size <= targetBytes) return file;
+  if (file.size <= targetBytes && !/hei[cf]/i.test(file.type)) return file;
+  if (!file.type.startsWith('image/')) throw new Error(`${file.name || 'The attachment'} is not a supported image. Choose a JPG or PNG photo.`);
 
   const image = await loadImage(file);
   const sourceWidth = image.naturalWidth || image.width;
@@ -69,7 +70,7 @@ async function compressPhoto(file: File, targetBytes: number) {
   if (!context) throw new Error('The phone could not prepare the selected photo for upload.');
 
   let best: Blob | null = null;
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < 7; pass += 1) {
     canvas.width = width;
     canvas.height = height;
     context.fillStyle = '#fff';
@@ -92,7 +93,7 @@ async function compressPhoto(file: File, targetBytes: number) {
   }
 
   if (!best) throw new Error('The selected photo could not be resized.');
-  if (best.size >= file.size) return file;
+  if (best.size > targetBytes) throw new Error(`${file.name || 'A photo'} could not be reduced enough. Choose a smaller copy of that photo.`);
 
   return new File([best], `${safeBaseName(file)}.jpg`, {
     type: 'image/jpeg',
@@ -117,6 +118,9 @@ async function prepareBreakdownForm(form: FormData) {
   for (const photo of photos) {
     prepared.push(await compressPhoto(photo, targetPerPhoto));
   }
+
+  const totalBytes = prepared.reduce((sum, photo) => sum + photo.size, 0);
+  if (totalBytes > TARGET_TOTAL_PHOTO_BYTES) throw new Error('The selected photos exceed the upload size limit after resizing. Try smaller photo copies.');
 
   const next = new FormData();
   for (const [name, value] of form.entries()) {
