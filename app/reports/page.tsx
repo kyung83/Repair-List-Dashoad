@@ -186,8 +186,12 @@ function Section({ title, subtitle, action, children }: { title: string; subtitl
   );
 }
 
-function TableWrap({ children }: { children: React.ReactNode }) {
-  return <div style={{ overflowX: "auto" }}>{children}</div>;
+function TableWrap({ children, maxHeight = 420 }: { children: React.ReactNode; maxHeight?: number }) {
+  return (
+    <div role="region" aria-label="Scrollable report table" tabIndex={0} style={{ maxHeight, overflow: "auto", overscrollBehavior: "contain", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+      {children}
+    </div>
+  );
 }
 
 export default function ReportsPage() {
@@ -196,6 +200,7 @@ export default function ReportsPage() {
   const [year, setYear] = useState(String(currentYear));
   const [unitId, setUnitId] = useState("all");
   const [query, setQuery] = useState("");
+  const [sortConfig, setSortConfig] = useState<Record<string, { key: string; direction: "asc" | "desc" }>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -301,6 +306,52 @@ export default function ReportsPage() {
   }), [data, unitId]);
 
   const visibleParts = useMemo(() => (data?.partsUsage ?? []).filter((part) => unitId === "all" || (selectedUnit ? part.units.includes(selectedUnit.unit) : true)), [data, selectedUnit, unitId]);
+  function sortRows<T extends object>(rows: T[], tableId: string): T[] {
+    const active = sortConfig[tableId];
+    if (!active) return rows;
+    return [...rows].sort((a, b) => {
+      const left = a[active.key as keyof T];
+      const right = b[active.key as keyof T];
+      if (left == null && right == null) return 0;
+      if (left == null) return 1;
+      if (right == null) return -1;
+      const compared = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+      return active.direction === "asc" ? compared : -compared;
+    });
+  }
+
+  function toggleSort(tableId: string, key: string) {
+    setSortConfig((current) => {
+      const prior = current[tableId];
+      return { ...current, [tableId]: { key, direction: prior?.key === key && prior.direction === "asc" ? "desc" : "asc" } };
+    });
+  }
+
+  function sortHeads(tableId: string, columns: Array<[string, string]>, padding = 8) {
+    return columns.map(([title, key]) => {
+      const active = sortConfig[tableId];
+      const selected = active?.key === key;
+      return (
+        <th
+          key={key}
+          aria-sort={selected ? (active.direction === "asc" ? "ascending" : "descending") : "none"}
+          style={{ position: "sticky", top: 0, zIndex: 2, background: "white", textAlign: "left", padding, borderBottom: "1px solid #dce2e7", fontSize: 12, whiteSpace: "nowrap" }}
+        >
+          <button
+            type="button"
+            title={`Sort by ${title}`}
+            onClick={() => toggleSort(tableId, key)}
+            style={{ border: 0, background: "transparent", color: "#172033", font: "inherit", fontWeight: 850, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, padding: 0, whiteSpace: "nowrap" }}
+          >
+            {title} <span aria-hidden="true" style={{ color: selected ? "#6d28d9" : "#64748b" }}>{selected ? (active.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+          </button>
+        </th>
+      );
+    });
+  }
+
   const maxCategoryCost = Math.max(1, ...(data?.categoryCosts ?? []).map((item) => item.totalCost));
 
   if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading reports…</main>;
@@ -336,6 +387,7 @@ export default function ReportsPage() {
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Unit, repair, technician…" style={inputStyle} />
         </label>
       </section>
+      <p style={{ margin: "9px 0 0", color: "#64748b", fontSize: 12 }}>Scroll inside report tables to see more rows. Column headings stay visible. Select a heading to sort, then select it again to reverse the order.</p>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 12 }}>
         {[
@@ -368,12 +420,12 @@ export default function ReportsPage() {
       <Section
         title={`Unit Cost Analysis — ${data.selectedYear}`}
         subtitle="Year cost separates parts, labor/outside charges and other ownership expenses. Lifetime ownership adds purchase price when it has been entered."
-        action={<button style={buttonStyle} onClick={() => downloadCsv(`unit-cost-${data.selectedYear}.csv`, visibleUnits.map((unit) => ({ Unit: unit.unit, Category: unit.category, RepairCost: unit.yearRepairCost, OtherExpenses: unit.yearExpenseCost, YearOperatingCost: unit.yearOperatingCost, LifetimeRepairCost: unit.lifetimeRepairCost, LifetimeOtherExpenses: unit.lifetimeExpenseCost, PurchasePrice: unit.purchasePrice, LifetimeOwnershipCost: unit.lifetimeOwnershipCost, NetLifecycleCost: unit.netLifecycleCost, CostPerMile: unit.recordedCostPerMile, RepairsThisYear: unit.repairCountYear, LifetimeRepairs: unit.lifetimeRepairCount })))}>Export CSV</button>}
+        action={<button style={buttonStyle} onClick={() => downloadCsv(`unit-cost-${data.selectedYear}.csv`, sortRows(visibleUnits, "units").map((unit) => ({ Unit: unit.unit, Category: unit.category, RepairCost: unit.yearRepairCost, OtherExpenses: unit.yearExpenseCost, YearOperatingCost: unit.yearOperatingCost, LifetimeRepairCost: unit.lifetimeRepairCost, LifetimeOtherExpenses: unit.lifetimeExpenseCost, PurchasePrice: unit.purchasePrice, LifetimeOwnershipCost: unit.lifetimeOwnershipCost, NetLifecycleCost: unit.netLifecycleCost, CostPerMile: unit.recordedCostPerMile, RepairsThisYear: unit.repairCountYear, LifetimeRepairs: unit.lifetimeRepairCount })))}>Export CSV</button>}
       >
-        <TableWrap>
+        <TableWrap maxHeight={560}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1450 }}>
-            <thead><tr>{["Unit","Category","Year repairs","Parts","Labor","Outside","Other expenses","Year operating","Lifetime repairs","Lifetime other","Purchase","Lifetime ownership","Net lifecycle","Recorded $/mi","Repair count"].map((head) => <th key={head} style={{ textAlign: "left", padding: 9, borderBottom: "1px solid #dce2e7", fontSize: 12 }}>{head}</th>)}</tr></thead>
-            <tbody>{visibleUnits.map((unit) => <tr key={unit.equipmentId}>
+            <thead><tr>{sortHeads("units", [["Unit","unit"],["Category","category"],["Year repairs","repairCountYear"],["Parts","yearPartsCost"],["Labor","yearLaborCost"],["Outside","yearOutsideCost"],["Other expenses","yearExpenseCost"],["Year operating","yearOperatingCost"],["Lifetime repairs","lifetimeRepairCost"],["Lifetime other","lifetimeExpenseCost"],["Purchase","purchasePrice"],["Lifetime ownership","lifetimeOwnershipCost"],["Net lifecycle","netLifecycleCost"],["Recorded $/mi","recordedCostPerMile"],["Repair count","lifetimeRepairCount"]], 9)}</tr></thead>
+            <tbody>{sortRows(visibleUnits, "units").map((unit) => <tr key={unit.equipmentId}>
               <td style={{ padding: 9, borderBottom: "1px solid #eef2f5", fontWeight: 850 }}>{unit.unit}</td>
               <td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{unit.category}</td>
               <td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{unit.repairCountYear}</td>
@@ -409,27 +461,27 @@ export default function ReportsPage() {
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Year-over-Year Fleet Cost</h2>
           <p style={{ color: "#64748b", fontSize: 13 }}>Recorded repair and ownership spending by calendar year.</p>
-          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{["Year","Repairs","Repair cost","Other expenses","Purchases","Total"].map((head) => <th key={head} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{[...data.yearlyTrend].reverse().map((item) => <tr key={item.year}><td style={{ padding: 8 }}>{item.year}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{money(item.repairCost)}</td><td style={{ padding: 8 }}>{money(item.expenseCost)}</td><td style={{ padding: 8 }}>{money(item.purchaseCost)}</td><td style={{ padding: 8, fontWeight: 800 }}>{money(item.totalCost)}</td></tr>)}</tbody></table></TableWrap>
+          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("yearly", [["Year","year"],["Repairs","repairCount"],["Repair cost","repairCost"],["Other expenses","expenseCost"],["Purchases","purchaseCost"],["Total","totalCost"]], 8)}</tr></thead><tbody>{sortRows([...data.yearlyTrend].reverse(), "yearly").map((item) => <tr key={item.year}><td style={{ padding: 8 }}>{item.year}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{money(item.repairCost)}</td><td style={{ padding: 8 }}>{money(item.expenseCost)}</td><td style={{ padding: 8 }}>{money(item.purchaseCost)}</td><td style={{ padding: 8, fontWeight: 800 }}>{money(item.totalCost)}</td></tr>)}</tbody></table></TableWrap>
         </div>
       </section>
 
       <Section
         title={unitId === "all" ? `Repair History — ${data.selectedYear}` : `Lifetime Repair History — ${selectedUnit?.unit ?? "Unit"}`}
         subtitle="Parts are costed from the historical repair-part snapshot when available; labor and outside charges can be entered below."
-        action={<button style={buttonStyle} onClick={() => downloadCsv(`repair-history-${unitId === "all" ? data.selectedYear : selectedUnit?.unit ?? "unit"}.csv`, visibleRepairs.map((repair) => ({ Date: repair.openedAt.slice(0,10), Unit: repair.unit, Repair: repair.title, Status: repair.status, Technician: repair.technician, PartsCost: repair.partsCost, LaborHours: repair.laborHours, LaborRate: repair.laborRate, LaborCost: repair.laborCost, OutsideCost: repair.outsideCost, TotalCost: repair.totalCost, RepairCycleHours: repair.repairCycleHours })))}>Export CSV</button>}
+        action={<button style={buttonStyle} onClick={() => downloadCsv(`repair-history-${unitId === "all" ? data.selectedYear : selectedUnit?.unit ?? "unit"}.csv`, sortRows(visibleRepairs, "repairs").map((repair) => ({ Date: repair.openedAt.slice(0,10), Unit: repair.unit, Repair: repair.title, Status: repair.status, Technician: repair.technician, PartsCost: repair.partsCost, LaborHours: repair.laborHours, LaborRate: repair.laborRate, LaborCost: repair.laborCost, OutsideCost: repair.outsideCost, TotalCost: repair.totalCost, RepairCycleHours: repair.repairCycleHours })))}>Export CSV</button>}
       >
-        <TableWrap><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1250 }}><thead><tr>{["Date","Unit","Repair","Status","Technician","Parts","Labor","Outside","Total","Cycle hours"].map((head) => <th key={head} style={{ textAlign: "left", padding: 9, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{visibleRepairs.map((repair) => <tr key={repair.id}><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{shortDate(repair.openedAt)}</td><td style={{ padding: 9, fontWeight: 850, borderBottom: "1px solid #eef2f5" }}>{repair.unit}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{repair.title}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{repair.status}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{repair.technician}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{money(repair.partsCost)}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{money(repair.laborCost)}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{money(repair.outsideCost)}</td><td style={{ padding: 9, fontWeight: 850, borderBottom: "1px solid #eef2f5" }}>{money(repair.totalCost)}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{num(repair.repairCycleHours, 1)}</td></tr>)}</tbody></table></TableWrap>
+        <TableWrap maxHeight={560}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1250 }}><thead><tr>{sortHeads("repairs", [["Date","openedAt"],["Unit","unit"],["Repair","title"],["Status","status"],["Technician","technician"],["Parts","partsCost"],["Labor","laborCost"],["Outside","outsideCost"],["Total","totalCost"],["Cycle hours","repairCycleHours"]], 9)}</tr></thead><tbody>{sortRows(visibleRepairs, "repairs").map((repair) => <tr key={repair.id}><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{shortDate(repair.openedAt)}</td><td style={{ padding: 9, fontWeight: 850, borderBottom: "1px solid #eef2f5" }}>{repair.unit}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{repair.title}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{repair.status}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{repair.technician}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{money(repair.partsCost)}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{money(repair.laborCost)}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{money(repair.outsideCost)}</td><td style={{ padding: 9, fontWeight: 850, borderBottom: "1px solid #eef2f5" }}>{money(repair.totalCost)}</td><td style={{ padding: 9, borderBottom: "1px solid #eef2f5" }}>{num(repair.repairCycleHours, 1)}</td></tr>)}</tbody></table></TableWrap>
       </Section>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))", gap: 18 }}>
         <div style={panel}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><h2 style={{ margin: 0, fontSize: 21 }}>Parts Usage — {data.selectedYear}</h2><button style={buttonStyle} onClick={() => downloadCsv(`parts-usage-${data.selectedYear}.csv`, visibleParts.map((part) => ({ PartNumber: part.partNumber, Description: part.description, Quantity: part.quantity, Repairs: part.repairCount, Units: part.unitCount, Cost: part.cost })))}>Export CSV</button></div>
-          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}><thead><tr>{["Part","Description","Qty","Repairs","Units","Cost"].map((head) => <th key={head} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{visibleParts.slice(0, 100).map((part) => <tr key={part.partNumber}><td style={{ padding: 8, fontWeight: 800 }}>{part.partNumber}</td><td style={{ padding: 8 }}>{part.description}</td><td style={{ padding: 8 }}>{num(part.quantity, 2)}</td><td style={{ padding: 8 }}>{part.repairCount}</td><td style={{ padding: 8 }}>{part.unitCount}</td><td style={{ padding: 8 }}>{money(part.cost)}</td></tr>)}</tbody></table></TableWrap>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><h2 style={{ margin: 0, fontSize: 21 }}>Parts Usage — {data.selectedYear}</h2><button style={buttonStyle} onClick={() => downloadCsv(`parts-usage-${data.selectedYear}.csv`, sortRows(visibleParts, "parts").map((part) => ({ PartNumber: part.partNumber, Description: part.description, Quantity: part.quantity, Repairs: part.repairCount, Units: part.unitCount, Cost: part.cost })))}>Export CSV</button></div>
+          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}><thead><tr>{sortHeads("parts", [["Part","partNumber"],["Description","description"],["Qty","quantity"],["Repairs","repairCount"],["Units","unitCount"],["Cost","cost"]], 8)}</tr></thead><tbody>{sortRows(visibleParts, "parts").slice(0, 100).map((part) => <tr key={part.partNumber}><td style={{ padding: 8, fontWeight: 800 }}>{part.partNumber}</td><td style={{ padding: 8 }}>{part.description}</td><td style={{ padding: 8 }}>{num(part.quantity, 2)}</td><td style={{ padding: 8 }}>{part.repairCount}</td><td style={{ padding: 8 }}>{part.unitCount}</td><td style={{ padding: 8 }}>{money(part.cost)}</td></tr>)}</tbody></table></TableWrap>
         </div>
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Common Repairs / Failure Analysis</h2>
           <p style={{ color: "#64748b", fontSize: 13 }}>Which repair descriptions occur most often and cost the most in {data.selectedYear}.</p>
-          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{["Repair / issue","Count","Units","Total cost","Avg cost"].map((head) => <th key={head} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{data.issueAnalysis.slice(0, 75).map((item) => <tr key={item.issue}><td style={{ padding: 8 }}>{item.issue}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{item.unitCount}</td><td style={{ padding: 8 }}>{money(item.totalCost)}</td><td style={{ padding: 8 }}>{money(item.averageCost)}</td></tr>)}</tbody></table></TableWrap>
+          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("issues", [["Repair / issue","issue"],["Count","repairCount"],["Units","unitCount"],["Total cost","totalCost"],["Avg cost","averageCost"]], 8)}</tr></thead><tbody>{sortRows(data.issueAnalysis, "issues").slice(0, 75).map((item) => <tr key={item.issue}><td style={{ padding: 8 }}>{item.issue}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{item.unitCount}</td><td style={{ padding: 8 }}>{money(item.totalCost)}</td><td style={{ padding: 8 }}>{money(item.averageCost)}</td></tr>)}</tbody></table></TableWrap>
         </div>
       </section>
 
@@ -437,20 +489,20 @@ export default function ReportsPage() {
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Technician / Workload Report</h2>
           <p style={{ color: "#64748b", fontSize: 13 }}>Repair counts, completed work and average repair-cycle time.</p>
-          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{["Technician","Repairs","Completed","Repair cost","Avg cycle hrs"].map((head) => <th key={head} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{data.technicianAnalysis.map((item) => <tr key={item.technician}><td style={{ padding: 8 }}>{item.technician}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{item.completedCount}</td><td style={{ padding: 8 }}>{money(item.totalCost)}</td><td style={{ padding: 8 }}>{num(item.averageRepairCycleHours, 1)}</td></tr>)}</tbody></table></TableWrap>
+          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("technicians", [["Technician","technician"],["Repairs","repairCount"],["Completed","completedCount"],["Repair cost","totalCost"],["Avg cycle hrs","averageRepairCycleHours"]], 8)}</tr></thead><tbody>{sortRows(data.technicianAnalysis, "technicians").map((item) => <tr key={item.technician}><td style={{ padding: 8 }}>{item.technician}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{item.completedCount}</td><td style={{ padding: 8 }}>{money(item.totalCost)}</td><td style={{ padding: 8 }}>{num(item.averageRepairCycleHours, 1)}</td></tr>)}</tbody></table></TableWrap>
         </div>
         <div style={panel}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><h2 style={{ margin: 0, fontSize: 21 }}>PM & Annual History</h2><button style={buttonStyle} onClick={() => downloadCsv(`maintenance-history-${unitId === "all" ? data.selectedYear : selectedUnit?.unit ?? "unit"}.csv`, visibleMaintenance.map((event) => ({ Date: event.eventDate, Unit: event.unit, Type: event.eventType, PMType: event.pmType, Mileage: event.mileage, Source: event.source, Notes: event.notes })))}>Export CSV</button></div>
-          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}><thead><tr>{["Date","Unit","Type","PM","Mileage","Source"].map((head) => <th key={head} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{visibleMaintenance.slice(0, 150).map((event) => <tr key={event.id}><td style={{ padding: 8 }}>{shortDate(event.eventDate)}</td><td style={{ padding: 8, fontWeight: 800 }}>{event.unit}</td><td style={{ padding: 8 }}>{event.eventType}</td><td style={{ padding: 8 }}>{event.pmType || "—"}</td><td style={{ padding: 8 }}>{num(event.mileage)}</td><td style={{ padding: 8 }}>{event.source}</td></tr>)}</tbody></table></TableWrap>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><h2 style={{ margin: 0, fontSize: 21 }}>PM & Annual History</h2><button style={buttonStyle} onClick={() => downloadCsv(`maintenance-history-${unitId === "all" ? data.selectedYear : selectedUnit?.unit ?? "unit"}.csv`, sortRows(visibleMaintenance, "maintenance").map((event) => ({ Date: event.eventDate, Unit: event.unit, Type: event.eventType, PMType: event.pmType, Mileage: event.mileage, Source: event.source, Notes: event.notes })))}>Export CSV</button></div>
+          <TableWrap><table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}><thead><tr>{sortHeads("maintenance", [["Date","eventDate"],["Unit","unit"],["Type","eventType"],["PM","pmType"],["Mileage","mileage"],["Source","source"]], 8)}</tr></thead><tbody>{sortRows(visibleMaintenance, "maintenance").slice(0, 150).map((event) => <tr key={event.id}><td style={{ padding: 8 }}>{shortDate(event.eventDate)}</td><td style={{ padding: 8, fontWeight: 800 }}>{event.unit}</td><td style={{ padding: 8 }}>{event.eventType}</td><td style={{ padding: 8 }}>{event.pmType || "—"}</td><td style={{ padding: 8 }}>{num(event.mileage)}</td><td style={{ padding: 8 }}>{event.source}</td></tr>)}</tbody></table></TableWrap>
         </div>
       </section>
 
       <Section
         title="Ownership Expense Ledger"
         subtitle="Use this for fuel, insurance, registration, lease payments, towing, taxes and other unit-specific costs that are not already attached to a repair."
-        action={<button style={buttonStyle} onClick={() => downloadCsv(`ownership-expenses-${unitId === "all" ? data.selectedYear : selectedUnit?.unit ?? "unit"}.csv`, visibleExpenses.map((item) => ({ Date: item.expenseDate, Unit: item.unit, Category: item.category, Vendor: item.vendor, Description: item.description, Amount: item.amount })))}>Export CSV</button>}
+        action={<button style={buttonStyle} onClick={() => downloadCsv(`ownership-expenses-${unitId === "all" ? data.selectedYear : selectedUnit?.unit ?? "unit"}.csv`, sortRows(visibleExpenses, "expenses").map((item) => ({ Date: item.expenseDate, Unit: item.unit, Category: item.category, Vendor: item.vendor, Description: item.description, Amount: item.amount })))}>Export CSV</button>}
       >
-        <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{["Date","Unit","Category","Vendor","Description","Amount"].map((head) => <th key={head} style={{ textAlign: "left", padding: 9, borderBottom: "1px solid #dce2e7" }}>{head}</th>)}</tr></thead><tbody>{visibleExpenses.map((item) => <tr key={item.id}><td style={{ padding: 9 }}>{shortDate(item.expenseDate)}</td><td style={{ padding: 9, fontWeight: 800 }}>{item.unit}</td><td style={{ padding: 9 }}>{item.category}</td><td style={{ padding: 9 }}>{item.vendor || "—"}</td><td style={{ padding: 9 }}>{item.description || "—"}</td><td style={{ padding: 9 }}>{money(item.amount)}</td></tr>)}</tbody></table></TableWrap>
+        <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("expenses", [["Date","expenseDate"],["Unit","unit"],["Category","category"],["Vendor","vendor"],["Description","description"],["Amount","amount"]], 9)}</tr></thead><tbody>{sortRows(visibleExpenses, "expenses").map((item) => <tr key={item.id}><td style={{ padding: 9 }}>{shortDate(item.expenseDate)}</td><td style={{ padding: 9, fontWeight: 800 }}>{item.unit}</td><td style={{ padding: 9 }}>{item.category}</td><td style={{ padding: 9 }}>{item.vendor || "—"}</td><td style={{ padding: 9 }}>{item.description || "—"}</td><td style={{ padding: 9 }}>{money(item.amount)}</td></tr>)}</tbody></table></TableWrap>
       </Section>
 
       {canEdit && (
