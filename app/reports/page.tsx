@@ -186,8 +186,12 @@ function Section({ title, subtitle, action, children }: { title: string; subtitl
   );
 }
 
-function TableWrap({ children }: { children: React.ReactNode }) {
-  return <div style={{ overflowX: "auto" }}>{children}</div>;
+function TableWrap({ children, maxHeight = 420 }: { children: React.ReactNode; maxHeight?: number }) {
+  return (
+    <div role="region" aria-label="Scrollable report table" tabIndex={0} style={{ maxHeight, overflow: "auto", overscrollBehavior: "contain", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+      {children}
+    </div>
+  );
 }
 
 export default function ReportsPage() {
@@ -196,6 +200,7 @@ export default function ReportsPage() {
   const [year, setYear] = useState(String(currentYear));
   const [unitId, setUnitId] = useState("all");
   const [query, setQuery] = useState("");
+  const [sortConfig, setSortConfig] = useState<Record<string, { key: string; direction: "asc" | "desc" }>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -301,6 +306,52 @@ export default function ReportsPage() {
   }), [data, unitId]);
 
   const visibleParts = useMemo(() => (data?.partsUsage ?? []).filter((part) => unitId === "all" || (selectedUnit ? part.units.includes(selectedUnit.unit) : true)), [data, selectedUnit, unitId]);
+  function sortRows<T extends object>(rows: T[], tableId: string): T[] {
+    const active = sortConfig[tableId];
+    if (!active) return rows;
+    return [...rows].sort((a, b) => {
+      const left = a[active.key as keyof T];
+      const right = b[active.key as keyof T];
+      if (left == null && right == null) return 0;
+      if (left == null) return 1;
+      if (right == null) return -1;
+      const compared = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+      return active.direction === "asc" ? compared : -compared;
+    });
+  }
+
+  function toggleSort(tableId: string, key: string) {
+    setSortConfig((current) => {
+      const prior = current[tableId];
+      return { ...current, [tableId]: { key, direction: prior?.key === key && prior.direction === "asc" ? "desc" : "asc" } };
+    });
+  }
+
+  function sortHeads(tableId: string, columns: Array<[string, string]>, padding = 8) {
+    return columns.map(([title, key]) => {
+      const active = sortConfig[tableId];
+      const selected = active?.key === key;
+      return (
+        <th
+          key={key}
+          aria-sort={selected ? (active.direction === "asc" ? "ascending" : "descending") : "none"}
+          style={{ position: "sticky", top: 0, zIndex: 2, background: "white", textAlign: "left", padding, borderBottom: "1px solid #dce2e7", fontSize: 12, whiteSpace: "nowrap" }}
+        >
+          <button
+            type="button"
+            title={`Sort by ${title}`}
+            onClick={() => toggleSort(tableId, key)}
+            style={{ border: 0, background: "transparent", color: "#172033", font: "inherit", fontWeight: 850, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, padding: 0, whiteSpace: "nowrap" }}
+          >
+            {title} <span aria-hidden="true" style={{ color: selected ? "#6d28d9" : "#64748b" }}>{selected ? (active.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+          </button>
+        </th>
+      );
+    });
+  }
+
   const maxCategoryCost = Math.max(1, ...(data?.categoryCosts ?? []).map((item) => item.totalCost));
 
   if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading reports…</main>;
@@ -336,6 +387,7 @@ export default function ReportsPage() {
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Unit, repair, technician…" style={inputStyle} />
         </label>
       </section>
+      <p style={{ margin: "9px 0 0", color: "#64748b", fontSize: 12 }}>Scroll inside report tables to see more rows. Column headings stay visible. Select a heading to sort, then select it again to reverse the order.</p>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 12 }}>
         {[
