@@ -20,6 +20,29 @@ CREATE TABLE IF NOT EXISTS historical_ro_cost_corrections (
   PRIMARY KEY (import_key, ro_number)
 );
 
+-- Every change is recorded; unlike the current-value corrections table,
+-- the change log is append-only and can show repeated edits to the same RO.
+CREATE TABLE IF NOT EXISTS historical_ro_cost_change_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_key TEXT NOT NULL,
+  ro_number TEXT NOT NULL,
+  equipment_id INTEGER NOT NULL,
+  changed_by_user_id INTEGER,
+  changed_by TEXT NOT NULL,
+  previous_parts_cost REAL NOT NULL,
+  previous_labor_cost REAL NOT NULL,
+  previous_sublet_cost REAL NOT NULL,
+  previous_total_cost REAL NOT NULL,
+  new_parts_cost REAL NOT NULL,
+  new_total_cost REAL NOT NULL,
+  reason TEXT NOT NULL,
+  guard_verified INTEGER NOT NULL DEFAULT 1 CHECK (guard_verified = 1),
+  changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_historical_ro_cost_change_log_ro
+ON historical_ro_cost_change_log(import_key, ro_number, id DESC);
+
 CREATE TABLE _historical_ro_cost_expected_20261012 (
   import_key TEXT NOT NULL,
   ro_number TEXT NOT NULL,
@@ -164,6 +187,18 @@ SELECT CASE WHEN
       AND ABS(l.total_cost - h.total_cost) < 0.005
   ) = 2
 THEN 1 ELSE 0 END;
+
+-- Retain a trace of the two corrections authorized on 2026-10-12.
+INSERT INTO historical_ro_cost_change_log
+  (import_key, ro_number, equipment_id, changed_by_user_id, changed_by,
+   previous_parts_cost, previous_labor_cost, previous_sublet_cost, previous_total_cost,
+   new_parts_cost, new_total_cost, reason)
+SELECT c.import_key, c.ro_number, c.equipment_id, NULL, 'Authorized correction request',
+       c.original_parts_cost, c.original_labor_cost, c.original_sublet_cost, c.original_total_cost,
+       c.corrected_parts_cost, c.corrected_total_cost, c.reason
+FROM historical_ro_cost_corrections c
+JOIN _historical_ro_cost_expected_20261012 x
+  ON x.import_key = c.import_key AND x.ro_number = c.ro_number;
 
 DROP TABLE _historical_ro_cost_guard_20261012;
 DROP TABLE _historical_ro_cost_expected_20261012;
