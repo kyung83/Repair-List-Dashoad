@@ -33,7 +33,8 @@ test('sorts complete loaded data before per-table display caps and preserves CSV
   assert.match(page, /sortRows\(data\.issueAnalysis, "issues"\)\.slice\(0, 75\)/);
   assert.match(page, /sortRows\(visibleMaintenance, "maintenance"\)\.slice\(0, 150\)/);
   for (const name of ['units', 'repairs', 'parts', 'maintenance', 'expenses']) {
-    const count = page.split('"' + name + '").map(').length - 1;
+    const count = page.split('"' + name + '").map(').length - 1
+      + page.split('"' + name + '").slice(').length - 1;
     assert.ok(count >= 2, name + ' should use the same sorted rows for display and CSV');
   }
 });
