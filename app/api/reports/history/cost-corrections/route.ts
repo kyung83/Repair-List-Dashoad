@@ -36,7 +36,8 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   const auth = await authorize(request);
-  if (auth.response || !auth.user) return auth.response;
+  if (auth.response) return auth.response;
+  if (!auth.user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
   try {
     const body = await request.json() as Record<string, unknown>;
     const updated = await correctHistoricalRoTotal(env.DB, body, auth.user);
