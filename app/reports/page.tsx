@@ -366,7 +366,10 @@ export default function ReportsPage() {
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Reporting & Cost Analysis</h1>
           <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 820 }}>Repair history, parts and labor cost, unit-by-unit yearly and lifetime cost, ownership expenses, PM/annual history, common failures, technician workload, and CSV exports.</p>
         </div>
-        <button style={buttonStyle} onClick={() => void load(year, unitId)} disabled={loading}>{loading ? "Refreshing…" : "Refresh reports"}</button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {canEdit && <a href="/reports/history#historical-ro-cost-editor" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Correct Historical RO Costs</a>}
+          <button style={buttonStyle} onClick={() => void load(year, unitId)} disabled={loading}>{loading ? "Refreshing…" : "Refresh reports"}</button>
+        </div>
       </header>
 
       {message && <div style={{ marginTop: 16, padding: 12, border: "1px solid #f2c66d", background: "#fff8e6", borderRadius: 10 }}>{message}</div>}
