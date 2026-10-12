@@ -291,7 +291,7 @@ export default function ReportSearchPage() {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
           <button style={button} onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Apply All Filters"}</button>
           <button style={lightButton} onClick={clearAll} disabled={loading}>Reset</button>
-          <a href="/reports/history" style={{ ...lightButton, textDecoration: "none" }}>Historical RO Category Drill-Down</a>
+          <a href="/reports/history" style={{ ...lightButton, textDecoration: "none" }}>Historical RO Category Drill-Down / Cost Corrections</a>
         </div>
       </section>
 
