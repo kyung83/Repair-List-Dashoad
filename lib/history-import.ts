@@ -1,3 +1,4 @@
+import { allocateHistoricalParts } from './historical-ro-cost-corrections';
 const IMPORT_KEY = 'ro-history-9309499-v1';
 const LEGACY_SOURCE_NAME = 'RO History Account Export 9309499.xls';
 const TERMINAL_STATUSES = new Set(['CLOSED', 'INVOICED', 'COMPLETTED']);
@@ -63,20 +64,30 @@ export async function importHistoryBatch(db: D1Database, body: Record<string, un
     // Refuse changed source details instead of silently overwriting approved financial records.
     const correction = correctionsByRo.get(ro.roNumber);
     if (correction) {
-      const line = ro.lines[0];
+      const total = (key: 'partsCost' | 'laborCost' | 'subletCost' | 'totalCost') =>
+        Math.round(ro.lines.reduce((sum, line) => sum + positiveNumber(line[key]), 0) * 100) / 100;
       const centsMatch = (left: number, right: number) => Math.abs(left - right) < 0.005;
-      const sourceMatchesOriginal = centsMatch(positiveNumber(line?.partsCost), Number(correction.original_parts_cost))
-        && centsMatch(positiveNumber(line?.totalCost), Number(correction.original_total_cost));
-      const sourceMatchesCorrected = centsMatch(positiveNumber(line?.partsCost), Number(correction.corrected_parts_cost))
-        && centsMatch(positiveNumber(line?.totalCost), Number(correction.corrected_total_cost));
-      const laborUnchanged = centsMatch(positiveNumber(line?.laborCost), Number(correction.original_labor_cost))
-        && centsMatch(positiveNumber(line?.subletCost), Number(correction.original_sublet_cost));
-      if (Number(correction.equipment_id) !== equipmentId || ro.lines.length !== 1
+      const sourceMatchesOriginal = centsMatch(total('partsCost'), Number(correction.original_parts_cost))
+        && centsMatch(total('totalCost'), Number(correction.original_total_cost));
+      const sourceMatchesCorrected = centsMatch(total('partsCost'), Number(correction.corrected_parts_cost))
+        && centsMatch(total('totalCost'), Number(correction.corrected_total_cost));
+      const laborUnchanged = centsMatch(total('laborCost'), Number(correction.original_labor_cost))
+        && centsMatch(total('subletCost'), Number(correction.original_sublet_cost));
+      if (Number(correction.equipment_id) !== equipmentId || !ro.lines.length
         || !laborUnchanged || !(sourceMatchesOriginal || sourceMatchesCorrected)
         || !centsMatch(Number(correction.corrected_total_cost), Number(correction.corrected_parts_cost) + Number(correction.original_labor_cost) + Number(correction.original_sublet_cost))) {
         throw new Error(`Previously approved cost correction for ${ro.roNumber} needs review before importing changed source data.`);
       }
-      ro.lines = [{ ...line, partsCost: Number(correction.corrected_parts_cost), totalCost: Number(correction.corrected_total_cost) }];
+      const allocated = allocateHistoricalParts(
+        ro.lines.map((line) => positiveNumber(line.partsCost)),
+        Math.round(Number(correction.corrected_parts_cost) * 100),
+      );
+      ro.lines = ro.lines.map((line, index) => ({
+        ...line,
+        partsCost: allocated[index] / 100,
+        totalCost: Math.round((allocated[index] + Math.round(positiveNumber(line.laborCost) * 100) +
+          Math.round(positiveNumber(line.subletCost) * 100))) / 100,
+      }));
     }
     const laborHours = ro.lines.reduce((sum, line) => sum + positiveNumber(line.laborHours), 0); const laborCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.laborCost), 0); const partsCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.partsCost), 0); const subletCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.subletCost), 0); const totalCost = ro.lines.reduce((sum, line) => sum + positiveNumber(line.totalCost), 0); const group: D1PreparedStatement[] = [db.prepare(`INSERT INTO historical_repairs (import_key, equipment_id, ro_number, ro_date, location, source_status, labor_hours, labor_cost, parts_cost, sublet_cost, total_cost, line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(import_key, ro_number) DO UPDATE SET equipment_id = excluded.equipment_id, ro_date = excluded.ro_date, location = excluded.location, source_status = excluded.source_status, labor_hours = excluded.labor_hours, labor_cost = excluded.labor_cost, parts_cost = excluded.parts_cost, sublet_cost = excluded.sublet_cost, total_cost = excluded.total_cost, line_count = excluded.line_count`).bind(IMPORT_KEY, equipmentId, ro.roNumber, ro.roDate, ro.location, ro.status, Math.round(laborHours * 100) / 100, Math.round(laborCost * 100) / 100, Math.round(partsCost * 100) / 100, Math.round(subletCost * 100) / 100, Math.round(totalCost * 100) / 100, ro.lines.length), db.prepare(`DELETE FROM historical_repair_lines WHERE import_key = ? AND ro_number = ?`).bind(IMPORT_KEY, ro.roNumber)];
     for (const line of ro.lines) { const systemCode = clean(line.systemCode, 20).toUpperCase(); const assemblyCode = clean(line.assemblyCode, 30).toUpperCase(); const description = clean(line.description, 500) || 'Unspecified repair'; group.push(db.prepare(`INSERT INTO historical_repair_lines (import_key, historical_repair_id, equipment_id, ro_number, ro_date, major_category, system_code, assembly_code, vmrs_description, labor_hours, labor_cost, parts_cost, sublet_cost, total_cost) VALUES (?, (SELECT id FROM historical_repairs WHERE import_key = ? AND ro_number = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(IMPORT_KEY, IMPORT_KEY, ro.roNumber, equipmentId, ro.roNumber, ro.roDate, majorCategory(systemCode), systemCode, assemblyCode, description, positiveNumber(line.laborHours), positiveNumber(line.laborCost), positiveNumber(line.partsCost), positiveNumber(line.subletCost), positiveNumber(line.totalCost))); importedLines++; }
