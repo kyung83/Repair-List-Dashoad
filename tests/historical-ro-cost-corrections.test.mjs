@@ -52,6 +52,26 @@ test('migration rejects changed source charges before touching either parent RO'
   db.close();
 });
 
+
+test('indexed migration can safely retry after a partial D1 application', () => {
+  const db = originalTestDatabase();
+  db.exec("UPDATE historical_repair_lines SET parts_cost=573,total_cost=633 WHERE ro_number='WO085385'");
+  // Wrangler records successful migrations; recovery must handle a partial failed attempt.
+  db.exec(migration);
+  const heads = db.prepare('SELECT ro_number,total_cost FROM historical_repairs ORDER BY ro_number').all();
+  const detail = db.prepare('SELECT ro_number,total_cost FROM historical_repair_lines ORDER BY ro_number').all();
+  assert.deepEqual(heads.map((x) => x.total_cost), [633,6004.53]);
+  assert.deepEqual(detail.map((x) => x.total_cost), [633,6004.53]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM historical_ro_cost_change_log").get().n, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM historical_ro_cost_corrections").get().n, 2);
+  db.close();
+});
+
+test('migration updates existing ROs only using indexed, exact RO predicates', () => {
+  assert.match(migration, /WHERE import_key='ro-history-9309499-v1' AND ro_number IN \('WO085385','WO086883'\)/);
+  assert.doesNotMatch(migration, /UPDATE historical_repair_lines[\s\S]*WHERE EXISTS \(/);
+});
+
 test('editable historical cost API is manager-only, guarded and auditable', () => {
   const api = source('app/api/reports/history/cost-corrections/route.ts');
   const service = source('lib/historical-ro-cost-corrections.ts');
