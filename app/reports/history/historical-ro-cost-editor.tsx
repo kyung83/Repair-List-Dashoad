@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type Change = {
   id: number; changed_by: string; previous_total_cost: number; new_total_cost: number;
@@ -26,6 +26,15 @@ export default function HistoricalRoCostEditor({ canEdit, onSaved }: { canEdit: 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!canEdit) return;
+    const directRo = new URLSearchParams(window.location.search).get('ro');
+    if (directRo && /^WO\d{5,12}$/i.test(directRo.trim())) {
+      setSearch(directRo.trim().toUpperCase());
+      void lookup(directRo);
+    }
+  }, [canEdit]);
 
   if (!canEdit) return null;
 
