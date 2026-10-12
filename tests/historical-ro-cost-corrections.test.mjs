@@ -56,7 +56,7 @@ test('migration rejects changed source charges before touching either parent RO'
 test('indexed migration can safely retry after a partial D1 application', () => {
   const db = originalTestDatabase();
   db.exec("UPDATE historical_repair_lines SET parts_cost=573,total_cost=633 WHERE ro_number='WO085385'");
-  db.exec(migration);
+  // Wrangler records successful migrations; recovery must handle a partial failed attempt.
   db.exec(migration);
   const heads = db.prepare('SELECT ro_number,total_cost FROM historical_repairs ORDER BY ro_number').all();
   const detail = db.prepare('SELECT ro_number,total_cost FROM historical_repair_lines ORDER BY ro_number').all();
