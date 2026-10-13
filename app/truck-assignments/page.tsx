@@ -86,7 +86,7 @@ export default function TruckAssignmentsPage(){
     if(location!=="All"&&!same(row.homeLocation,location)&&!same(row.currentLocation,location))return false;
     if(filter!=="All"){
       const s=niceStatus(row);
-      if(filter==="Needs Truck"&&row.currentDriver)return false;
+      if(filter==="Needs Truck"&&(row.currentDriver||row.saleOffRoad))return false;
       else if(filter==="In Service"&&row.status!=="service")return false;
       else if(filter==="Out of Service"&&!row.outOfService)return false;
       else if(filter==="For Sale"&&row.saleStatus!=="for_sale")return false;
@@ -200,12 +200,12 @@ export default function TruckAssignmentsPage(){
 
   return <main className="easy-page"><div style={{maxWidth:1680,margin:"0 auto"}}>
     <header style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:14,flexWrap:"wrap"}}>
-      <div><p className="easy-eyebrow">FLEET OPERATIONS</p><h1 className="easy-title">Truck Assignments</h1><p className="easy-subtitle">Permanent truck ownership stays intact while daily swaps, moves, repair coverage, cleaning and open trucks are handled separately.</p></div>
+      <div><p className="easy-eyebrow">FLEET OPERATIONS</p><h1 className="easy-title">Truck Assignments</h1><p className="easy-subtitle">Permanent truck ownership stays intact while daily swaps, repairs, sale listings, off-road holds and sold trucks are tracked separately.</p></div>
       <a href="/repair-board" style={{...button,textDecoration:"none"}}>Open Repair Board</a>
     </header>
     {msg&&<div className="easy-notice" style={{marginTop:14}}>{msg}</div>}
 
-    <section style={{display:"grid",gridTemplateColumns:"repeat(6,minmax(130px,1fr))",gap:10,marginTop:16}}>
+    <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10,marginTop:16}}>
       {[
         ["Long-Term",data?.summary.assigned??0,"#e8f5ec","#167a3e"],
         ["Open Trucks",data?.summary.open??0,"#e9f2ff","#145fd0"],
@@ -213,11 +213,14 @@ export default function TruckAssignmentsPage(){
         ["Active Swaps",data?.summary.coverage??0,"#fff0df","#c45a05"],
         ["In Service",data?.summary.service??0,"#fce8e8","#b42318"],
         ["Ready to Return",data?.summary.readyToReturn??0,"#e7f7ee","#15803d"],
+        ["For Sale",data?.summary.forSale??0,"#fef3c7","#92400e"],
+        ["Off Road",data?.summary.offRoad??0,"#fee2e2","#991b1b"],
+        ["Sold",data?.summary.sold??0,"#e2e8f0","#334155"],
       ].map(([label,value,bg,color])=><div key={String(label)} style={{...card,padding:"13px 15px",background:String(bg)}}><div style={{fontSize:26,fontWeight:950,color:String(color)}}>{value}</div><div style={{fontSize:12,fontWeight:850,color:"#334155"}}>{label}</div></div>)}
     </section>
 
     <div style={{display:"flex",gap:8,marginTop:16,borderBottom:"1px solid #dbe3ea"}}>
-      {([["board","Assignment Board"],["master","Master Assignments"],["activity","Moves & History"]] as const).map(([key,label])=><button key={key} onClick={()=>setTab(key)} style={{...button,border:"none",borderRadius:"9px 9px 0 0",background:tab===key?"#0b6ff9":"transparent",color:tab===key?"#fff":"#334155"}}>{label}</button>)}
+      {([["board","Assignment Board"],["master","Master Assignments"],["activity","Moves & History"],["sales","Sales & History"]] as const).map(([key,label])=><button key={key} onClick={()=>setTab(key)} style={{...button,border:"none",borderRadius:"9px 9px 0 0",background:tab===key?"#0b6ff9":"transparent",color:tab===key?"#fff":"#334155"}}>{label}</button>)}
     </div>
 
     {tab==="board"&&<>
@@ -240,7 +243,7 @@ export default function TruckAssignmentsPage(){
                 <td style={td}><strong>{row.unit}</strong></td>
                 <td style={td}><strong>{active?active.coverageUnit:row.currentDriver?row.unit:"—"}</strong></td>
                 <td style={td}>{active?active.workingLocation:row.currentLocation||"—"}</td>
-                <td style={td}><span style={statusStyle(row)}>{niceStatus(row)}</span></td>
+                <td style={td}><div style={{display:"grid",justifyItems:"start",gap:5}}><span style={statusStyle(row)}>{niceStatus(row)}</span>{saleBadge(row)}</div></td>
                 <td style={td}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   {row.outOfService&&<span style={badge("#fee2e2","#b91c1c")}>OOS</span>}
                   {row.openRepairCount>0&&<button type="button" onClick={e=>{e.stopPropagation();void inspectRepairs(row);}} title="View Active Repairs" style={{...badge("#fff7ed","#9a3412"),border:0,cursor:"pointer"}}>{row.openRepairCount} Active</button>}
@@ -310,7 +313,7 @@ export default function TruckAssignmentsPage(){
         {!data?.permissions.canEditMaster&&<span style={badge("#f1f5f9","#475569")}>View only for dispatch</span>}
       </div>
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:1050}}><thead><tr>{["Truck","Permanent Driver","Home Terminal","Class","Auto","Flatbed","Current Driver","Current Location","Status","Notes",""].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead><tbody>{visible.map(row=><tr key={row.equipmentId}>
-        <td style={td}><strong>{row.unit}</strong></td><td style={td}>{row.homeDriver||"OPEN"}</td><td style={td}>{row.homeLocation||"—"}</td><td style={td}>{row.truckClass||"—"}</td><td style={td}>{row.automatic?"Yes":"No"}</td><td style={td}>{row.flatbed?"Yes":"No"}</td><td style={td}>{row.currentDriver||"—"}</td><td style={td}>{row.currentLocation||"—"}</td><td style={td}>{niceStatus(row)}</td><td style={{...td,maxWidth:240}}>{row.notes||"—"}</td><td style={td}>{data?.permissions.canEditMaster&&<button style={{...button,padding:"6px 9px"}} onClick={()=>editMaster(row)}>Edit</button>}</td>
+        <td style={td}><strong>{row.unit}</strong></td><td style={td}>{row.homeDriver||"OPEN"}</td><td style={td}>{row.homeLocation||"—"}</td><td style={td}>{row.truckClass||"—"}</td><td style={td}>{row.automatic?"Yes":"No"}</td><td style={td}>{row.flatbed?"Yes":"No"}</td><td style={td}>{row.currentDriver||"—"}</td><td style={td}>{row.currentLocation||"—"}</td><td style={td}><div style={{display:"grid",gap:3}}>{niceStatus(row)}{saleBadge(row)}</div></td><td style={{...td,maxWidth:240}}>{row.notes||"—"}</td><td style={td}>{data?.permissions.canEditMaster&&<button style={{...button,padding:"6px 9px"}} onClick={()=>editMaster(row)}>Edit</button>}</td>
       </tr>)}</tbody></table></div>
     </section>}
 
