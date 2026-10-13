@@ -172,7 +172,7 @@ test('one open repair is not treated as physical in-shop status',()=>{
   assert.equal(niceStatus({...truck,status:'service'}),'At Service');
   assert.equal(niceStatus({...truck,outOfService:true}),'Out of Service');
   assert.equal(niceStatus({...truck,status:'coverage'}),'Coverage Swap');
-  assert.match(page,/row\.openRepairCount>0\?<span title="Open repair work does not mean/);
+  assert.match(page,/row\.openRepairCount>0&&<button type="button"/);
   assert.match(page,/Service \/ Cleaning \/ OOS/);
   assert.doesNotMatch(page,/rows\.filter\(x=>x\.outOfService\|\|x\.openRepairCount>0\|\|x\.status==="service"/);
 });
@@ -184,7 +184,47 @@ test('In Service counter and filter rely on actual service assignment state',()=
   assert.match(api,/Number\(row\.open_repairs\|\|0\)>0\?'open_repair'/);
   assert.match(page,/filter==="In Service"&&row\.status!=="service"/);
   assert.match(page,/filter==="Out of Service"&&!row\.outOfService/);
-  assert.match(page,/selected\.outOfService\|\|selected\.openRepairCount>0/);
+  assert.match(page,/selected\.outOfService\|\|selected\.pendingRepairCount>0/);
   assert.match(page,/x\.outOfService\|\|x\.status==="service"\|\|x\.status==="cleaning"/);
-  assert.match(page,/x\.openRepairCount===0/);
+  assert.match(page,/x\.pendingRepairCount===0/);
+});
+
+
+test('575 can have pending database records absent from visible Repair Board',()=>{
+  const aggregate=api.match(/\(SELECT COUNT\(\*\) FROM repairs r\s+WHERE r\.equipment_id=e\.id\s+AND lower\(COALESCE\(r\.status,''\)\) NOT LIKE '%complete%'[\s\S]*?\) AS repair_board_repairs/);
+  assert.ok(aggregate,'Repair Board-visible count should be computed independently');
+  const db=new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE equipment(id INTEGER PRIMARY KEY,unit TEXT);"+
+    "CREATE TABLE repairs(id INTEGER PRIMARY KEY,equipment_id INTEGER,title TEXT,status TEXT,source TEXT);"+
+    "INSERT INTO equipment VALUES(575,'575(SC)'),(571,'571(DC)');"+
+    "INSERT INTO repairs VALUES(1,575,'Roadside service','New','roadside-breakdown');"+
+    "INSERT INTO repairs VALUES(2,575,'Next PM','Deferred to Next PM','manual');"+
+    "INSERT INTO repairs VALUES(3,575,'Vendor work','Outside - Waiting on Provider','manual');"+
+    "INSERT INTO repairs VALUES(4,575,'Brake light','New','manual');"+
+    "INSERT INTO repairs VALUES(5,575,'Finished job','Completed','manual');"+
+    "INSERT INTO repairs VALUES(6,571,'Roadside repair','In Progress','roadside-breakdown');");
+  const sql="SELECT e.unit,"+aggregate[0]+" FROM equipment e ORDER BY e.id";
+  const rows=db.prepare(sql).all();
+  assert.deepEqual(rows.map(x=>[x.unit,x.repair_board_repairs]),[['571(DC)',0],['575(SC)',1]]);
+  assert.match(api,/otherPendingRepairCount:Math\.max\(0,Number\(row\.open_repairs\|\|0\)-Number\(row\.repair_board_repairs\|\|0\)\)/);
+  assert.match(api,/pendingRepairCount:Number\(row\.open_repairs\|\|0\)/);
+  db.close();
+});
+
+test('managers and dispatch can inspect actual pending repair record and exclusion reason',()=>{
+  assert.match(api,/const inspectId=new URL\(request\.url\)\.searchParams\.get\('inspectEquipmentId'\)/);
+  assert.match(api,/const user=await requireOperator\(request\)/);
+  assert.match(api,/WHERE r\.equipment_id=\?/);
+  assert.match(api,/ORDER BY r\.id DESC LIMIT 101/);
+  assert.match(api,/Roadside breakdown: excluded from the Repair Board/);
+  assert.match(api,/Deferred to next PM\/Annual: excluded from the Repair Board/);
+  assert.match(api,/Outside repair: excluded from the Repair Board/);
+  assert.match(page,/Repair Records · Truck/);
+  assert.match(page,/record\.explanation/);
+  assert.match(page,/View Repair Records/);
+  assert.match(page,/Repair Board Jobs/);
+  assert.match(page,/Other Pending Records/);
+  assert.match(page,/pendingRepairCount===0/);
+  assert.match(api,/service:rows\.filter\(x=>x\.status==='service'\)\.length/);
+  assert.doesNotMatch(page,/if\(row\.outOfService\|\|row\.openRepairCount>0\)return "In Shop"/);
 });
