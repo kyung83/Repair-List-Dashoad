@@ -76,7 +76,7 @@ test('simplified UI keeps board, master and history views',()=>{
   assert.match(page,/Moves & History/);
   assert.match(page,/Start Coverage Swap/);
   assert.match(page,/Open \/ Spare Trucks/);
-  assert.match(page,/In Shop \/ Cleaning/);
+  assert.match(page,/Service \/ Cleaning \/ OOS/);
   assert.match(page,/Ready to Return/);
   assert.match(page,/Mark \{s\.homeUnit\} Ready to Return/);
   assert.match(page,/Open Repair Board/);
@@ -155,4 +155,36 @@ test('mark Open releases an assigned truck, protects permanent home unless reque
   const blocked=stmt.run(1,7,103,'Swap Driver','Swap Driver',103,103);
   assert.equal(blocked.changes,0);
   db.close();
+});
+
+
+test('one open repair is not treated as physical in-shop status',()=>{
+  const match=page.match(/function niceStatus\(row:Assignment\)\{([\s\S]*?)\n\}/);
+  assert.ok(match,'truck status display helper must exist');
+  const niceStatus=new Function('row',match[1]);
+  const truck={
+    homeDriver:'Jim Phillips',currentDriver:'Jim Phillips',status:'assigned',
+    outOfService:false,openRepairCount:1,readyToReturn:false,
+  };
+  assert.equal(niceStatus(truck),'Assigned','571 with one open job is not necessarily in shop');
+  assert.equal(niceStatus({...truck,homeDriver:'Rob Bates'}),'Swapped');
+  assert.equal(niceStatus({...truck,openRepairCount:0,status:'service',readyToReturn:true}),'Ready to Return');
+  assert.equal(niceStatus({...truck,status:'service'}),'At Service');
+  assert.equal(niceStatus({...truck,outOfService:true}),'Out of Service');
+  assert.equal(niceStatus({...truck,status:'coverage'}),'Coverage Swap');
+  assert.match(page,/row\.openRepairCount>0\?<span title="Open repair work does not mean/);
+  assert.match(page,/Service \/ Cleaning \/ OOS/);
+  assert.doesNotMatch(page,/rows\.filter\(x=>x\.outOfService\|\|x\.openRepairCount>0\|\|x\.status==="service"/);
+});
+
+test('In Service counter and filter rely on actual service assignment state',()=>{
+  assert.match(api,/service:rows\.filter\(x=>x\.status==='service'\)\.length/);
+  assert.doesNotMatch(api,/service:rows\.filter\(x=>x\.status==='service'\|\|x\.repairState==='in_shop'\)/);
+  assert.match(api,/repairState:row\.pool_status==='service'\?'in_service'/);
+  assert.match(api,/Number\(row\.open_repairs\|\|0\)>0\?'open_repair'/);
+  assert.match(page,/filter==="In Service"&&row\.status!=="service"/);
+  assert.match(page,/filter==="Out of Service"&&!row\.outOfService/);
+  assert.match(page,/selected\.outOfService\|\|selected\.openRepairCount>0/);
+  assert.match(page,/x\.outOfService\|\|x\.status==="service"\|\|x\.status==="cleaning"/);
+  assert.match(page,/x\.openRepairCount===0/);
 });
