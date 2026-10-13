@@ -5,11 +5,12 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 type Assignment={
   equipmentId:number;unit:string;equipmentType:string;homeDriver:string;homeLocation:string;currentDriver:string;currentLocation:string;
   status:string;truckClass:string;flatbed:boolean;automatic:boolean;notes:string;coverageForEquipmentId:number|null;coverageForDriver:string;
-  outOfService:boolean;outOfServiceReason:string;shopEta:string;openRepairCount:number;repairState:string;readyToReturn:boolean;
+  outOfService:boolean;outOfServiceReason:string;shopEta:string;openRepairCount:number;otherPendingRepairCount:number;pendingRepairCount:number;repairState:string;readyToReturn:boolean;
 };
 type Swap={id:number;driver:string;homeEquipmentId:number;homeUnit:string;coverageEquipmentId:number;coverageUnit:string;workingLocation:string;serviceLocation:string;reason:string;coverageReturnPool:string;openedAt:string;repairClear:boolean;readyToReturn:boolean};
 type EventRow={id:number;action:string;driver:string;from_location:string;to_location:string;detail:string;created_at:string;primary_unit:string;secondary_unit:string;by_name:string};
 type Payload={permissions:{canOperate:boolean;canEditMaster:boolean};assignments:Assignment[];activeSwaps:Swap[];events:EventRow[];summary:Record<string,number>;updatedAt:string;error?:string};
+type RepairAudit={unit:string;equipmentId:number;records:Array<{id:number;title:string;status:string;source:string;openedAt:string;shownOnRepairBoard:boolean;explanation:string}>;truncated:boolean;error?:string};
 
 const card:CSSProperties={background:"#fff",border:"1px solid #dbe3ea",borderRadius:14,boxShadow:"0 1px 2px rgba(15,23,42,.04)"};
 const button:CSSProperties={border:"1px solid #cbd5e1",background:"#fff",color:"#0f172a",fontWeight:800,borderRadius:9,padding:"9px 13px",cursor:"pointer"};
@@ -48,6 +49,10 @@ export default function TruckAssignmentsPage(){
   const[data,setData]=useState<Payload|null>(null),[tab,setTab]=useState<"board"|"master"|"activity">("board"),[q,setQ]=useState(""),[location,setLocation]=useState("All"),[filter,setFilter]=useState("All"),[selectedId,setSelectedId]=useState<number|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
   const[swapHome,setSwapHome]=useState<number|null>(null),[swapCoverage,setSwapCoverage]=useState<number|null>(null),[swapReason,setSwapReason]=useState("PM / Repair"),[swapService,setSwapService]=useState("Clare"),[swapReturn,setSwapReturn]=useState("spare");
   const[edit,setEdit]=useState<Assignment|null>(null);
+  const[auditUnit,setAuditUnit]=useState<string|null>(null);
+  const[audit,setAudit]=useState<RepairAudit|null>(null);
+  const[auditError,setAuditError]=useState("");
+  const[auditBusy,setAuditBusy]=useState(false);
   const[managedId,setManagedId]=useState<number|null>(null);
   const[driverDraft,setDriverDraft]=useState("");
   const[locationDraft,setLocationDraft]=useState("");
@@ -70,14 +75,18 @@ export default function TruckAssignmentsPage(){
       if(filter==="Needs Truck"&&row.currentDriver)return false;
       else if(filter==="In Service"&&row.status!=="service")return false;
       else if(filter==="Out of Service"&&!row.outOfService)return false;
+      else if(filter==="Repair Board Jobs"&&row.openRepairCount===0)return false;
+      else if(filter==="Other Pending Records"&&row.otherPendingRepairCount===0)return false;
       else if(filter==="Open"&&!["Open","Spare"].includes(s))return false;
-      else if(!["Needs Truck","In Service","Out of Service","Open"].includes(filter)&&s!==filter)return false;
+      else if(!["Needs Truck","In Service","Out of Service","Repair Board Jobs","Other Pending Records","Open"].includes(filter)&&s!==filter)return false;
     }
     const needle=q.trim().toLowerCase();if(!needle)return true;
     return [row.unit,row.homeDriver,row.currentDriver,row.homeLocation,row.currentLocation,row.truckClass,row.notes].some(v=>String(v).toLowerCase().includes(needle));
   }),[rows,location,filter,q]);
 
-  const pool=rows.filter(x=>["open","spare"].includes(x.status)&&!x.currentDriver&&!x.outOfService&&x.openRepairCount===0);
+  // Keep existing coverage eligibility conservative: an excluded repair record
+  // still requires review even when not displayed on the Repair Board.
+  const pool=rows.filter(x=>["open","spare"].includes(x.status)&&!x.currentDriver&&!x.outOfService&&x.pendingRepairCount===0);
   const activeSwapByHome=new Map((data?.activeSwaps??[]).map(x=>[x.homeEquipmentId,x]));
   const managed=rows.find(x=>x.equipmentId===managedId)??null;
   const managingActiveSwap=Boolean(managed&&(data?.activeSwaps??[]).some(x=>x.homeEquipmentId===managed.equipmentId||x.coverageEquipmentId===managed.equipmentId));
@@ -93,6 +102,16 @@ export default function TruckAssignmentsPage(){
     finally{setBusy(false);}
   }
 
+  async function inspectRepairRecords(row:Assignment){
+    setAuditUnit(row.unit);setAudit(null);setAuditError("");setAuditBusy(true);
+    try{
+      const response=await fetch("/api/truck-assignments?inspectEquipmentId="+encodeURIComponent(String(row.equipmentId)),{cache:"no-store"});
+      const details=await response.json() as RepairAudit;
+      if(!response.ok)throw new Error(details.error||"Unable to load the underlying repair records.");
+      setAudit(details);
+    }catch(error){setAuditError(error instanceof Error?error.message:"Repair records could not be loaded.");}
+    finally{setAuditBusy(false);}
+  }
   function openManage(row:Assignment){
     setSelectedId(row.equipmentId);
     setManagedId(row.equipmentId);
@@ -154,7 +173,7 @@ export default function TruckAssignmentsPage(){
     {tab==="board"&&<>
       <section style={{...card,padding:12,marginTop:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <select value={location} onChange={e=>setLocation(e.target.value)} style={{...input,width:180}}>{locations.map(x=><option key={x}>{x}</option>)}</select>
-        <select value={filter} onChange={e=>setFilter(e.target.value)} style={{...input,width:170}}>{["All","Assigned","Coverage Swap","In Service","Out of Service","Ready to Return","Open","Needs Truck","Cleaning"].map(x=><option key={x}>{x}</option>)}</select>
+        <select value={filter} onChange={e=>setFilter(e.target.value)} style={{...input,width:170}}>{["All","Assigned","Coverage Swap","In Service","Out of Service","Repair Board Jobs","Other Pending Records","Ready to Return","Open","Needs Truck","Cleaning"].map(x=><option key={x}>{x}</option>)}</select>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search driver, truck, terminal..." style={{...input,maxWidth:360,flex:"1 1 260px"}}/>
         <button style={button} onClick={()=>void load()} disabled={busy}>Refresh</button>
       </section>
@@ -172,7 +191,14 @@ export default function TruckAssignmentsPage(){
                 <td style={td}><strong>{active?active.coverageUnit:row.currentDriver?row.unit:"—"}</strong></td>
                 <td style={td}>{active?active.workingLocation:row.currentLocation||"—"}</td>
                 <td style={td}><span style={statusStyle(row)}>{niceStatus(row)}</span></td>
-                <td style={td}>{row.outOfService?<span style={badge("#fee2e2","#b91c1c")}>OOS</span>:row.openRepairCount>0?<span title="Open repair work does not mean the truck is physically in the shop" style={badge("#fff7ed","#9a3412")}>{`${row.openRepairCount} open job${row.openRepairCount===1?"":"s"}`}</span>:<span style={badge("#ecfdf5","#047857")}>Clear</span>}</td>
+                <td style={td}>
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {row.outOfService&&<span style={badge("#fee2e2","#b91c1c")}>OOS</span>}
+                    {row.openRepairCount>0&&<button type="button" title="See exact repair records on the Repair Board" style={{...badge("#fff7ed","#9a3412"),border:0,cursor:"pointer"}} onClick={e=>{e.stopPropagation();void inspectRepairRecords(row);}}>{row.openRepairCount} Board job{row.openRepairCount===1?"":"s"}</button>}
+                    {row.otherPendingRepairCount>0&&<button type="button" title="See records excluded from the Repair Board" style={{...badge("#e0f2fe","#075985"),border:0,cursor:"pointer"}} onClick={e=>{e.stopPropagation();void inspectRepairRecords(row);}}>{row.otherPendingRepairCount} other pending</button>}
+                    {!row.outOfService&&row.pendingRepairCount===0&&<span style={badge("#ecfdf5","#047857")}>Clear</span>}
+                  </div>
+                </td>
                 <td style={td}><button style={{...button,padding:"6px 10px"}} onClick={e=>{e.stopPropagation();openManage(row);}}>Manage</button></td>
               </tr>
             })}</tbody>
@@ -196,7 +222,12 @@ export default function TruckAssignmentsPage(){
                 {!selected.currentDriver&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"spare",currentLocation:selected.currentLocation})} disabled={busy}>Mark Spare</button>}
                 {!selected.currentDriver&&<button style={orange} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"cleaning",currentLocation:selected.currentLocation})} disabled={busy}>Needs Cleaning</button>}
               </div>
-              {(selected.outOfService||selected.openRepairCount>0)&&<div style={{marginTop:10,padding:10,borderRadius:9,background:"#fff1f2",fontSize:12,color:"#9f1239"}}><strong>Repair Board:</strong> {selected.outOfService?selected.outOfServiceReason||"Out of service":`${selected.openRepairCount} open repair job(s)`}. {selected.outOfService?"Truck is out of service.":"An open repair does not mean the truck is in the shop."} This truck cannot be used as coverage until cleared.</div>}
+              {(selected.outOfService||selected.pendingRepairCount>0)&&<div style={{marginTop:10,padding:10,borderRadius:9,background:"#fff7ed",fontSize:12,color:"#92400e"}}>
+                <strong>Repair status:</strong> {selected.outOfService?selected.outOfServiceReason||"Out of service. ":""}
+                {selected.openRepairCount} visible Repair Board job(s); {selected.otherPendingRepairCount} other pending record(s).
+                Pending repairs do not prove this truck is physically in the shop. Coverage restrictions remain until these records are reviewed.
+                <button type="button" style={{...button,marginTop:8,display:"block",padding:"6px 10px"}} onClick={()=>void inspectRepairRecords(selected)}>View Repair Records</button>
+              </div>}
             </>}
           </section>
 
@@ -240,6 +271,34 @@ export default function TruckAssignmentsPage(){
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}><thead><tr>{["When","Type","Driver","Truck(s)","Move","Details","By"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead><tbody>{(data?.events??[]).map(x=><tr key={x.id}><td style={td}>{dateTime(x.created_at)}</td><td style={td}>{x.action.replaceAll("_"," ")}</td><td style={td}>{x.driver||"—"}</td><td style={td}>{[x.primary_unit,x.secondary_unit].filter(Boolean).join(" / ")||"—"}</td><td style={td}>{x.from_location&&x.to_location?`${x.from_location} → ${x.to_location}`:"—"}</td><td style={td}>{x.detail}</td><td style={td}>{x.by_name}</td></tr>)}</tbody></table></div>
     </section>}
 
+
+    {auditUnit!==null&&<div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.58)",display:"grid",placeItems:"center",padding:14,zIndex:1100}} onMouseDown={()=>setAuditUnit(null)}>
+      <section role="dialog" aria-modal="true" aria-label={`Repair records for truck ${auditUnit}`} style={{...card,width:"min(940px,96vw)",maxHeight:"90vh",overflowY:"auto",padding:18}} onMouseDown={e=>e.stopPropagation()}>
+        <div style={{display:"flex",gap:12,alignItems:"flex-start",justifyContent:"space-between"}}>
+          <div><h2 style={{margin:"0 0 4px"}}>Repair Records · Truck {auditUnit}</h2>
+            <p style={{fontSize:13,color:"#64748b",margin:0}}>Read-only audit of unfinished database records. Some are intentionally excluded from the Repair Board.</p>
+          </div>
+          <button type="button" style={button} onClick={()=>setAuditUnit(null)} aria-label="Close repair records">Close</button>
+        </div>
+        {auditBusy&&<p>Checking records…</p>}
+        {auditError&&<p role="alert" style={{color:"#b91c1c"}}>{auditError}</p>}
+        {audit&&!audit.records.length&&<p>No unfinished repair records remain for this truck. Refresh Truck Assignments.</p>}
+        {audit&&audit.records.length>0&&<div style={{overflowX:"auto",marginTop:14}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:740}}>
+            <thead><tr>{["Repair #","Description","Current status","Source","Why it is counted"].map(v=><th key={v} style={th}>{v}</th>)}</tr></thead>
+            <tbody>{audit.records.map(record=><tr key={record.id}>
+              <td style={td}><strong>#{record.id}</strong></td>
+              <td style={td}>{record.title||"No description"}</td>
+              <td style={td}>{record.status||"No status"}</td>
+              <td style={td}>{record.source||"Manual"}</td>
+              <td style={td}><span style={record.shownOnRepairBoard?badge("#dcfce7","#166534"):badge("#e0f2fe","#075985")}>{record.explanation}</span></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+        {audit?.truncated&&<p role="status" style={{color:"#92400e",fontSize:12}}>Showing only the latest 100 unfinished records.</p>}
+        <p style={{fontSize:12,color:"#64748b",margin:"14px 0 0"}}>This window does not change repairs or truck availability. Existing Repair Board and out-of-service checks still apply.</p>
+      </section>
+    </div>}
 
     {managed&&<div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.54)",display:"grid",placeItems:"center",padding:14,zIndex:1000}} onMouseDown={()=>!busy&&setManagedId(null)}>
       <div role="dialog" aria-modal="true" aria-label={`Manage truck ${managed.unit}`} style={{...card,width:"min(630px,96vw)",padding:20,maxHeight:"92vh",overflowY:"auto"}} onMouseDown={e=>e.stopPropagation()}>
