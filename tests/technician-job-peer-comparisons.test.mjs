@@ -162,7 +162,7 @@ test("peer job reporting has manager access, separate browsing, CSV and transpar
   assert.match(page,/Export This View/);
   assert.match(page,/window.print/);
   assert.match(page,/Small comparison sample/);
-  assert.match(page,/not a quality score/);
+  assert.match(page,/not<\/strong> a quality score/);
   assert.match(page,/maxHeight:575,overflow:"auto"/);
   assert.match(original,/Compare Same Jobs/);
   assert.match(nav,/href: "\/reports\/technician-productivity\/comparisons".*roles: managerRoles/);
