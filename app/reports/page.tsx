@@ -368,6 +368,7 @@ export default function ReportsPage() {
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {canEdit && <a href="/reports/technician-productivity" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Technician Productivity</a>}
+          {canEdit && <a href="/reports/technician-productivity/comparisons" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Compare Techs on Jobs</a>}
           {canEdit && <a href="/reports/history#historical-ro-cost-editor" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Correct Historical RO Costs</a>}
           <button style={buttonStyle} onClick={() => void load(year, unitId)} disabled={loading}>{loading ? "Refreshing…" : "Refresh reports"}</button>
         </div>
