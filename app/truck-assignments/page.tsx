@@ -22,9 +22,11 @@ const td:CSSProperties={padding:"9px 10px",fontSize:13,borderBottom:"1px solid #
 const badge=(bg:string,color:string):CSSProperties=>({display:"inline-block",borderRadius:999,padding:"4px 9px",fontSize:11,fontWeight:850,background:bg,color,whiteSpace:"nowrap"});
 
 function niceStatus(row:Assignment){
-  if(row.outOfService||row.openRepairCount>0)return "In Shop";
+  // Open repair records can belong to trucks still working their routes.
+  // Only explicit fleet assignment state identifies a truck sent for service.
+  if(row.status==="service")return row.readyToReturn?"Ready to Return":"At Service";
+  if(row.outOfService)return "Out of Service";
   if(row.status==="coverage")return "Coverage Swap";
-  if(row.status==="service")return row.readyToReturn?"Ready to Return":"At Clare / Service";
   if(row.status==="cleaning")return "Cleaning";
   if(row.status==="open")return "Open";
   if(row.status==="spare")return "Spare";
@@ -35,7 +37,7 @@ function statusStyle(row:Assignment){
   if(s==="Assigned")return badge("#dcfce7","#166534");
   if(s==="Open"||s==="Spare")return badge("#dbeafe","#1d4ed8");
   if(s==="Ready to Return")return badge("#dcfce7","#166534");
-  if(s==="In Shop")return badge("#fee2e2","#b91c1c");
+  if(s==="Out of Service")return badge("#fee2e2","#b91c1c");
   if(s==="Cleaning")return badge("#ede9fe","#6d28d9");
   return badge("#ffedd5","#c2410c");
 }
@@ -66,9 +68,10 @@ export default function TruckAssignmentsPage(){
     if(filter!=="All"){
       const s=niceStatus(row);
       if(filter==="Needs Truck"&&row.currentDriver)return false;
-      else if(filter==="In Shop"&&s!=="In Shop"&&s!=="At Clare / Service"&&s!=="Ready to Return")return false;
+      else if(filter==="In Service"&&row.status!=="service")return false;
+      else if(filter==="Out of Service"&&!row.outOfService)return false;
       else if(filter==="Open"&&!["Open","Spare"].includes(s))return false;
-      else if(!["Needs Truck","In Shop","Open"].includes(filter)&&s!==filter)return false;
+      else if(!["Needs Truck","In Service","Out of Service","Open"].includes(filter)&&s!==filter)return false;
     }
     const needle=q.trim().toLowerCase();if(!needle)return true;
     return [row.unit,row.homeDriver,row.currentDriver,row.homeLocation,row.currentLocation,row.truckClass,row.notes].some(v=>String(v).toLowerCase().includes(needle));
@@ -151,7 +154,7 @@ export default function TruckAssignmentsPage(){
     {tab==="board"&&<>
       <section style={{...card,padding:12,marginTop:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <select value={location} onChange={e=>setLocation(e.target.value)} style={{...input,width:180}}>{locations.map(x=><option key={x}>{x}</option>)}</select>
-        <select value={filter} onChange={e=>setFilter(e.target.value)} style={{...input,width:170}}>{["All","Assigned","Coverage Swap","In Shop","Ready to Return","Open","Needs Truck","Cleaning"].map(x=><option key={x}>{x}</option>)}</select>
+        <select value={filter} onChange={e=>setFilter(e.target.value)} style={{...input,width:170}}>{["All","Assigned","Coverage Swap","In Service","Out of Service","Ready to Return","Open","Needs Truck","Cleaning"].map(x=><option key={x}>{x}</option>)}</select>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search driver, truck, terminal..." style={{...input,maxWidth:360,flex:"1 1 260px"}}/>
         <button style={button} onClick={()=>void load()} disabled={busy}>Refresh</button>
       </section>
@@ -169,7 +172,7 @@ export default function TruckAssignmentsPage(){
                 <td style={td}><strong>{active?active.coverageUnit:row.currentDriver?row.unit:"—"}</strong></td>
                 <td style={td}>{active?active.workingLocation:row.currentLocation||"—"}</td>
                 <td style={td}><span style={statusStyle(row)}>{niceStatus(row)}</span></td>
-                <td style={td}>{row.outOfService||row.openRepairCount>0?<span style={badge("#fee2e2","#b91c1c")}>{row.outOfService?"OOS":`${row.openRepairCount} open job${row.openRepairCount===1?"":"s"}`}</span>:<span style={badge("#ecfdf5","#047857")}>Clear</span>}</td>
+                <td style={td}>{row.outOfService?<span style={badge("#fee2e2","#b91c1c")}>OOS</span>:row.openRepairCount>0?<span title="Open repair work does not mean the truck is physically in the shop" style={badge("#fff7ed","#9a3412")}>`${row.openRepairCount} open job${row.openRepairCount===1?"":"s"}`</span>:<span style={badge("#ecfdf5","#047857")}>Clear</span>}</td>
                 <td style={td}><button style={{...button,padding:"6px 10px"}} onClick={e=>{e.stopPropagation();openManage(row);}}>Manage</button></td>
               </tr>
             })}</tbody>
@@ -193,7 +196,7 @@ export default function TruckAssignmentsPage(){
                 {!selected.currentDriver&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"spare",currentLocation:selected.currentLocation})} disabled={busy}>Mark Spare</button>}
                 {!selected.currentDriver&&<button style={orange} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"cleaning",currentLocation:selected.currentLocation})} disabled={busy}>Needs Cleaning</button>}
               </div>
-              {(selected.outOfService||selected.openRepairCount>0)&&<div style={{marginTop:10,padding:10,borderRadius:9,background:"#fff1f2",fontSize:12,color:"#9f1239"}}><strong>Repair Board:</strong> {selected.outOfServiceReason||`${selected.openRepairCount} open repair job(s)`}. This truck cannot be used as coverage until cleared.</div>}
+              {(selected.outOfService||selected.openRepairCount>0)&&<div style={{marginTop:10,padding:10,borderRadius:9,background:"#fff1f2",fontSize:12,color:"#9f1239"}}><strong>Repair Board:</strong> {selected.outOfService?selected.outOfServiceReason||"Out of service":`${selected.openRepairCount} open repair job(s)`}. {selected.outOfService?"Truck is out of service.":"An open repair does not mean the truck is in the shop."} This truck cannot be used as coverage until cleared.</div>}
             </>}
           </section>
 
@@ -217,7 +220,7 @@ export default function TruckAssignmentsPage(){
 
       <section style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:14,marginTop:14}}>
         <div style={{...card,overflow:"hidden"}}><div style={{padding:"11px 13px",fontWeight:900}}>Open / Spare Trucks</div><table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{pool.slice(0,7).map(x=><tr key={x.equipmentId}><td style={td}><strong>{x.unit}</strong></td><td style={td}>{x.currentLocation||x.homeLocation||"—"}</td><td style={td}><span style={badge("#dbeafe","#1d4ed8")}>{x.status}</span></td></tr>)}</tbody></table></div>
-        <div style={{...card,overflow:"hidden"}}><div style={{padding:"11px 13px",fontWeight:900}}>In Shop / Cleaning</div><table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{rows.filter(x=>x.outOfService||x.openRepairCount>0||x.status==="service"||x.status==="cleaning").slice(0,7).map(x=><tr key={x.equipmentId}><td style={td}><strong>{x.unit}</strong></td><td style={td}>{x.currentLocation||"—"}</td><td style={td}>{niceStatus(x)}</td></tr>)}</tbody></table></div>
+        <div style={{...card,overflow:"hidden"}}><div style={{padding:"11px 13px",fontWeight:900}}>Service / Cleaning / OOS</div><table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{rows.filter(x=>x.outOfService||x.status==="service"||x.status==="cleaning").slice(0,7).map(x=><tr key={x.equipmentId}><td style={td}><strong>{x.unit}</strong></td><td style={td}>{x.currentLocation||"—"}</td><td style={td}>{niceStatus(x)}</td></tr>)}</tbody></table></div>
         <div style={{...card,overflow:"hidden"}}><div style={{padding:"11px 13px",fontWeight:900}}>Recent Moves & Swaps</div><table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{(data?.events??[]).slice(0,7).map(x=><tr key={x.id}><td style={{...td,width:84,fontSize:11}}>{dateTime(x.created_at).split(",")[0]}</td><td style={td}>{x.detail}</td></tr>)}</tbody></table></div>
       </section>
     </>}
