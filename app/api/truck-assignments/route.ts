@@ -129,7 +129,7 @@ export async function GET(request:Request){
       notes:row.scheduler_notes,coverageForEquipmentId:row.coverage_for_equipment_id,coverageForDriver:row.coverage_for_driver,
       outOfService:Boolean(row.out_of_service),outOfServiceReason:row.out_of_service_reason,shopEta:row.shop_eta??'',
       openRepairCount:Number(row.open_repairs||0),
-      repairState:Boolean(row.out_of_service)||Number(row.open_repairs||0)>0?'in_shop':row.pool_status==='cleaning'?'cleaning':'clear',
+      repairState:row.pool_status==='service'?'in_service':Boolean(row.out_of_service)?'out_of_service':Number(row.open_repairs||0)>0?'open_repair':row.pool_status==='cleaning'?'cleaning':'clear',
       readyToReturn:row.pool_status==='service'&&!row.out_of_service&&Number(row.open_repairs||0)===0,
     }));
     const active=swaps.results.map(row=>({
@@ -148,7 +148,7 @@ export async function GET(request:Request){
         open:rows.filter(x=>x.status==='open').length,
         spare:rows.filter(x=>x.status==='spare').length,
         coverage:rows.filter(x=>x.status==='coverage').length,
-        service:rows.filter(x=>x.status==='service'||x.repairState==='in_shop').length,
+        service:rows.filter(x=>x.status==='service').length,
         cleaning:rows.filter(x=>x.status==='cleaning').length,
         readyToReturn:active.filter(x=>x.readyToReturn).length,
       },
