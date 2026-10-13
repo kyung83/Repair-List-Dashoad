@@ -168,7 +168,7 @@ test('one open repair is not treated as physical in-shop status',()=>{
   };
   assert.equal(niceStatus(truck),'Assigned','571 with one open job is not necessarily in shop');
   assert.equal(niceStatus({...truck,homeDriver:'Rob Bates'}),'Swapped');
-  assert.equal(niceStatus({...truck,openRepairCount:0,status:'service'}),'Ready to Return');
+  assert.equal(niceStatus({...truck,openRepairCount:0,status:'service',readyToReturn:true}),'Ready to Return');
   assert.equal(niceStatus({...truck,status:'service'}),'At Service');
   assert.equal(niceStatus({...truck,outOfService:true}),'Out of Service');
   assert.equal(niceStatus({...truck,status:'coverage'}),'Coverage Swap');
