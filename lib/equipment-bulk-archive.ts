@@ -17,6 +17,22 @@ export async function bulkArchiveEquipmentMasterItems(db: D1Database, body: Reco
   const reason = text(body.reason);
   let archived = 0;
 
+  // Validate every chunk BEFORE archiving any equipment. Bulk cleanup must
+  // never sidestep a For Sale / parked truck's manager-controlled lifecycle.
+  for (let index = 0; index < ids.length; index += 75) {
+    const chunk = ids.slice(index, index + 75);
+    const placeholders = chunk.map(() => '?').join(',');
+    const blocked = await db.prepare(`
+      SELECT e.unit FROM fleet_truck_sales s
+      JOIN equipment e ON e.id=s.equipment_id
+      WHERE s.equipment_id IN (${placeholders})
+        AND (s.sale_status IN ('for_sale','off_road')
+          OR (s.off_road_at IS NOT NULL AND s.returned_to_road_at IS NULL))
+      LIMIT 1
+    `).bind(...chunk).first<{unit:string}>();
+    if(blocked)throw new Error('Truck '+blocked.unit+' has an active sale or Off Road hold. Finish or cancel it in Truck Assignments before bulk archive.');
+  }
+
   for (let index = 0; index < ids.length; index += 75) {
     const chunk = ids.slice(index, index + 75);
     const placeholders = chunk.map(() => '?').join(',');
