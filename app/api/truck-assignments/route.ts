@@ -114,6 +114,28 @@ export async function GET(request:Request){
   try{
     const user=await requireOperator(request);
     await ensureAssignments();
+    const inspectId=new URL(request.url).searchParams.get('inspectEquipmentId');
+    if(inspectId!==null){
+      const equipmentId=id(inspectId),truck=await equipment(equipmentId);
+      const [active,outside]=await Promise.all([
+        env.DB.prepare("SELECT r.id,COALESCE(r.title,'') AS title,COALESCE(r.status,'') AS status,COALESCE(r.source,'') AS source "+
+          "FROM repairs r WHERE r.equipment_id=? AND "+ACTIVE_REPAIR_SQL+" ORDER BY r.id DESC LIMIT 101")
+          .bind(equipmentId).all<{id:number;title:string;status:string;source:string}>(),
+        env.DB.prepare("SELECT r.id,COALESCE(r.title,'') AS title,COALESCE(r.status,'') AS status, "+
+          "a.status AS vendor_status,COALESCE(v.name,'') AS vendor "+
+          "FROM outside_repair_assignments a JOIN repairs r ON r.id=a.repair_id "+
+          "LEFT JOIN outside_work_vendors v ON v.id=a.outside_vendor_id "+
+          "WHERE r.equipment_id=? AND "+OUTSIDE_REPAIR_SQL+" ORDER BY a.updated_at DESC LIMIT 101")
+          .bind(equipmentId).all<{id:number;title:string;status:string;vendor_status:string;vendor:string}>(),
+      ]);
+      const records=[
+        ...active.results.slice(0,100).map(row=>({id:row.id,title:row.title,status:row.status,kind:'Active Repair',detail:row.source||'Manual'})),
+        ...outside.results.slice(0,100).map(row=>({id:row.id,title:row.title,status:row.status,kind:'Outside Repair',
+          detail:(row.vendor||'Outside vendor')+' · '+(row.vendor_status==='waiting_vendor'?'Waiting on vendor':'Waiting on invoice')})),
+      ];
+      return Response.json({unit:truck.unit,equipmentId,records,truncated:active.results.length>100||outside.results.length>100},
+        {headers:{'cache-control':'no-store'}});
+    }
     const [assignments,swaps,events]=await Promise.all([
       env.DB.prepare(`
         SELECT a.equipment_id,e.unit,COALESCE(e.equipment_type,'other') AS equipment_type,
@@ -121,7 +143,7 @@ export async function GET(request:Request){
                a.truck_class,a.flatbed,a.automatic,a.scheduler_notes,a.coverage_for_equipment_id,a.coverage_for_driver,
                COALESCE(e.out_of_service,0) AS out_of_service,COALESCE(e.out_of_service_reason,'') AS out_of_service_reason,
                e.shop_eta,
-               (SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs
+               ${repairCountSelect('e.id')}
         FROM fleet_truck_assignments a
         JOIN equipment e ON e.id=a.equipment_id
         WHERE e.active=1 AND e.merged_into_equipment_id IS NULL
@@ -155,9 +177,10 @@ export async function GET(request:Request){
       status:row.pool_status,truckClass:row.truck_class,flatbed:Boolean(row.flatbed),automatic:Boolean(row.automatic),
       notes:row.scheduler_notes,coverageForEquipmentId:row.coverage_for_equipment_id,coverageForDriver:row.coverage_for_driver,
       outOfService:Boolean(row.out_of_service),outOfServiceReason:row.out_of_service_reason,shopEta:row.shop_eta??'',
-      openRepairCount:Number(row.open_repairs||0),
-      repairState:row.pool_status==='service'?'in_service':Boolean(row.out_of_service)?'out_of_service':Number(row.open_repairs||0)>0?'open_repair':row.pool_status==='cleaning'?'cleaning':'clear',
-      readyToReturn:row.pool_status==='service'&&!row.out_of_service&&Number(row.open_repairs||0)===0,
+      openRepairCount:Number(row.active_repairs||0),
+      outsideRepairCount:Number(row.outside_repairs||0),
+      repairState:row.pool_status==='service'?'in_service':Boolean(row.out_of_service)?'out_of_service':Number(row.active_repairs||0)>0?'active_repair':Number(row.outside_repairs||0)>0?'outside_repair':row.pool_status==='cleaning'?'cleaning':'clear',
+      readyToReturn:row.pool_status==='service'&&!row.out_of_service&&Number(row.active_repairs||0)===0&&Number(row.outside_repairs||0)===0,
     }));
     const active=swaps.results.map(row=>({
       id:row.id,driver:row.driver,homeEquipmentId:row.home_equipment_id,homeUnit:row.home_unit,
