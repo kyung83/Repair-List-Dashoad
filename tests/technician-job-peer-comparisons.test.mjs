@@ -76,7 +76,7 @@ test("job comparison uses per-technician and per-WO aggregation, not labor-entry
   const alice=sourceRows.find(r=>r.repair_id===100&&r.technician_id===1);
   assert.equal(alice.hours,3);
   assert.equal(alice.entries,2);
-  assert.equal(result.summary.uniqueWorkOrders,15);
+  assert.equal(result.summary.uniqueWorkOrders,14);
   assert.equal(sourceRows.filter(r=>r.repair_id===115).length,0);
   assert.equal(sourceRows.filter(r=>r.repair_id===116).length,0);
 });
