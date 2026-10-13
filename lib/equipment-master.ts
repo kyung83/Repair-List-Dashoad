@@ -284,6 +284,14 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
 
 export async function archiveEquipmentMasterItem(db: D1Database, body: Record<string, unknown>) {
   const id = positiveId(body.id);
+  // A sale listing is not an instruction to archive an active truck. Require
+  // the Truck Assignments workflow to release it and finalize its sale.
+  const sale = await db.prepare("SELECT sale_status,off_road_at,returned_to_road_at FROM fleet_truck_sales WHERE equipment_id=?")
+    .bind(id).first<{sale_status:string;off_road_at:string|null;returned_to_road_at:string|null}>();
+  if(sale&&(sale.sale_status==='for_sale'||sale.sale_status==='off_road'
+    ||(sale.off_road_at&&!sale.returned_to_road_at))){
+    throw new Error('This truck has an active sale or Off Road hold. Finish or cancel the sale in Truck Assignments instead of archiving it here.');
+  }
   const reason = text(body.reason, 1000);
   const result = await db.prepare(`
     UPDATE equipment
