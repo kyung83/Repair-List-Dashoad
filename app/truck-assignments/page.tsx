@@ -325,6 +325,100 @@ export default function TruckAssignmentsPage(){
     </section>}
 
 
+
+    {saleId!==null&&data?.permissions.canEditMaster&&<div style={{position:"fixed",inset:0,zIndex:1200,background:"rgba(15,23,42,.6)",display:"grid",placeItems:"center",padding:14}} onMouseDown={()=>!busy&&setSaleId(null)}>
+      <section role="dialog" aria-modal="true" aria-label="Manage truck sale" style={{...card,width:"min(700px,96vw)",maxHeight:"94vh",overflowY:"auto",padding:19}} onMouseDown={event=>event.stopPropagation()}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:14}}>
+          <div><p style={{fontSize:11,color:"#ea580c",fontWeight:900,letterSpacing:".1em",margin:"0 0 4px"}}>SALE / RETIREMENT</p>
+            <h2 style={{margin:"0 0 5px",fontSize:22}}>Truck {saleRecord?.unit||saleAssignment?.unit}</h2>
+            <p style={{margin:0,fontSize:13,color:"#64748b"}}>Sale status is separate from the truck's driver and operational status.</p>
+          </div>
+          <button type="button" style={button} disabled={busy} onClick={()=>setSaleId(null)}>Close</button>
+        </div>
+        <div style={{background:"#f8fafc",borderRadius:10,padding:13,marginTop:13,display:"grid",gap:6}}>
+          <div><strong>Sale stage:</strong> {saleStatus==="for_sale"?"For Sale — Still Working":saleStatus==="off_road"?"Off Road — Awaiting Sale":saleStatus==="sold"?"Sold":saleStatus==="cancelled"?"Sale Cancelled":"Not Listed"}</div>
+          {saleAssignment&&<div style={{fontSize:13}}><strong>Dispatch status:</strong> {niceStatus(saleAssignment)} · <strong>Driver:</strong> {saleAssignment.currentDriver||"Unassigned"}</div>}
+          {saleHeld&&<div style={{fontSize:13,color:"#b91c1c",fontWeight:800}}>OFF ROAD — unavailable for assignments, even if the sale is cancelled.</div>}
+          {saleRecord?.soldAt&&<div style={{fontSize:13}}><strong>Sold:</strong> {saleRecord.soldAt.slice(0,10)} · <strong>Price:</strong> {money(saleRecord.salePrice)}{saleRecord.buyer?" · Buyer: "+saleRecord.buyer:""}</div>}
+        </div>
+        {saleError&&<p role="alert" style={{background:"#fff1f2",border:"1px solid #fecaca",borderRadius:8,color:"#991b1b",padding:11,fontSize:13}}>{saleError}</p>}
+        {(saleStatus==="none"||(saleStatus==="cancelled"&&!saleHeld)||saleStatus==="for_sale")&&<div style={{marginTop:17}}>
+          <h3 style={{fontSize:16,margin:"0 0 8px"}}>{saleStatus==="for_sale"?"Edit Sale Listing":"List Truck For Sale"}</h3>
+          <p style={{fontSize:12,color:"#64748b",margin:"0 0 11px"}}>Listing this truck does not remove it from work, change its current driver, interrupt Geotab, or cancel repairs/PMs.</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+            <label style={{display:"grid",gap:5,fontSize:13,fontWeight:750}}>Asking price (optional)
+              <input type="number" min="0" max="100000000" step="0.01" value={askingDraft} onChange={e=>setAskingDraft(e.target.value)} style={input} placeholder="Optional asking price"/>
+            </label>
+            <label style={{display:"grid",gap:5,fontSize:13,fontWeight:750}}>Sale notes (optional)
+              <input value={notesDraft} maxLength={1000} onChange={e=>setNotesDraft(e.target.value)} style={input} placeholder="Listing notes, contact, etc."/>
+            </label>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+            {saleStatus==="for_sale"
+              ?<button type="button" style={blue} disabled={busy} onClick={()=>void saveSale("update_listing","Save these updated sale details for truck "+saleAssignment?.unit+"?")}>Save Sale Details</button>
+              :<button type="button" style={blue} disabled={busy} onClick={()=>void saveSale("mark_for_sale","List truck "+saleAssignment?.unit+" For Sale while KEEPING it on the road and with its current driver?")}>Mark For Sale — Keep Working</button>}
+          </div>
+        </div>}
+        {saleStatus==="for_sale"&&<div style={{borderTop:"1px solid #e2e8f0",marginTop:18,paddingTop:14}}>
+          <h3 style={{fontSize:16,margin:"0 0 8px"}}>When you park the truck</h3>
+          <p style={{fontSize:13,color:"#475569",lineHeight:1.45,margin:"0 0 10px"}}>Remove From Road will release the permanent and current driver from this truck, remove it from dispatch/spare availability, and keep its maintenance history and equipment tracking until Sold. Reassign the driver separately.</p>
+          <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:13,padding:"10px 0"}}>
+            <input type="checkbox" checked={confirmParked} onChange={e=>setConfirmParked(e.target.checked)}/>
+            <strong>I confirm this truck is physically parked and its driver has been released or reassigned.</strong>
+          </label>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            <button type="button" style={{...orange,background:"#b91c1c",borderColor:"#b91c1c"}} disabled={busy||!confirmParked} onClick={()=>void saveSale("remove_from_road","REMOVE truck "+saleAssignment?.unit+" FROM ROAD? Drivers will be released and the truck will be blocked from new assignments. This does not mark it Sold.")}>Remove From Road — Awaiting Sale</button>
+            <button type="button" style={light} disabled={busy} onClick={()=>void saveSale("cancel_sale","Cancel the sale listing for "+saleAssignment?.unit+"? It will keep its current driver and continue operating normally.")}>Cancel Sale — Keep Truck</button>
+          </div>
+        </div>}
+        {saleStatus==="off_road"&&<div style={{borderTop:"1px solid #e2e8f0",marginTop:18,paddingTop:14}}>
+          <h3 style={{fontSize:16,margin:"0 0 9px"}}>What happens next?</h3>
+          <p style={{fontSize:13,color:"#475569",lineHeight:1.5,margin:"0 0 10px"}}>Finalize the sale to archive this truck from the active fleet, or cancel the sale and keep it Off Road until you explicitly return it to service.</p>
+          <button type="button" style={light} disabled={busy} onClick={()=>void saveSale("cancel_sale","Cancel sale of "+saleAssignment?.unit+"? The truck will STAY OFF ROAD, not automatically returned to service.")}>Cancel Sale — Keep Off Road</button>
+          <div style={{marginTop:16,background:"#f8fafc",borderRadius:10,padding:14}}>
+            <h4 style={{fontSize:15,margin:"0 0 8px"}}>Finalize Truck as Sold</h4>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+              <label style={{display:"grid",gap:5,fontSize:13,fontWeight:750}}>Actual sale price (required)
+                <input type="number" min="0.01" max="100000000" step="0.01" value={priceDraft} onChange={e=>setPriceDraft(e.target.value)} style={input} placeholder="0.00"/>
+              </label>
+              <label style={{display:"grid",gap:5,fontSize:13,fontWeight:750}}>Sale date (required)
+                <input type="date" value={dateDraft} onChange={e=>setDateDraft(e.target.value)} style={input} max={new Date().toISOString().slice(0,10)}/>
+              </label>
+              <label style={{display:"grid",gap:5,fontSize:13,fontWeight:750}}>Buyer (optional)
+                <input value={buyerDraft} maxLength={160} onChange={e=>setBuyerDraft(e.target.value)} style={input} placeholder="Buyer or auction"/>
+              </label>
+            </div>
+            <label style={{display:"flex",gap:9,marginTop:14,fontSize:13,alignItems:"flex-start"}}>
+              <input type="checkbox" checked={confirmSold} onChange={e=>setConfirmSold(e.target.checked)}/>
+              <strong>I confirm the sale is final. This truck should be archived and Geotab fleet tracking ended; its repair and cost history must remain.</strong>
+            </label>
+            <button type="button" style={{...orange,background:"#b91c1c",borderColor:"#b91c1c",marginTop:12}} disabled={busy||!confirmSold||!(Number(priceDraft)>0)||!dateDraft} onClick={()=>void saveSale("mark_sold","FINALIZE truck "+saleAssignment?.unit+" AS SOLD for "+money(Number(priceDraft))+" on "+dateDraft+"? It will leave the active fleet. This cannot be undone with Cancel Sale.")}>Mark Sold & Archive</button>
+          </div>
+        </div>}
+        {saleStatus==="cancelled"&&saleHeld&&<div style={{borderTop:"1px solid #e2e8f0",marginTop:18,paddingTop:14}}>
+          <h3 style={{fontSize:16,margin:"0 0 8px"}}>Sale Cancelled — Truck Still Off Road</h3>
+          <p style={{fontSize:13,color:"#475569",lineHeight:1.5}}>Cancellation does not make the truck available for dispatch. Confirm it has been inspected and is ready, with no active/outside repair holds or out-of-service status, before returning it to the Open pool.</p>
+          <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:13,margin:"12px 0"}}>
+            <input type="checkbox" checked={confirmRoadworthy} onChange={e=>setConfirmRoadworthy(e.target.checked)}/>
+            <strong>I confirm the truck is inspected, roadworthy, and cleared to return to active dispatch.</strong>
+          </label>
+          <button type="button" style={green} disabled={busy||!confirmRoadworthy} onClick={()=>void saveSale("return_to_road","RETURN truck "+saleAssignment?.unit+" TO ROAD as OPEN and unassigned? No former driver will be automatically reattached.")}>Return to Road — Mark Open</button>
+        </div>}
+        {saleStatus==="cancelled"&&!saleHeld&&<p style={{marginTop:15,fontSize:13,color:"#166534"}}>Sale cancelled. This truck remains available under its normal assignment status. You can list it again at any time.</p>}
+        {saleStatus==="sold"&&<p style={{marginTop:16,fontSize:13,color:"#475569"}}>Finalized sale. The truck is archived from dispatch; permanent repairs, maintenance, costs, and sale history remain accessible. A completed sale cannot be cancelled here.</p>}
+        {(data?.saleEvents??[]).some(e=>e.equipmentId===saleId)&&<details style={{marginTop:17,paddingTop:13,borderTop:"1px solid #e2e8f0"}}>
+          <summary style={{cursor:"pointer",fontWeight:850,fontSize:14}}>Sale Change History</summary>
+          <div style={{display:"grid",gap:7,marginTop:10}}>
+            {(data?.saleEvents??[]).filter(ev=>ev.equipmentId===saleId).map(ev=><div key={ev.id} style={{padding:9,background:"#f8fafc",borderRadius:8,fontSize:12}}>
+              <strong>{ev.action.replaceAll("_"," ")} · {dateTime(ev.when)}</strong>
+              <div style={{color:"#475569",marginTop:3}}>{ev.details}</div>
+              <div style={{color:"#64748b",marginTop:3}}>By {ev.by}</div>
+            </div>)}
+          </div>
+        </details>}
+      </section>
+    </div>}
+
     {auditUnit!==null&&<div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.55)",display:"grid",placeItems:"center",padding:14,zIndex:1100}} onMouseDown={()=>setAuditUnit(null)}>
       <section role="dialog" aria-modal="true" aria-label={`Repair records for truck ${auditUnit}`} style={{...card,width:"min(880px,96vw)",maxHeight:"90vh",overflowY:"auto",padding:18}} onMouseDown={e=>e.stopPropagation()}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start"}}>
