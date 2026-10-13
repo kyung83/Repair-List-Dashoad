@@ -268,8 +268,8 @@ export default function TruckAssignmentsPage(){
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                 {selected.homeDriver&&!selected.saleOffRoad&&!activeSwapByHome.has(selected.equipmentId)&&<button style={blue} onClick={()=>openSwap(selected.equipmentId)} disabled={busy}>Start Coverage Swap</button>}
                 {!selected.currentDriver&&!selected.saleOffRoad&&["open","spare"].includes(selected.status)&&<button style={green} onClick={()=>{const d=prompt("Driver name");if(d){const l=prompt("Driver / truck location",selected.currentLocation||selected.homeLocation)||selected.currentLocation;void act({action:"assignOpenTruck",equipmentId:selected.equipmentId,driver:d,location:l});}}} disabled={busy}>Assign Truck</button>}
-                <button style={button} disabled={busy||selected.saleOffRoad} onClick={()=>{const l=prompt("Move truck to",selected.currentLocation||selected.homeLocation);if(l)void act({action:"moveTruck",equipmentId:selected.equipmentId,toLocation:l,reason:"Dispatcher move"});}} disabled={busy}>Move Truck</button>
-                <button style={button} disabled={busy||selected.saleOffRoad} onClick={()=>{if(!selected.currentDriver&&!selected.homeDriver)void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"open",currentLocation:selected.currentLocation});else openManage(selected);}} disabled={busy}>Mark Open</button>
+                <button style={button} disabled={busy||selected.saleOffRoad} onClick={()=>{const l=prompt("Move truck to",selected.currentLocation||selected.homeLocation);if(l)void act({action:"moveTruck",equipmentId:selected.equipmentId,toLocation:l,reason:"Dispatcher move"});}}>Move Truck</button>
+                <button style={button} disabled={busy||selected.saleOffRoad} onClick={()=>{if(!selected.currentDriver&&!selected.homeDriver)void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"open",currentLocation:selected.currentLocation});else openManage(selected);}}>Mark Open</button>
                 {!selected.currentDriver&&!selected.saleOffRoad&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"spare",currentLocation:selected.currentLocation})} disabled={busy}>Mark Spare</button>}
                 {!selected.currentDriver&&!selected.saleOffRoad&&<button style={orange} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"cleaning",currentLocation:selected.currentLocation})} disabled={busy}>Needs Cleaning</button>}
               </div>
@@ -377,7 +377,7 @@ export default function TruckAssignmentsPage(){
         </div>
         <datalist id="assignment-driver-suggestions">{driverSuggestions.map(driver=><option key={driver} value={driver}/>)}</datalist>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,flexWrap:"wrap",marginTop:10}}>
-          {data?.permissions.canEditMaster&&<button type="button" style={button} disabled={busy} onClick={()=>{setManagedId(null);editMaster(managed);}} disabled={busy||managed.saleOffRoad}>Edit Permanent Driver</button>}
+          {data?.permissions.canEditMaster&&<button type="button" style={button} onClick={()=>{setManagedId(null);editMaster(managed);}} disabled={busy||managed.saleOffRoad}>Edit Permanent Driver</button>}
           <button type="button" style={blue} disabled={busy||managingActiveSwap||managed.saleOffRoad||!driverDraft.trim()} onClick={()=>void saveManagedDriver()}>{busy?"Saving…":"Save Current Driver"}</button>
         </div>
         <div style={{borderTop:"1px solid #e2e8f0",marginTop:18,paddingTop:15}}>
@@ -389,6 +389,11 @@ export default function TruckAssignmentsPage(){
           </div>
           {!data?.permissions.canEditMaster&&<p style={{fontSize:12,color:"#64748b",margin:"10px 0 0"}}>Dispatch can mark the truck Open temporarily. A manager must remove the permanent driver assignment.</p>}
         </div>
+        {data?.permissions.canEditMaster&&<div style={{borderTop:"1px solid #e2e8f0",paddingTop:14,marginTop:16}}>
+          <h3 style={{fontSize:16,margin:"0 0 7px"}}>Truck Sale / Retirement</h3>
+          <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>List a working truck for sale, remove it from the road later, cancel a sale or mark it sold without losing its history.</p>
+          <button type="button" style={blue} disabled={busy} onClick={()=>openSale(managed)}>Manage Sale</button>
+        </div>}
         <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
           <button type="button" style={button} disabled={busy} onClick={()=>setManagedId(null)}>Close</button>
         </div>
