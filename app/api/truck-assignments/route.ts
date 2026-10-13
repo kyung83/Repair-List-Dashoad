@@ -283,9 +283,8 @@ export async function POST(request:Request){
       const driver=text(body.driver,160);
       if(!driver)throw new Error('Enter a new driver, or use Mark Open to remove the current driver.');
       if(truck.out_of_service)throw new Error(`${truck.unit} is out of service and cannot be assigned to a driver.`);
-      const repair=await env.DB.prepare("SELECT COUNT(*) AS count FROM repairs WHERE equipment_id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'")
-        .bind(equipmentId).first<{count:number}>();
-      if(Number(repair?.count||0)>0)throw new Error(`${truck.unit} still has open Repair Board work. Clear it before assigning a driver.`);
+      const repair=await truckRepairCounts(equipmentId);
+      if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(truck.unit,repair.active,repair.outside));
       const active=await env.DB.prepare('SELECT id FROM fleet_coverage_swaps WHERE closed_at IS NULL AND (home_equipment_id=? OR coverage_equipment_id=?) LIMIT 1')
         .bind(equipmentId,equipmentId).first();
       if(active)throw new Error('This truck is in an active coverage swap. Complete the swap before changing its driver.');
@@ -329,6 +328,8 @@ export async function POST(request:Request){
     if(action==='assignOpenTruck'){
       const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
       if(truck.out_of_service)throw new Error(`${truck.unit} is out of service on the Repair Board.`);
+      const repair=await truckRepairCounts(equipmentId);
+      if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(truck.unit,repair.active,repair.outside));
       const driver=text(body.driver,160);if(!driver)throw new Error('Choose or enter a driver.');
       const location=text(body.location,160);
       const row=await env.DB.prepare('SELECT current_driver,current_location,pool_status FROM fleet_truck_assignments WHERE equipment_id=?').bind(equipmentId).first<{current_driver:string;current_location:string;pool_status:string}>();
@@ -356,6 +357,8 @@ export async function POST(request:Request){
       if(homeId===coverageId)throw new Error('Choose a different coverage truck.');
       const [home,coverage]=await Promise.all([equipment(homeId),equipment(coverageId)]);
       if(coverage.out_of_service)throw new Error(`${coverage.unit} is out of service on the Repair Board.`);
+      const repairs=await truckRepairCounts(coverageId);
+      if(repairs.active+repairs.outside>0)throw new Error(repairHoldMessage(coverage.unit,repairs.active,repairs.outside));
       const driver=text(body.driver,160);if(!driver)throw new Error('Driver is required.');
       const workingLocation=text(body.workingLocation,160),serviceLocation=text(body.serviceLocation,160)||'Clare';
       const reason=text(body.reason,300),returnPool=pool(body.coverageReturnPool,['open','spare']);
@@ -386,9 +389,9 @@ export async function POST(request:Request){
       const swap=await env.DB.prepare('SELECT id,home_equipment_id FROM fleet_coverage_swaps WHERE id=? AND closed_at IS NULL').bind(swapId).first<{id:number;home_equipment_id:number}>();
       if(!swap)throw new Error('Active coverage swap was not found.');
       const home=await equipment(swap.home_equipment_id);
-      const repair=await env.DB.prepare(`SELECT COALESCE(e.out_of_service,0) AS oos,(SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs FROM equipment e WHERE e.id=?`)
-        .bind(home.id).first<{oos:number;open_repairs:number}>();
-      if(Boolean(repair?.oos)||Number(repair?.open_repairs||0)>0)throw new Error(`${home.unit} still has open Repair Board work or is out of service.`);
+      const repair=await truckRepairCounts(home.id);
+      if(repair.oos)throw new Error(`${home.unit} remains out of service.`);
+      if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(home.unit,repair.active,repair.outside));
       await env.DB.prepare('UPDATE fleet_coverage_swaps SET ready_at=CURRENT_TIMESTAMP,ready_by_user_id=? WHERE id=?').bind(user.id,swapId).run();
       await logEvent(user,'ready_to_return',home.id,null,'','','',`${home.unit} marked ready to return to its permanent driver.`);
       return Response.json({ok:true});
@@ -400,9 +403,9 @@ export async function POST(request:Request){
         .first<{id:number;driver:string;home_equipment_id:number;coverage_equipment_id:number;working_location:string;service_location:string;coverage_return_pool:string}>();
       if(!swap)throw new Error('Active coverage swap was not found.');
       const [home,coverage]=await Promise.all([equipment(swap.home_equipment_id),equipment(swap.coverage_equipment_id)]);
-      const repair=await env.DB.prepare(`SELECT COALESCE(e.out_of_service,0) AS oos,(SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs FROM equipment e WHERE e.id=?`)
-        .bind(home.id).first<{oos:number;open_repairs:number}>();
-      if(Boolean(repair?.oos)||Number(repair?.open_repairs||0)>0)throw new Error(`${home.unit} still has open Repair Board work or is out of service.`);
+      const repair=await truckRepairCounts(home.id);
+      if(repair.oos)throw new Error(`${home.unit} remains out of service.`);
+      if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(home.unit,repair.active,repair.outside));
       const readiness=await env.DB.prepare(`SELECT ready_at,EXISTS(SELECT 1 FROM repairs r WHERE r.equipment_id=? AND r.completed_at IS NOT NULL AND r.completed_at>=opened_at) AS completed_service_work FROM fleet_coverage_swaps WHERE id=?`).bind(home.id,swapId).first<{ready_at:string|null;completed_service_work:number}>();
       if(!readiness?.ready_at&&!readiness?.completed_service_work)throw new Error(`${home.unit} must be marked Ready to Return, or have completed Repair Board work from this swap, before it can go back to the driver.`);
       await env.DB.batch([
