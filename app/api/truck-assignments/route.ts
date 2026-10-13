@@ -20,6 +20,7 @@ type AssignmentRow = {
   out_of_service_reason:string;
   shop_eta:string|null;
   open_repairs:number;
+  repair_board_repairs:number;
 };
 
 type SwapRow = {
@@ -87,6 +88,32 @@ export async function GET(request:Request){
   try{
     const user=await requireOperator(request);
     await ensureAssignments();
+    const inspectId=new URL(request.url).searchParams.get('inspectEquipmentId');
+    if(inspectId!==null){
+      const equipmentId=id(inspectId);
+      const truck=await equipment(equipmentId);
+      const matched=await env.DB.prepare(`
+        SELECT r.id,COALESCE(r.title,'') AS title,COALESCE(r.status,'') AS status,
+               COALESCE(r.source,'') AS source,COALESCE(r.opened_at,'') AS opened_at
+        FROM repairs r WHERE r.equipment_id=?
+          AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+        ORDER BY r.id DESC LIMIT 101
+      `).bind(equipmentId).all<{id:number;title:string;status:string;source:string;opened_at:string}>();
+      const records=matched.results.slice(0,100).map(row=>{
+        const source=row.source.toLowerCase(),status=row.status.toLowerCase();
+        const explanation=source==='roadside-breakdown'
+          ? 'Roadside breakdown: excluded from the Repair Board'
+          : status.startsWith('deferred to next')
+            ? 'Deferred to next PM/Annual: excluded from the Repair Board'
+            : status.startsWith('outside - waiting on')
+              ? 'Outside repair: excluded from the Repair Board'
+              : 'Visible on the Repair Board';
+        return {id:row.id,title:row.title,status:row.status,source:row.source,openedAt:row.opened_at,
+          shownOnRepairBoard:explanation==='Visible on the Repair Board',explanation};
+      });
+      return Response.json({unit:truck.unit,equipmentId,records,truncated:matched.results.length>100},
+        {headers:{'cache-control':'no-store'}});
+    }
     const [assignments,swaps,events]=await Promise.all([
       env.DB.prepare(`
         SELECT a.equipment_id,e.unit,COALESCE(e.equipment_type,'other') AS equipment_type,
@@ -94,7 +121,13 @@ export async function GET(request:Request){
                a.truck_class,a.flatbed,a.automatic,a.scheduler_notes,a.coverage_for_equipment_id,a.coverage_for_driver,
                COALESCE(e.out_of_service,0) AS out_of_service,COALESCE(e.out_of_service_reason,'') AS out_of_service_reason,
                e.shop_eta,
-               (SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs
+               (SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=e.id AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%') AS open_repairs,
+               (SELECT COUNT(*) FROM repairs r
+                WHERE r.equipment_id=e.id
+                  AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+                  AND COALESCE(r.source,'') <> 'roadside-breakdown'
+                  AND lower(COALESCE(r.status,'')) NOT LIKE 'deferred to next%'
+                  AND lower(COALESCE(r.status,'')) NOT LIKE 'outside - waiting on%') AS repair_board_repairs
         FROM fleet_truck_assignments a
         JOIN equipment e ON e.id=a.equipment_id
         WHERE e.active=1 AND e.merged_into_equipment_id IS NULL
@@ -128,7 +161,9 @@ export async function GET(request:Request){
       status:row.pool_status,truckClass:row.truck_class,flatbed:Boolean(row.flatbed),automatic:Boolean(row.automatic),
       notes:row.scheduler_notes,coverageForEquipmentId:row.coverage_for_equipment_id,coverageForDriver:row.coverage_for_driver,
       outOfService:Boolean(row.out_of_service),outOfServiceReason:row.out_of_service_reason,shopEta:row.shop_eta??'',
-      openRepairCount:Number(row.open_repairs||0),
+      openRepairCount:Number(row.repair_board_repairs||0),
+      otherPendingRepairCount:Math.max(0,Number(row.open_repairs||0)-Number(row.repair_board_repairs||0)),
+      pendingRepairCount:Number(row.open_repairs||0),
       repairState:row.pool_status==='service'?'in_service':Boolean(row.out_of_service)?'out_of_service':Number(row.open_repairs||0)>0?'open_repair':row.pool_status==='cleaning'?'cleaning':'clear',
       readyToReturn:row.pool_status==='service'&&!row.out_of_service&&Number(row.open_repairs||0)===0,
     }));
