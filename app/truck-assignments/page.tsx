@@ -17,6 +17,7 @@ type RepairAudit={unit:string;equipmentId:number;records:Array<{id:number;title:
 
 const card:CSSProperties={background:"#fff",border:"1px solid #dbe3ea",borderRadius:14,boxShadow:"0 1px 2px rgba(15,23,42,.04)"};
 const button:CSSProperties={border:"1px solid #cbd5e1",background:"#fff",color:"#0f172a",fontWeight:800,borderRadius:9,padding:"9px 13px",cursor:"pointer"};
+const light:CSSProperties={...button,background:"#f1f5f9"};
 const blue:CSSProperties={...button,background:"#0b6ff9",borderColor:"#0b6ff9",color:"#fff"};
 const green:CSSProperties={...button,background:"#16a34a",borderColor:"#16a34a",color:"#fff"};
 const orange:CSSProperties={...button,background:"#f97316",borderColor:"#f97316",color:"#fff"};
@@ -325,6 +326,52 @@ export default function TruckAssignmentsPage(){
     </section>}
 
 
+
+    {tab==="sales"&&data?.permissions.canEditMaster&&<section style={{...card,marginTop:14,overflow:"hidden"}}>
+      <div style={{padding:15,display:"flex",gap:12,alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+        <div><h2 style={{margin:"0 0 5px",fontSize:19}}>Truck Sales & Retirement History</h2>
+          <p style={{fontSize:12,color:"#64748b",margin:0}}>Includes trucks still working, trucks parked awaiting a sale, cancelled listings, and archived sold trucks. Historical repairs, PMs and ownership costs remain on the original units.</p></div>
+        <input type="search" aria-label="Search truck sales" placeholder="Search truck number, buyer or status…" value={saleSearch} onChange={e=>setSaleSearch(e.target.value)} style={{...input,maxWidth:300}}/>
+      </div>
+      <div style={{maxHeight:580,overflow:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}>
+          <thead><tr>{["Truck","Sale Stage","Asking Price","Sold Price","Buyer","Dates","Location","Action"].map(h=><th key={h} style={{...th,position:"sticky",top:0,zIndex:2}}>{h}</th>)}</tr></thead>
+          <tbody>{(data?.sales??[]).filter(sale=>!saleSearch.trim()||[sale.unit,sale.status,sale.buyer,sale.location,sale.notes].some(x=>String(x??"").toLowerCase().includes(saleSearch.trim().toLowerCase()))).map(sale=>{
+            const held=Boolean(sale.offRoadAt&&!sale.returnedToRoadAt);
+            const label=sale.status==="sold"?"Sold":held?(sale.status==="cancelled"?"Sale Cancelled · Off Road":"Off Road · Awaiting Sale"):sale.status==="for_sale"?"For Sale · Still Working":"Sale Cancelled";
+            return <tr key={sale.equipmentId}>
+              <td style={td}><strong>{sale.unit}</strong></td>
+              <td style={td}><span style={held?badge("#fee2e2","#991b1b"):sale.status==="for_sale"?badge("#fef3c7","#92400e"):badge("#e2e8f0","#475569")}>{label}</span></td>
+              <td style={td}>{money(sale.askingPrice)}</td><td style={td}>{money(sale.salePrice)}</td>
+              <td style={td}>{sale.buyer||"—"}</td>
+              <td style={{...td,fontSize:12}}>{sale.listedAt&&<div>Listed {sale.listedAt.slice(0,10)}</div>}
+                {sale.offRoadAt&&<div>Parked {sale.offRoadAt.slice(0,10)}</div>}
+                {sale.returnedToRoadAt&&<div>Returned {sale.returnedToRoadAt.slice(0,10)}</div>}
+                {sale.cancelledAt&&<div>Cancelled {sale.cancelledAt.slice(0,10)}</div>}
+                {sale.soldAt&&<div>Sold {sale.soldAt.slice(0,10)}</div>}</td>
+              <td style={td}>{sale.location||"—"}</td>
+              <td style={td}><button type="button" style={{...button,padding:"6px 10px"}} onClick={()=>openSale(sale)}>{sale.status==="sold"?"View Sale":"Manage Sale"}</button></td>
+            </tr>;
+          })}
+          {!(data?.sales??[]).length&&<tr><td colSpan={8} style={{padding:22,color:"#64748b"}}>No trucks have been listed for sale yet. Use Manage → Manage Sale on a truck to start.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div style={{padding:15,borderTop:"1px solid #e2e8f0"}}>
+        <h3 style={{fontSize:17,margin:"0 0 5px"}}>Sale Change History</h3>
+        <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>Who listed, cancelled, removed from service, returned to service, or finalized each truck. Latest 300 entries shown.</p>
+        <div style={{maxHeight:350,overflow:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:750}}>
+            <thead><tr>{["When","Truck","Event","Details","By"].map(h=><th key={h} style={{...th,position:"sticky",top:0,zIndex:1}}>{h}</th>)}</tr></thead>
+            <tbody>{(data?.saleEvents??[]).filter(ev=>!saleSearch.trim()||[ev.unit,ev.details,ev.action,ev.by].some(x=>x.toLowerCase().includes(saleSearch.trim().toLowerCase()))).map(ev=><tr key={ev.id}>
+              <td style={td}>{dateTime(ev.when)}</td><td style={td}>{ev.unit}</td><td style={td}>{ev.action.replaceAll("_"," ")}</td>
+              <td style={{...td,whiteSpace:"normal"}}>{ev.details}</td><td style={td}>{ev.by}</td>
+            </tr>)}
+            {!(data?.saleEvents??[]).length&&<tr><td colSpan={5} style={{padding:18,color:"#64748b"}}>No sale actions recorded yet.</td></tr>}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>}
 
     {saleId!==null&&data?.permissions.canEditMaster&&<div style={{position:"fixed",inset:0,zIndex:1200,background:"rgba(15,23,42,.6)",display:"grid",placeItems:"center",padding:14}} onMouseDown={()=>!busy&&setSaleId(null)}>
       <section role="dialog" aria-modal="true" aria-label="Manage truck sale" style={{...card,width:"min(700px,96vw)",maxHeight:"94vh",overflowY:"auto",padding:19}} onMouseDown={event=>event.stopPropagation()}>
