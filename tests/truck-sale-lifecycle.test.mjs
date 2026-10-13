@@ -162,7 +162,7 @@ test('Sold archives equipment and ends live tracking, retaining historic repairs
   await act('mark_for_sale',{askingPrice:'16000'});
   await assert.rejects(act('mark_sold',{salePrice:'13000',saleDate:'2026-10-13',confirmSaleFinal:true}),/Remove the truck from the road/);
   await act('remove_from_road',{confirmDriverRelease:true});
-  await assert.rejects(act('mark_sold',{salePrice:'-100',saleDate:'2026-10-13',confirmSaleFinal:true}),/sale price/);
+  await assert.rejects(act('mark_sold',{salePrice:'-100',saleDate:'2026-10-13',confirmSaleFinal:true}),/Enter dollars|sale price/);
   await assert.rejects(act('mark_sold',{salePrice:'13000',saleDate:'2026-12-01',confirmSaleFinal:true}),/future/);
   await assert.rejects(act('mark_sold',{salePrice:'13000',saleDate:'2026-10-13'}),/Confirm the sale is final/);
   await act('mark_sold',{salePrice:'13000.50',saleDate:'2026-10-13',buyer:'Fleet Buyer',confirmSaleFinal:true,expectedVersion:2});
