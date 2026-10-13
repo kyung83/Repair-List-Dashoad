@@ -149,6 +149,41 @@ export default function TruckAssignmentsPage(){
     if(ok)setManagedId(null);
   }
 
+  const saleAssignment=rows.find(row=>row.equipmentId===saleId)??null;
+  const saleRecord=(data?.sales??[]).find(row=>row.equipmentId===saleId)??null;
+  const saleStatus=saleRecord?.status??saleAssignment?.saleStatus??"none";
+  const saleHeld=Boolean(saleAssignment?.saleOffRoad||(saleRecord?.offRoadAt&&!saleRecord?.returnedToRoadAt));
+
+  function openSale(row:Assignment|SaleRecord){
+    const record=("saleStatus" in row)?(data?.sales??[]).find(sale=>sale.equipmentId===row.equipmentId):row;
+    const asking=("saleStatus" in row)?row.saleAskingPrice:row.askingPrice;
+    const notes=("saleStatus" in row)?row.saleNotes:row.notes;
+    setSaleId(row.equipmentId);setManagedId(null);setSaleError("");
+    setAskingDraft(asking==null?"":asking.toFixed(2));setNotesDraft(notes??"");
+    setPriceDraft("");setBuyerDraft("");setDateDraft(new Date().toISOString().slice(0,10));
+    setConfirmParked(false);setConfirmRoadworthy(false);setConfirmSold(false);
+    if(record?.salePrice!=null)setPriceDraft(record.salePrice.toFixed(2));
+    if(record?.buyer)setBuyerDraft(record.buyer);
+  }
+  async function saveSale(action:string,warning:string){
+    if(!saleAssignment)return;
+    if(!window.confirm(warning))return;
+    setBusy(true);setSaleError("");setMsg("");
+    try{
+      const body={
+        action,equipmentId:saleAssignment.equipmentId,expectedVersion:saleAssignment.saleVersion,
+        askingPrice:askingDraft,notes:notesDraft,
+        salePrice:priceDraft,buyer:buyerDraft,saleDate:dateDraft,
+        confirmDriverRelease:confirmParked,confirmRoadworthy,confirmSaleFinal:confirmSold,
+      };
+      const response=await fetch("/api/truck-assignments",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      const result=await response.json() as {ok?:boolean;error?:string;message?:string};
+      if(!response.ok||!result.ok)throw new Error(result.error||"Truck sale change failed.");
+      await load();setSaleId(null);setMsg(result.message||"Truck sale updated.");
+    }catch(error){setSaleError(error instanceof Error?error.message:"Truck sale change failed.");}
+    finally{setBusy(false);}
+  }
+
   function openSwap(home:number){setSwapHome(home);setSelectedId(home);const row=rows.find(x=>x.equipmentId===home);setSwapCoverage(pool.find(x=>x.equipmentId!==home)?.equipmentId??null);setSwapService("Clare");setSwapReason("PM / Repair");setSwapReturn("spare");}
   async function startSwap(){
     const home=rows.find(x=>x.equipmentId===swapHome),coverage=rows.find(x=>x.equipmentId===swapCoverage);
