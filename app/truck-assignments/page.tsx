@@ -172,7 +172,7 @@ export default function TruckAssignmentsPage(){
                 <td style={td}><strong>{active?active.coverageUnit:row.currentDriver?row.unit:"—"}</strong></td>
                 <td style={td}>{active?active.workingLocation:row.currentLocation||"—"}</td>
                 <td style={td}><span style={statusStyle(row)}>{niceStatus(row)}</span></td>
-                <td style={td}>{row.outOfService?<span style={badge("#fee2e2","#b91c1c")}>OOS</span>:row.openRepairCount>0?<span title="Open repair work does not mean the truck is physically in the shop" style={badge("#fff7ed","#9a3412")}>`${row.openRepairCount} open job${row.openRepairCount===1?"":"s"}`</span>:<span style={badge("#ecfdf5","#047857")}>Clear</span>}</td>
+                <td style={td}>{row.outOfService?<span style={badge("#fee2e2","#b91c1c")}>OOS</span>:row.openRepairCount>0?<span title="Open repair work does not mean the truck is physically in the shop" style={badge("#fff7ed","#9a3412")}>{`${row.openRepairCount} open job${row.openRepairCount===1?"":"s"}`}</span>:<span style={badge("#ecfdf5","#047857")}>Clear</span>}</td>
                 <td style={td}><button style={{...button,padding:"6px 10px"}} onClick={e=>{e.stopPropagation();openManage(row);}}>Manage</button></td>
               </tr>
             })}</tbody>
