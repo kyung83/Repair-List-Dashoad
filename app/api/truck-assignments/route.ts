@@ -190,6 +190,79 @@ export async function POST(request:Request){
       return Response.json({ok:true});
     }
 
+
+    // An assigned truck can be released without first removing a stale driver
+    // from the dispatch list. An active coverage swap must be completed through
+    // the established return/repair workflow instead.
+    if(action==='markTruckOpen'){
+      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const clearPermanent=body.clearPermanent===true;
+      if(clearPermanent&&!canEditMaster(user))throw new Error('Only managers and administrators can remove a permanent driver assignment.');
+      const row=await env.DB.prepare('SELECT home_driver,current_driver,current_location,pool_status FROM fleet_truck_assignments WHERE equipment_id=?')
+        .bind(equipmentId).first<{home_driver:string;current_driver:string;current_location:string;pool_status:string}>();
+      if(!row)throw new Error('Truck assignment was not found.');
+      const active=await env.DB.prepare('SELECT id FROM fleet_coverage_swaps WHERE closed_at IS NULL AND (home_equipment_id=? OR coverage_equipment_id=?) LIMIT 1')
+        .bind(equipmentId,equipmentId).first();
+      if(active)throw new Error('This truck has an active coverage swap. Complete the swap before marking it Open.');
+      const result=await env.DB.prepare(`UPDATE fleet_truck_assignments
+        SET home_driver=CASE WHEN ?=1 THEN '' ELSE home_driver END,
+            current_driver='',pool_status='open',
+            coverage_for_equipment_id=NULL,coverage_for_driver='',
+            updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP
+        WHERE equipment_id=? AND home_driver=? AND current_driver=?
+          AND NOT EXISTS(SELECT 1 FROM fleet_coverage_swaps
+            WHERE closed_at IS NULL AND (home_equipment_id=? OR coverage_equipment_id=?))`)
+        .bind(clearPermanent?1:0,user.id,equipmentId,row.home_driver,row.current_driver,equipmentId,equipmentId).run();
+      if(Number(result.meta.changes||0)!==1)throw new Error('Assignment changed while you were editing. Refresh this truck and try again.');
+      if(clearPermanent){
+        await env.DB.prepare('UPDATE equipment SET driver=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(equipmentId).run();
+      }
+      await logEvent(user,clearPermanent?'permanent_driver_removed':'truck_marked_open',equipmentId,null,
+        row.current_driver||row.home_driver,row.current_location,row.current_location,
+        clearPermanent
+          ?`${truck.unit} made Open. Former permanent driver ${row.home_driver||'none'} and current driver ${row.current_driver||'none'} removed.`
+          :`${truck.unit} made Open. Current driver ${row.current_driver||'none'} released; permanent assignment kept.`);
+      return Response.json({ok:true,unit:truck.unit,status:'open',permanentCleared:clearPermanent});
+    }
+
+    // Dispatch may change who is CURRENTLY driving an available truck.
+    // This does not rewrite the permanent owner, Master Equipment or an
+    // in-progress service/coverage swap.
+    if(action==='changeCurrentDriver'){
+      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const driver=text(body.driver,160);
+      if(!driver)throw new Error('Enter a new driver, or use Mark Open to remove the current driver.');
+      if(truck.out_of_service)throw new Error(`${truck.unit} is out of service and cannot be assigned to a driver.`);
+      const repair=await env.DB.prepare("SELECT COUNT(*) AS count FROM repairs WHERE equipment_id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'")
+        .bind(equipmentId).first<{count:number}>();
+      if(Number(repair?.count||0)>0)throw new Error(`${truck.unit} still has open Repair Board work. Clear it before assigning a driver.`);
+      const active=await env.DB.prepare('SELECT id FROM fleet_coverage_swaps WHERE closed_at IS NULL AND (home_equipment_id=? OR coverage_equipment_id=?) LIMIT 1')
+        .bind(equipmentId,equipmentId).first();
+      if(active)throw new Error('This truck is in an active coverage swap. Complete the swap before changing its driver.');
+      const row=await env.DB.prepare('SELECT home_driver,current_driver,current_location,pool_status FROM fleet_truck_assignments WHERE equipment_id=?')
+        .bind(equipmentId).first<{home_driver:string;current_driver:string;current_location:string;pool_status:string}>();
+      if(!row)throw new Error('Truck assignment was not found.');
+      if(row.pool_status==='cleaning')throw new Error('Mark this truck Open or Spare after cleaning before assigning a driver.');
+      const other=await env.DB.prepare(`SELECT a.equipment_id,e.unit FROM fleet_truck_assignments a
+        JOIN equipment e ON e.id=a.equipment_id
+        WHERE a.equipment_id<>? AND lower(trim(a.current_driver))=lower(trim(?)) LIMIT 1`)
+        .bind(equipmentId,driver).first<{equipment_id:number;unit:string}>();
+      if(other)throw new Error(`${driver} is already listed on truck ${other.unit}. Release that truck first to avoid duplicate assignments.`);
+      const location=text(body.location,160)||row.current_location;
+      const changed=await env.DB.prepare(`UPDATE fleet_truck_assignments
+        SET current_driver=?,current_location=?,pool_status='assigned',
+            coverage_for_equipment_id=NULL,coverage_for_driver='',
+            updated_by_user_id=?,updated_at=CURRENT_TIMESTAMP
+        WHERE equipment_id=? AND current_driver=?
+          AND NOT EXISTS(SELECT 1 FROM fleet_coverage_swaps
+            WHERE closed_at IS NULL AND (home_equipment_id=? OR coverage_equipment_id=?))`)
+        .bind(driver,location,user.id,equipmentId,row.current_driver,equipmentId,equipmentId).run();
+      if(Number(changed.meta.changes||0)!==1)throw new Error('Assignment changed while you were editing. Refresh this truck and try again.');
+      await logEvent(user,'current_driver_changed',equipmentId,null,driver,row.current_location,location,
+        `${truck.unit} current driver changed from ${row.current_driver||'unassigned'} to ${driver}. Permanent driver unchanged.`);
+      return Response.json({ok:true,unit:truck.unit,currentDriver:driver});
+    }
+
     if(action==='setPoolStatus'){
       const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
       const status=pool(body.status,['open','spare','cleaning']);
