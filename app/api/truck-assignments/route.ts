@@ -183,6 +183,30 @@ export async function GET(request:Request){
         LEFT JOIN app_users u ON u.id=ev.user_id
         ORDER BY ev.id DESC LIMIT 100
       `).all<{id:number;action:string;driver:string;from_location:string;to_location:string;detail:string;created_at:string;primary_unit:string;secondary_unit:string;by_name:string}>(),
+      env.DB.prepare(`
+        SELECT sale.equipment_id,e.unit,sale.sale_status,sale.asking_price,sale.sale_notes,
+               sale.listed_at,sale.off_road_at,sale.returned_to_road_at,sale.cancelled_at,
+               sale.sold_at,sale.sale_price,sale.buyer,sale.version,
+               COALESCE(a.home_location,COALESCE(e.location,'')) AS location
+        FROM fleet_truck_sales sale
+        JOIN equipment e ON e.id=sale.equipment_id
+        LEFT JOIN fleet_truck_assignments a ON a.equipment_id=e.id
+        ORDER BY CASE sale.sale_status WHEN 'sold' THEN 0 ELSE 1 END,
+                 sale.updated_at DESC LIMIT 500
+      `).all<{equipment_id:number;unit:string;sale_status:string;asking_price:number|null;sale_notes:string;
+        listed_at:string;off_road_at:string|null;returned_to_road_at:string|null;cancelled_at:string|null;
+        sold_at:string|null;sale_price:number|null;buyer:string;version:number;location:string}>(),
+      env.DB.prepare(`
+        SELECT ev.id,ev.equipment_id,ev.action,ev.from_status,ev.to_status,ev.details,
+               ev.driver_snapshot,ev.asking_price,ev.sale_price,ev.buyer,ev.created_at,
+               COALESCE(e.unit,'') AS unit,
+               COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'System') AS by_name
+        FROM fleet_truck_sale_events ev
+        JOIN equipment e ON e.id=ev.equipment_id
+        LEFT JOIN app_users u ON u.id=ev.user_id
+        ORDER BY ev.id DESC LIMIT 300
+      `).all<{id:number;equipment_id:number;action:string;from_status:string;to_status:string;details:string;
+        driver_snapshot:string;asking_price:number|null;sale_price:number|null;buyer:string;created_at:string;unit:string;by_name:string}>(),
     ]);
     const rows=assignments.results.map(row=>({
       equipmentId:row.equipment_id,unit:row.unit,equipmentType:row.equipment_type,
