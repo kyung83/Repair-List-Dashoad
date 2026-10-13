@@ -46,6 +46,9 @@ export default function TruckAssignmentsPage(){
   const[data,setData]=useState<Payload|null>(null),[tab,setTab]=useState<"board"|"master"|"activity">("board"),[q,setQ]=useState(""),[location,setLocation]=useState("All"),[filter,setFilter]=useState("All"),[selectedId,setSelectedId]=useState<number|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
   const[swapHome,setSwapHome]=useState<number|null>(null),[swapCoverage,setSwapCoverage]=useState<number|null>(null),[swapReason,setSwapReason]=useState("PM / Repair"),[swapService,setSwapService]=useState("Clare"),[swapReturn,setSwapReturn]=useState("spare");
   const[edit,setEdit]=useState<Assignment|null>(null);
+  const[managedId,setManagedId]=useState<number|null>(null);
+  const[driverDraft,setDriverDraft]=useState("");
+  const[locationDraft,setLocationDraft]=useState("");
 
   async function load(){
     const r=await fetch("/api/truck-assignments",{cache:"no-store"}),j=await r.json() as Payload;
@@ -73,15 +76,40 @@ export default function TruckAssignmentsPage(){
 
   const pool=rows.filter(x=>["open","spare"].includes(x.status)&&!x.currentDriver&&!x.outOfService&&x.openRepairCount===0);
   const activeSwapByHome=new Map((data?.activeSwaps??[]).map(x=>[x.homeEquipmentId,x]));
-  async function act(body:Record<string,unknown>){
+  const managed=rows.find(x=>x.equipmentId===managedId)??null;
+  const managingActiveSwap=Boolean(managed&&(data?.activeSwaps??[]).some(x=>x.homeEquipmentId===managed.equipmentId||x.coverageEquipmentId===managed.equipmentId));
+  const driverSuggestions=[...new Set(rows.flatMap(row=>[row.homeDriver,row.currentDriver]).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  async function act(body:Record<string,unknown>):Promise<boolean>{
     setBusy(true);setMsg("");
     try{
       const r=await fetch("/api/truck-assignments",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
       const j=await r.json() as {ok?:boolean;error?:string};
       if(!r.ok||!j.ok)throw new Error(j.error||"Change failed.");
-      await load();setMsg("Saved.");
-    }catch(e){setMsg(e instanceof Error?e.message:"Change failed.");}
+      await load();setMsg("Saved.");return true;
+    }catch(e){setMsg(e instanceof Error?e.message:"Change failed.");return false;}
     finally{setBusy(false);}
+  }
+
+  function openManage(row:Assignment){
+    setSelectedId(row.equipmentId);
+    setManagedId(row.equipmentId);
+    setDriverDraft(row.currentDriver);
+    setLocationDraft(row.currentLocation||row.homeLocation);
+    setMsg("");
+  }
+  async function saveManagedDriver(){
+    if(!managed)return;
+    const ok=await act({action:"changeCurrentDriver",equipmentId:managed.equipmentId,driver:driverDraft.trim(),location:locationDraft.trim()});
+    if(ok)setManagedId(null);
+  }
+  async function markManagedOpen(clearPermanent:boolean){
+    if(!managed)return;
+    const explanation=clearPermanent
+      ? "Remove BOTH the permanent and current driver from truck "+managed.unit+" and mark it Open? This also clears the driver in Master Equipment."
+      : "Release the current driver and mark truck "+managed.unit+" Open? Its permanent home-driver assignment will remain unchanged.";
+    if(!window.confirm(explanation))return;
+    const ok=await act({action:"markTruckOpen",equipmentId:managed.equipmentId,clearPermanent});
+    if(ok)setManagedId(null);
   }
 
   function openSwap(home:number){setSwapHome(home);setSelectedId(home);const row=rows.find(x=>x.equipmentId===home);setSwapCoverage(pool.find(x=>x.equipmentId!==home)?.equipmentId??null);setSwapService("Clare");setSwapReason("PM / Repair");setSwapReturn("spare");}
@@ -94,8 +122,8 @@ export default function TruckAssignmentsPage(){
   function editMaster(row:Assignment){setEdit({...row});}
   async function saveMaster(){
     if(!edit)return;
-    await act({action:"updateMaster",equipmentId:edit.equipmentId,homeDriver:edit.homeDriver,homeLocation:edit.homeLocation,status:edit.homeDriver?"assigned":edit.status==="spare"?"spare":"open",truckClass:edit.truckClass,flatbed:edit.flatbed,automatic:edit.automatic,notes:edit.notes});
-    setEdit(null);
+    const ok=await act({action:"updateMaster",equipmentId:edit.equipmentId,homeDriver:edit.homeDriver,homeLocation:edit.homeLocation,status:edit.homeDriver?"assigned":edit.status==="spare"?"spare":"open",truckClass:edit.truckClass,flatbed:edit.flatbed,automatic:edit.automatic,notes:edit.notes});
+    if(ok)setEdit(null);
   }
 
   return <main className="easy-page"><div style={{maxWidth:1680,margin:"0 auto"}}>
@@ -142,7 +170,7 @@ export default function TruckAssignmentsPage(){
                 <td style={td}>{active?active.workingLocation:row.currentLocation||"—"}</td>
                 <td style={td}><span style={statusStyle(row)}>{niceStatus(row)}</span></td>
                 <td style={td}>{row.outOfService||row.openRepairCount>0?<span style={badge("#fee2e2","#b91c1c")}>{row.outOfService?"OOS":`${row.openRepairCount} open job${row.openRepairCount===1?"":"s"}`}</span>:<span style={badge("#ecfdf5","#047857")}>Clear</span>}</td>
-                <td style={td}><button style={{...button,padding:"6px 10px"}} onClick={e=>{e.stopPropagation();setSelectedId(row.equipmentId);}}>Manage</button></td>
+                <td style={td}><button style={{...button,padding:"6px 10px"}} onClick={e=>{e.stopPropagation();openManage(row);}}>Manage</button></td>
               </tr>
             })}</tbody>
           </table></div>
@@ -161,7 +189,7 @@ export default function TruckAssignmentsPage(){
                 {selected.homeDriver&&!activeSwapByHome.has(selected.equipmentId)&&<button style={blue} onClick={()=>openSwap(selected.equipmentId)} disabled={busy}>Start Coverage Swap</button>}
                 {!selected.currentDriver&&["open","spare"].includes(selected.status)&&<button style={green} onClick={()=>{const d=prompt("Driver name");if(d){const l=prompt("Driver / truck location",selected.currentLocation||selected.homeLocation)||selected.currentLocation;void act({action:"assignOpenTruck",equipmentId:selected.equipmentId,driver:d,location:l});}}} disabled={busy}>Assign Truck</button>}
                 <button style={button} onClick={()=>{const l=prompt("Move truck to",selected.currentLocation||selected.homeLocation);if(l)void act({action:"moveTruck",equipmentId:selected.equipmentId,toLocation:l,reason:"Dispatcher move"});}} disabled={busy}>Move Truck</button>
-                {!selected.currentDriver&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"open",currentLocation:selected.currentLocation})} disabled={busy}>Mark Open</button>}
+                <button style={button} onClick={()=>{if(!selected.currentDriver&&!selected.homeDriver)void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"open",currentLocation:selected.currentLocation});else openManage(selected);}} disabled={busy}>Mark Open</button>
                 {!selected.currentDriver&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"spare",currentLocation:selected.currentLocation})} disabled={busy}>Mark Spare</button>}
                 {!selected.currentDriver&&<button style={orange} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"cleaning",currentLocation:selected.currentLocation})} disabled={busy}>Needs Cleaning</button>}
               </div>
@@ -208,6 +236,50 @@ export default function TruckAssignmentsPage(){
       <div style={{padding:"13px 14px"}}><h2 style={{margin:0,fontSize:18}}>Assignment History</h2><p style={{margin:"4px 0 0",fontSize:12,color:"#64748b"}}>Every permanent change, swap, move, cleaning status and return is logged.</p></div>
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:900}}><thead><tr>{["When","Type","Driver","Truck(s)","Move","Details","By"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead><tbody>{(data?.events??[]).map(x=><tr key={x.id}><td style={td}>{dateTime(x.created_at)}</td><td style={td}>{x.action.replaceAll("_"," ")}</td><td style={td}>{x.driver||"—"}</td><td style={td}>{[x.primary_unit,x.secondary_unit].filter(Boolean).join(" / ")||"—"}</td><td style={td}>{x.from_location&&x.to_location?`${x.from_location} → ${x.to_location}`:"—"}</td><td style={td}>{x.detail}</td><td style={td}>{x.by_name}</td></tr>)}</tbody></table></div>
     </section>}
+
+
+    {managed&&<div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.54)",display:"grid",placeItems:"center",padding:14,zIndex:1000}} onMouseDown={()=>!busy&&setManagedId(null)}>
+      <div role="dialog" aria-modal="true" aria-label={`Manage truck ${managed.unit}`} style={{...card,width:"min(630px,96vw)",padding:20,maxHeight:"92vh",overflowY:"auto"}} onMouseDown={e=>e.stopPropagation()}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
+          <div><h2 style={{margin:"0 0 4px"}}>Manage Truck {managed.unit}</h2><p style={{margin:0,fontSize:13,color:"#64748b"}}>Choose a driver change or release the truck to Open.</p></div>
+          <button type="button" style={{...button,padding:"6px 11px"}} onClick={()=>setManagedId(null)} disabled={busy} aria-label="Close truck manager">✕</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10,background:"#f8fafc",padding:12,borderRadius:10,marginTop:15}}>
+          <div><div style={{fontSize:11,color:"#64748b"}}>Permanent driver</div><strong>{managed.homeDriver||"None"}</strong></div>
+          <div><div style={{fontSize:11,color:"#64748b"}}>Current driver</div><strong>{managed.currentDriver||"Open / unassigned"}</strong></div>
+          <div><div style={{fontSize:11,color:"#64748b"}}>Current location</div><strong>{managed.currentLocation||"—"}</strong></div>
+          <div><div style={{fontSize:11,color:"#64748b"}}>Truck status</div><strong>{niceStatus(managed)}</strong></div>
+        </div>
+        {managingActiveSwap&&<p role="alert" style={{padding:10,background:"#fff7ed",color:"#9a3412",borderRadius:8,fontSize:13}}>This truck is in an active coverage swap. Complete that swap using the existing return process before changing the driver or marking it Open.</p>}
+        <h3 style={{margin:"18px 0 8px",fontSize:16}}>Change Current Driver</h3>
+        <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>For temporary driver changes. The permanent home-driver assignment stays as it is.</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+          <label style={{fontSize:13,fontWeight:700}}>Current driver
+            <input list="assignment-driver-suggestions" autoComplete="off" style={{...input,marginTop:5}} value={driverDraft} onChange={e=>setDriverDraft(e.target.value)} placeholder="Search or enter a driver"/>
+          </label>
+          <label style={{fontSize:13,fontWeight:700}}>Truck location
+            <input style={{...input,marginTop:5}} value={locationDraft} onChange={e=>setLocationDraft(e.target.value)} placeholder="Current terminal"/>
+          </label>
+        </div>
+        <datalist id="assignment-driver-suggestions">{driverSuggestions.map(driver=><option key={driver} value={driver}/>)}</datalist>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,flexWrap:"wrap",marginTop:10}}>
+          {data?.permissions.canEditMaster&&<button type="button" style={button} disabled={busy} onClick={()=>{setManagedId(null);editMaster(managed);}}>Edit Permanent Driver</button>}
+          <button type="button" style={blue} disabled={busy||managingActiveSwap||!driverDraft.trim()} onClick={()=>void saveManagedDriver()}>{busy?"Saving…":"Save Current Driver"}</button>
+        </div>
+        <div style={{borderTop:"1px solid #e2e8f0",marginTop:18,paddingTop:15}}>
+          <h3 style={{margin:"0 0 7px",fontSize:16}}>Make This Truck Open</h3>
+          <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>Release a truck even when the scheduler still shows the former driver. A permanent removal also clears the driver in Master Equipment.</p>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button type="button" style={button} disabled={busy||managingActiveSwap} onClick={()=>void markManagedOpen(false)}>Release Current Driver Only</button>
+            {data?.permissions.canEditMaster&&<button type="button" style={{...orange,background:"#b91c1c",borderColor:"#b91c1c"}} disabled={busy||managingActiveSwap} onClick={()=>void markManagedOpen(true)}>Remove Driver Permanently & Mark Open</button>}
+          </div>
+          {!data?.permissions.canEditMaster&&<p style={{fontSize:12,color:"#64748b",margin:"10px 0 0"}}>Dispatch can mark the truck Open temporarily. A manager must remove the permanent driver assignment.</p>}
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
+          <button type="button" style={button} disabled={busy} onClick={()=>setManagedId(null)}>Close</button>
+        </div>
+      </div>
+    </div>}
 
     {swapHome&&<div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.48)",display:"grid",placeItems:"center",padding:18,zIndex:1000}} onMouseDown={()=>setSwapHome(null)}>
       <div style={{...card,width:"min(620px,96vw)",padding:18}} onMouseDown={e=>e.stopPropagation()}>

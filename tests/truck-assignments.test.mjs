@@ -86,7 +86,73 @@ test('dispatch can use operational scheduler actions but cannot update master',(
   assert.match(nav,/Truck Assignments/);
   assert.match(worker,/'\/truck-assignments'/);
   assert.match(worker,/'\/api\/truck-assignments'/);
-  const allow=worker.match(/new Set\(\['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','markCoverageReady','completeCoverageSwap'\]\)/);
+  const allow=worker.match(/new Set\(\['setPoolStatus','assignOpenTruck','moveTruck','startCoverageSwap','markCoverageReady','completeCoverageSwap','changeCurrentDriver','markTruckOpen'\]\)/);
   assert.ok(allow);
   assert.doesNotMatch(allow[0],/updateMaster/);
+});
+
+
+test('Manage opens driver editor and allows marking occupied trucks Open',()=>{
+  assert.match(page,/onClick=\{e=>\{e.stopPropagation\(\);openManage\(row\);\}\}>Manage/);
+  assert.match(page,/role="dialog" aria-modal="true"/);
+  assert.match(page,/Change Current Driver/);
+  assert.match(page,/Save Current Driver/);
+  assert.match(page,/Edit Permanent Driver/);
+  assert.match(page,/Release Current Driver Only/);
+  assert.match(page,/Remove Driver Permanently & Mark Open/);
+  assert.match(page,/if\(!selected\.currentDriver&&!selected\.homeDriver\)/);
+  assert.match(page,/else openManage\(selected\)/);
+  assert.match(page,/window\.confirm\(explanation\)/);
+  assert.match(page,/if\(ok\)setManagedId\(null\)/);
+});
+
+test('quit driver can be removed permanently without leaving a stale current driver',()=>{
+  const release=api.split("if(action==='markTruckOpen')")[1].split("if(action==='changeCurrentDriver')")[0];
+  assert.ok(release);
+  assert.match(release,/clearPermanent&&!canEditMaster\(user\)/);
+  assert.match(release,/home_driver=CASE WHEN \?=1 THEN '' ELSE home_driver END/);
+  assert.match(release,/current_driver='',pool_status='open'/);
+  assert.match(release,/UPDATE equipment SET driver=NULL/);
+  assert.match(release,/WHERE closed_at IS NULL AND \(home_equipment_id=\? OR coverage_equipment_id=\?\)/);
+  assert.match(release,/permanent_driver_removed/);
+  assert.match(release,/truck_marked_open/);
+});
+
+test('dispatch can change the current driver but not the permanent assignment',()=>{
+  const driver=api.split("if(action==='changeCurrentDriver')")[1].split("if(action==='setPoolStatus')")[0];
+  assert.ok(driver);
+  assert.match(driver,/current_driver=\?,current_location=\?,pool_status='assigned'/);
+  assert.doesNotMatch(driver,/SET home_driver=/);
+  assert.doesNotMatch(driver,/UPDATE equipment SET driver=/);
+  assert.match(driver,/still has open Repair Board work/);
+  assert.match(driver,/out of service and cannot be assigned/);
+  assert.match(driver,/active coverage swap/);
+  assert.match(driver,/already listed on truck/);
+  assert.match(driver,/current_driver_changed/);
+  assert.match(worker,/changeCurrentDriver/);
+  assert.match(worker,/markTruckOpen/);
+});
+
+test('mark Open releases an assigned truck, protects permanent home unless requested and blocks swaps',()=>{
+  const match=api.match(/const result=await env\.DB\.prepare\(\x60(UPDATE fleet_truck_assignments[\s\S]*?)\x60\)\s*\.bind\(clearPermanent\?1:0/);
+  assert.ok(match,'release UPDATE must exist in API');
+  const db=new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE fleet_truck_assignments(equipment_id INTEGER PRIMARY KEY,home_driver TEXT NOT NULL,current_driver TEXT NOT NULL,current_location TEXT NOT NULL,pool_status TEXT NOT NULL,coverage_for_equipment_id INTEGER,coverage_for_driver TEXT,updated_by_user_id INTEGER,updated_at TEXT);"
+    +"CREATE TABLE fleet_coverage_swaps(id INTEGER PRIMARY KEY,home_equipment_id INTEGER,coverage_equipment_id INTEGER,closed_at TEXT);"
+    +"INSERT INTO fleet_truck_assignments VALUES (101,'Quit Driver','Quit Driver','Clare','assigned',NULL,'',NULL,NULL);"
+    +"INSERT INTO fleet_truck_assignments VALUES (102,'Temp Driver','Temp Driver','Clare','assigned',NULL,'',NULL,NULL);"
+    +"INSERT INTO fleet_truck_assignments VALUES (103,'Swap Driver','Swap Driver','Clare','coverage',NULL,'',NULL,NULL);"
+    +"INSERT INTO fleet_coverage_swaps VALUES(7,103,999,NULL);");
+  const stmt=db.prepare(match[1]);
+  const permanent=stmt.run(1,7,101,'Quit Driver','Quit Driver',101,101);
+  assert.equal(permanent.changes,1);
+  assert.deepEqual({...db.prepare('SELECT home_driver,current_driver,pool_status FROM fleet_truck_assignments WHERE equipment_id=101').get()},
+    {home_driver:'',current_driver:'',pool_status:'open'});
+  const temporary=stmt.run(0,7,102,'Temp Driver','Temp Driver',102,102);
+  assert.equal(temporary.changes,1);
+  assert.deepEqual({...db.prepare('SELECT home_driver,current_driver,pool_status FROM fleet_truck_assignments WHERE equipment_id=102').get()},
+    {home_driver:'Temp Driver',current_driver:'',pool_status:'open'});
+  const blocked=stmt.run(1,7,103,'Swap Driver','Swap Driver',103,103);
+  assert.equal(blocked.changes,0);
+  db.close();
 });
