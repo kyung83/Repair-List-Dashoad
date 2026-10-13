@@ -47,10 +47,12 @@ test('migration bootstraps assigned, open and floater trucks without storing fle
 });
 
 test('scheduler reads Repair Board state and blocks premature return',()=>{
-  assert.match(api,/FROM repairs r WHERE r\.equipment_id=e\.id AND lower\(COALESCE\(r\.status,''\)\) NOT LIKE '%complete%'/);
+  assert.match(api,/repairCountSelect\('e.id'\)/);
+  assert.match(api,/ACTIVE_REPAIR_SQL/);
+  assert.match(api,/OUTSIDE_REPAIR_SQL/);
   assert.match(api,/COALESCE\(e\.out_of_service,0\)/);
-  assert.match(api,/if\(Boolean\(repair\?\.oos\)\|\|Number\(repair\?\.open_repairs\|\|0\)>0\)throw new Error/);
-  assert.match(api,/still has open Repair Board work or is out of service/);
+  assert.match(api,/if\(repair\.active\+repair\.outside>0\)throw new Error/);
+  assert.match(api,/if\(repair\.oos\)throw new Error/);
   assert.match(api,/must be marked Ready to Return, or have completed Repair Board work from this swap/);
 });
 
@@ -124,7 +126,7 @@ test('dispatch can change the current driver but not the permanent assignment',(
   assert.match(driver,/current_driver=\?,current_location=\?,pool_status='assigned'/);
   assert.doesNotMatch(driver,/SET home_driver=/);
   assert.doesNotMatch(driver,/UPDATE equipment SET driver=/);
-  assert.match(driver,/still has open Repair Board work/);
+  assert.match(driver,/repairHoldMessage\(truck.unit,repair.active,repair.outside\)/);
   assert.match(driver,/out of service and cannot be assigned/);
   assert.match(driver,/active coverage swap/);
   assert.match(driver,/already listed on truck/);
@@ -172,7 +174,8 @@ test('one open repair is not treated as physical in-shop status',()=>{
   assert.equal(niceStatus({...truck,status:'service'}),'At Service');
   assert.equal(niceStatus({...truck,outOfService:true}),'Out of Service');
   assert.equal(niceStatus({...truck,status:'coverage'}),'Coverage Swap');
-  assert.match(page,/row\.openRepairCount>0\?<span title="Open repair work does not mean/);
+  assert.match(page,/row\.openRepairCount>0&&<button/);
+  assert.match(page,/row\.outsideRepairCount>0&&<button/);
   assert.match(page,/Service \/ Cleaning \/ OOS/);
   assert.doesNotMatch(page,/rows\.filter\(x=>x\.outOfService\|\|x\.openRepairCount>0\|\|x\.status==="service"/);
 });
@@ -181,10 +184,64 @@ test('In Service counter and filter rely on actual service assignment state',()=
   assert.match(api,/service:rows\.filter\(x=>x\.status==='service'\)\.length/);
   assert.doesNotMatch(api,/service:rows\.filter\(x=>x\.status==='service'\|\|x\.repairState==='in_shop'\)/);
   assert.match(api,/repairState:row\.pool_status==='service'\?'in_service'/);
-  assert.match(api,/Number\(row\.open_repairs\|\|0\)>0\?'open_repair'/);
+  assert.match(api,/Number\(row\.active_repairs\|\|0\)>0\?'active_repair'/);
+  assert.match(api,/Number\(row\.outside_repairs\|\|0\)>0\?'outside_repair'/);
   assert.match(page,/filter==="In Service"&&row\.status!=="service"/);
   assert.match(page,/filter==="Out of Service"&&!row\.outOfService/);
-  assert.match(page,/selected\.outOfService\|\|selected\.openRepairCount>0/);
+  assert.match(page,/selected\.outOfService\|\|selected\.openRepairCount>0\|\|selected\.outsideRepairCount>0/);
   assert.match(page,/x\.outOfService\|\|x\.status==="service"\|\|x\.status==="cleaning"/);
-  assert.match(page,/x\.openRepairCount===0/);
+  assert.match(page,/x\.openRepairCount===0&&x\.outsideRepairCount===0/);
+});
+
+
+test('truck assignments count only Active Repairs and current Outside Repairs',()=>{
+  const activeLines=api.match(/const ACTIVE_REPAIR_SQL = \[([\s\S]*?)\]\.join\(' AND '\)/);
+  assert.ok(activeLines,'active repairs predicate exists');
+  const conditions=[...activeLines[1].matchAll(/"([^"]+)"/g)].map(match=>match[1]).join(' AND ');
+  assert.ok(conditions.includes("COALESCE(r.source,'') <> 'roadside-breakdown'"));
+  assert.ok(conditions.includes("deferred to next%"));
+  assert.ok(conditions.includes("outside - waiting on%"));
+  assert.ok(conditions.includes("NOT EXISTS"));
+  const outsidePredicate=api.match(/const OUTSIDE_REPAIR_SQL = "([^"]+)"/);
+  assert.ok(outsidePredicate);
+  assert.equal(outsidePredicate[1],"a.status IN ('waiting_vendor','waiting_invoice')");
+  const db=new DatabaseSync(':memory:');
+  db.exec("CREATE TABLE equipment(id INTEGER PRIMARY KEY,unit TEXT);"+
+    "CREATE TABLE repairs(id INTEGER PRIMARY KEY,equipment_id INTEGER,title TEXT,status TEXT,source TEXT);"+
+    "CREATE TABLE outside_repair_assignments(repair_id INTEGER UNIQUE,status TEXT);"+
+    "INSERT INTO equipment VALUES(575,'575(SC)'),(571,'571(DC)');"+
+    "INSERT INTO repairs VALUES(1,575,'Roadside call','New','roadside-breakdown');"+
+    "INSERT INTO repairs VALUES(2,575,'Next PM','Deferred to Next PM','manual');"+
+    "INSERT INTO repairs VALUES(3,575,'Vendor work','Outside - Waiting on Vendor','manual');"+
+    "INSERT INTO repairs VALUES(4,575,'Invoice pending','Outside - Waiting on Invoice','manual');"+
+    "INSERT INTO repairs VALUES(5,575,'Brake lights','In Progress','manual');"+
+    "INSERT INTO repairs VALUES(6,575,'Done','Completed','manual');"+
+    "INSERT INTO repairs VALUES(7,575,'Vendor assignment','New','manual');"+
+    "INSERT INTO repairs VALUES(8,571,'Oil leak','New','manual');"+
+    "INSERT INTO repairs VALUES(9,575,'Vendor finished','Outside - Waiting on Invoice','manual');"+
+    "INSERT INTO outside_repair_assignments VALUES(3,'waiting_vendor'),(4,'waiting_invoice'),(7,'waiting_vendor'),(9,'completed');");
+  const activeSQL="SELECT COUNT(*) AS count FROM repairs r WHERE r.equipment_id=? AND "+conditions;
+  const outsideSQL="SELECT COUNT(*) AS count FROM outside_repair_assignments a JOIN repairs r ON r.id=a.repair_id WHERE r.equipment_id=? AND "+outsidePredicate[1];
+  const active=db.prepare(activeSQL),outside=db.prepare(outsideSQL);
+  assert.equal(active.get(575).count,1);
+  assert.equal(outside.get(575).count,3);
+  assert.equal(active.get(571).count,1);
+  assert.equal(outside.get(571).count,0);
+  db.close();
+});
+
+test('only the selected Active and Outside Repair sources affect truck release and coverage',()=>{
+  assert.match(api,/const repair=await truckRepairCounts\(equipmentId\)/);
+  assert.match(api,/const repairs=await truckRepairCounts\(coverageId\)/);
+  assert.match(api,/const repair=await truckRepairCounts\(home.id\)/);
+  assert.match(api,/readyToReturn:row.pool_status==='service'&&!row.out_of_service&&Number\(row.active_repairs\|\|0\)===0&&Number\(row.outside_repairs\|\|0\)===0/);
+  assert.match(page,/x.openRepairCount===0&&x.outsideRepairCount===0/);
+  assert.match(page,/Active \/ Outside Repairs/);
+  assert.match(page,/View Active & Outside Repair Records/);
+  assert.match(page,/Active Repairs/);
+  assert.match(page,/Outside Repairs/);
+  assert.match(api,/const inspectId=new URL\(request.url\).searchParams.get\('inspectEquipmentId'\)/);
+  assert.match(api,/requireOperator\(request\)/);
+  assert.match(api,/ORDER BY a.updated_at DESC LIMIT 101/);
+  assert.doesNotMatch(api,/Number\(row.open_repairs\|\|0\)>0\?'in_shop'/);
 });
