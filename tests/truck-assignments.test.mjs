@@ -184,7 +184,7 @@ test('In Service counter and filter rely on actual service assignment state',()=
   assert.match(api,/Number\(row\.open_repairs\|\|0\)>0\?'open_repair'/);
   assert.match(page,/filter==="In Service"&&row\.status!=="service"/);
   assert.match(page,/filter==="Out of Service"&&!row\.outOfService/);
-  assert.match(page,/row\.outOfService\|\|row\.openRepairCount>0/);
+  assert.match(page,/selected\.outOfService\|\|selected\.openRepairCount>0/);
   assert.match(page,/x\.outOfService\|\|x\.status==="service"\|\|x\.status==="cleaning"/);
   assert.match(page,/x\.openRepairCount===0/);
 });
