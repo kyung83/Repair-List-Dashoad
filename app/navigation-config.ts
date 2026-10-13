@@ -109,6 +109,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/reports/parts-usage", label: "Parts Usage", exact: true, roles: officeRoles },
       { href: "/reports/history", label: "Repair History", roles: officeRoles },
       { href: "/reports/technician-productivity", label: "Technician Productivity", exact: true, roles: managerRoles },
+      { href: "/reports/technician-productivity/comparisons", label: "Compare Techs / Jobs", exact: true, roles: managerRoles },
     ],
   },
   {
