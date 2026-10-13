@@ -113,6 +113,7 @@ export default function TechnicianProductivityPage(){
       </div>
       <div className="tech-prod-no-print" style={{display:"flex",flexWrap:"wrap",gap:8}}>
         <a style={{...light,textDecoration:"none"}} href="/reports">← Fleet Reports</a>
+        <a style={{...action,textDecoration:"none"}} href="/reports/technician-productivity/comparisons">Compare Same Jobs</a>
         <button type="button" onClick={()=>window.print()} style={light} disabled={!report}>Print</button>
         <button type="button" onClick={exportTechs} style={action} disabled={!visible.length}>Export CSV</button>
       </div>
