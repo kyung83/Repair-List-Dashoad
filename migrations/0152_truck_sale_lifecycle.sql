@@ -44,3 +44,40 @@ CREATE TABLE IF NOT EXISTS fleet_truck_sale_events (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_fleet_truck_sale_events_unit ON fleet_truck_sale_events(equipment_id,id DESC);
+
+
+-- A dispatcher or another code path cannot reassign or move an off-road truck.
+-- The lifecycle updates its assignment BEFORE setting the off-road hold, and
+-- clears the hold BEFORE returning it to the Open pool.
+CREATE TRIGGER IF NOT EXISTS trg_fleet_sale_block_held_assignment
+BEFORE UPDATE ON fleet_truck_assignments
+WHEN EXISTS (
+  SELECT 1 FROM fleet_truck_sales sale
+  WHERE sale.equipment_id=OLD.equipment_id
+    AND sale.off_road_at IS NOT NULL AND sale.returned_to_road_at IS NULL
+)
+BEGIN
+  SELECT RAISE(ABORT,'This truck is Off Road and unavailable for assignment');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_fleet_sale_block_held_driver
+BEFORE UPDATE OF driver ON equipment
+WHEN NEW.driver IS NOT NULL AND trim(NEW.driver)<>''
+  AND EXISTS (
+    SELECT 1 FROM fleet_truck_sales sale
+    WHERE sale.equipment_id=NEW.id
+      AND sale.off_road_at IS NOT NULL AND sale.returned_to_road_at IS NULL
+  )
+BEGIN
+  SELECT RAISE(ABORT,'This truck is Off Road. Return to Road before assigning a driver');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_fleet_sale_block_sold_restore
+BEFORE UPDATE OF active ON equipment
+WHEN NEW.active=1 AND EXISTS (
+  SELECT 1 FROM fleet_truck_sales sale
+  WHERE sale.equipment_id=NEW.id AND sale.sale_status='sold'
+)
+BEGIN
+  SELECT RAISE(ABORT,'Sold trucks cannot be restored to the active fleet');
+END;
