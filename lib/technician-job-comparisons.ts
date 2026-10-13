@@ -8,7 +8,7 @@ type JobWorkRow = {
   unit:string; repair_type_id:number; repair_type_name:string;
   maintenance_event_type:string; maintenance_template_key:string;
   maintenance_template_name:string; maintenance_template_id:number;
-  maintenance_template_version:number;
+  maintenance_template_version:number; pm_type:string;
   hours:number; entries:number; untimed_hours:number;
   first_labor_date:string; last_labor_date:string;
 };
@@ -22,7 +22,7 @@ export async function getTechnicianJobComparisons(db:D1Database,start:string,end
     range,
     ...comparison,
     metric:'completed-job logged-hours comparison',
-    explanation:'Peer averages use single-technician, completed work orders of the same saved repair type or PM/Annual checklist version, opened and completed in the selected period, with timer timestamps on every included labor entry. An average is not a manufacturer labor standard or a quality rating.',
+    explanation:'Peer averages use single-technician, completed work orders of the same saved repair type, PM type and checklist version, or Annual checklist version, opened and completed in the selected period, with timer timestamps on every included labor entry. An average is not a manufacturer labor standard or a quality rating.',
     updatedAt:new Date().toISOString(),
   };
 }
