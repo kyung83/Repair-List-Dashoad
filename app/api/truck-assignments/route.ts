@@ -419,7 +419,7 @@ export async function POST(request:Request){
     if(action==='startCoverageSwap'){
       const homeId=id(body.homeEquipmentId),coverageId=id(body.coverageEquipmentId);
       if(homeId===coverageId)throw new Error('Choose a different coverage truck.');
-      const [home,coverage]=await Promise.all([equipment(homeId),equipment(coverageId)]);
+      const [home,coverage]=await Promise.all([equipmentForDispatch(homeId),equipmentForDispatch(coverageId)]);
       if(coverage.out_of_service)throw new Error(`${coverage.unit} is out of service on the Repair Board.`);
       const repairs=await truckRepairCounts(coverageId);
       if(repairs.active+repairs.outside>0)throw new Error(repairHoldMessage(coverage.unit,repairs.active,repairs.outside));
@@ -466,7 +466,7 @@ export async function POST(request:Request){
       const swap=await env.DB.prepare(`SELECT id,driver,home_equipment_id,coverage_equipment_id,working_location,service_location,coverage_return_pool FROM fleet_coverage_swaps WHERE id=? AND closed_at IS NULL`).bind(swapId)
         .first<{id:number;driver:string;home_equipment_id:number;coverage_equipment_id:number;working_location:string;service_location:string;coverage_return_pool:string}>();
       if(!swap)throw new Error('Active coverage swap was not found.');
-      const [home,coverage]=await Promise.all([equipment(swap.home_equipment_id),equipment(swap.coverage_equipment_id)]);
+      const [home,coverage]=await Promise.all([equipmentForDispatch(swap.home_equipment_id),equipmentForDispatch(swap.coverage_equipment_id)]);
       const repair=await truckRepairCounts(home.id);
       if(repair.oos)throw new Error(`${home.unit} remains out of service.`);
       if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(home.unit,repair.active,repair.outside));
