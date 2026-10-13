@@ -6,10 +6,13 @@ type Assignment={
   equipmentId:number;unit:string;equipmentType:string;homeDriver:string;homeLocation:string;currentDriver:string;currentLocation:string;
   status:string;truckClass:string;flatbed:boolean;automatic:boolean;notes:string;coverageForEquipmentId:number|null;coverageForDriver:string;
   outOfService:boolean;outOfServiceReason:string;shopEta:string;openRepairCount:number;outsideRepairCount:number;repairState:string;readyToReturn:boolean;
+  saleStatus:string;saleOffRoad:boolean;saleVersion:number;saleAskingPrice:number|null;saleNotes:string;saleListedAt:string;
 };
 type Swap={id:number;driver:string;homeEquipmentId:number;homeUnit:string;coverageEquipmentId:number;coverageUnit:string;workingLocation:string;serviceLocation:string;reason:string;coverageReturnPool:string;openedAt:string;repairClear:boolean;readyToReturn:boolean};
 type EventRow={id:number;action:string;driver:string;from_location:string;to_location:string;detail:string;created_at:string;primary_unit:string;secondary_unit:string;by_name:string};
-type Payload={permissions:{canOperate:boolean;canEditMaster:boolean};assignments:Assignment[];activeSwaps:Swap[];events:EventRow[];summary:Record<string,number>;updatedAt:string;error?:string};
+type SaleRecord={equipmentId:number;unit:string;status:string;askingPrice:number|null;notes:string;listedAt:string;offRoadAt:string|null;returnedToRoadAt:string|null;cancelledAt:string|null;soldAt:string|null;salePrice:number|null;buyer:string;version:number;location:string};
+type SaleEvent={id:number;equipmentId:number;unit:string;action:string;from:string;to:string;details:string;driver:string;askingPrice:number|null;salePrice:number|null;buyer:string;when:string;by:string};
+type Payload={permissions:{canOperate:boolean;canEditMaster:boolean};assignments:Assignment[];activeSwaps:Swap[];events:EventRow[];sales:SaleRecord[];saleEvents:SaleEvent[];summary:Record<string,number>;updatedAt:string;error?:string};
 type RepairAudit={unit:string;equipmentId:number;records:Array<{id:number;title:string;status:string;kind:string;detail:string}>;truncated:boolean;error?:string};
 
 const card:CSSProperties={background:"#fff",border:"1px solid #dbe3ea",borderRadius:14,boxShadow:"0 1px 2px rgba(15,23,42,.04)"};
@@ -23,6 +26,7 @@ const td:CSSProperties={padding:"9px 10px",fontSize:13,borderBottom:"1px solid #
 const badge=(bg:string,color:string):CSSProperties=>({display:"inline-block",borderRadius:999,padding:"4px 9px",fontSize:11,fontWeight:850,background:bg,color,whiteSpace:"nowrap"});
 
 function niceStatus(row:Assignment){
+  if(row.saleOffRoad)return "Off Road";
   // Open repair records can belong to trucks still working their routes.
   // Only explicit fleet assignment state identifies a truck sent for service.
   if(row.status==="service")return row.readyToReturn?"Ready to Return":"At Service";
@@ -38,15 +42,22 @@ function statusStyle(row:Assignment){
   if(s==="Assigned")return badge("#dcfce7","#166534");
   if(s==="Open"||s==="Spare")return badge("#dbeafe","#1d4ed8");
   if(s==="Ready to Return")return badge("#dcfce7","#166534");
-  if(s==="Out of Service")return badge("#fee2e2","#b91c1c");
+  if(s==="Out of Service"||s==="Off Road")return badge("#fee2e2","#b91c1c");
   if(s==="Cleaning")return badge("#ede9fe","#6d28d9");
   return badge("#ffedd5","#c2410c");
 }
 function dateTime(v:string){if(!v)return"—";const d=new Date(v.includes("T")?v:v.replace(" ","T")+"Z");return Number.isNaN(d.getTime())?v:d.toLocaleString();}
 function same(a:string,b:string){return a.trim().toLowerCase()===b.trim().toLowerCase();}
+function money(value:number|null){return value==null?"Not specified":value.toLocaleString("en-US",{style:"currency",currency:"USD"});}
+function saleBadge(row:Assignment){
+  if(row.saleOffRoad)return <span style={badge("#fee2e2","#991b1b")}>{row.saleStatus==="cancelled"?"Sale Cancelled · Still Off Road":"Off Road · Awaiting Sale"}</span>;
+  if(row.saleStatus==="for_sale")return <span style={badge("#fef3c7","#92400e")}>For Sale · Still Working</span>;
+  if(row.saleStatus==="cancelled")return <span style={badge("#e2e8f0","#475569")}>Sale Cancelled</span>;
+  return null;
+}
 
 export default function TruckAssignmentsPage(){
-  const[data,setData]=useState<Payload|null>(null),[tab,setTab]=useState<"board"|"master"|"activity">("board"),[q,setQ]=useState(""),[location,setLocation]=useState("All"),[filter,setFilter]=useState("All"),[selectedId,setSelectedId]=useState<number|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
+  const[data,setData]=useState<Payload|null>(null),[tab,setTab]=useState<"board"|"master"|"activity"|"sales">("board"),[q,setQ]=useState(""),[location,setLocation]=useState("All"),[filter,setFilter]=useState("All"),[selectedId,setSelectedId]=useState<number|null>(null),[msg,setMsg]=useState(""),[busy,setBusy]=useState(false);
   const[swapHome,setSwapHome]=useState<number|null>(null),[swapCoverage,setSwapCoverage]=useState<number|null>(null),[swapReason,setSwapReason]=useState("PM / Repair"),[swapService,setSwapService]=useState("Clare"),[swapReturn,setSwapReturn]=useState("spare");
   const[edit,setEdit]=useState<Assignment|null>(null);
   const[managedId,setManagedId]=useState<number|null>(null);
@@ -54,6 +65,11 @@ export default function TruckAssignmentsPage(){
   const[locationDraft,setLocationDraft]=useState("");
   const[auditUnit,setAuditUnit]=useState<string|null>(null),[audit,setAudit]=useState<RepairAudit|null>(null);
   const[auditBusy,setAuditBusy]=useState(false),[auditError,setAuditError]=useState("");
+  const[saleId,setSaleId]=useState<number|null>(null),[saleError,setSaleError]=useState("");
+  const[askingDraft,setAskingDraft]=useState(""),[notesDraft,setNotesDraft]=useState("");
+  const[priceDraft,setPriceDraft]=useState(""),[buyerDraft,setBuyerDraft]=useState(""),[dateDraft,setDateDraft]=useState(new Date().toISOString().slice(0,10));
+  const[confirmParked,setConfirmParked]=useState(false),[confirmRoadworthy,setConfirmRoadworthy]=useState(false);
+  const[confirmSold,setConfirmSold]=useState(false),[saleSearch,setSaleSearch]=useState("");
 
   async function load(){
     const r=await fetch("/api/truck-assignments",{cache:"no-store"}),j=await r.json() as Payload;
@@ -73,16 +89,19 @@ export default function TruckAssignmentsPage(){
       if(filter==="Needs Truck"&&row.currentDriver)return false;
       else if(filter==="In Service"&&row.status!=="service")return false;
       else if(filter==="Out of Service"&&!row.outOfService)return false;
+      else if(filter==="For Sale"&&row.saleStatus!=="for_sale")return false;
+      else if(filter==="Off Road"&&!row.saleOffRoad)return false;
+      else if(filter==="Sale Cancelled"&&row.saleStatus!=="cancelled")return false;
       else if(filter==="Active Repairs"&&row.openRepairCount===0)return false;
       else if(filter==="Outside Repairs"&&row.outsideRepairCount===0)return false;
       else if(filter==="Open"&&!["Open","Spare"].includes(s))return false;
-      else if(!["Needs Truck","In Service","Out of Service","Active Repairs","Outside Repairs","Open"].includes(filter)&&s!==filter)return false;
+      else if(!["Needs Truck","In Service","Out of Service","For Sale","Off Road","Sale Cancelled","Active Repairs","Outside Repairs","Open"].includes(filter)&&s!==filter)return false;
     }
     const needle=q.trim().toLowerCase();if(!needle)return true;
     return [row.unit,row.homeDriver,row.currentDriver,row.homeLocation,row.currentLocation,row.truckClass,row.notes].some(v=>String(v).toLowerCase().includes(needle));
   }),[rows,location,filter,q]);
 
-  const pool=rows.filter(x=>["open","spare"].includes(x.status)&&!x.currentDriver&&!x.outOfService&&x.openRepairCount===0&&x.outsideRepairCount===0);
+  const pool=rows.filter(x=>["open","spare"].includes(x.status)&&!x.currentDriver&&!x.outOfService&&!x.saleOffRoad&&x.openRepairCount===0&&x.outsideRepairCount===0);
   const activeSwapByHome=new Map((data?.activeSwaps??[]).map(x=>[x.homeEquipmentId,x]));
   const managed=rows.find(x=>x.equipmentId===managedId)??null;
   const managingActiveSwap=Boolean(managed&&(data?.activeSwaps??[]).some(x=>x.homeEquipmentId===managed.equipmentId||x.coverageEquipmentId===managed.equipmentId));
