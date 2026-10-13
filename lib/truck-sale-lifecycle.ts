@@ -165,7 +165,7 @@ export async function changeTruckSale(db:D1Database,user:Pick<AppUser,'id'>,body
     ?" AND EXISTS(SELECT 1 FROM fleet_truck_assignments a WHERE a.equipment_id=? AND a.home_driver='' AND a.current_driver='')":'';
   const guardEquipment="EXISTS(SELECT 1 FROM equipment e WHERE e.id=? AND e.active=1 AND e.archived_at IS NULL AND e.merged_into_equipment_id IS NULL)";
   const guard="("+guardSale+" AND "+guardEquipment+guardSwap+guardAssignment+")";
-  const guardBindings:unknown[]=[id,...(sale?[from,expectedVersion]:[]),id];
+  const guardBindings:Array<string|number|null>=[id,...(sale?[from,expectedVersion]:[]),id];
   if(guardSwap)guardBindings.push(id,id);
   if(guardAssignment)guardBindings.push(id);
   const audit=db.prepare(
