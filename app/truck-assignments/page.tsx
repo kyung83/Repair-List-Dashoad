@@ -75,7 +75,7 @@ export default function TruckAssignmentsPage(){
     const r=await fetch("/api/truck-assignments",{cache:"no-store"}),j=await r.json() as Payload;
     if(!r.ok)throw new Error(j.error||"Truck assignments could not be loaded.");
     setData(j);
-    setSelectedId(current=>current??j.assignments[0]?.equipmentId??null);
+    setSelectedId(current=>j.assignments.some(row=>row.equipmentId===current)?current:j.assignments[0]?.equipmentId??null);
   }
   useEffect(()=>{void load().catch(e=>setMsg(e instanceof Error?e.message:"Truck assignments could not be loaded."));},[]);
 
@@ -220,13 +220,13 @@ export default function TruckAssignmentsPage(){
     </section>
 
     <div style={{display:"flex",gap:8,marginTop:16,borderBottom:"1px solid #dbe3ea"}}>
-      {([["board","Assignment Board"],["master","Master Assignments"],["activity","Moves & History"],["sales","Sales & History"]] as const).map(([key,label])=><button key={key} onClick={()=>setTab(key)} style={{...button,border:"none",borderRadius:"9px 9px 0 0",background:tab===key?"#0b6ff9":"transparent",color:tab===key?"#fff":"#334155"}}>{label}</button>)}
+      {([["board","Assignment Board"],["master","Master Assignments"],["activity","Moves & History"],...(data?.permissions.canEditMaster?[["sales","Sales & History"] as const]:[])] as const).map(([key,label])=><button key={key} onClick={()=>setTab(key)} style={{...button,border:"none",borderRadius:"9px 9px 0 0",background:tab===key?"#0b6ff9":"transparent",color:tab===key?"#fff":"#334155"}}>{label}</button>)}
     </div>
 
     {tab==="board"&&<>
       <section style={{...card,padding:12,marginTop:14,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <select value={location} onChange={e=>setLocation(e.target.value)} style={{...input,width:180}}>{locations.map(x=><option key={x}>{x}</option>)}</select>
-        <select value={filter} onChange={e=>setFilter(e.target.value)} style={{...input,width:170}}>{["All","Assigned","Coverage Swap","In Service","Out of Service","Active Repairs","Outside Repairs","Ready to Return","Open","Needs Truck","Cleaning"].map(x=><option key={x}>{x}</option>)}</select>
+        <select value={filter} onChange={e=>setFilter(e.target.value)} style={{...input,width:170}}>{["All","Assigned","Coverage Swap","In Service","Out of Service","For Sale","Off Road","Sale Cancelled","Active Repairs","Outside Repairs","Ready to Return","Open","Needs Truck","Cleaning"].map(x=><option key={x}>{x}</option>)}</select>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search driver, truck, terminal..." style={{...input,maxWidth:360,flex:"1 1 260px"}}/>
         <button style={button} onClick={()=>void load()} disabled={busy}>Refresh</button>
       </section>
@@ -266,13 +266,15 @@ export default function TruckAssignmentsPage(){
                 <div style={{fontSize:12,color:"#64748b",marginTop:3}}>Home: {selected.homeLocation||"—"} · Current: {selected.currentLocation||"—"}</div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                {selected.homeDriver&&!activeSwapByHome.has(selected.equipmentId)&&<button style={blue} onClick={()=>openSwap(selected.equipmentId)} disabled={busy}>Start Coverage Swap</button>}
-                {!selected.currentDriver&&["open","spare"].includes(selected.status)&&<button style={green} onClick={()=>{const d=prompt("Driver name");if(d){const l=prompt("Driver / truck location",selected.currentLocation||selected.homeLocation)||selected.currentLocation;void act({action:"assignOpenTruck",equipmentId:selected.equipmentId,driver:d,location:l});}}} disabled={busy}>Assign Truck</button>}
-                <button style={button} onClick={()=>{const l=prompt("Move truck to",selected.currentLocation||selected.homeLocation);if(l)void act({action:"moveTruck",equipmentId:selected.equipmentId,toLocation:l,reason:"Dispatcher move"});}} disabled={busy}>Move Truck</button>
-                <button style={button} onClick={()=>{if(!selected.currentDriver&&!selected.homeDriver)void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"open",currentLocation:selected.currentLocation});else openManage(selected);}} disabled={busy}>Mark Open</button>
-                {!selected.currentDriver&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"spare",currentLocation:selected.currentLocation})} disabled={busy}>Mark Spare</button>}
-                {!selected.currentDriver&&<button style={orange} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"cleaning",currentLocation:selected.currentLocation})} disabled={busy}>Needs Cleaning</button>}
+                {selected.homeDriver&&!selected.saleOffRoad&&!activeSwapByHome.has(selected.equipmentId)&&<button style={blue} onClick={()=>openSwap(selected.equipmentId)} disabled={busy}>Start Coverage Swap</button>}
+                {!selected.currentDriver&&!selected.saleOffRoad&&["open","spare"].includes(selected.status)&&<button style={green} onClick={()=>{const d=prompt("Driver name");if(d){const l=prompt("Driver / truck location",selected.currentLocation||selected.homeLocation)||selected.currentLocation;void act({action:"assignOpenTruck",equipmentId:selected.equipmentId,driver:d,location:l});}}} disabled={busy}>Assign Truck</button>}
+                <button style={button} disabled={busy||selected.saleOffRoad} onClick={()=>{const l=prompt("Move truck to",selected.currentLocation||selected.homeLocation);if(l)void act({action:"moveTruck",equipmentId:selected.equipmentId,toLocation:l,reason:"Dispatcher move"});}} disabled={busy}>Move Truck</button>
+                <button style={button} disabled={busy||selected.saleOffRoad} onClick={()=>{if(!selected.currentDriver&&!selected.homeDriver)void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"open",currentLocation:selected.currentLocation});else openManage(selected);}} disabled={busy}>Mark Open</button>
+                {!selected.currentDriver&&!selected.saleOffRoad&&<button style={button} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"spare",currentLocation:selected.currentLocation})} disabled={busy}>Mark Spare</button>}
+                {!selected.currentDriver&&!selected.saleOffRoad&&<button style={orange} onClick={()=>void act({action:"setPoolStatus",equipmentId:selected.equipmentId,status:"cleaning",currentLocation:selected.currentLocation})} disabled={busy}>Needs Cleaning</button>}
               </div>
+              {selected.saleOffRoad&&<div style={{marginTop:10,color:"#991b1b",fontSize:12,fontWeight:750}}>OFF ROAD — no driver assignments, dispatch moves, spare/coverage uses or automatic return. A manager can review this in Manage Sale.</div>}
+              {saleBadge(selected)&&<div style={{marginTop:10}}>{saleBadge(selected)}</div>}
               {(selected.outOfService||selected.openRepairCount>0||selected.outsideRepairCount>0)&&<div style={{marginTop:10,padding:10,borderRadius:9,background:"#fff7ed",fontSize:12,color:"#92400e"}}>
                 <strong>Truck repair status:</strong> {selected.outOfService?"Out of service. ":""}
                 {selected.openRepairCount} Active Repair(s) · {selected.outsideRepairCount} Outside Repair(s).
@@ -351,7 +353,7 @@ export default function TruckAssignmentsPage(){
     {managed&&<div style={{position:"fixed",inset:0,background:"rgba(15,23,42,.54)",display:"grid",placeItems:"center",padding:14,zIndex:1000}} onMouseDown={()=>!busy&&setManagedId(null)}>
       <div role="dialog" aria-modal="true" aria-label={`Manage truck ${managed.unit}`} style={{...card,width:"min(630px,96vw)",padding:20,maxHeight:"92vh",overflowY:"auto"}} onMouseDown={e=>e.stopPropagation()}>
         <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12}}>
-          <div><h2 style={{margin:"0 0 4px"}}>Manage Truck {managed.unit}</h2><p style={{margin:0,fontSize:13,color:"#64748b"}}>Choose a driver change or release the truck to Open.</p></div>
+          <div><h2 style={{margin:"0 0 4px"}}>Manage Truck {managed.unit}</h2><p style={{margin:0,fontSize:13,color:"#64748b"}}>Manage driver assignments and the truck sale lifecycle separately.</p></div>
           <button type="button" style={{...button,padding:"6px 11px"}} onClick={()=>setManagedId(null)} disabled={busy} aria-label="Close truck manager">✕</button>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10,background:"#f8fafc",padding:12,borderRadius:10,marginTop:15}}>
@@ -360,6 +362,8 @@ export default function TruckAssignmentsPage(){
           <div><div style={{fontSize:11,color:"#64748b"}}>Current location</div><strong>{managed.currentLocation||"—"}</strong></div>
           <div><div style={{fontSize:11,color:"#64748b"}}>Truck status</div><strong>{niceStatus(managed)}</strong></div>
         </div>
+        {saleBadge(managed)&&<div style={{marginTop:10}}>{saleBadge(managed)}</div>}
+        {managed.saleOffRoad&&<p role="alert" style={{padding:10,background:"#fee2e2",color:"#991b1b",borderRadius:8,fontSize:13}}>Truck is Off Road. Driver changes are disabled until a manager cancels the sale and uses Return to Road.</p>}
         {managingActiveSwap&&<p role="alert" style={{padding:10,background:"#fff7ed",color:"#9a3412",borderRadius:8,fontSize:13}}>This truck is in an active coverage swap. Complete that swap using the existing return process before changing the driver or marking it Open.</p>}
         <h3 style={{margin:"18px 0 8px",fontSize:16}}>Change Current Driver</h3>
         <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>For temporary driver changes. The permanent home-driver assignment stays as it is.</p>
@@ -373,15 +377,15 @@ export default function TruckAssignmentsPage(){
         </div>
         <datalist id="assignment-driver-suggestions">{driverSuggestions.map(driver=><option key={driver} value={driver}/>)}</datalist>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,flexWrap:"wrap",marginTop:10}}>
-          {data?.permissions.canEditMaster&&<button type="button" style={button} disabled={busy} onClick={()=>{setManagedId(null);editMaster(managed);}}>Edit Permanent Driver</button>}
-          <button type="button" style={blue} disabled={busy||managingActiveSwap||!driverDraft.trim()} onClick={()=>void saveManagedDriver()}>{busy?"Saving…":"Save Current Driver"}</button>
+          {data?.permissions.canEditMaster&&<button type="button" style={button} disabled={busy} onClick={()=>{setManagedId(null);editMaster(managed);}} disabled={busy||managed.saleOffRoad}>Edit Permanent Driver</button>}
+          <button type="button" style={blue} disabled={busy||managingActiveSwap||managed.saleOffRoad||!driverDraft.trim()} onClick={()=>void saveManagedDriver()}>{busy?"Saving…":"Save Current Driver"}</button>
         </div>
         <div style={{borderTop:"1px solid #e2e8f0",marginTop:18,paddingTop:15}}>
           <h3 style={{margin:"0 0 7px",fontSize:16}}>Make This Truck Open</h3>
           <p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>Release a truck even when the scheduler still shows the former driver. A permanent removal also clears the driver in Master Equipment.</p>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button type="button" style={button} disabled={busy||managingActiveSwap} onClick={()=>void markManagedOpen(false)}>Release Current Driver Only</button>
-            {data?.permissions.canEditMaster&&<button type="button" style={{...orange,background:"#b91c1c",borderColor:"#b91c1c"}} disabled={busy||managingActiveSwap} onClick={()=>void markManagedOpen(true)}>Remove Driver Permanently & Mark Open</button>}
+            <button type="button" style={button} disabled={busy||managingActiveSwap||managed.saleOffRoad} onClick={()=>void markManagedOpen(false)}>Release Current Driver Only</button>
+            {data?.permissions.canEditMaster&&<button type="button" style={{...orange,background:"#b91c1c",borderColor:"#b91c1c"}} disabled={busy||managingActiveSwap||managed.saleOffRoad} onClick={()=>void markManagedOpen(true)}>Remove Driver Permanently & Mark Open</button>}
           </div>
           {!data?.permissions.canEditMaster&&<p style={{fontSize:12,color:"#64748b",margin:"10px 0 0"}}>Dispatch can mark the truck Open temporarily. A manager must remove the permanent driver assignment.</p>}
         </div>
