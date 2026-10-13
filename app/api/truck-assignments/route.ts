@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
+import { assertTruckAvailableForDispatch, changeTruckSale } from '@/lib/truck-sale-lifecycle';
 
 type AssignmentRow = {
   equipment_id:number;
@@ -21,6 +22,8 @@ type AssignmentRow = {
   shop_eta:string|null;
   active_repairs:number;
   outside_repairs:number;
+  sale_status:string|null; sale_off_road_at:string|null; sale_returned_to_road_at:string|null;
+  sale_asking_price:number|null; sale_notes:string|null; sale_listed_at:string|null; sale_version:number|null;
 };
 
 // The only repairs used by Truck Assignments: Repair Board Active Repairs
@@ -85,6 +88,11 @@ async function equipment(equipmentId:number){
   if(!/truck|vehicle|glider|switcher/i.test(row.equipment_type))throw new Error(`${row.unit} is not a truck.`);
   return row;
 }
+async function equipmentForDispatch(equipmentId:number){
+  const truck=await equipment(equipmentId);
+  await assertTruckAvailableForDispatch(env.DB,equipmentId);
+  return truck;
+}
 async function ensureAssignments(){
   await env.DB.prepare(`
     INSERT OR IGNORE INTO fleet_truck_assignments(
@@ -136,16 +144,21 @@ export async function GET(request:Request){
       return Response.json({unit:truck.unit,equipmentId,records,truncated:active.results.length>100||outside.results.length>100},
         {headers:{'cache-control':'no-store'}});
     }
-    const [assignments,swaps,events]=await Promise.all([
+    const [assignments,swaps,events,soldTrucks,saleEvents]=await Promise.all([
       env.DB.prepare(`
         SELECT a.equipment_id,e.unit,COALESCE(e.equipment_type,'other') AS equipment_type,
                a.home_driver,a.home_location,a.current_driver,a.current_location,a.pool_status,
                a.truck_class,a.flatbed,a.automatic,a.scheduler_notes,a.coverage_for_equipment_id,a.coverage_for_driver,
                COALESCE(e.out_of_service,0) AS out_of_service,COALESCE(e.out_of_service_reason,'') AS out_of_service_reason,
                e.shop_eta,
+               sale.sale_status,sale.off_road_at AS sale_off_road_at,
+               sale.returned_to_road_at AS sale_returned_to_road_at,
+               sale.asking_price AS sale_asking_price,sale.sale_notes,
+               sale.listed_at AS sale_listed_at,sale.version AS sale_version,
                ${repairCountSelect('e.id')}
         FROM fleet_truck_assignments a
         JOIN equipment e ON e.id=a.equipment_id
+        LEFT JOIN fleet_truck_sales sale ON sale.equipment_id=e.id
         WHERE e.active=1 AND e.merged_into_equipment_id IS NULL
         ORDER BY CASE WHEN a.home_location='' THEN 1 ELSE 0 END,a.home_location COLLATE NOCASE,e.unit COLLATE NOCASE
       `).all<AssignmentRow>(),
@@ -179,6 +192,12 @@ export async function GET(request:Request){
       outOfService:Boolean(row.out_of_service),outOfServiceReason:row.out_of_service_reason,shopEta:row.shop_eta??'',
       openRepairCount:Number(row.active_repairs||0),
       outsideRepairCount:Number(row.outside_repairs||0),
+      saleStatus:row.sale_status??'none',
+      saleOffRoad:Boolean(row.sale_off_road_at&&!row.sale_returned_to_road_at),
+      saleVersion:Number(row.sale_version||0),
+      saleAskingPrice:canEditMaster(user)?row.sale_asking_price:null,
+      saleNotes:canEditMaster(user)?row.sale_notes??'':'',
+      saleListedAt:row.sale_listed_at??'',
       repairState:row.pool_status==='service'?'in_service':Boolean(row.out_of_service)?'out_of_service':Number(row.active_repairs||0)>0?'active_repair':Number(row.outside_repairs||0)>0?'outside_repair':row.pool_status==='cleaning'?'cleaning':'clear',
       readyToReturn:row.pool_status==='service'&&!row.out_of_service&&Number(row.active_repairs||0)===0&&Number(row.outside_repairs||0)===0,
     }));
@@ -193,6 +212,19 @@ export async function GET(request:Request){
     return Response.json({
       permissions:{canOperate:true,canEditMaster:canEditMaster(user)},
       assignments:rows,activeSwaps:active,events:events.results,
+      sales:canEditMaster(user)?soldTrucks.results.map(sale=>({
+        equipmentId:sale.equipment_id,unit:sale.unit,status:sale.sale_status,
+        askingPrice:sale.asking_price,notes:sale.sale_notes,listedAt:sale.listed_at,
+        offRoadAt:sale.off_road_at,returnedToRoadAt:sale.returned_to_road_at,
+        cancelledAt:sale.cancelled_at,soldAt:sale.sold_at,
+        salePrice:sale.sale_price,buyer:sale.buyer,version:sale.version,location:sale.location,
+      })):[],
+      saleEvents:canEditMaster(user)?saleEvents.results.map(ev=>({
+        id:ev.id,equipmentId:ev.equipment_id,unit:ev.unit,action:ev.action,
+        from:ev.from_status,to:ev.to_status,details:ev.details,driver:ev.driver_snapshot,
+        askingPrice:ev.asking_price,salePrice:ev.sale_price,buyer:ev.buyer,
+        when:ev.created_at,by:ev.by_name,
+      })):[],
       summary:{
         assigned:rows.filter(x=>x.status==='assigned').length,
         open:rows.filter(x=>x.status==='open').length,
@@ -201,6 +233,9 @@ export async function GET(request:Request){
         service:rows.filter(x=>x.status==='service').length,
         cleaning:rows.filter(x=>x.status==='cleaning').length,
         readyToReturn:active.filter(x=>x.readyToReturn).length,
+        forSale:rows.filter(x=>x.saleStatus==='for_sale').length,
+        offRoad:rows.filter(x=>x.saleOffRoad).length,
+        sold:soldTrucks.results.filter(x=>x.sale_status==='sold').length,
       },
       updatedAt:new Date().toISOString(),
     },{headers:{'cache-control':'no-store'}});
@@ -216,9 +251,14 @@ export async function POST(request:Request){
     const body=await request.json() as Record<string,unknown>;
     const action=text(body.action,40);
 
+    if(['mark_for_sale','update_listing','cancel_sale','remove_from_road','return_to_road','mark_sold'].includes(action)){
+      if(!canEditMaster(user))throw new Error('Only managers and administrators may change sale status.');
+      return Response.json(await changeTruckSale(env.DB,user,body),{headers:{'cache-control':'no-store'}});
+    }
+
     if(action==='updateMaster'){
       if(!canEditMaster(user))throw new Error('Manager or administrator access is required to change permanent assignments.');
-      const equipmentId=id(body.equipmentId);await equipment(equipmentId);
+      const equipmentId=id(body.equipmentId);await equipmentForDispatch(equipmentId);
       const homeDriver=text(body.homeDriver,160),homeLocation=text(body.homeLocation,160);
       const status=pool(body.status,['assigned','open','spare','cleaning']);
       const truckClass=text(body.truckClass,40),notes=text(body.notes,1000);
@@ -245,7 +285,7 @@ export async function POST(request:Request){
     // from the dispatch list. An active coverage swap must be completed through
     // the established return/repair workflow instead.
     if(action==='markTruckOpen'){
-      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const equipmentId=id(body.equipmentId);const truck=await equipmentForDispatch(equipmentId);
       const clearPermanent=body.clearPermanent===true;
       if(clearPermanent&&!canEditMaster(user))throw new Error('Only managers and administrators can remove a permanent driver assignment.');
       const row=await env.DB.prepare('SELECT home_driver,current_driver,current_location,pool_status FROM fleet_truck_assignments WHERE equipment_id=?')
@@ -279,7 +319,7 @@ export async function POST(request:Request){
     // This does not rewrite the permanent owner, Master Equipment or an
     // in-progress service/coverage swap.
     if(action==='changeCurrentDriver'){
-      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const equipmentId=id(body.equipmentId);const truck=await equipmentForDispatch(equipmentId);
       const driver=text(body.driver,160);
       if(!driver)throw new Error('Enter a new driver, or use Mark Open to remove the current driver.');
       if(truck.out_of_service)throw new Error(`${truck.unit} is out of service and cannot be assigned to a driver.`);
@@ -313,7 +353,7 @@ export async function POST(request:Request){
     }
 
     if(action==='setPoolStatus'){
-      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const equipmentId=id(body.equipmentId);const truck=await equipmentForDispatch(equipmentId);
       const status=pool(body.status,['open','spare','cleaning']);
       const row=await env.DB.prepare('SELECT current_driver,current_location FROM fleet_truck_assignments WHERE equipment_id=?').bind(equipmentId).first<{current_driver:string;current_location:string}>();
       if(!row)throw new Error('Truck assignment was not found.');
@@ -326,7 +366,7 @@ export async function POST(request:Request){
     }
 
     if(action==='assignOpenTruck'){
-      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const equipmentId=id(body.equipmentId);const truck=await equipmentForDispatch(equipmentId);
       if(truck.out_of_service)throw new Error(`${truck.unit} is out of service on the Repair Board.`);
       const repair=await truckRepairCounts(equipmentId);
       if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(truck.unit,repair.active,repair.outside));
@@ -342,7 +382,7 @@ export async function POST(request:Request){
     }
 
     if(action==='moveTruck'){
-      const equipmentId=id(body.equipmentId);const truck=await equipment(equipmentId);
+      const equipmentId=id(body.equipmentId);const truck=await equipmentForDispatch(equipmentId);
       const toLocation=text(body.toLocation,160);if(!toLocation)throw new Error('Choose the destination.');
       const reason=text(body.reason,300);
       const row=await env.DB.prepare('SELECT current_driver,current_location FROM fleet_truck_assignments WHERE equipment_id=?').bind(equipmentId).first<{current_driver:string;current_location:string}>();
@@ -388,7 +428,7 @@ export async function POST(request:Request){
       const swapId=id(body.swapId);
       const swap=await env.DB.prepare('SELECT id,home_equipment_id FROM fleet_coverage_swaps WHERE id=? AND closed_at IS NULL').bind(swapId).first<{id:number;home_equipment_id:number}>();
       if(!swap)throw new Error('Active coverage swap was not found.');
-      const home=await equipment(swap.home_equipment_id);
+      const home=await equipmentForDispatch(swap.home_equipment_id);
       const repair=await truckRepairCounts(home.id);
       if(repair.oos)throw new Error(`${home.unit} remains out of service.`);
       if(repair.active+repair.outside>0)throw new Error(repairHoldMessage(home.unit,repair.active,repair.outside));
