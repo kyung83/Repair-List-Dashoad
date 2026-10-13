@@ -19,8 +19,35 @@ type AssignmentRow = {
   out_of_service:number;
   out_of_service_reason:string;
   shop_eta:string|null;
-  open_repairs:number;
+  active_repairs:number;
+  outside_repairs:number;
 };
+
+// The only repairs used by Truck Assignments: Repair Board Active Repairs
+// and live Outside Repairs. Raw due PM/Annual items are not repair orders.
+// Unfinished vendor-assigned work belongs to Outside Repairs, never both.
+const ACTIVE_REPAIR_SQL = [
+  "lower(COALESCE(r.status,'')) NOT LIKE '%complete%'",
+  "COALESCE(r.source,'') <> 'roadside-breakdown'",
+  "lower(COALESCE(r.status,'')) NOT LIKE 'deferred to next%'",
+  "lower(COALESCE(r.status,'')) NOT LIKE 'outside - waiting on%'",
+  "NOT EXISTS (SELECT 1 FROM outside_repair_assignments outside WHERE outside.repair_id=r.id AND outside.status IN ('waiting_vendor','waiting_invoice'))",
+].join(' AND ');
+const OUTSIDE_REPAIR_SQL = "a.status IN ('waiting_vendor','waiting_invoice')";
+
+function repairCountSelect(equipmentExpr:string) {
+  return "(SELECT COUNT(*) FROM repairs r WHERE r.equipment_id=" + equipmentExpr + " AND " + ACTIVE_REPAIR_SQL + ") AS active_repairs, " +
+    "(SELECT COUNT(*) FROM outside_repair_assignments a JOIN repairs r ON r.id=a.repair_id WHERE r.equipment_id=" +
+    equipmentExpr + " AND " + OUTSIDE_REPAIR_SQL + ") AS outside_repairs";
+}
+async function truckRepairCounts(equipmentId:number) {
+  const row=await env.DB.prepare("SELECT COALESCE(e.out_of_service,0) AS oos,"+repairCountSelect('e.id')+
+    " FROM equipment e WHERE e.id=?").bind(equipmentId).first<{oos:number;active_repairs:number;outside_repairs:number}>();
+  return {oos:Boolean(row?.oos),active:Number(row?.active_repairs||0),outside:Number(row?.outside_repairs||0)};
+}
+function repairHoldMessage(unit:string,active:number,outside:number) {
+  return unit+" has "+active+" Active Repair(s) and "+outside+" Outside Repair(s). Review or clear those jobs before assigning it as coverage.";
+}
 
 type SwapRow = {
   id:number;
