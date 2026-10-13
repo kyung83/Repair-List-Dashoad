@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS fleet_truck_sales (
   sale_notes TEXT NOT NULL DEFAULT '',
   listed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   off_road_at TEXT,
+  returned_to_road_at TEXT,
+  cancelled_at TEXT,
   sold_at TEXT,
   sale_price REAL CHECK(sale_price IS NULL OR (sale_price>=0 AND sale_price<=100000000)),
   buyer TEXT NOT NULL DEFAULT '',
@@ -22,9 +24,9 @@ CREATE TABLE IF NOT EXISTS fleet_truck_sales (
 
 CREATE INDEX IF NOT EXISTS idx_fleet_truck_sales_status ON fleet_truck_sales(sale_status,equipment_id);
 
--- Immutable audit of every manager-approved lifecycle transition. Including
--- an expected-state guard inside the same D1 batch prevents stale concurrent
--- edits without a partially applied transition.
+-- Immutable audit of every manager-approved lifecycle transition. A
+-- CHECK-protected guard statement in the same D1 batch prevents stale edits.
+-- Cancelled listings can retain an off-road hold until separately released.
 CREATE TABLE IF NOT EXISTS fleet_truck_sale_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   equipment_id INTEGER NOT NULL REFERENCES equipment(id) ON DELETE RESTRICT,
