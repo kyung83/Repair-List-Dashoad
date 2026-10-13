@@ -15,6 +15,7 @@ function fixture(){
     "CREATE TABLE repair_types(id INTEGER PRIMARY KEY,name TEXT);"+
     "CREATE TABLE maintenance_checklist_templates(id INTEGER PRIMARY KEY,template_key TEXT,name TEXT,version INTEGER);"+
     "CREATE TABLE maintenance_checklist_runs(id INTEGER PRIMARY KEY,repair_id INTEGER UNIQUE,template_id INTEGER,event_type TEXT);"+
+    "CREATE TABLE maintenance_events(id INTEGER PRIMARY KEY,equipment_id INTEGER,event_type TEXT,pm_type TEXT,source TEXT);"+
     "CREATE TABLE repairs(id INTEGER PRIMARY KEY,title TEXT,status TEXT,source TEXT,opened_at TEXT,completed_at TEXT,equipment_id INTEGER,repair_type_id INTEGER);"+
     "CREATE TABLE repair_labor_entries(id INTEGER PRIMARY KEY AUTOINCREMENT,repair_id INTEGER,technician_id INTEGER,labor_date TEXT,hours REAL,started_at TEXT,ended_at TEXT);"+
     "CREATE INDEX idx_labor_tech_date ON repair_labor_entries(technician_id,labor_date);"+
@@ -42,7 +43,9 @@ function fixture(){
   addRepair(114,"Old job","repair","Completed","2026-09-15","2026-10-04",1);
   addRepair(115,"Shop cleanup","indirect-labor","Completed","2026-10-04","2026-10-04",3);
   addRepair(116,"Other year","repair","Completed","2026-09-04","2026-09-05",1);
-  db.exec("INSERT INTO maintenance_checklist_runs VALUES(1,107,7,'pm'),(2,108,7,'pm'),(3,109,8,'pm'),(4,113,NULL,'annual');");
+  db.exec("INSERT INTO maintenance_checklist_runs VALUES(1,107,7,'pm'),(2,108,7,'pm'),(3,109,8,'pm'),(4,113,NULL,'annual');"+
+    "INSERT INTO maintenance_events VALUES(1,1,'pm','20A','checklist-wo-107'),"+
+    "(2,1,'pm','20A','checklist-wo-108'),(3,1,'pm','40','checklist-wo-109');");
   const labor=db.prepare("INSERT INTO repair_labor_entries(repair_id,technician_id,labor_date,hours,started_at,ended_at) VALUES (?,?,?,?,?,?)");
   function addLabor(repairId,tech,hours,date="2026-10-05",timed=true){
     labor.run(repairId,tech,date,hours,timed?date+" 08:00:00":null,timed?date+" 12:00:00":null);
@@ -98,16 +101,22 @@ test("same repair type compares SOLO completed timer-confirmed full-period jobs 
 
 test("PM comparison uses exact checklist version, not every PM style as one class",()=>{
   const {result}=report();
-  assert.equal(result.comparisons.filter(c=>c.categoryKey==="pm:7").length,2);
-  assert.equal(result.comparisons.filter(c=>c.categoryKey==="pm:8").length,0);
-  const pmV1=result.jobTypes.find(type=>type.key==="pm:7");
-  const pmV2=result.jobTypes.find(type=>type.key==="pm:8");
-  assert.equal(pmV1.name,"PM – PM checklist (v1)");
+  assert.equal(result.comparisons.filter(c=>c.categoryKey==="pm:20A:7").length,2);
+  assert.equal(result.comparisons.filter(c=>c.categoryKey==="pm:40:8").length,0);
+  const pmV1=result.jobTypes.find(type=>type.key==="pm:20A:7");
+  const pmV2=result.jobTypes.find(type=>type.key==="pm:40:8");
+  assert.equal(pmV1.name,"PM 20A – PM checklist (v1)");
   assert.equal(pmV1.eligibleJobs,2);
-  assert.equal(pmV2.name,"PM – PM checklist (v2)");
+  assert.equal(pmV2.name,"PM 40 – PM checklist (v2)");
   assert.equal(pmV2.eligibleJobs,1);
+  const sameTemplateDifferentPm=classifyTechnicianJob({
+    source:"scheduled-pm",pm_type:"40",maintenance_template_id:7,
+    maintenance_template_name:"PM checklist",maintenance_template_version:1,
+  });
+  assert.notEqual(sameTemplateDifferentPm.key,pmV1.key,"20A and 40 never share benchmark");
+  assert.equal(classifyTechnicianJob({source:"scheduled-pm",maintenance_template_id:7}).comparable,false);
   const annual=result.workOrders.find(w=>w.repairId===113);
-  assert.match(annual.excludedReason,/No versioned PM\/Annual checklist/);
+  assert.match(annual.excludedReason,/No versioned Annual checklist/);
 });
 
 test("an identical shared WO shows each technician's labor share, not false head-to-head job speed",()=>{
