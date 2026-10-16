@@ -494,6 +494,23 @@ export default function PlanningCenter(){
       {data?.canManage&&detail.equipmentId&&<button className={s.danger} type="button" onClick={()=>{const reason=window.prompt(`Why is Unit ${detail.unit} out of service?`,detail.rows[0]?.issue||'');if(reason?.trim())void change(`oos-${detail.equipmentId}`,{action:'setUnitOos',equipmentId:detail.equipmentId,unit:detail.unit,outOfService:true,reason:reason.trim()})}}>Mark OOS</button>}
      </div>
      {canCreateRepair&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
+     {detail.equipmentId&&<section className={s.futureSection} aria-label={`Future repairs for Unit ${detail.unit}`}>
+      <div className={s.futureHead}>
+       <div><strong>Future Repairs <span className={s.futureTotal}>{detailFuture.length}</span></strong>
+        <p>Saved for a later service visit — not assigned or counted as active repairs yet.</p>
+       </div>
+       {data?.canManage&&<a className={s.futureManage} href="/next-pm-repairs">Manage</a>}
+      </div>
+      {detailFuture.length>0
+       ?<div className={s.futureList}>{detailFuture.map(item=><article key={item.id} className={s.futureItem}>
+         <div className={s.futureItemTop}>
+          <strong>{item.description}</strong>
+          <span className={s.futureTarget}>NEXT {item.targetEventType==='annual'?'ANNUAL':'PM'}</span>
+         </div>
+         <p>{item.repairStatus||'Deferred'} · Waiting for next service{item.plannedPartCount>0?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</p>
+        </article>)}</div>
+       :<p className={s.futureEmpty}>No future repairs currently waiting for this unit.</p>}
+     </section>}
      <div>{detail.rows.map(row=><article className={s.job} key={row.id}>
       <div className={s.jobHead}><div><div className={s.chips}><span className={s.source}>{sourceLabel(row.source)}</span><span className={`${s.status} ${statusClass(row)}`}>{nextStep(row)}</span></div><h3>{row.issue}</h3></div><span>{row.laborHours.toFixed(2)} hr</span></div>
       {row.dvirComments&&<p><strong>DVIR:</strong> {row.dvirComments}</p>}
