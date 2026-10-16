@@ -5,12 +5,18 @@ import { getOpenCustomMaintenanceRepairs, syncCustomMaintenanceRepairs } from '@
 import { GET as originalGET, POST as originalPOST } from './original';
 import { assignToMeFromBoard } from './self-assign';
 import { createRepairForTechnician, setUnitOosByTechnician } from './technician-actions';
+import { REPAIR_BOARD_FUTURE_REPAIRS_SQL } from '@/lib/repair-board-future-repairs-sql';
 
 type BoardRepair = {
   id:string; source:string; issue:string; status:string; technicianId:number|null; activeTimer:unknown;
   outOfService:boolean; equipmentType:string; equipmentId:number|null; maintenanceId?:string;
 };
 type OosUnit = { openWork?: Array<{status?:string}>; [key:string]: unknown };
+type FutureRepairRow = {
+  id:number; equipment_id:number; repair_id:number; description:string;
+  target_event_type:'pm'|'annual'; tagged_at:string; repair_status:string;
+  unit:string; planned_part_count:number;
+};
 type AdminRepairRow = {
   id:number;
   equipment_id:number|null;
@@ -317,6 +323,22 @@ export async function GET(request: Request) {
     })
     .filter((repair) => !deferred(repair.status) && !outsideRepair(repair.status)));
   payload.repairs = repairs;
+  // These are queued future-service notes, not active Repair Board work.
+  // Keep active counts, job assignment, and PM scheduling unchanged.
+  // Their source-of-truth is the same pending pm_next_repairs queue used by
+  // Planned Repairs / Unit Hub; attached work moves to the normal active rows.
+  const pendingFutureRepairs = await env.DB.prepare(REPAIR_BOARD_FUTURE_REPAIRS_SQL).all<FutureRepairRow>();
+  payload.futureRepairs = pendingFutureRepairs.results.map((row)=>({
+    id:row.id,
+    equipmentId:row.equipment_id,
+    repairId:`repair-${row.repair_id}`,
+    unit:row.unit,
+    description:row.description,
+    targetEventType:row.target_event_type,
+    repairStatus:row.repair_status,
+    taggedAt:row.tagged_at,
+    plannedPartCount:Number(row.planned_part_count||0),
+  }));
   if (Array.isArray(payload.oosUnits)) {
     payload.oosUnits = payload.oosUnits.map((unit) => ({
       ...unit,

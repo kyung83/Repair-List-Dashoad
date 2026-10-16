@@ -17,11 +17,15 @@ type Row={
  dvirComments:string;dvirPhotos:string;maintenanceId:string;
 };
 type Group={key:string;unit:string;equipmentId:number|null;equipmentType:string;location:string;driver:string;rows:Row[]};
+type FutureRepair={
+ id:number;equipmentId:number;repairId:string;unit:string;description:string;
+ targetEventType:'pm'|'annual';repairStatus:string;taggedAt:string;plannedPartCount:number;
+};
 type Tech={id:number;name:string};
 type Equip={id:number;unit:string;equipmentType:string;driver:string;location:string};
 type Oos={equipmentId:number;unit:string;equipmentType:string;driver:string;location:string;reason:string;since:string|null;openWork:{id:string;source:Src;issue:string;assignedTo:string;status:string}[]};
 type BoardUser={id:number;username:string;displayName:string;role:'viewer'|'mechanic'|'dispatch'|'manager'|'admin';technicianId:number|null};
-type Data={user:BoardUser;canManage:boolean;technicians:Tech[];equipment:Equip[];repairs:Row[];oosUnits:Oos[];updatedAt:string};
+type Data={user:BoardUser;canManage:boolean;technicians:Tech[];equipment:Equip[];repairs:Row[];futureRepairs:FutureRepair[];oosUnits:Oos[];updatedAt:string};
 type YardInfo={currentYard:YardSelection;zoneName:string;positionAt:string;yardUpdatedAt:string};
 type Sync={status:string;message:string;positions:number;clare:number;cadillac:number;gr:number;taylor:number;boyne:number;outside:number;updatedAt:string};
 type Review={
@@ -173,6 +177,15 @@ export default function PlanningCenter(){
   return live||normalizeYard(row.location);
  },[yards]);
  const allRows=data?.repairs||[];
+ const futureByEquipment=useMemo(()=>{
+  const byEquipment=new Map<number,FutureRepair[]>();
+  for(const item of data?.futureRepairs??[]){
+   const list=byEquipment.get(item.equipmentId)??[];
+   list.push(item);
+   byEquipment.set(item.equipmentId,list);
+  }
+  return byEquipment;
+ },[data?.futureRepairs]);
  const yardRows=useMemo(()=>allRows.filter(row=>shop==='all'||yardFor(row)===shop),[allRows,shop,yardFor]);
  const counts=useMemo(()=>{
   const result:Record<Shop,number>={all:allRows.length,clare:0,cadillac:0,gr:0,taylor:0,boyne:0};
@@ -191,10 +204,12 @@ export default function PlanningCenter(){
    if(!matchesAttention(row,attention))return false;
    if(assignee==='unassigned'&&row.technicianId!==null)return false;
    if(/^\d+$/.test(assignee)&&Number(assignee)!==Number(row.technicianId||0))return false;
-   if(needle&&![row.unit,row.issue,row.parts,row.location,displayDriver(row.driver),row.assignedTo,row.status,sourceLabel(row.source),etas[String(row.equipmentId||'')]].join(' ').toLowerCase().includes(needle))return false;
+   const queued=row.equipmentId?(futureByEquipment.get(row.equipmentId)??[]):[];
+   const futureWords=queued.map(item=>`${item.description} next ${item.targetEventType} ${item.repairStatus}`).join(' ');
+   if(needle&&![row.unit,row.issue,row.parts,row.location,displayDriver(row.driver),row.assignedTo,row.status,sourceLabel(row.source),etas[String(row.equipmentId||'')],futureWords].join(' ').toLowerCase().includes(needle))return false;
    return true;
   });
- },[yardRows,q,attention,assignee,etas]);
+ },[yardRows,q,attention,assignee,etas,futureByEquipment]);
 
  const panels=useMemo(()=>{
   const glassRows=filtered.filter(glass);
@@ -214,6 +229,7 @@ export default function PlanningCenter(){
  },[filtered]);
  const allGroups=useMemo(()=>groups(allRows),[allRows]);
  const detail=detailKey?allGroups.find(group=>group.key===detailKey)||null:null;
+ const detailFuture=detail?.equipmentId?futureByEquipment.get(detail.equipmentId)??[]:[];
  const selectedRows=useMemo(()=>allRows.filter(row=>selected.has(row.id)),[allRows,selected]);
  const hasFilters=attention!=='all'||assignee!=='all'||Boolean(q.trim());
 
@@ -364,6 +380,8 @@ export default function PlanningCenter(){
      const top=lead(group),ids=group.rows.map(row=>row.id),checked=ids.length>0&&ids.every(id=>selected.has(id));
      const yard=top.equipmentId?yards[String(top.equipmentId)]?.currentYard:'';
      const etaValue=top.equipmentId?etas[String(top.equipmentId)]||'':'';
+     const futureCount=group.equipmentId?(futureByEquipment.get(group.equipmentId)?.length??0):0;
+     const maintenanceRow=group.rows.some(row=>pm(row.source)||annual(row.source));
      return <div key={`${name}-${group.key}`} className={`${s.row} ${checked?s.rowSelected:''}`} role="button" tabIndex={0} onClick={()=>setDetailKey(group.key)} onKeyDown={event=>{if(event.key==='Enter')setDetailKey(group.key)}}>
       {data?.canManage
        ? <input aria-label={`Select Unit ${group.unit} ${title}`} className={s.rowCheck} type="checkbox" checked={checked} onClick={event=>event.stopPropagation()} onChange={()=>toggleGroup(group)}/>
@@ -372,7 +390,9 @@ export default function PlanningCenter(){
       <div className={s.issue}><strong>{groupIssue(group)||'Open work'}</strong><small>{groupParts(group)}</small></div>
       <div className={`${s.meta} ${s.hideMobile}`}><strong>{yard?`${yardLabel(yard)} Yard`:group.location||'No location'}</strong><small>{group.driver||'No driver'}</small></div>
       <div className={`${s.meta} ${s.hideTablet}`}><strong>{groupAssignee(group)}</strong><small>{etaValue?`ETA ${etaValue}`:'No ETA / depart'}</small></div>
-      <div className={s.meta}><span className={`${s.status} ${statusClass(top)}`}>{nextStep(top)}</span><small>{group.rows.length>1?`${group.rows.length} open items`:sourceLabel(top.source)}</small></div>
+      <div className={s.meta}><span className={`${s.status} ${statusClass(top)}`}>{nextStep(top)}</span><small>{group.rows.length>1?`${group.rows.length} open items`:sourceLabel(top.source)}</small>
+       {maintenanceRow&&futureCount>0&&<small className={s.futureCount}>{futureCount} FUTURE REPAIR{futureCount===1?'':'S'}</small>}
+      </div>
       <button className={s.chev} type="button" aria-label={`Open Unit ${group.unit}`} onClick={event=>{event.stopPropagation();setDetailKey(group.key)}}>›</button>
      </div>;
     })}
@@ -474,6 +494,23 @@ export default function PlanningCenter(){
       {data?.canManage&&detail.equipmentId&&<button className={s.danger} type="button" onClick={()=>{const reason=window.prompt(`Why is Unit ${detail.unit} out of service?`,detail.rows[0]?.issue||'');if(reason?.trim())void change(`oos-${detail.equipmentId}`,{action:'setUnitOos',equipmentId:detail.equipmentId,unit:detail.unit,outOfService:true,reason:reason.trim()})}}>Mark OOS</button>}
      </div>
      {canCreateRepair&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
+     {detail.equipmentId&&<section className={s.futureSection} aria-label={`Future repairs for Unit ${detail.unit}`}>
+      <div className={s.futureHead}>
+       <div><strong>Future Repairs <span className={s.futureTotal}>{detailFuture.length}</span></strong>
+        <p>Saved for a later service visit — not assigned or counted as active repairs yet.</p>
+       </div>
+       {data?.canManage&&<a className={s.futureManage} href="/next-pm-repairs">Manage</a>}
+      </div>
+      {detailFuture.length>0
+       ?<div className={s.futureList}>{detailFuture.map(item=><article key={item.id} className={s.futureItem}>
+         <div className={s.futureItemTop}>
+          <strong>{item.description}</strong>
+          <span className={s.futureTarget}>NEXT {item.targetEventType==='annual'?'ANNUAL':'PM'}</span>
+         </div>
+         <p>{item.repairStatus||'Deferred'} · Waiting for next service{item.plannedPartCount>0?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</p>
+        </article>)}</div>
+       :<p className={s.futureEmpty}>No future repairs currently waiting for this unit.</p>}
+     </section>}
      <div>{detail.rows.map(row=><article className={s.job} key={row.id}>
       <div className={s.jobHead}><div><div className={s.chips}><span className={s.source}>{sourceLabel(row.source)}</span><span className={`${s.status} ${statusClass(row)}`}>{nextStep(row)}</span></div><h3>{row.issue}</h3></div><span>{row.laborHours.toFixed(2)} hr</span></div>
       {row.dvirComments&&<p><strong>DVIR:</strong> {row.dvirComments}</p>}
