@@ -77,7 +77,8 @@ test('clicking a due PM displays its queued Future Repairs within the unit detai
  assert.match(center,/Future Repairs <span/);
  assert.match(center,/detailFuture\.length/);
  assert.match(center,/item\.description/);
- assert.match(center,/NEXT \{item\.targetEventType==='annual'\?'ANNUAL':'PM'\}/);
+  assert.match(center,/NEXT SHOP VISIT/);
+  assert.match(center,/Originally tagged Next/);
  assert.match(center,/plannedPartCount/);
  assert.match(center,/href="\/next-pm-repairs"/);
  assert.match(center,/No future repairs currently waiting for this unit/);

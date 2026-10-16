@@ -381,7 +381,6 @@ export default function PlanningCenter(){
      const yard=top.equipmentId?yards[String(top.equipmentId)]?.currentYard:'';
      const etaValue=top.equipmentId?etas[String(top.equipmentId)]||'':'';
      const futureCount=group.equipmentId?(futureByEquipment.get(group.equipmentId)?.length??0):0;
-     const maintenanceRow=group.rows.some(row=>pm(row.source)||annual(row.source));
      return <div key={`${name}-${group.key}`} className={`${s.row} ${checked?s.rowSelected:''}`} role="button" tabIndex={0} onClick={()=>setDetailKey(group.key)} onKeyDown={event=>{if(event.key==='Enter')setDetailKey(group.key)}}>
       {data?.canManage
        ? <input aria-label={`Select Unit ${group.unit} ${title}`} className={s.rowCheck} type="checkbox" checked={checked} onClick={event=>event.stopPropagation()} onChange={()=>toggleGroup(group)}/>
@@ -391,7 +390,7 @@ export default function PlanningCenter(){
       <div className={`${s.meta} ${s.hideMobile}`}><strong>{yard?`${yardLabel(yard)} Yard`:group.location||'No location'}</strong><small>{group.driver||'No driver'}</small></div>
       <div className={`${s.meta} ${s.hideTablet}`}><strong>{groupAssignee(group)}</strong><small>{etaValue?`ETA ${etaValue}`:'No ETA / depart'}</small></div>
       <div className={s.meta}><span className={`${s.status} ${statusClass(top)}`}>{nextStep(top)}</span><small>{group.rows.length>1?`${group.rows.length} open items`:sourceLabel(top.source)}</small>
-       {maintenanceRow&&futureCount>0&&<small className={s.futureCount}>{futureCount} FUTURE REPAIR{futureCount===1?'':'S'}</small>}
+       {futureCount>0&&<small className={s.futureCount}>{futureCount} FUTURE REPAIR{futureCount===1?'':'S'}</small>}
       </div>
       <button className={s.chev} type="button" aria-label={`Open Unit ${group.unit}`} onClick={event=>{event.stopPropagation();setDetailKey(group.key)}}>›</button>
      </div>;
@@ -497,7 +496,7 @@ export default function PlanningCenter(){
      {detail.equipmentId&&<section className={s.futureSection} aria-label={`Future repairs for Unit ${detail.unit}`}>
       <div className={s.futureHead}>
        <div><strong>Future Repairs <span className={s.futureTotal}>{detailFuture.length}</span></strong>
-        <p>Saved for a later service visit — not assigned or counted as active repairs yet.</p>
+        <p>Waiting for the next repair, DVIR, PM or Annual work order — whichever starts first. Due-only PMs and Annuals do not activate repairs until the shop work order is opened.</p>
        </div>
        {data?.canManage&&<a className={s.futureManage} href="/next-pm-repairs">Manage</a>}
       </div>
@@ -505,9 +504,9 @@ export default function PlanningCenter(){
        ?<div className={s.futureList}>{detailFuture.map(item=><article key={item.id} className={s.futureItem}>
          <div className={s.futureItemTop}>
           <strong>{item.description}</strong>
-          <span className={s.futureTarget}>NEXT {item.targetEventType==='annual'?'ANNUAL':'PM'}</span>
+          <span className={s.futureTarget} title={`Originally requested for next ${item.targetEventType==='annual'?'Annual':'PM'}; it will be pulled into whichever shop job starts first.`}>NEXT SHOP VISIT</span>
          </div>
-         <p>{item.repairStatus||'Deferred'} · Waiting for next service{item.plannedPartCount>0?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</p>
+         <p>{item.repairStatus||'Deferred'} · Originally tagged Next {item.targetEventType==='annual'?'Annual':'PM'}{item.plannedPartCount>0?` · ${item.plannedPartCount} planned part${item.plannedPartCount===1?'':'s'}`:''}</p>
         </article>)}</div>
        :<p className={s.futureEmpty}>No future repairs currently waiting for this unit.</p>}
      </section>}
