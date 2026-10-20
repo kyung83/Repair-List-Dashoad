@@ -299,7 +299,7 @@ export default function BreakdownsPage(){
     if(!window.confirm('Change breakdown #'+row.id+' from '+oldLabel+' to '+targetLabel+'?\n\nThe linked repair and costs will move to the corrected equipment. Photos, receipts, and original tire/driver details will remain attached. If the equipment type changes, review the original tire positions.'))return;
     setBusyAction('unit');setMessage('');
     try{
-      const response=await fetch(`/api/breakdowns/%D%/unit`.replace('%D%',String(row.id)),{
+      const response=await fetch(`/api/breakdowns/${row.id}/unit`,{
         method:'PATCH',headers:{'content-type':'application/json'},
         body:JSON.stringify({unitType:newType,unitNumber:next}),
       });
