@@ -12,6 +12,13 @@ function normalizedType(value: unknown): UnitType {
   return String(value ?? '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
 }
 
+function desiredType(value: unknown, existing: UnitType): UnitType {
+  if (value === undefined || value === null || value === '') return existing;
+  const next = String(value).trim().toLowerCase();
+  if (next !== 'truck' && next !== 'trailer') throw new Error('Choose Truck or Trailer for the corrected breakdown.');
+  return next;
+}
+
 function unitKey(value: unknown, unitType: UnitType) {
   const raw = cleanUnit(value).toUpperCase();
   const compact = raw.replace(/[^A-Z0-9]/g, '');
@@ -46,17 +53,18 @@ async function requireOperator(request: Request) {
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireOperator(request);
+    const user = await requireOperator(request);
     const { id } = await params;
     const breakdownId = Number(id);
     if (!Number.isInteger(breakdownId) || breakdownId <= 0) throw new Error('Invalid breakdown number.');
 
-    const body = await request.json<{ unitNumber?: unknown; trailerNumber?: unknown }>();
+    const body = await request.json<{ unitType?: unknown; unitNumber?: unknown; trailerNumber?: unknown }>();
 
     const current = await env.DB.prepare(`
-      SELECT b.id,b.repair_id,b.stage,b.equipment_id,e.unit,e.equipment_type
+      SELECT b.id,b.repair_id,b.stage,b.equipment_id,e.unit,e.equipment_type,COALESCE(r.source,'') AS repair_source
       FROM roadside_breakdowns b
       JOIN equipment e ON e.id=b.equipment_id
+      JOIN repairs r ON r.id=b.repair_id
       WHERE b.id=?
     `).bind(breakdownId).first<{
       id:number;
@@ -65,17 +73,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       equipment_id:number;
       unit:string;
       equipment_type:string;
+      repair_source:string;
     }>();
 
     if (!current) return Response.json({ error: 'Breakdown not found.' }, { status: 404 });
 
-    const unitType = normalizedType(current.equipment_type);
+    if (current.repair_source !== 'roadside-breakdown') throw new Error('The linked repair is not a roadside breakdown.');
+    const previousUnitType = normalizedType(current.equipment_type);
+    const unitType = desiredType(body.unitType, previousUnitType);
     const requested = cleanUnit(body.unitNumber ?? body.trailerNumber);
     const wantedKey = unitKey(requested, unitType);
     if (!wantedKey) throw new Error(`Enter the correct ${unitType} number.`);
 
-    if (Number(current.stage) >= 5) {
-      throw new Error(`Completed breakdowns cannot be moved to another ${unitType} from Active Breakdowns.`);
+    if (Number(current.stage) >= 5 && user.role !== 'manager' && user.role !== 'admin') {
+      throw new Error('Completed breakdown equipment can only be corrected by a manager or administrator from Breakdown Reports.');
     }
 
     const typeSql = unitType === 'trailer'
@@ -105,6 +116,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ok: true,
         changed: false,
         unitType,
+        previousUnitType,
         unitNumber: String(target.unit || '').trim(),
         previousUnitNumber: String(current.unit || '').trim(),
       }, { headers: { 'cache-control': 'no-store' } });
