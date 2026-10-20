@@ -35,8 +35,13 @@ function fixture() {
     CREATE TABLE repairs(
       id INTEGER PRIMARY KEY,
       equipment_id INTEGER NOT NULL,
-      updated_at TEXT
+      updated_at TEXT,
+      source TEXT NOT NULL DEFAULT 'roadside-breakdown',
+      outside_cost REAL DEFAULT 0
     );
+    CREATE TABLE repair_job_events(id INTEGER PRIMARY KEY,repair_id INTEGER,user_id INTEGER,technician_id INTEGER,action TEXT,detail TEXT);
+    CREATE TABLE roadside_breakdown_receipts(id INTEGER PRIMARY KEY,breakdown_id INTEGER,object_key TEXT);
+    CREATE TABLE roadside_breakdown_tires(id INTEGER PRIMARY KEY,breakdown_id INTEGER,position_code TEXT,tire_size TEXT);
     CREATE TABLE roadside_breakdowns(
       id INTEGER PRIMARY KEY,
       repair_id INTEGER NOT NULL,
@@ -65,11 +70,13 @@ function fixture() {
       (9,'229(DC)','truck',1,NULL),
       (10,'229(BT)','truck',1,NULL),
       (11,'999(DC)','truck',0,NULL);
-    INSERT INTO repairs VALUES
-      (101,1,'2026-10-08 08:00:00'),
-      (102,1,'2026-10-08 08:00:00'),
-      (103,7,'2026-10-08 08:00:00'),
-      (104,7,'2026-10-08 08:00:00');
+    INSERT INTO repairs(id,equipment_id,updated_at,outside_cost) VALUES
+      (101,1,'2026-10-08 08:00:00',476.52),
+      (102,1,'2026-10-08 08:00:00',155.01),
+      (103,7,'2026-10-08 08:00:00',300.05),
+      (104,7,'2026-10-08 08:00:00',845.90);
+    INSERT INTO roadside_breakdown_receipts VALUES(1,10,'receipts/10.pdf');
+    INSERT INTO roadside_breakdown_tires VALUES(1,10,'A2LO','295/75R22.5');
     INSERT INTO roadside_breakdowns
       (id,repair_id,equipment_id,stage,snapshot_source,geotab_driver_id,driver_observed_at,geotab_device_id,latitude,longitude,gps_observed_at,gps_source,snapshot_captured_at,updated_at)
     VALUES
@@ -113,7 +120,7 @@ function request(id, body) {
 }
 
 test('dispatch can correct an active trailer and linked repair follows the corrected equipment', async () => {
-  const f = fixture(); let user = { role: 'dispatch' };
+  const f = fixture(); let user = { role: 'dispatch', id: 10 };
   try {
     const route = compile('app/api/breakdowns/[id]/unit/route.ts', {
       'cloudflare:workers': { env: { DB: f.db } },
@@ -131,11 +138,17 @@ test('dispatch can correct an active trailer and linked repair follows the corre
     const repair = f.sqlite.prepare('SELECT * FROM repairs WHERE id=101').get();
     assert.equal(breakdown.equipment_id, 2);
     assert.equal(repair.equipment_id, 2);
+    assert.equal(repair.outside_cost, 476.52);
+    const audit = f.sqlite.prepare("SELECT * FROM repair_job_events WHERE action='breakdown_equipment_corrected'").get();
+    assert.equal(audit.user_id, 10);
+    assert.match(audit.detail, /Trailer TRL 211 to Trailer 53027/);
+    assert.equal(f.sqlite.prepare('SELECT object_key FROM roadside_breakdown_receipts WHERE breakdown_id=10').get().object_key, 'receipts/10.pdf');
+    assert.equal(f.sqlite.prepare('SELECT position_code FROM roadside_breakdown_tires WHERE breakdown_id=10').get().position_code,'A2LO');
     assert.equal(breakdown.snapshot_source, 'unit-corrected');
     assert.equal(breakdown.geotab_driver_id, null);
     assert.equal(breakdown.geotab_device_id, null);
 
-    user = { role: 'viewer' };
+    user = { role: 'viewer', id: 10 };
     assert.equal((await route.PATCH(request(10, { unitNumber: 'TRL 211' }), { params: Promise.resolve({ id: '10' }) })).status, 400);
   } finally { f.sqlite.close(); }
 });
@@ -145,7 +158,7 @@ test('dispatch can correct a truck by road number even when Master Equipment inc
   try {
     const route = compile('app/api/breakdowns/[id]/unit/route.ts', {
       'cloudflare:workers': { env: { DB: f.db } },
-      '@/lib/auth': { getSessionUser: async () => ({ role: 'dispatch' }) },
+      '@/lib/auth': { getSessionUser: async () => ({ role: 'dispatch', id: 10 }) },
     });
     const response = await route.PATCH(request(12, { unitNumber: '228' }), { params: Promise.resolve({ id: '12' }) });
     assert.equal(response.status, 200);
@@ -171,7 +184,7 @@ test('unit correction refuses ambiguous, inactive, completed, and unsafe targets
   try {
     const route = compile('app/api/breakdowns/[id]/unit/route.ts', {
       'cloudflare:workers': { env: { DB: f.db } },
-      '@/lib/auth': { getSessionUser: async () => ({ role: 'manager' }) },
+      '@/lib/auth': { getSessionUser: async () => ({ role: 'manager', id: 11 }) },
     });
 
     const sameTrailer = await route.PATCH(request(10, { trailerNumber: '211' }), { params: Promise.resolve({ id: '10' }) });
@@ -198,21 +211,31 @@ test('unit correction refuses ambiguous, inactive, completed, and unsafe targets
     assert.equal(inactiveTruck.status, 400);
     assert.match((await inactiveTruck.json()).error, /not found in active equipment/i);
 
-    const completedTrailer = await route.PATCH(request(11, { unitNumber: '53027' }), { params: Promise.resolve({ id: '11' }) });
-    assert.equal(completedTrailer.status, 400);
-    assert.match((await completedTrailer.json()).error, /Completed breakdowns cannot be moved/i);
+    const completedTrailer = await route.PATCH(request(11, { unitType:'truck',unitNumber: '228' }), { params: Promise.resolve({ id: '11' }) });
+    assert.equal(completedTrailer.status, 200);
+    assert.equal((await completedTrailer.json()).unitType,'truck');
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=102').get().equipment_id,8);
 
-    const completedTruck = await route.PATCH(request(13, { unitNumber: '228' }), { params: Promise.resolve({ id: '13' }) });
-    assert.equal(completedTruck.status, 400);
-    assert.match((await completedTruck.json()).error, /Completed breakdowns cannot be moved/i);
+    const completedTruck = await route.PATCH(request(13, { unitType:'trailer',unitNumber: '53027' }), { params: Promise.resolve({ id: '13' }) });
+    assert.equal(completedTruck.status, 200);
+    assert.equal((await completedTruck.json()).unitType,'trailer');
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=104').get().equipment_id,2);
   } finally { f.sqlite.close(); }
 });
 
-test('dispatch breakdown detail exposes truck and trailer correction from the same control', () => {
-  const page = read('app/breakdowns/page.tsx');
-  assert.match(page, /const correctionName=correctionType==='trailer'\?'Trailer':'Truck'/);
-  assert.match(page, /Change \{correctionName\} #/);
-  assert.match(page, /Save Correct \$\{correctionName\}/);
-  assert.match(page, /body:JSON\.stringify\(\{unitNumber:next\}\)/);
-  assert.match(page, /Linked repair and costs moved with it/);
+test('office breakdowns and completed reports expose Truck/Trailer selection and preserve correction history',()=>{
+  const page=read('app/breakdowns/page.tsx');
+  const editor=read('app/reports/breakdowns/edit-breakdown-button.tsx');
+  const completedRoute=read('app/api/reports/breakdowns/[id]/route.ts');
+  assert.match(page,/Change Truck \/ Trailer/);
+  assert.match(page,/Correct affected equipment type/);
+  assert.match(page,/<option value="truck">Truck<\/option>/);
+  assert.match(page,/<option value="trailer">Trailer<\/option>/);
+  assert.match(page,/body:JSON.stringify\(\{unitType:newType,unitNumber:next\}\)/);
+  assert.match(page,/Review the original reported tire positions/);
+  assert.match(editor,/Correct Truck \/ Trailer/);
+  assert.match(editor,/Save Correct Equipment/);
+  assert.match(editor,/unitType:equipmentTypeDraft,unitNumber:next/);
+  assert.match(completedRoute,/equipmentType: row.equipment_type/);
+  assert.match(page,/Linked repair and costs moved with it/);
 });
