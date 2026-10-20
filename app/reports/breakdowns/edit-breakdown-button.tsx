@@ -5,6 +5,7 @@ import { useState } from 'react';
 type EditRecord = {
   breakdownId: number;
   unit: string;
+  equipmentType: 'truck' | 'trailer';
   finalTotalCost: number;
   serviceProvider: string;
   invoiceNumber: string;
@@ -64,6 +65,10 @@ export default function EditBreakdownButton({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingEquipment, setSavingEquipment] = useState(false);
+  const [equipmentTypeDraft, setEquipmentTypeDraft] = useState<'truck' | 'trailer'>('truck');
+  const [equipmentUnitDraft, setEquipmentUnitDraft] = useState('');
+  const [originalEquipment, setOriginalEquipment] = useState<{type:'truck'|'trailer';unit:string}|null>(null);
   const [message, setMessage] = useState('');
   const [draft, setDraft] = useState<Draft>({ totalAmount: '', serviceProvider: '', invoiceNumber: '', invoiceDate: '', closeoutNotes: '' });
 
@@ -75,6 +80,9 @@ export default function EditBreakdownButton({
       const response = await fetch(`/api/reports/breakdowns/${breakdownId}`, { cache: 'no-store' });
       const payload = await response.json() as { record?: EditRecord; error?: string };
       if (!response.ok || !payload.record) throw new Error(payload.error || 'Breakdown could not be loaded.');
+      setOriginalEquipment({type:payload.record.equipmentType,unit:payload.record.unit});
+      setEquipmentTypeDraft(payload.record.equipmentType);
+      setEquipmentUnitDraft(payload.record.unit);
       setDraft({
         totalAmount: Number(payload.record.finalTotalCost || 0).toFixed(2),
         serviceProvider: payload.record.serviceProvider || '',
@@ -86,6 +94,31 @@ export default function EditBreakdownButton({
       setMessage(error instanceof Error ? error.message : 'Breakdown could not be loaded.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveEquipmentCorrection() {
+    const next = equipmentUnitDraft.trim();
+    if (!next) { setMessage('Enter the correct truck or trailer number.'); return; }
+    const currentLabel = (originalEquipment?.type==='trailer'?'Trailer ':'Truck ') + (originalEquipment?.unit||unit);
+    const targetLabel = (equipmentTypeDraft==='trailer'?'Trailer ':'Truck ') + next;
+    if (!window.confirm('Correct completed breakdown #' + breakdownId + ' from ' + currentLabel + ' to ' + targetLabel +
+      '?\n\nThe linked repair and all costs will be assigned to the corrected equipment. Photos, receipts and original driver-reported tire positions remain unchanged.')) return;
+    setSavingEquipment(true);
+    setMessage('');
+    try {
+      const response = await fetch(`/api/breakdowns/${breakdownId}/unit`, {
+        method:'PATCH',headers:{'content-type':'application/json'},
+        body:JSON.stringify({unitType:equipmentTypeDraft,unitNumber:next}),
+      });
+      const result = await response.json() as {ok?:boolean;changed?:boolean;reviewTirePositions?:boolean;error?:string};
+      if (!response.ok||!result.ok) throw new Error(result.error||'Equipment correction could not be saved.');
+      await onSaved();
+      setOpen(false);
+    } catch(error) {
+      setMessage(error instanceof Error ? error.message : 'Equipment correction could not be saved.');
+    } finally {
+      setSavingEquipment(false);
     }
   }
 
@@ -142,6 +175,36 @@ export default function EditBreakdownButton({
         </div>
 
         {loading ? <div style={{ marginTop: 18, padding: 16, background: '#f8fafc', borderRadius: 9 }}>Loading breakdown…</div> : <div style={{ display: 'grid', gap: 13, marginTop: 18 }}>
+          <section style={{border:'1px solid #d4deeb',borderRadius:10,padding:14,background:'#f8fafc',display:'grid',gap:11}}>
+            <div>
+              <h3 style={{fontSize:16,margin:'0 0 5px'}}>Correct Truck / Trailer</h3>
+              <p style={{fontSize:12,color:'#556478',margin:0}}>
+                Currently {originalEquipment?.type==='trailer'?'Trailer':'Truck'} {originalEquipment?.unit||unit}.
+                This changes which equipment is affected, including the linked repair and unit cost reports. It does not change the original driver report, receipts, photos, tire positions, or final cost.
+              </p>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:10}}>
+              <label style={label}>Correct equipment type
+                <select style={input} value={equipmentTypeDraft} disabled={savingEquipment||saving} onChange={event=>{
+                  setEquipmentTypeDraft(event.target.value as 'truck'|'trailer');setEquipmentUnitDraft('');
+                }}>
+                  <option value="truck">Truck</option>
+                  <option value="trailer">Trailer</option>
+                </select>
+              </label>
+              <label style={label}>Correct {equipmentTypeDraft} number
+                <input style={input} value={equipmentUnitDraft} maxLength={40} disabled={savingEquipment||saving}
+                  onChange={event=>setEquipmentUnitDraft(event.target.value.replace(/[^A-Za-z0-9()\- ]/g,'').slice(0,40))}
+                  placeholder={equipmentTypeDraft==='truck'?'227 or 227(DC)':'53027 or TRL 211'} />
+              </label>
+            </div>
+            <button type="button" style={{...button,background:'#173f6e',color:'#fff',justifySelf:'start'}}
+              disabled={saving||savingEquipment||!equipmentUnitDraft.trim()||loading}
+              onClick={()=>void saveEquipmentCorrection()}>{savingEquipment?'Updating…':'Save Correct Equipment'}</button>
+            <p style={{fontSize:11,color:'#6b7280',margin:0}}>
+              If the driver selected the wrong equipment type, review any original tire positions after correction. Saved positions are retained, not automatically translated.
+            </p>
+          </section>
           <label style={label}>Final Total Cost
             <div style={{ position: 'relative' }}><span style={{ position: 'absolute', left: 11, top: 11, fontWeight: 900, color: '#52616d' }}>$</span><input style={{ ...input, paddingLeft: 26, fontSize: 20, fontWeight: 900 }} inputMode="decimal" value={draft.totalAmount} onChange={(event) => setField('totalAmount', event.target.value.replace(/[^0-9.]/g, '').slice(0, 12))} /></div>
           </label>
