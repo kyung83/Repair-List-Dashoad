@@ -239,3 +239,110 @@ test('office breakdowns and completed reports expose Truck/Trailer selection and
   assert.match(completedRoute,/equipmentType: row.equipment_type/);
   assert.match(page,/Linked repair and costs moved with it/);
 });
+
+
+test('dispatch corrects active Trailer 211 to Truck 227 with linked repair, cost, photos and receipts preserved',async()=>{
+  const f=fixture();
+  try{
+    const route=compile('app/api/breakdowns/[id]/unit/route.ts',{
+      'cloudflare:workers':{env:{DB:f.db}},
+      '@/lib/auth':{getSessionUser:async()=>({role:'dispatch',id:21})},
+    });
+    const response=await route.PATCH(request(10,{unitType:'truck',unitNumber:'227'}),{params:Promise.resolve({id:'10'})});
+    assert.equal(response.status,200);
+    const data=await response.json();
+    assert.equal(data.changed,true);
+    assert.equal(data.previousUnitType,'trailer');
+    assert.equal(data.unitType,'truck');
+    assert.equal(data.previousUnitNumber,'TRL 211');
+    assert.equal(data.unitNumber,'227(DC)');
+    assert.equal(data.reviewTirePositions,true);
+    const b=f.sqlite.prepare('SELECT * FROM roadside_breakdowns WHERE id=10').get();
+    const r=f.sqlite.prepare('SELECT * FROM repairs WHERE id=101').get();
+    assert.equal(b.equipment_id,7);
+    assert.equal(b.stage,2);
+    assert.equal(b.snapshot_source,'unit-corrected');
+    assert.equal(r.equipment_id,7);
+    assert.equal(r.outside_cost,476.52);
+    assert.equal(f.sqlite.prepare('SELECT object_key FROM roadside_breakdown_receipts WHERE breakdown_id=10').get().object_key,'receipts/10.pdf');
+    assert.equal(f.sqlite.prepare('SELECT position_code FROM roadside_breakdown_tires WHERE breakdown_id=10').get().position_code,'A2LO');
+    const audit=f.sqlite.prepare("SELECT * FROM repair_job_events WHERE action='breakdown_equipment_corrected'").get();
+    assert.equal(audit.user_id,21);
+    assert.match(audit.detail,/Trailer TRL 211 to Truck 227\(DC\)/);
+    assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM repair_job_events').get().n,1);
+  }finally{f.sqlite.close();}
+});
+
+test('truck can be switched to trailer and back without changing the breakdown or repair identifiers',async()=>{
+  const f=fixture();
+  try{
+    const route=compile('app/api/breakdowns/[id]/unit/route.ts',{
+      'cloudflare:workers':{env:{DB:f.db}},
+      '@/lib/auth':{getSessionUser:async()=>({role:'manager',id:11})},
+    });
+    const change=async(unitType,unitNumber)=>route.PATCH(request(12,{unitType,unitNumber}),{params:Promise.resolve({id:'12'})});
+    let response=await change('trailer','53027');
+    assert.equal(response.status,200);
+    assert.equal((await response.json()).unitType,'trailer');
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM roadside_breakdowns WHERE id=12').get().equipment_id,2);
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=103').get().equipment_id,2);
+    response=await change('truck','227');
+    assert.equal(response.status,200);
+    assert.equal((await response.json()).unitType,'truck');
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=103').get().equipment_id,7);
+    assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM repair_job_events').get().n,2);
+    response=await change('truck','227(DC)');
+    assert.equal(response.status,200);
+    assert.equal((await response.json()).changed,false);
+    assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM repair_job_events').get().n,2,'no duplicate audit on no-op');
+  }finally{f.sqlite.close();}
+});
+
+test('dispatch cannot rewrite completed breakdowns, but manager may correct archived breakdown attribution without reopening',async()=>{
+  const f=fixture();
+  let actor={role:'dispatch',id:31};
+  try{
+    const route=compile('app/api/breakdowns/[id]/unit/route.ts',{
+      'cloudflare:workers':{env:{DB:f.db}},
+      '@/lib/auth':{getSessionUser:async()=>actor},
+    });
+    let response=await route.PATCH(request(11,{unitType:'truck',unitNumber:'227'}),{params:Promise.resolve({id:'11'})});
+    assert.equal(response.status,400);
+    assert.match((await response.json()).error,/Completed breakdown equipment can only be corrected/);
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=102').get().equipment_id,1);
+    actor={role:'admin',id:32};
+    response=await route.PATCH(request(11,{unitType:'truck',unitNumber:'227'}),{params:Promise.resolve({id:'11'})});
+    assert.equal(response.status,200);
+    const result=await response.json();
+    assert.equal(result.unitType,'truck');
+    assert.equal(f.sqlite.prepare('SELECT stage FROM roadside_breakdowns WHERE id=11').get().stage,5);
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=102').get().equipment_id,7);
+    assert.equal(f.sqlite.prepare('SELECT outside_cost FROM repairs WHERE id=102').get().outside_cost,155.01);
+    assert.equal(f.sqlite.prepare("SELECT user_id FROM repair_job_events WHERE action='breakdown_equipment_corrected'").get().user_id,32);
+  }finally{f.sqlite.close();}
+});
+
+test('type-changing correction rejects invalid type, missing, duplicate or inactive targets without changing records',async()=>{
+  const f=fixture();
+  try{
+    const route=compile('app/api/breakdowns/[id]/unit/route.ts',{
+      'cloudflare:workers':{env:{DB:f.db}},
+      '@/lib/auth':{getSessionUser:async()=>({role:'manager',id:11})},
+    });
+    const cases=[
+      [{unitType:'bus',unitNumber:'227'},/Choose Truck or Trailer/],
+      [{unitType:'truck',unitNumber:'229'},/more than one active equipment record/],
+      [{unitType:'truck',unitNumber:'999'},/not found in active equipment/],
+      [{unitType:'trailer',unitNumber:'227'},/not found in active equipment/],
+      [{unitType:'trailer',unitNumber:'53028'},/more than one active equipment record/],
+    ];
+    for(const [body,message] of cases){
+      const response=await route.PATCH(request(10,body),{params:Promise.resolve({id:'10'})});
+      assert.equal(response.status,400);
+      assert.match((await response.json()).error,message);
+    }
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM roadside_breakdowns WHERE id=10').get().equipment_id,1);
+    assert.equal(f.sqlite.prepare('SELECT equipment_id FROM repairs WHERE id=101').get().equipment_id,1);
+    assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM repair_job_events').get().n,0);
+  }finally{f.sqlite.close();}
+});
