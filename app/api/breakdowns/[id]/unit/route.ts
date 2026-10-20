@@ -12,6 +12,13 @@ function normalizedType(value: unknown): UnitType {
   return String(value ?? '').trim().toLowerCase() === 'trailer' ? 'trailer' : 'truck';
 }
 
+function desiredType(value: unknown, existing: UnitType): UnitType {
+  if (value === undefined || value === null || value === '') return existing;
+  const next = String(value).trim().toLowerCase();
+  if (next !== 'truck' && next !== 'trailer') throw new Error('Choose Truck or Trailer for the corrected breakdown.');
+  return next;
+}
+
 function unitKey(value: unknown, unitType: UnitType) {
   const raw = cleanUnit(value).toUpperCase();
   const compact = raw.replace(/[^A-Z0-9]/g, '');
@@ -46,17 +53,18 @@ async function requireOperator(request: Request) {
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireOperator(request);
+    const user = await requireOperator(request);
     const { id } = await params;
     const breakdownId = Number(id);
     if (!Number.isInteger(breakdownId) || breakdownId <= 0) throw new Error('Invalid breakdown number.');
 
-    const body = await request.json<{ unitNumber?: unknown; trailerNumber?: unknown }>();
+    const body = await request.json<{ unitType?: unknown; unitNumber?: unknown; trailerNumber?: unknown }>();
 
     const current = await env.DB.prepare(`
-      SELECT b.id,b.repair_id,b.stage,b.equipment_id,e.unit,e.equipment_type
+      SELECT b.id,b.repair_id,b.stage,b.equipment_id,e.unit,e.equipment_type,COALESCE(r.source,'') AS repair_source
       FROM roadside_breakdowns b
       JOIN equipment e ON e.id=b.equipment_id
+      JOIN repairs r ON r.id=b.repair_id
       WHERE b.id=?
     `).bind(breakdownId).first<{
       id:number;
@@ -65,17 +73,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       equipment_id:number;
       unit:string;
       equipment_type:string;
+      repair_source:string;
     }>();
 
     if (!current) return Response.json({ error: 'Breakdown not found.' }, { status: 404 });
 
-    const unitType = normalizedType(current.equipment_type);
+    if (current.repair_source !== 'roadside-breakdown') throw new Error('The linked repair is not a roadside breakdown.');
+    const previousUnitType = normalizedType(current.equipment_type);
+    const unitType = desiredType(body.unitType, previousUnitType);
     const requested = cleanUnit(body.unitNumber ?? body.trailerNumber);
     const wantedKey = unitKey(requested, unitType);
     if (!wantedKey) throw new Error(`Enter the correct ${unitType} number.`);
 
-    if (Number(current.stage) >= 5) {
-      throw new Error(`Completed breakdowns cannot be moved to another ${unitType} from Active Breakdowns.`);
+    if (Number(current.stage) >= 5 && user.role !== 'manager' && user.role !== 'admin') {
+      throw new Error('Completed breakdown equipment can only be corrected by a manager or administrator from Breakdown Reports.');
     }
 
     const typeSql = unitType === 'trailer'
@@ -105,12 +116,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         ok: true,
         changed: false,
         unitType,
+        previousUnitType,
         unitNumber: String(target.unit || '').trim(),
         previousUnitNumber: String(current.unit || '').trim(),
       }, { headers: { 'cache-control': 'no-store' } });
     }
 
-    await env.DB.batch([
+    const previousLabel = label(previousUnitType) + ' ' + String(current.unit || '').trim();
+    const correctedLabel = label(unitType) + ' ' + String(target.unit || '').trim();
+    const detail = ('Breakdown #' + breakdownId + ': affected equipment corrected from ' +
+      previousLabel + ' to ' + correctedLabel +
+      '; linked repair and costs reassigned. Driver photos, receipts, and originally reported tire details retained. ' +
+      'Prior Geotab device/GPS snapshot invalidated.').slice(0, 500);
+
+    // Atomic batch keeps the existing breakdown and repair IDs, costs, receipts,
+    // photos, status, dispatch stages, and notes. Only the affected equipment
+    // changes. Both UPDATEs guard against a concurrent office correction.
+    const changes = await env.DB.batch([
       env.DB.prepare(`
         UPDATE roadside_breakdowns
         SET equipment_id=?,
@@ -124,19 +146,41 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             gps_source=NULL,
             snapshot_captured_at=NULL,
             updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).bind(target.id, breakdownId),
+        WHERE id=? AND equipment_id=?
+          AND EXISTS (
+            SELECT 1 FROM repairs r
+            WHERE r.id=? AND r.equipment_id=? AND r.source='roadside-breakdown'
+          )
+      `).bind(target.id, breakdownId, current.equipment_id, current.repair_id, current.equipment_id),
       env.DB.prepare(`
         UPDATE repairs
         SET equipment_id=?,updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).bind(target.id, current.repair_id),
+        WHERE id=? AND equipment_id=? AND source='roadside-breakdown'
+          AND EXISTS (
+            SELECT 1 FROM roadside_breakdowns b
+            WHERE b.id=? AND b.equipment_id=?
+          )
+      `).bind(target.id, current.repair_id, current.equipment_id, breakdownId, target.id),
+      env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
+        SELECT ?,?,NULL,'breakdown_equipment_corrected',?
+        WHERE EXISTS (
+          SELECT 1 FROM roadside_breakdowns b
+          JOIN repairs r ON r.id=b.repair_id
+          WHERE b.id=? AND b.equipment_id=? AND r.equipment_id=?
+        )
+      `).bind(current.repair_id, user.id, detail, breakdownId, target.id, target.id),
     ]);
+    if (changes.some((item) => Number(item.meta?.changes ?? 0) !== 1)) {
+      throw new Error('Breakdown information changed during correction. Refresh and verify the breakdown and linked repair.');
+    }
 
     return Response.json({
       ok: true,
       changed: true,
       unitType,
+      previousUnitType,
+      reviewTirePositions: unitType !== previousUnitType,
       unitNumber: String(target.unit || '').trim(),
       previousUnitNumber: String(current.unit || '').trim(),
     }, { headers: { 'cache-control': 'no-store' } });

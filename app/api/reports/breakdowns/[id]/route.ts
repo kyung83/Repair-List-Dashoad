@@ -12,6 +12,7 @@ type BreakdownEditRow = {
   id: number;
   repair_id: number;
   unit: string;
+  equipment_type: string;
   stage: number;
   breakdown_status: string;
   repair_status: string;
@@ -67,7 +68,7 @@ function invoiceDate(value: unknown) {
 async function editableBreakdown(id: number) {
   return env.DB.prepare(`
     SELECT
-      b.id,b.repair_id,COALESCE(e.unit,'') AS unit,b.stage,
+      b.id,b.repair_id,COALESCE(e.unit,'') AS unit,COALESCE(e.equipment_type,'') AS equipment_type,b.stage,
       COALESCE(b.status,'') AS breakdown_status,COALESCE(r.status,'') AS repair_status,
       COALESCE(r.source,'') AS source,b.service_provider,r.outside_cost,
       COALESCE(b.closeout_invoice_number,'') AS closeout_invoice_number,
@@ -108,6 +109,7 @@ export async function GET(request: Request) {
       record: {
         breakdownId: row.id,
         unit: row.unit,
+        equipmentType: row.equipment_type === 'trailer' ? 'trailer' : 'truck',
         finalTotalCost,
         serviceProvider: row.reviewed_vendor?.trim() || row.service_provider || '',
         invoiceNumber: row.reviewed_invoice_number?.trim() || row.closeout_invoice_number || '',
