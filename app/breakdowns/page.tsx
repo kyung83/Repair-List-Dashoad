@@ -144,6 +144,7 @@ export default function BreakdownsPage(){
   const[busyAction,setBusyAction]=useState<BusyAction>(null);
   const[editingUnit,setEditingUnit]=useState(false);
   const[unitDraft,setUnitDraft]=useState('');
+  const[unitTypeDraft,setUnitTypeDraft]=useState<'truck'|'trailer'>('truck');
   const[message,setMessage]=useState('');
   const initialLoadDone=useRef(false);
 
@@ -225,7 +226,7 @@ export default function BreakdownsPage(){
   },[breakdowns,filter,categoryFilter,query]);
 
   function openBreakdown(id:number){
-    setSelectedId(id);setEditingUnit(false);setUnitDraft('');setMessage('');
+    setSelectedId(id);setEditingUnit(false);setUnitDraft('');setUnitTypeDraft('truck');setMessage('');
     const url=new URL(window.location.href);url.searchParams.set('id',String(id));window.history.pushState(null,'',url);
     window.scrollTo({top:0,behavior:'smooth'});
   }
@@ -290,20 +291,32 @@ export default function BreakdownsPage(){
 
   async function correctUnit(row:BreakdownViewRow){
     const next=unitDraft.trim();
-    const unitType=String(row.equipment_type||'').toLowerCase()==='trailer'?'trailer':'truck';
-    const unitName=unitType==='trailer'?'Trailer':'Truck';
-    if(!next){setMessage(`Enter the correct ${unitType} number.`);return;}
-    if(!window.confirm(`Change breakdown #${row.id} from ${unitName} ${row.unit} to ${unitName} ${next}?\n\nThe linked repair, costs, photos, and breakdown history stay together and move to the corrected ${unitType}.`))return;
+    const oldType=String(row.equipment_type||'').toLowerCase()==='trailer'?'trailer':'truck';
+    const newType=unitTypeDraft;
+    const oldLabel=(oldType==='trailer'?'Trailer':'Truck')+' '+row.unit;
+    const targetLabel=(newType==='trailer'?'Trailer':'Truck')+' '+next;
+    if(!next){setMessage('Enter the correct '+newType+' number.');return;}
+    if(!window.confirm('Change breakdown #'+row.id+' from '+oldLabel+' to '+targetLabel+'?\n\nThe linked repair and costs will move to the corrected equipment. Photos, receipts, and original tire/driver details will remain attached. If the equipment type changes, review the original tire positions.'))return;
     setBusyAction('unit');setMessage('');
     try{
-      const response=await fetch(`/api/breakdowns/${row.id}/unit`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({unitNumber:next})});
-      const payload=await response.json() as {ok?:boolean;changed?:boolean;unitType?:'truck'|'trailer';unitNumber?:string;previousUnitNumber?:string;error?:string};
-      if(!response.ok||!payload.ok)throw new Error(payload.error||`${unitName} number could not be corrected.`);
+      const response=await fetch(`/api/breakdowns/%D%/unit`.replace('%D%',String(row.id)),{
+        method:'PATCH',headers:{'content-type':'application/json'},
+        body:JSON.stringify({unitType:newType,unitNumber:next}),
+      });
+      const payload=await response.json() as {
+        ok?:boolean;changed?:boolean;unitType?:'truck'|'trailer';previousUnitType?:'truck'|'trailer';
+        unitNumber?:string;previousUnitNumber?:string;reviewTirePositions?:boolean;error?:string;
+      };
+      if(!response.ok||!payload.ok)throw new Error(payload.error||'Breakdown equipment could not be corrected.');
       await load();setSelectedId(row.id);setEditingUnit(false);setUnitDraft('');
+      const actualType=payload.unitType==='trailer'?'Trailer':'Truck';
+      const previousType=payload.previousUnitType==='trailer'?'Trailer':'Truck';
       setMessage(payload.changed===false
-        ? `Breakdown #${row.id} is already assigned to ${unitName} ${payload.unitNumber||row.unit}.`
-        : `Breakdown #${row.id} changed from ${unitName} ${payload.previousUnitNumber||row.unit} to ${unitName} ${payload.unitNumber||next}. Linked repair and costs moved with it.`);
-    }catch(error){setMessage(error instanceof Error?error.message:`${unitName} number could not be corrected.`);}
+        ? 'Breakdown #'+row.id+' is already assigned to '+actualType+' '+(payload.unitNumber||row.unit)+'.'
+        : 'Breakdown #'+row.id+' changed from '+previousType+' '+(payload.previousUnitNumber||row.unit)+
+          ' to '+actualType+' '+(payload.unitNumber||next)+'. Linked repair and costs moved with it.'+
+          (payload.reviewTirePositions?' Review the original reported tire positions; these were retained, not automatically converted.':''));
+    }catch(error){setMessage(error instanceof Error?error.message:'Breakdown equipment could not be corrected.');}
     finally{setBusyAction(null);}
   }
 
@@ -363,15 +376,21 @@ export default function BreakdownsPage(){
             const correctionName=correctionType==='trailer'?'Trailer':'Truck';
             return <div className={s.statusBox} style={{marginBottom:14}}>
               <div className={s.statusRow}><span>Affected {correctionType}</span><strong>{selected.unit}</strong></div>
-              {!editingUnit?<div className={s.actions} style={{marginTop:10}}><button type="button" className={s.button} disabled={anyActionBusy} onClick={()=>{setUnitDraft(selected.unit);setEditingUnit(true);setMessage('');}}>Change {correctionName} #</button></div>:<>
-                <label className={s.field} style={{marginTop:10}}>Correct {correctionType} number
-                  <input className={s.input} value={unitDraft} disabled={unitBusy} onChange={event=>setUnitDraft(event.target.value.replace(/[^a-zA-Z0-9()\- ]/g,'').slice(0,40))} placeholder={correctionType==='trailer'?'Example: 53027 or TRL 211':'Example: 227 or 227(DC)'}/>
+              {!editingUnit?<div className={s.actions} style={{marginTop:10}}><button type="button" className={s.button} disabled={anyActionBusy} onClick={()=>{setUnitDraft(selected.unit);setUnitTypeDraft(correctionType);setEditingUnit(true);setMessage('');}}>Change Truck / Trailer</button></div>:<>
+                <label className={s.field} style={{marginTop:10}}>Correct affected equipment type
+                  <select className={s.select} value={unitTypeDraft} disabled={unitBusy} onChange={event=>{setUnitTypeDraft(event.target.value as 'truck'|'trailer');setUnitDraft('');}}>
+                    <option value="truck">Truck</option>
+                    <option value="trailer">Trailer</option>
+                  </select>
+                </label>
+                <label className={s.field} style={{marginTop:10}}>Correct {unitTypeDraft} number
+                  <input className={s.input} value={unitDraft} disabled={unitBusy} onChange={event=>setUnitDraft(event.target.value.replace(/[^a-zA-Z0-9()\- ]/g,'').slice(0,40))} placeholder={unitTypeDraft==='trailer'?'Example: 53027 or TRL 211':'Example: 227 or 227(DC)'}/>
                 </label>
                 <div className={s.actions} style={{marginTop:10}}>
-                  <button type="button" className={s.orangeButton} disabled={anyActionBusy||!unitDraft.trim()} onClick={()=>void correctUnit(selected)}>{unitBusy?'Saving…':`Save Correct ${correctionName}`}</button>
+                  <button type="button" className={s.orangeButton} disabled={anyActionBusy||!unitDraft.trim()} onClick={()=>void correctUnit(selected)}>{unitBusy?'Saving…':`Save Correct ${unitTypeDraft==='trailer'?'Trailer':'Truck'}`}</button>
                   <button type="button" className={s.button} disabled={unitBusy} onClick={()=>{setEditingUnit(false);setUnitDraft('');}}>Cancel</button>
                 </div>
-                <p className={s.cardHelp} style={{marginTop:8}}>This changes only the affected {correctionType}. The linked repair, photos, costs, and breakdown history stay with this breakdown.</p>
+                <p className={s.cardHelp} style={{marginTop:8}}>The affected unit will be reassigned from {correctionName} {selected.unit} to {unitTypeDraft==='trailer'?'Trailer':'Truck'} {unitDraft||'…'}. Linked repair, costs, photos, receipts, and the driver report stay with this breakdown. Review original tire positions if changing Truck/Trailer.</p>
               </>}
             </div>;
           })()}
