@@ -163,7 +163,7 @@ export default function EditBreakdownButton({
 
   return <>
     <button type="button" style={button} onClick={() => void openEditor()}>Edit Breakdown</button>
-    {open && <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,.48)', display: 'grid', placeItems: 'center', padding: 18 }} onMouseDown={(event) => { if (event.currentTarget === event.target && !saving) setOpen(false); }}>
+    {open && <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(15,23,42,.48)', display: 'grid', placeItems: 'center', padding: 18 }} onMouseDown={(event) => { if (event.currentTarget === event.target && !saving && !savingEquipment) setOpen(false); }}>
       <div role="dialog" aria-modal="true" aria-label={`Edit breakdown ${breakdownId}`} style={{ width: 'min(720px,100%)', maxHeight: '92vh', overflowY: 'auto', background: '#fff', borderRadius: 14, boxShadow: '0 24px 70px rgba(15,23,42,.28)', padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12 }}>
           <div>
@@ -171,7 +171,7 @@ export default function EditBreakdownButton({
             <h2 style={{ margin: '5px 0 0', fontSize: 24 }}>Breakdown #{breakdownId} · Unit {unit}</h2>
             <p style={{ margin: '7px 0 0', color: '#64748b', fontSize: 13 }}>Correct the final outside invoice information without reopening the breakdown. Parts and labor stay unchanged.</p>
           </div>
-          <button type="button" style={button} disabled={saving} onClick={() => setOpen(false)}>Close</button>
+          <button type="button" style={button} disabled={saving || savingEquipment} onClick={() => setOpen(false)}>Close</button>
         </div>
 
         {loading ? <div style={{ marginTop: 18, padding: 16, background: '#f8fafc', borderRadius: 9 }}>Loading breakdown…</div> : <div style={{ display: 'grid', gap: 13, marginTop: 18 }}>
@@ -216,8 +216,8 @@ export default function EditBreakdownButton({
           <label style={label}>Closeout Notes<textarea style={{ ...input, minHeight: 120, resize: 'vertical' }} value={draft.closeoutNotes} onChange={(event) => setField('closeoutNotes', event.target.value.slice(0, 4000))} /></label>
           {message && <div style={{ padding: 10, border: '1px solid #efc16c', borderRadius: 8, background: '#fff8e8', color: '#6b4d14', fontSize: 12, fontWeight: 700 }}>{message}</div>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <button type="button" style={button} disabled={saving} onClick={() => setOpen(false)}>Cancel</button>
-            <button type="button" style={{ ...button, background: '#f47b20', borderColor: '#f47b20', color: '#fff', minWidth: 170 }} disabled={saving || loading} onClick={() => void save()}>{saving ? 'Saving…' : 'Save Correction'}</button>
+            <button type="button" style={button} disabled={saving || savingEquipment} onClick={() => setOpen(false)}>Cancel</button>
+            <button type="button" style={{ ...button, background: '#f47b20', borderColor: '#f47b20', color: '#fff', minWidth: 170 }} disabled={saving || savingEquipment || loading} onClick={() => void save()}>{saving ? 'Saving…' : 'Save Correction'}</button>
           </div>
         </div>}
       </div>
