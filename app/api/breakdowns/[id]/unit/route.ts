@@ -122,7 +122,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }, { headers: { 'cache-control': 'no-store' } });
     }
 
-    await env.DB.batch([
+    const previousLabel = label(previousUnitType) + ' ' + String(current.unit || '').trim();
+    const correctedLabel = label(unitType) + ' ' + String(target.unit || '').trim();
+    const detail = ('Breakdown #' + breakdownId + ': affected equipment corrected from ' +
+      previousLabel + ' to ' + correctedLabel +
+      '; linked repair and costs reassigned. Driver photos, receipts, and originally reported tire details retained. ' +
+      'Prior Geotab device/GPS snapshot invalidated.').slice(0, 500);
+
+    // Atomic batch keeps the existing breakdown and repair IDs, costs, receipts,
+    // photos, status, dispatch stages, and notes. Only the affected equipment
+    // changes. Both UPDATEs guard against a concurrent office correction.
+    const changes = await env.DB.batch([
       env.DB.prepare(`
         UPDATE roadside_breakdowns
         SET equipment_id=?,
@@ -136,19 +146,41 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             gps_source=NULL,
             snapshot_captured_at=NULL,
             updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).bind(target.id, breakdownId),
+        WHERE id=? AND equipment_id=?
+          AND EXISTS (
+            SELECT 1 FROM repairs r
+            WHERE r.id=? AND r.equipment_id=? AND r.source='roadside-breakdown'
+          )
+      `).bind(target.id, breakdownId, current.equipment_id, current.repair_id, current.equipment_id),
       env.DB.prepare(`
         UPDATE repairs
         SET equipment_id=?,updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).bind(target.id, current.repair_id),
+        WHERE id=? AND equipment_id=? AND source='roadside-breakdown'
+          AND EXISTS (
+            SELECT 1 FROM roadside_breakdowns b
+            WHERE b.id=? AND b.equipment_id=?
+          )
+      `).bind(target.id, current.repair_id, current.equipment_id, breakdownId, target.id),
+      env.DB.prepare(`
+        INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
+        SELECT ?,?,NULL,'breakdown_equipment_corrected',?
+        WHERE EXISTS (
+          SELECT 1 FROM roadside_breakdowns b
+          JOIN repairs r ON r.id=b.repair_id
+          WHERE b.id=? AND b.equipment_id=? AND r.equipment_id=?
+        )
+      `).bind(current.repair_id, user.id, detail, breakdownId, target.id, target.id),
     ]);
+    if (changes.some((item) => Number(item.meta?.changes ?? 0) !== 1)) {
+      throw new Error('Breakdown information changed during correction. Refresh and verify the breakdown and linked repair.');
+    }
 
     return Response.json({
       ok: true,
       changed: true,
       unitType,
+      previousUnitType,
+      reviewTirePositions: unitType !== previousUnitType,
       unitNumber: String(target.unit || '').trim(),
       previousUnitNumber: String(current.unit || '').trim(),
     }, { headers: { 'cache-control': 'no-store' } });
