@@ -10,13 +10,21 @@ Standalone Cloudflare application for repairs, direct Geotab DVIR synchronizatio
 - Direct MyGeotab API integration; no Google Apps Script dependency
 - Geotab imports remain paused until service-account permissions are verified and dashboard access control is enabled
 
-## Required encrypted Worker secrets
+## Dedicated Geotab service account
 
-- `GEOTAB_DATABASE`
-- `GEOTAB_USERNAME`
-- `GEOTAB_PASSWORD`
+An administrator must save a **non-personal, limited-permission MyGeotab service account** under
+**Setup Center → Geotab Connection** (`/admin/geotab-review/connection`).
+Its password is encrypted in the Cloudflare D1 `geotab_runtime_credentials` table using
+`GEOTAB_CONFIG_PRIVATE_KEY` or `AUTH_BOOTSTRAP_TOKEN` (Worker secret).
 
-Use a dedicated limited-permission MyGeotab service account. Never commit real credentials or fleet data to this public repository.
+All DVIR, GPS, yard, mileage, device, photo, repair-certification and diagnostic calls
+use the same saved account and encrypted shared session. The old `GEOTAB_USERNAME`/
+`GEOTAB_PASSWORD` deployment bindings and bundled encrypted login are never used
+as fallbacks; the retired personal `jtomaski` username is rejected. Deployment
+will not publish the new Worker unless a dedicated account record exists in remote D1.
+This preflight validates the account name and presence, not its Geotab permissions.
+Check the Geotab Connection panel to verify live authentication and permissions before
+disabling or deleting a prior account. Never commit credentials or fleet data to this repository.
 
 ## Inventory
 
