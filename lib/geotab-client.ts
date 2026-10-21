@@ -7,9 +7,6 @@ import {
 
 export type GeotabClientEnv = {
   DB?: D1Database;
-  GEOTAB_DATABASE?: string;
-  GEOTAB_USERNAME?: string;
-  GEOTAB_PASSWORD?: string;
   GEOTAB_CONFIG_PRIVATE_KEY?: string;
   AUTH_BOOTSTRAP_TOKEN?: string;
 };
