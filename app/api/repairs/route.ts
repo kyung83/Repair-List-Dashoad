@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { completeRepair, getDashboardData, saveRepair } from '@/lib/dashboard-db';
 import { diagnoseGeotabConnection } from '@/lib/geotab-diagnostic';
-import { isGeotabConfigured, markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
+import { markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
+import { getGeotabRuntimeCredentialMetadata } from '@/lib/geotab-runtime-credentials';
 import { syncGeotabFleetMaster } from '@/lib/geotab-fleet';
 import { completeMaintenanceBoardItem, getMaintenanceBoardItems } from '@/lib/maintenance-board';
 
@@ -22,10 +23,11 @@ export async function GET(request: Request) {
       return Response.json(diagnostic, { status, headers: { 'cache-control': 'no-store' } });
     }
 
-    const [payload, maintenanceRepairs] = await Promise.all([
-      getDashboardData(env.DB, isGeotabConfigured(env)),
+    const [credential, maintenanceRepairs] = await Promise.all([
+      getGeotabRuntimeCredentialMetadata(env.DB),
       getMaintenanceBoardItems(env.DB),
     ]);
+    const payload = await getDashboardData(env.DB, credential.active);
 
     payload.dvir = payload.dvir.filter((defect) => !defect.repaired);
     payload.repairs = [
