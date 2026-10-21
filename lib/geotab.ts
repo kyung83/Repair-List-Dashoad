@@ -1,39 +1,15 @@
 import { markDvirRepairedLocal } from './dashboard-db';
-import { geotabProtectedConfig } from './geotab-protected-config';
+import { createGeotabClient, type GeotabClientEnv } from './geotab-client';
 
-export type GeotabEnv = {
-  DB: D1Database;
-  GEOTAB_DATABASE?: string;
-  GEOTAB_USERNAME?: string;
-  GEOTAB_PASSWORD?: string;
-  GEOTAB_CONFIG_PRIVATE_KEY?: string;
-};
+export type GeotabEnv = GeotabClientEnv & { DB: D1Database };
 
 type JsonRecord = Record<string, unknown>;
-type Credentials = { database: string; userName: string; sessionId: string };
-type Auth = { endpoint: string; credentials: Credentials };
-type GeotabLogin = { database: string; userName: string; password: string };
-type ProtectedGeotabConfig = {
-  database: string;
-  serviceUsername: string;
-  servicePassword: string;
-};
-type GeotabPayload<T> = {
-  result?: T;
-  error?: { message?: string; name?: string };
-};
+type GeotabAuth = Awaited<ReturnType<typeof createGeotabClient>>;
 type DeviceAssignmentRow = {
   geotab_device_id: string;
   equipment_id: number;
   unit: string;
 };
-
-let protectedLoginPromise: Promise<GeotabLogin> | undefined;
-
-export function isGeotabConfigured(env: GeotabEnv) {
-  const direct = Boolean(env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD);
-  return direct || Boolean(env.GEOTAB_CONFIG_PRIVATE_KEY);
-}
 
 function record(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
@@ -86,141 +62,9 @@ function setDvirDefects(log: JsonRecord, defects: JsonRecord[]) {
   else log.dVIRDefects = defects;
 }
 
-function decodeBase64(value: string) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-function decodePem(value: string) {
-  const base64 = value
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/\s+/g, '');
-  if (!base64) throw new Error('Geotab configuration private key is invalid');
-  return decodeBase64(base64);
-}
-
-async function decryptProtectedLogin(env: GeotabEnv): Promise<GeotabLogin> {
-  const privateKeyPem = env.GEOTAB_CONFIG_PRIVATE_KEY;
-  if (!privateKeyPem) throw new Error('Geotab encrypted configuration key is missing');
-
-  if (!protectedLoginPromise) {
-    protectedLoginPromise = (async () => {
-      const privateKey = await crypto.subtle.importKey(
-        'pkcs8',
-        decodePem(privateKeyPem),
-        { name: 'RSA-OAEP', hash: 'SHA-256' },
-        false,
-        ['decrypt'],
-      );
-      const rawAesKey = await crypto.subtle.decrypt(
-        { name: 'RSA-OAEP' },
-        privateKey,
-        decodeBase64(geotabProtectedConfig.wrappedKey),
-      );
-      const aesKey = await crypto.subtle.importKey(
-        'raw',
-        rawAesKey,
-        { name: 'AES-GCM' },
-        false,
-        ['decrypt'],
-      );
-      const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: decodeBase64(geotabProtectedConfig.iv) },
-        aesKey,
-        decodeBase64(geotabProtectedConfig.ciphertext),
-      );
-      const config = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<ProtectedGeotabConfig>;
-      if (!config.database || !config.serviceUsername || !config.servicePassword) {
-        throw new Error('Geotab encrypted service-account configuration is incomplete');
-      }
-      return {
-        database: config.database,
-        userName: config.serviceUsername,
-        password: config.servicePassword,
-      };
-    })();
-  }
-
-  return protectedLoginPromise;
-}
-
-function cleanApiMessage(value: string) {
-  return value
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[service-account]')
-    .replace(/password\s*[:=]\s*\S+/gi, 'password=[redacted]')
-    .replace(/sessionId\s*[:=]\s*\S+/gi, 'sessionId=[redacted]')
-    .slice(0, 500);
-}
-
-async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Promise<T> {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({ method, params }),
-  });
-
-  if (!response.ok) {
-    const body = cleanApiMessage(await response.text());
-    throw new Error(`Geotab ${method} returned HTTP ${response.status}${body ? `: ${body}` : ''}`);
-  }
-
-  const payload = await response.json() as GeotabPayload<T>;
-  if (payload.error) {
-    const detail = cleanApiMessage(payload.error.message || payload.error.name || 'unknown API error');
-    throw new Error(`Geotab ${method} failed: ${detail}`);
-  }
-  if (payload.result === undefined) throw new Error(`Geotab ${method} returned no result`);
-  return payload.result;
-}
-
-function endpointFromPath(pathValue: unknown) {
-  const path = text(pathValue).trim();
-  if (!path || path.toLowerCase() === 'thisserver') return 'https://my.geotab.com/apiv1';
-  const host = path.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-  if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Geotab returned an invalid API path');
-  return `https://${host}/apiv1`;
-}
-
-async function authenticateLogin(login: GeotabLogin): Promise<Auth> {
-  const result = await rpc<{ credentials: Credentials; path?: string }>(
-    'https://my.geotab.com/apiv1',
-    'Authenticate',
-    {
-      database: login.database,
-      userName: login.userName,
-      password: login.password,
-    },
-  );
-  return { endpoint: endpointFromPath(result.path), credentials: result.credentials };
-}
-
-async function call<T>(auth: Auth, method: string, params: JsonRecord): Promise<T> {
-  return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
-}
-
-async function resolveGeotabLogin(env: GeotabEnv): Promise<GeotabLogin> {
-  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
-    return {
-      database: env.GEOTAB_DATABASE,
-      userName: env.GEOTAB_USERNAME,
-      password: env.GEOTAB_PASSWORD,
-    };
-  }
-  return decryptProtectedLogin(env);
-}
-
-async function authenticate(env: GeotabEnv): Promise<Auth> {
-  if (!isGeotabConfigured(env)) throw new Error('Geotab is not configured');
-  return authenticateLogin(await resolveGeotabLogin(env));
-}
-
-async function safeGetAll(auth: Auth, typeName: string, search?: JsonRecord) {
+async function safeGetAll(client: GeotabAuth, typeName: string, search?: JsonRecord) {
   try {
-    return await call<JsonRecord[]>(auth, 'Get', {
+    return await client.call<JsonRecord[]>('Get', {
       typeName,
       ...(search ? { search } : {}),
     });
@@ -301,10 +145,9 @@ async function runInChunks(db: D1Database, statements: D1PreparedStatement[], ch
 }
 
 export async function getGeotabDeviceOptions(env: GeotabEnv) {
-  if (!isGeotabConfigured(env)) return { configured: false, devices: [] as never[] };
-  const auth = await authenticate(env);
+  const client = await createGeotabClient(env);
   const [devices, assignmentsResult] = await Promise.all([
-    call<JsonRecord[]>(auth, 'Get', { typeName: 'Device' }),
+    client.call<JsonRecord[]>('Get', { typeName: 'Device' }),
     env.DB.prepare(`
       SELECT a.geotab_device_id, a.equipment_id, e.unit
       FROM equipment_geotab_devices a
@@ -335,26 +178,25 @@ export async function getGeotabDeviceOptions(env: GeotabEnv) {
 }
 
 export async function syncGeotabDvir(env: GeotabEnv) {
-  if (!isGeotabConfigured(env)) return { ok: true, skipped: true, reason: 'not-configured' };
-  const auth = await authenticate(env);
+  const client = await createGeotabClient(env);
 
   try {
     const toDate = new Date().toISOString();
     const fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const logs = await call<JsonRecord[]>(auth, 'Get', {
+    const logs = await client.call<JsonRecord[]>('Get', {
       typeName: 'DVIRLog',
       search: { fromDate, toDate },
     });
 
     const [devices, trailers, users, defects, defectLists, defectParts, defectListParts] = await Promise.all([
-      safeGetAll(auth, 'Device'),
-      safeGetAll(auth, 'Trailer'),
-      safeGetAll(auth, 'User'),
-      safeGetAll(auth, 'Defect', { includeAllTrees: true }),
-      safeGetAll(auth, 'DefectList', { includeAllTrees: true }),
-      safeGetAll(auth, 'DefectPart'),
-      safeGetAll(auth, 'DefectListPart'),
+      safeGetAll(client, 'Device'),
+      safeGetAll(client, 'Trailer'),
+      safeGetAll(client, 'User'),
+      safeGetAll(client, 'Defect', { includeAllTrees: true }),
+      safeGetAll(client, 'DefectList', { includeAllTrees: true }),
+      safeGetAll(client, 'DefectPart'),
+      safeGetAll(client, 'DefectListPart'),
     ]);
 
     // Master Equipment is authoritative. Device/Trailer catalogs are used only
@@ -451,21 +293,21 @@ export async function syncGeotabDvir(env: GeotabEnv) {
 
 export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, defectId: string) {
   if (!logId || !defectId) throw new Error('Geotab log ID and defect ID are required');
-  const auth = await authenticate(env);
+  const client = await createGeotabClient(env);
 
-  const logs = await call<JsonRecord[]>(auth, 'Get', {
+  const logs = await client.call<JsonRecord[]>('Get', {
     typeName: 'DVIRLog',
     search: { id: logId },
   });
   const log = record(logs[0]);
   if (!objectId(log)) throw new Error('Geotab DVIR log not found');
 
-  const users = await call<JsonRecord[]>(auth, 'Get', {
+  const users = await client.call<JsonRecord[]>('Get', {
     typeName: 'User',
-    search: { name: auth.credentials.userName },
+    search: { name: client.userName },
   });
   const repairUser = users.find(
-    (candidate) => objectName(candidate).toLowerCase() === auth.credentials.userName.toLowerCase(),
+    (candidate) => objectName(candidate).toLowerCase() === client.userName.toLowerCase(),
   );
   const repairUserId = objectId(repairUser);
   if (!repairUserId) throw new Error('Geotab repair user could not be resolved');
@@ -478,7 +320,7 @@ export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, de
   target.repairUser = { id: repairUserId };
   setDvirDefects(log, defects);
 
-  await call(auth, 'Set', { typeName: 'DVIRLog', entity: log });
+  await client.call('Set', { typeName: 'DVIRLog', entity: log });
   await markDvirRepairedLocal(env.DB, defectId);
   return { ok: true, logId, defectId };
 }
