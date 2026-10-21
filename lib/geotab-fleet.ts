@@ -1,15 +1,9 @@
-import { geotabProtectedConfig } from './geotab-protected-config';
 import { createGeotabClient } from './geotab-client';
 import { recoverAssignedOdometers } from './geotab-odometer-recovery';
 import { refreshMissingVinMetadata } from './vin-decoder';
 import type { GeotabEnv } from './geotab';
 
 type JsonRecord = Record<string, unknown>;
-type Credentials = { database: string; userName: string; sessionId: string };
-type Login = { database: string; userName: string; password: string };
-type Auth = { endpoint: string; credentials: Credentials };
-type ProtectedConfig = { database: string; serviceUsername: string; servicePassword: string };
-type Payload<T> = { result?: T; error?: { message?: string; name?: string } };
 type AssignmentRow = {
   equipment_id: number;
   geotab_device_id: string;
@@ -26,8 +20,6 @@ type MileageDecision = {
   accepted: boolean;
   reason?: 'decrease' | 'implausible_increase';
 };
-
-let loginPromise: Promise<Login> | undefined;
 
 function record(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
@@ -83,85 +75,6 @@ function mileageDecision(equipment: AssignmentRow, incomingMileage: number, now 
     return { accepted: false, reason: 'implausible_increase' };
   }
   return { accepted: true };
-}
-
-function decodeBase64(value: string) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-function decodePem(value: string) {
-  const base64 = value
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/\s+/g, '');
-  if (!base64) throw new Error('Geotab configuration private key is invalid');
-  return decodeBase64(base64);
-}
-
-async function protectedLogin(env: GeotabEnv): Promise<Login> {
-  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
-    return { database: env.GEOTAB_DATABASE, userName: env.GEOTAB_USERNAME, password: env.GEOTAB_PASSWORD };
-  }
-  if (!env.GEOTAB_CONFIG_PRIVATE_KEY) throw new Error('Geotab configuration is missing');
-
-  if (!loginPromise) {
-    loginPromise = (async () => {
-      const privateKey = await crypto.subtle.importKey(
-        'pkcs8', decodePem(env.GEOTAB_CONFIG_PRIVATE_KEY!), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt'],
-      );
-      const rawAesKey = await crypto.subtle.decrypt(
-        { name: 'RSA-OAEP' }, privateKey, decodeBase64(geotabProtectedConfig.wrappedKey),
-      );
-      const aesKey = await crypto.subtle.importKey('raw', rawAesKey, { name: 'AES-GCM' }, false, ['decrypt']);
-      const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: decodeBase64(geotabProtectedConfig.iv) },
-        aesKey,
-        decodeBase64(geotabProtectedConfig.ciphertext),
-      );
-      const config = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<ProtectedConfig>;
-      if (!config.database || !config.serviceUsername || !config.servicePassword) {
-        throw new Error('Geotab protected configuration is incomplete');
-      }
-      return { database: config.database, userName: config.serviceUsername, password: config.servicePassword };
-    })();
-  }
-  return loginPromise;
-}
-
-function endpointFromPath(pathValue: unknown) {
-  const path = text(pathValue).trim();
-  if (!path || path.toLowerCase() === 'thisserver') return 'https://my.geotab.com/apiv1';
-  const host = path.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-  if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Geotab returned an invalid API path');
-  return `https://${host}/apiv1`;
-}
-
-async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Promise<T> {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ method, params }),
-  });
-  if (!response.ok) throw new Error(`Geotab ${method} returned HTTP ${response.status}`);
-  const payload = await response.json() as Payload<T>;
-  if (payload.error) throw new Error(`Geotab ${method} failed: ${payload.error.name || payload.error.message || 'unknown error'}`);
-  if (payload.result === undefined) throw new Error(`Geotab ${method} returned no result`);
-  return payload.result;
-}
-
-async function authenticate(env: GeotabEnv): Promise<Auth> {
-  const login = await protectedLogin(env);
-  const result = await rpc<{ credentials: Credentials; path?: string }>('https://my.geotab.com/apiv1', 'Authenticate', {
-    database: login.database,
-    userName: login.userName,
-    password: login.password,
-  });
-  return { endpoint: endpointFromPath(result.path), credentials: result.credentials };
-}
-
-async function call<T>(auth: Auth, method: string, params: JsonRecord) {
-  return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
 }
 
 async function runBatches(db: D1Database, statements: D1PreparedStatement[], size = 60) {
