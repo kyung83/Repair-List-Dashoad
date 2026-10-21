@@ -487,6 +487,56 @@ if (flag !== 1) {
 console.log('Verified remote roadside breakdown Geotab snapshot schema 0098.');
 NODE
 
+# Fail safely before deploying strict service-account-only Geotab authentication.
+# If there is no dedicated account saved in remote D1, leave the currently
+# deployed Worker untouched so existing fleet automation does not unexpectedly
+# stop. This check deliberately returns a boolean, never the saved username,
+# password ciphertext, session ID, or other credentials.
+geotab_account_sql="SELECT CASE WHEN EXISTS (
+  SELECT 1 FROM geotab_runtime_credentials
+  WHERE id=1
+    AND LENGTH(TRIM(COALESCE(database_name,'')))>0
+    AND LENGTH(TRIM(COALESCE(username,'')))>0
+    AND LENGTH(TRIM(COALESCE(password_ciphertext,'')))>0
+    AND LOWER(TRIM(SUBSTR(username,1,INSTR(username||'@','@')-1))) NOT IN
+      ('jtomaski','j.tomaski','jerry.tomaski','jerry_tomaski')
+) THEN 1 ELSE 0 END AS dedicated_geotab_account_ready;"
+
+npx wrangler d1 execute "$DB_NAME" \
+  --remote \
+  --config "$CONFIG_FILE" \
+  "${ACCOUNT_ARG[@]}" \
+  --command "$geotab_account_sql" \
+  --json > /tmp/geotab-service-account-preflight.json
+
+node - /tmp/geotab-service-account-preflight.json <<'NODE'
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+function findFlag(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findFlag(item);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'dedicated_geotab_account_ready')) {
+    return Number(value.dedicated_geotab_account_ready);
+  }
+  for (const child of Object.values(value)) {
+    const found = findFlag(child);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+if (findFlag(payload) !== 1) {
+  console.error('Production deployment stopped safely: save a dedicated non-personal Geotab service account in Diagnostics -> Geotab Connection before deploying. Current Worker remains unchanged. The personal jtomaski login cannot be used.');
+  process.exit(1);
+}
+console.log('Verified a dedicated Geotab service-account record is present in remote D1; no username or secrets revealed.');
+NODE
+
 # Deploy the exact build snapshot produced by the Cloudflare Vite plugin.
 npx wrangler deploy --config "$OUTPUT_CONFIG" "${ACCOUNT_ARG[@]}"
 
