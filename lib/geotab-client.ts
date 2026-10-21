@@ -228,6 +228,9 @@ async function downloadMediaFile(auth: Auth, mediaId: string) {
     }),
   });
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Geotab authentication expired during DownloadMediaFile (HTTP ' + response.status + ').');
+    }
     throw new Error('Geotab DownloadMediaFile returned HTTP ' + response.status);
   }
   const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
