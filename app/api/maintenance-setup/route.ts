@@ -2,7 +2,6 @@ import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { syncGeotabDvir } from '@/lib/geotab';
 import { syncGeotabFleetMaster } from '@/lib/geotab-fleet';
-import { loadGeotabRuntimeCredentials } from '@/lib/geotab-runtime-credentials';
 import {
   assignMaintenanceCategory,
   correctEquipmentMaintenance,
@@ -62,17 +61,6 @@ async function managerUser(request: Request) {
     throw new Error('Manager or administrator access is required.');
   }
   return user;
-}
-
-async function geotabEnvForSync() {
-  const saved = await loadGeotabRuntimeCredentials(env.DB, env).catch(() => null);
-  if (!saved) return env;
-  return {
-    ...env,
-    GEOTAB_DATABASE: saved.database,
-    GEOTAB_USERNAME: saved.username,
-    GEOTAB_PASSWORD: saved.password,
-  };
 }
 
 async function openPmRepair(equipmentId: number) {
@@ -304,9 +292,8 @@ export async function POST(request: Request) {
     if (action === 'assignCategory') return Response.json(await assignMaintenanceCategory(env.DB, body));
     if (action === 'correctUnitMaintenance') return Response.json(await correctEquipmentMaintenance(env.DB, body));
     if (action === 'syncGeotab') {
-      const syncEnv = await geotabEnvForSync();
-      const fleet = await syncGeotabFleetMaster(syncEnv);
-      const dvir = await syncGeotabDvir(syncEnv);
+      const fleet = await syncGeotabFleetMaster(env);
+      const dvir = await syncGeotabDvir(env);
       return Response.json({ ok: true, fleet, dvir }, { headers: { 'cache-control': 'no-store' } });
     }
     return Response.json({ error: 'Unknown maintenance setup action.' }, { status: 400 });
