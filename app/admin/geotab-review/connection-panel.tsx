@@ -67,7 +67,7 @@ export default function GeotabConnectionPanel(){
   }
 
   async function clearOverride(){
-    if(!window.confirm('Clear the saved Diagnostics Geotab account and go back to the deployment credential?'))return;
+    if(!window.confirm('Disconnect the saved Geotab service account? Geotab imports, DVIR certification, GPS, mileage and photo downloads will PAUSE until another dedicated account is saved. There is no old-login fallback.'))return;
     setBusy('clear');setMessage('');
     try{
       const response=await fetch('/api/admin/geotab-connection',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'clear'})});
@@ -91,7 +91,7 @@ export default function GeotabConnectionPanel(){
         <div style={{maxWidth:900}}>
           <div style={{fontSize:11,fontWeight:950,letterSpacing:'.12em',color:connected?'#25713c':'#9a6508'}}>DIAGNOSTICS · GEOTAB CONNECTION</div>
           <h2 style={{margin:'6px 0 0',fontSize:23,color:'#102238'}}>{connected?'Geotab connection is working':'Geotab connection is blocked'}</h2>
-          {archived?<p style={copy}><strong>The service account used by this app was archived or expired in MyGeotab.</strong> GPS, mileage, DVIR and yard pulls cannot authenticate until that account is reactivated or replaced. Retrying an individual truck cannot fix an archived login.</p>:connected?<p style={copy}>Authentication is working. {override?.active?'The replacement account saved from Diagnostics is currently taking priority over the deployment credential.':'The normal deployment credential is currently in use.'}</p>:<p style={copy}>{status?.error||'The app cannot authenticate to Geotab right now.'}</p>}
+          {archived?<p style={copy}><strong>The service account used by this app was archived or expired in MyGeotab.</strong> GPS, mileage, DVIR and yard pulls cannot authenticate until that account is reactivated or replaced. Retrying an individual truck cannot fix an archived login.</p>:connected?<p style={copy}>Authentication is working. {override?.active?'Every Geotab function now uses the dedicated service account saved here, including DVIR, repairs, GPS, mileage and photos.':'No dedicated account is saved. Geotab operations cannot use the retired personal or deployment login; save a service account here.'}</p>:<p style={copy}>{status?.error||'The app cannot authenticate to Geotab right now.'}</p>}
         </div>
         <button type="button" disabled={Boolean(busy)} onClick={()=>{setMessage('');void load().catch(error=>setMessage(error instanceof Error?error.message:'Connection test failed.'));}}>Test current connection</button>
       </div>
@@ -101,17 +101,17 @@ export default function GeotabConnectionPanel(){
 
       <div style={{marginTop:16,display:'grid',gridTemplateColumns:'minmax(260px,.8fr) minmax(420px,1.5fr)',gap:14,alignItems:'start'}}>
         <div style={infoCard}>
-          <strong style={{fontSize:15}}>How to restore service</strong>
-          <p style={smallCopy}>You have two safe choices. Reactivate the existing service account in MyGeotab and then test the current connection, or enter a different active Geotab service account here.</p>
+          <strong style={{fontSize:15}}>Dedicated service account</strong>
+          <p style={smallCopy}>Use an active, non-personal MyGeotab service account here. This is the only Geotab login for the Cloudflare application. The personal jtomaski account and deployment credentials are never used as a fallback.</p>
           <a href="https://my.geotab.com" target="_blank" rel="noreferrer" style={linkButton}>Open MyGeotab</a>
           <div style={{marginTop:13,paddingTop:12,borderTop:'1px solid #e0e5e9',fontSize:12,color:'#5d6d7a',lineHeight:1.55}}>
-            <div><strong>Current source:</strong> {override?.active?'Diagnostics replacement':'Deployment credential'}</div>
+            <div><strong>Current source:</strong> {override?.active?'Saved dedicated service account':'Not configured — save dedicated service account'}</div>
             {override?.active&&<><div><strong>Database:</strong> {override.database||'—'}</div><div><strong>Username:</strong> {override.username||'—'}</div><div><strong>Saved:</strong> {when(override.updatedAt)}</div></>}
           </div>
         </div>
 
         <div style={formCard}>
-          <div><strong style={{fontSize:16}}>Use a replacement Geotab service account</strong><p style={{...smallCopy,marginTop:4}}>Credentials are tested against Geotab before they can be saved. The password is encrypted server-side before D1 storage and is never displayed back on this page.</p></div>
+          <div><strong style={{fontSize:16}}>Configure dedicated Geotab service account</strong><p style={{...smallCopy,marginTop:4}}>Credentials are tested against Geotab before they can be saved. The password is encrypted server-side before D1 storage and is never displayed back on this page.</p></div>
           <div style={{display:'grid',gridTemplateColumns:'minmax(160px,.7fr) minmax(220px,1fr)',gap:9}}>
             <label style={label}>Database<input value={form.database} onChange={event=>setForm({...form,database:event.target.value})} placeholder={status?.suggestedDatabase||'Geotab database'} autoComplete="off" style={input}/></label>
             <label style={label}>Service account username<input value={form.username} onChange={event=>setForm({...form,username:event.target.value})} placeholder="Geotab username / email" autoComplete="username" style={input}/></label>
@@ -120,7 +120,7 @@ export default function GeotabConnectionPanel(){
           <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
             <button type="button" disabled={Boolean(busy)} onClick={()=>void action('test')}>{busy==='test'?'Testing…':'Test credentials'}</button>
             <button type="button" disabled={Boolean(busy)} onClick={()=>void action('save')} style={primaryButton}>{busy==='save'?'Saving…':'Save & use this account'}</button>
-            {override?.active&&<button type="button" disabled={Boolean(busy)} onClick={()=>void clearOverride()} style={dangerButton}>{busy==='clear'?'Clearing…':'Clear saved replacement'}</button>}
+            {override?.active&&<button type="button" disabled={Boolean(busy)} onClick={()=>void clearOverride()} style={dangerButton}>{busy==='clear'?'Clearing…':'Disconnect account (pauses Geotab)'}</button>}
           </div>
         </div>
       </div>

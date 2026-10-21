@@ -1,4 +1,4 @@
-import { geotabProtectedConfig } from './geotab-protected-config';
+import { assertDedicatedGeotabUsername, GEOTAB_SERVICE_ACCOUNT_REQUIRED } from './geotab-account-policy.js';
 import {
   decryptGeotabRuntimeSecret,
   encryptGeotabRuntimeSecret,
@@ -7,9 +7,6 @@ import {
 
 export type GeotabClientEnv = {
   DB?: D1Database;
-  GEOTAB_DATABASE?: string;
-  GEOTAB_USERNAME?: string;
-  GEOTAB_PASSWORD?: string;
   GEOTAB_CONFIG_PRIVATE_KEY?: string;
   AUTH_BOOTSTRAP_TOKEN?: string;
 };
@@ -24,7 +21,6 @@ export type GeotabJsonRecord = Record<string, unknown>;
 type Credentials = { database: string; userName: string; sessionId: string };
 type Login = { database: string; userName: string; password: string };
 type Auth = { endpoint: string; credentials: Credentials };
-type ProtectedConfig = { database: string; serviceUsername: string; servicePassword: string };
 type Payload<T> = { result?: T; error?: { message?: string; name?: string } };
 type SharedSessionRow = {
   database_name: string;
@@ -33,8 +29,6 @@ type SharedSessionRow = {
   session_ciphertext: string;
   session_iv: string;
 };
-
-let protectedLoginPromise: Promise<Login> | undefined;
 
 export function geotabRecord(value: unknown): GeotabJsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as GeotabJsonRecord : {};
@@ -65,64 +59,14 @@ function cleanApiMessage(value: string) {
     .slice(0, 500);
 }
 
-function decodeBase64(value: string) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-function decodePem(value: string) {
-  const base64 = value
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/\s+/g, '');
-  if (!base64) throw new Error('Geotab configuration private key is invalid');
-  return decodeBase64(base64);
-}
-
-async function protectedFallbackLogin(env: GeotabClientEnv): Promise<Login> {
-  if (!env.GEOTAB_CONFIG_PRIVATE_KEY) throw new Error('Geotab configuration is missing');
-
-  if (!protectedLoginPromise) {
-    protectedLoginPromise = (async () => {
-      const privateKey = await crypto.subtle.importKey(
-        'pkcs8',
-        decodePem(env.GEOTAB_CONFIG_PRIVATE_KEY!),
-        { name: 'RSA-OAEP', hash: 'SHA-256' },
-        false,
-        ['decrypt'],
-      );
-      const rawAesKey = await crypto.subtle.decrypt(
-        { name: 'RSA-OAEP' },
-        privateKey,
-        decodeBase64(geotabProtectedConfig.wrappedKey),
-      );
-      const aesKey = await crypto.subtle.importKey('raw', rawAesKey, { name: 'AES-GCM' }, false, ['decrypt']);
-      const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: decodeBase64(geotabProtectedConfig.iv) },
-        aesKey,
-        decodeBase64(geotabProtectedConfig.ciphertext),
-      );
-      const config = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<ProtectedConfig>;
-      if (!config.database || !config.serviceUsername || !config.servicePassword) {
-        throw new Error('Geotab protected configuration is incomplete');
-      }
-      return { database: config.database, userName: config.serviceUsername, password: config.servicePassword };
-    })();
-  }
-  return protectedLoginPromise;
-}
-
 async function configuredLogin(env: GeotabClientEnv): Promise<Login> {
-  // An administrator-saved replacement must take priority immediately. Do not cache this lookup:
-  // Diagnostics needs a newly saved account to start working without waiting for an isolate recycle.
-  if (env.DB) {
-    const runtime = await loadGeotabRuntimeCredentials(env.DB, env);
-    if (runtime) return { database: runtime.database, userName: runtime.username, password: runtime.password };
-  }
-  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
-    return { database: env.GEOTAB_DATABASE, userName: env.GEOTAB_USERNAME, password: env.GEOTAB_PASSWORD };
-  }
-  return protectedFallbackLogin(env);
+  // Never use Cloudflare GEOTAB_USERNAME/password or the legacy bundled RSA
+  // credential, even when the D1 service-account record is missing.
+  if (!env.DB) throw new Error(GEOTAB_SERVICE_ACCOUNT_REQUIRED);
+  const runtime = await loadGeotabRuntimeCredentials(env.DB, env);
+  if (!runtime) throw new Error(GEOTAB_SERVICE_ACCOUNT_REQUIRED);
+  assertDedicatedGeotabUsername(runtime.username);
+  return { database: runtime.database, userName: runtime.username, password: runtime.password };
 }
 
 function endpointFromPath(pathValue: unknown) {
@@ -267,8 +211,38 @@ export async function testGeotabCredentials(input: GeotabCredentialInput) {
   const username = String(input.username || '').trim();
   const password = String(input.password || '');
   if (!database || !username || !password) throw new Error('Database, username, and password are required.');
+  assertDedicatedGeotabUsername(username);
   await authenticateLogin({ database, userName: username, password });
   return { ok: true } as const;
+}
+
+async function downloadMediaFile(auth: Auth, mediaId: string) {
+  // DownloadMediaFile returns raw image bytes, not the JSON envelope handled
+  // by rpc(). Reuse the EXACT same saved service-account session as Get/Set.
+  const response = await fetch(auth.endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'image/*,application/octet-stream,application/json' },
+    body: JSON.stringify({
+      method: 'DownloadMediaFile',
+      params: { credentials: auth.credentials, mediaFile: { id: mediaId } },
+    }),
+  });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Geotab authentication expired during DownloadMediaFile (HTTP ' + response.status + ').');
+    }
+    throw new Error('Geotab DownloadMediaFile returned HTTP ' + response.status);
+  }
+  const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!contentType.startsWith('image/')) {
+    if (contentType === 'application/json') {
+      const result = await response.json().catch(() => null) as Payload<unknown> | null;
+      const message = cleanApiMessage(result?.error?.message || result?.error?.name || 'not an image');
+      throw new Error('Geotab DownloadMediaFile failed: ' + message);
+    }
+    throw new Error('Geotab media response was not an image.');
+  }
+  return { bytes: await response.arrayBuffer(), contentType };
 }
 
 export async function createGeotabClient(env: GeotabClientEnv) {
@@ -277,6 +251,8 @@ export async function createGeotabClient(env: GeotabClientEnv) {
   if (!auth) auth = await freshAuth(env, login);
 
   return {
+    userName: login.userName,
+    get endpointHost() { return new URL(auth.endpoint).hostname; },
     async call<T>(method: string, params: GeotabJsonRecord) {
       try {
         return await rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
@@ -285,6 +261,16 @@ export async function createGeotabClient(env: GeotabClientEnv) {
         await clearSharedAuth(env);
         auth = await freshAuth(env, login);
         return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
+      }
+    },
+    async downloadMedia(mediaId: string) {
+      try {
+        return await downloadMediaFile(auth, mediaId);
+      } catch (error) {
+        if (!looksLikeAuthenticationFailure(error)) throw error;
+        await clearSharedAuth(env);
+        auth = await freshAuth(env, login);
+        return downloadMediaFile(auth, mediaId);
       }
     },
   };

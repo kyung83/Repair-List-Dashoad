@@ -1,3 +1,5 @@
+import { assertDedicatedGeotabUsername } from './geotab-account-policy.js';
+
 export type GeotabRuntimeSecretEnv = {
   GEOTAB_CONFIG_PRIVATE_KEY?: string;
   AUTH_BOOTSTRAP_TOKEN?: string;
@@ -127,6 +129,7 @@ export async function saveGeotabRuntimeCredentials(
   const username = credentials.username.trim();
   const password = credentials.password;
   if (!database || !username || !password) throw new Error('Database, username, and password are required.');
+  assertDedicatedGeotabUsername(username);
   const encrypted = await encryptGeotabRuntimeSecret(password, env);
   await db.prepare(`
     INSERT INTO geotab_runtime_credentials (

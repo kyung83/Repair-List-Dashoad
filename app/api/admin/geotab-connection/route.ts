@@ -43,7 +43,7 @@ async function statusPayload() {
       issue: 'none' as ConnectionIssue,
       error: '',
       suggestedDatabase: runtimeOverride.database,
-      credentialSource: runtimeOverride.active ? 'diagnostics_override' : 'deployment',
+      credentialSource: runtimeOverride.active ? 'dedicated_service_account' : 'not_configured',
       runtimeOverride,
     };
   } catch (error) {
@@ -52,7 +52,7 @@ async function statusPayload() {
       connected: false,
       ...classified,
       suggestedDatabase: runtimeOverride.database || classified.suggestedDatabase,
-      credentialSource: runtimeOverride.active ? 'diagnostics_override' : 'deployment',
+      credentialSource: runtimeOverride.active ? 'dedicated_service_account' : 'not_configured',
       runtimeOverride,
     };
   }
