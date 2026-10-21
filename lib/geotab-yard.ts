@@ -1,20 +1,14 @@
-import { geotabProtectedConfig } from './geotab-protected-config';
+import { createGeotabClient } from './geotab-client';
 import type { GeotabEnv } from './geotab';
 import { YARD_DEFINITIONS, type YardKey, type YardSelection } from './yards';
 
 type JsonRecord = Record<string, unknown>;
-type Credentials = { database: string; userName: string; sessionId: string };
-type Login = { database: string; userName: string; password: string };
-type Auth = { endpoint: string; credentials: Credentials };
-type ProtectedConfig = { database: string; serviceUsername: string; servicePassword: string };
-type Payload<T> = { result?: T; error?: { message?: string; name?: string } };
+type Client = Awaited<ReturnType<typeof createGeotabClient>>;
 type Position = { deviceId: string; latitude: number; longitude: number; dateTime: string };
 type Point = { x: number; y: number };
 type YardZone = { name: string; points: Point[] };
 type YardCounts = Record<YardKey, number>;
 type YardZoneFound = Record<YardKey, boolean>;
-
-let loginPromise: Promise<Login> | undefined;
 
 function record(value: unknown): JsonRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
@@ -47,83 +41,6 @@ function dateValue(value: unknown) {
   if (!raw) return null;
   const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function decodeBase64(value: string) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
-
-function decodePem(value: string) {
-  const base64 = value
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/\s+/g, '');
-  if (!base64) throw new Error('Geotab configuration private key is invalid');
-  return decodeBase64(base64);
-}
-
-async function protectedLogin(env: GeotabEnv): Promise<Login> {
-  if (env.GEOTAB_DATABASE && env.GEOTAB_USERNAME && env.GEOTAB_PASSWORD) {
-    return { database: env.GEOTAB_DATABASE, userName: env.GEOTAB_USERNAME, password: env.GEOTAB_PASSWORD };
-  }
-  if (!env.GEOTAB_CONFIG_PRIVATE_KEY) throw new Error('Geotab configuration is missing');
-
-  if (!loginPromise) {
-    loginPromise = (async () => {
-      const privateKey = await crypto.subtle.importKey(
-        'pkcs8', decodePem(env.GEOTAB_CONFIG_PRIVATE_KEY!), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt'],
-      );
-      const rawAesKey = await crypto.subtle.decrypt(
-        { name: 'RSA-OAEP' }, privateKey, decodeBase64(geotabProtectedConfig.wrappedKey),
-      );
-      const aesKey = await crypto.subtle.importKey('raw', rawAesKey, { name: 'AES-GCM' }, false, ['decrypt']);
-      const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: decodeBase64(geotabProtectedConfig.iv) },
-        aesKey,
-        decodeBase64(geotabProtectedConfig.ciphertext),
-      );
-      const config = JSON.parse(new TextDecoder().decode(plaintext)) as Partial<ProtectedConfig>;
-      if (!config.database || !config.serviceUsername || !config.servicePassword) throw new Error('Geotab protected configuration is incomplete');
-      return { database: config.database, userName: config.serviceUsername, password: config.servicePassword };
-    })();
-  }
-  return loginPromise;
-}
-
-function endpointFromPath(pathValue: unknown) {
-  const path = text(pathValue).trim();
-  if (!path || path.toLowerCase() === 'thisserver') return 'https://my.geotab.com/apiv1';
-  const host = path.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
-  if (!host || !/^[a-z0-9.-]+$/i.test(host)) throw new Error('Geotab returned an invalid API path');
-  return `https://${host}/apiv1`;
-}
-
-async function rpc<T>(endpoint: string, method: string, params: JsonRecord): Promise<T> {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ method, params }),
-  });
-  if (!response.ok) throw new Error(`Geotab ${method} returned HTTP ${response.status}`);
-  const payload = await response.json() as Payload<T>;
-  if (payload.error) throw new Error(`Geotab ${method} failed: ${payload.error.name || payload.error.message || 'unknown error'}`);
-  if (payload.result === undefined) throw new Error(`Geotab ${method} returned no result`);
-  return payload.result;
-}
-
-async function authenticate(env: GeotabEnv): Promise<Auth> {
-  const login = await protectedLogin(env);
-  const result = await rpc<{ credentials: Credentials; path?: string }>('https://my.geotab.com/apiv1', 'Authenticate', {
-    database: login.database,
-    userName: login.userName,
-    password: login.password,
-  });
-  return { endpoint: endpointFromPath(result.path), credentials: result.credentials };
-}
-
-async function call<T>(auth: Auth, method: string, params: JsonRecord) {
-  return rpc<T>(auth.endpoint, method, { ...params, credentials: auth.credentials });
 }
 
 function currentZone(zone: JsonRecord, now = Date.now()) {
@@ -165,8 +82,8 @@ function pointInPolygon(longitude: number, latitude: number, polygon: Point[]) {
   return inside;
 }
 
-async function currentPositions(auth: Auth): Promise<Position[]> {
-  const statuses = await call<JsonRecord[]>(auth, 'Get', { typeName: 'DeviceStatusInfo' });
+async function currentPositions(client: Client): Promise<Position[]> {
+  const statuses = await client.call<JsonRecord[]>('Get', { typeName: 'DeviceStatusInfo' });
   const positions: Position[] = [];
   for (const status of statuses) {
     const deviceId = objectId(get(status, 'device', 'Device')) || objectId(status);
@@ -233,10 +150,10 @@ async function writeSyncState(env: GeotabEnv, state: {
 
 export async function syncGeotabYardPresence(env: GeotabEnv) {
   try {
-    const auth = await authenticate(env);
+    const client = await createGeotabClient(env);
     const [positions, zones] = await Promise.all([
-      currentPositions(auth),
-      call<JsonRecord[]>(auth, 'Get', { typeName: 'Zone' }),
+      currentPositions(client),
+      client.call<JsonRecord[]>('Get', { typeName: 'Zone' }),
     ]);
 
     const yardZones = new Map<YardKey, YardZone | null>(
