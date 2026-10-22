@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+type Unit = { id: number; unit: string; vin: string; make: string; model: string; modelYear: number | null; equipmentType: string };
 
 type Catalog = "excelerator" | "fleetrite";
 const CATALOGS: Record<Catalog, { name: string; url: string; brand: string }> = {
@@ -12,6 +14,27 @@ export default function OemCatalogEmbedTest() {
   const [catalog, setCatalog] = useState<Catalog>("excelerator");
   const [vin, setVin] = useState("");
   const [show, setShow] = useState(false);
+  const [units, setUnits] = useState<Unit[]>([]);
+  const [unitQuery, setUnitQuery] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/equipment", { cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error("Equipment list unavailable.");
+      return response.json() as Promise<{ equipment?: Unit[] }>;
+    }).then(result => { if (active) setUnits((result.equipment ?? []).filter(x => x.unit && /freightliner|international/i.test(x.make ?? ""))); })
+    .catch(() => { if (active) setError("Could not load truck records. Manual VIN entry still works."); });
+    return () => { active = false; };
+  }, []);
+  const matchingUnits = useMemo(() => units.filter(x => `${x.unit} ${x.vin} ${x.make}`.toLowerCase().includes(unitQuery.toLowerCase())).slice(0, 30), [units, unitQuery]);
+  function chooseUnit(id: string) {
+    const unit = units.find(x => String(x.id) === id);
+    if (!unit) return;
+    setVin(unit.vin ?? "");
+    setUnitQuery(unit.unit);
+    setCatalog(/international/i.test(unit.make) ? "fleetrite" : "excelerator");
+    setShow(false);
+  }
   const selected = CATALOGS[catalog];
   return (
     <main style={{ maxWidth: 1200, margin: "30px auto", padding: 20, fontFamily: "Arial, sans-serif" }}>
@@ -19,7 +42,7 @@ export default function OemCatalogEmbedTest() {
       <h1>OEM Parts Catalog — Embedding Test</h1>
       <p>This isolated experiment does not save credentials, place orders, modify inventory, or change existing parts workflows. Only administrators can access this page.</p>
       <p><strong>Important:</strong> Your dealer's browser policy may prevent its login or diagrams from loading inside another website. A blocked frame is an expected test result, not something to bypass.</p>
-      <label htmlFor="catalog">Catalog</label>{" "}
+      <div style={{ marginBottom: 18 }}><label htmlFor="unit-search">Find fleet truck (optional)</label><br/><input id="unit-search" list="oem-units" value={unitQuery} onChange={e => setUnitQuery(e.target.value)} placeholder="Unit number or VIN" style={{ padding: 10, width: 260, marginTop: 8 }} /><select aria-label="Select matching truck" value="" onChange={e => chooseUnit(e.target.value)} style={{ marginLeft: 8, padding: 10 }}><option value="">Select matching truck...</option>{matchingUnits.map(x => <option key={x.id} value={String(x.id)}>{x.unit} · {x.make} {x.model} · {x.vin || "No VIN"}</option>)}</select>{error && <p role="status">{error}</p>}</div><label htmlFor="catalog">Catalog</label>{" "}
       <select id="catalog" value={catalog} onChange={(e) => {setCatalog(e.target.value as Catalog); setShow(false);}}>
         <option value="excelerator">Freightliner Excelerator / PartsProX</option>
         <option value="fleetrite">International Fleetrite</option>
