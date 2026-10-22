@@ -7,7 +7,7 @@ type Unit = { id: number; unit: string; vin: string; make: string; model: string
 type Catalog = "excelerator" | "fleetrite";
 const CATALOGS: Record<Catalog, { name: string; url: string; brand: string }> = {
   excelerator: { name: "Freightliner Excelerator / PartsProX", url: "https://excelerator.com/truck-parts/en", brand: "Freightliner" },
-  fleetrite: { name: "International Fleetrite", url: "https://www.fleetrite.com/", brand: "International" },
+  fleetrite: { name: "International Navistar Parts Catalog", url: "https://oecnpc.navistar.com/npc/myportal/", brand: "International" },
 };
 
 export default function OemCatalogEmbedTest() {
@@ -38,6 +38,8 @@ export default function OemCatalogEmbedTest() {
   const selected = CATALOGS[catalog];
   const normalizedVin = vin.trim().toUpperCase();
   const validVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(normalizedVin);
+  const internationalSearch = normalizedVin.length >= 8 ? normalizedVin.slice(-8) : "";
+  const lookupText = catalog === "fleetrite" ? internationalSearch : normalizedVin;
   const catalogUrl = catalog === "excelerator" && validVin
     ? `https://excelerator.com/truck-parts/en/vin/${encodeURIComponent(normalizedVin)}`
     : selected.url;
@@ -50,13 +52,13 @@ export default function OemCatalogEmbedTest() {
       <div style={{ marginBottom: 18 }}><label htmlFor="unit-search">Find fleet truck (optional)</label><br/><input id="unit-search" list="oem-units" value={unitQuery} onChange={e => setUnitQuery(e.target.value)} placeholder="Unit number or VIN" style={{ padding: 10, width: 260, marginTop: 8 }} /><select aria-label="Select matching truck" value="" onChange={e => chooseUnit(e.target.value)} style={{ marginLeft: 8, padding: 10 }}><option value="">Select matching truck...</option>{matchingUnits.map(x => <option key={x.id} value={String(x.id)}>{x.unit} · {x.make} {x.model} · {x.vin || "No VIN"}</option>)}</select>{error && <p role="status">{error}</p>}</div><label htmlFor="catalog">Catalog</label>{" "}
       <select id="catalog" value={catalog} onChange={(e) => {setCatalog(e.target.value as Catalog); setShow(false);}}>
         <option value="excelerator">Freightliner Excelerator / PartsProX</option>
-        <option value="fleetrite">International Fleetrite</option>
+        <option value="fleetrite">International Navistar Parts Catalog</option>
       </select>
       <div style={{ marginTop: 16 }}>
         <label htmlFor="vin">VIN for manual catalog lookup (optional)</label><br />
         <input id="vin" value={vin} maxLength={17} onChange={(e) => setVin(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} placeholder="Enter VIN" style={{ padding: 10, width: 260, marginTop: 8 }}/>
-        <button type="button" onClick={() => navigator.clipboard?.writeText(vin)} disabled={!vin} style={{ marginLeft: 8, padding: 10 }}>Copy VIN</button>
-        <p style={{ color: "#526378", fontSize: 13 }}>For Freightliner, a valid 17-character VIN uses the PartsProX address pattern supplied from your dealer session. International VIN deep linking is not yet verified.</p>
+        <button type="button" onClick={() => { if (lookupText) void navigator.clipboard.writeText(lookupText); }} disabled={!lookupText} style={{ marginLeft: 8, padding: 10 }}>{catalog === "fleetrite" ? "Copy Last 8" : "Copy VIN"}</button>
+        <p style={{ color: "#526378", fontSize: 13 }}>{catalog === "fleetrite" ? "International Navistar search requires the LAST 8 VIN characters. Copy the value below, then paste into the Navistar search field after sign-in. Automatic search is not supported yet." : "For Freightliner, a valid 17-character VIN uses the PartsProX address pattern supplied from your dealer session."}</p>{catalog === "fleetrite" && <p aria-label="International VIN lookup value" style={{ fontFamily: "monospace", fontSize: 21, fontWeight: 700 }}>{internationalSearch || "Select a unit with a VIN"}</p>}
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
         <button type="button" onClick={() => setShow(true)} style={{ padding: 12, background: "#123c67", color: "white", border: 0, borderRadius: 6 }}>Test embedded {selected.brand} catalog</button>
