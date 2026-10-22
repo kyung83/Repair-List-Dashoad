@@ -82,6 +82,7 @@ const sidebarGroups: SidebarGroup[] = [
     links: [
       { href: "/parts-desk", label: "Parts Desk", roles: managerRoles },
       { href: "/inventory", label: "Inventory", exact: true, roles: managerRoles },
+      { href: "/admin/oem-parts-test", label: "OEM Parts Lookup (Test)", exact: true, roles: adminRoles },
       { href: "/parts-receiving", label: "Receiving", exact: true, roles: managerRoles },
       { href: "/inventory-transfer", label: "Transfer & Cross-Refs", exact: true, roles: managerRoles },
       { href: "/cores", label: "Core", exact: true, roles: managerRoles },
