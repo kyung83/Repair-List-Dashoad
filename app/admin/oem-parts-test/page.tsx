@@ -65,14 +65,14 @@ export default function OemCatalogEmbedTest() {
         <p style={{ color: "#526378", fontSize: 13 }}>{catalog === "fleetrite" ? "For International, Open International Parts by VIN uses the eValue chassis-results link that worked for your tested truck, without a browser extension. Access for other chassis and other employees still needs testing. If it fails, use Copy Last 8 and search from the official catalog." : "For Freightliner, a valid 17-character VIN uses the PartsProX address pattern supplied from your dealer session."}</p>{catalog === "fleetrite" && <p aria-label="International VIN lookup value" style={{ fontFamily: "monospace", fontSize: 21, fontWeight: 700 }}>{internationalSearch || "Select a unit with a VIN"}</p>}
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
-        <button type="button" onClick={() => setShow(true)} style={{ padding: 12, background: "#123c67", color: "white", border: 0, borderRadius: 6 }}>Test embedded {selected.brand} catalog</button>
-        <button type="button" onClick={() => setShow(false)} style={{ padding: 12 }}>Close embedded view</button>
+        {catalog === "excelerator" && <button type="button" onClick={() => setShow(true)} style={{ padding: 12, background: "#123c67", color: "white", border: 0, borderRadius: 6 }}>Test embedded {selected.brand} catalog</button>}
+        {catalog === "excelerator" && <button type="button" onClick={() => setShow(false)} style={{ padding: 12 }}>Close embedded view</button>}
         {catalog === "fleetrite" ? <a href={internationalDirectUrl} target="_blank" rel="noopener noreferrer" style={{ padding: 12, background: "#175789", color: "white", borderRadius: 6 }}>{internationalSearch ? "Open International Parts by VIN" : "Open International Catalog"}</a> : <a href={catalogUrl} target="_blank" rel="noopener noreferrer" style={{ padding: 12 }}>Open Freightliner Parts by VIN</a>}
       </div>
-      <div style={{ border: "1px solid #bdc7d2", borderRadius: 8, marginTop: 20, minHeight: 500, overflow: "hidden" }}>
+      {catalog === "excelerator" && <div style={{ border: "1px solid #bdc7d2", borderRadius: 8, marginTop: 20, minHeight: 500, overflow: "hidden" }}>
         {show ? <iframe key={`${catalog}-${catalogUrl}`} title={selected.name} src={catalogUrl} referrerPolicy="no-referrer" style={{ width: "100%", minHeight: 720, border: 0 }} /> :
           <div style={{ padding: 24 }}>Select a manufacturer and choose <strong>Test embedded catalog</strong>. For Freightliner, selecting a unit with a valid VIN will attempt the matching PartsProX catalog page. If it stays blank or reports refusal to connect, embedding is restricted by the provider.</div>}
-      </div>
+      </div>}
       <p style={{ background: "#fff5da", padding: 12 }}>Dealer ordering is NOT integrated or enabled in this test. The existing Parts Desk internal on-order quantity feature is unchanged.</p>
     </main>
   );
