@@ -40,8 +40,9 @@ export default function OemCatalogEmbedTest() {
   const validVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(normalizedVin);
   const internationalSearch = normalizedVin.length >= 8 ? normalizedVin.slice(-8) : "";
   const lookupText = catalog === "fleetrite" ? internationalSearch : normalizedVin;
-  const navistarHandoffUrl = internationalSearch && /^[A-HJ-NPR-Z0-9]{8}$/.test(internationalSearch)
-    ? `https://oecnpc.navistar.com/npc/myportal/?northern_vin=${encodeURIComponent(internationalSearch)}`
+  // Direct eValue catalog route verified for one chassis; other VINs still require user validation.
+  const internationalDirectUrl = /^[A-HJ-NPR-Z0-9]{8}$/.test(internationalSearch)
+    ? `https://evalue.internationaldelivers.com/fleetipc/ipc/jsp/CS_Results.jsp?chassis_no=${encodeURIComponent(internationalSearch)}&OrderIntegrationSessionID=&ship_to_code=RTL07459`
     : CATALOGS.fleetrite.url;
   const catalogUrl = catalog === "excelerator" && validVin
     ? `https://excelerator.com/truck-parts/en/vin/${encodeURIComponent(normalizedVin)}`
@@ -50,7 +51,7 @@ export default function OemCatalogEmbedTest() {
     <main style={{ maxWidth: 1200, margin: "30px auto", padding: 20, fontFamily: "Arial, sans-serif" }}>
       <p style={{ color: "#526378" }}>ADMIN / EXPERIMENT / LOOKUP ONLY</p>
       <h1>OEM Parts Catalog — Embedding Test</h1>
-      <p>This isolated experiment does not save credentials, place dealer orders, modify inventory, or change existing parts workflows. Navistar automatic field entry requires optional Chrome helper v0.2 and is not yet verified on your logged-in session. Only administrators can access this page.</p>
+      <p>This isolated experiment does not save credentials, place dealer orders, modify inventory, or change existing parts workflows. International eValue direct VIN lookup is being tested without the Chrome extension; authorization and results for other trucks are not yet verified. Only administrators can access this page.</p>
       <p><strong>Important:</strong> Your dealer's browser policy may prevent its login or diagrams from loading inside another website. A blocked frame is an expected test result, not something to bypass.</p>
       <div style={{ marginBottom: 18 }}><label htmlFor="unit-search">Find fleet truck (optional)</label><br/><input id="unit-search" list="oem-units" value={unitQuery} onChange={e => setUnitQuery(e.target.value)} placeholder="Unit number or VIN" style={{ padding: 10, width: 260, marginTop: 8 }} /><select aria-label="Select matching truck" value="" onChange={e => chooseUnit(e.target.value)} style={{ marginLeft: 8, padding: 10 }}><option value="">Select matching truck...</option>{matchingUnits.map(x => <option key={x.id} value={String(x.id)}>{x.unit} · {x.make} {x.model} · {x.vin || "No VIN"}</option>)}</select>{error && <p role="status">{error}</p>}</div><label htmlFor="catalog">Catalog</label>{" "}
       <select id="catalog" value={catalog} onChange={(e) => {setCatalog(e.target.value as Catalog); setShow(false);}}>
@@ -61,12 +62,12 @@ export default function OemCatalogEmbedTest() {
         <label htmlFor="vin">VIN for manual catalog lookup (optional)</label><br />
         <input id="vin" value={vin} maxLength={17} onChange={(e) => setVin(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))} placeholder="Enter VIN" style={{ padding: 10, width: 260, marginTop: 8 }}/>
         <button type="button" onClick={() => { if (lookupText) void navigator.clipboard.writeText(lookupText); }} disabled={!lookupText} style={{ marginLeft: 8, padding: 10 }}>{catalog === "fleetrite" ? "Copy Last 8" : "Copy VIN"}</button>
-        <p style={{ color: "#526378", fontSize: 13 }}>{catalog === "fleetrite" ? "For International, use Open International Parts by VIN. With the optional Northern Chrome helper v0.2 installed, the Navistar search field should fill automatically. Otherwise use Copy Last 8 and search manually." : "For Freightliner, a valid 17-character VIN uses the PartsProX address pattern supplied from your dealer session."}</p>{catalog === "fleetrite" && <p aria-label="International VIN lookup value" style={{ fontFamily: "monospace", fontSize: 21, fontWeight: 700 }}>{internationalSearch || "Select a unit with a VIN"}</p>}
+        <p style={{ color: "#526378", fontSize: 13 }}>{catalog === "fleetrite" ? "For International, Open International Parts by VIN uses the eValue chassis-results link that worked for your tested truck, without a browser extension. Access for other chassis and other employees still needs testing. If it fails, use Copy Last 8 and search from the official catalog." : "For Freightliner, a valid 17-character VIN uses the PartsProX address pattern supplied from your dealer session."}</p>{catalog === "fleetrite" && <p aria-label="International VIN lookup value" style={{ fontFamily: "monospace", fontSize: 21, fontWeight: 700 }}>{internationalSearch || "Select a unit with a VIN"}</p>}
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
         <button type="button" onClick={() => setShow(true)} style={{ padding: 12, background: "#123c67", color: "white", border: 0, borderRadius: 6 }}>Test embedded {selected.brand} catalog</button>
         <button type="button" onClick={() => setShow(false)} style={{ padding: 12 }}>Close embedded view</button>
-        {catalog === "fleetrite" ? <a href={navistarHandoffUrl} target="_blank" rel="noopener noreferrer" style={{ padding: 12, background: "#175789", color: "white", borderRadius: 6 }}>Open International Parts by VIN</a> : <a href={catalogUrl} target="_blank" rel="noopener noreferrer" style={{ padding: 12 }}>Open Freightliner Parts by VIN</a>}
+        {catalog === "fleetrite" ? <a href={internationalDirectUrl} target="_blank" rel="noopener noreferrer" style={{ padding: 12, background: "#175789", color: "white", borderRadius: 6 }}>{internationalSearch ? "Open International Parts by VIN" : "Open International Catalog"}</a> : <a href={catalogUrl} target="_blank" rel="noopener noreferrer" style={{ padding: 12 }}>Open Freightliner Parts by VIN</a>}
       </div>
       <div style={{ border: "1px solid #bdc7d2", borderRadius: 8, marginTop: 20, minHeight: 500, overflow: "hidden" }}>
         {show ? <iframe key={`${catalog}-${catalogUrl}`} title={selected.name} src={catalogUrl} referrerPolicy="no-referrer" style={{ width: "100%", minHeight: 720, border: 0 }} /> :
