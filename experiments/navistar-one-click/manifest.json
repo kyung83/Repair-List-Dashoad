@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Northern Navistar One-Click Lookup",
+  "version": "0.2.0",
+  "description": "Auto-fill a Navistar chassis lookup when launched from Northern's OEM parts screen.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://oecnpc.navistar.com/npc/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
