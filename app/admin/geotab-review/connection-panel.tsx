@@ -32,6 +32,7 @@ export default function GeotabConnectionPanel(){
   const[form,setForm]=useState<FormState>({database:"",username:"",password:""});
   const[message,setMessage]=useState("");
   const[busy,setBusy]=useState("");
+  const[fullDiagnostic,setFullDiagnostic]=useState<{ok:boolean;authenticated:boolean;stage:string;checks:Record<string,{ok:boolean;count?:number;error?:string}>;error?:string}|null>(null);
 
   async function load(){
     const response=await fetch('/api/admin/geotab-connection',{cache:'no-store'});
@@ -66,6 +67,17 @@ export default function GeotabConnectionPanel(){
     }catch(error){setMessage(error instanceof Error?error.message:'Geotab connection action failed.');}finally{setBusy('');}
   }
 
+  async function checkPermissions(){
+    setBusy("permissions");setMessage("");setFullDiagnostic(null);
+    try{
+      const response=await fetch("/api/repairs?checkGeotab=1",{cache:"no-store"});
+      const result=await response.json() as {ok?:boolean;authenticated?:boolean;stage?:string;checks?:Record<string,{ok:boolean;count?:number;error?:string}>;error?:string};
+      if (!result.checks || !result.stage) throw new Error(result.error||"Geotab permissions check unavailable.");
+      setFullDiagnostic({ok:Boolean(result.ok),authenticated:Boolean(result.authenticated),stage:result.stage,checks:result.checks,error:result.error});
+    }catch(error){setMessage(error instanceof Error?error.message:"Geotab diagnostic failed.");}
+    finally{setBusy("");}
+  }
+
   async function clearOverride(){
     if(!window.confirm('Disconnect the saved Geotab service account? Geotab imports, DVIR certification, GPS, mileage and photo downloads will PAUSE until another dedicated account is saved. There is no old-login fallback.'))return;
     setBusy('clear');setMessage('');
@@ -94,10 +106,12 @@ export default function GeotabConnectionPanel(){
           {archived?<p style={copy}><strong>The service account used by this app was archived or expired in MyGeotab.</strong> GPS, mileage, DVIR and yard pulls cannot authenticate until that account is reactivated or replaced. Retrying an individual truck cannot fix an archived login.</p>:connected?<p style={copy}>Authentication is working. {override?.active?'Every Geotab function now uses the dedicated service account saved here, including DVIR, repairs, GPS, mileage and photos.':'No dedicated account is saved. Geotab operations cannot use the retired personal or deployment login; save a service account here.'}</p>:<p style={copy}>{status?.error||'The app cannot authenticate to Geotab right now.'}</p>}
         </div>
         <button type="button" disabled={Boolean(busy)} onClick={()=>{setMessage('');void load().catch(error=>setMessage(error instanceof Error?error.message:'Connection test failed.'));}}>Test current connection</button>
+        <button type="button" disabled={Boolean(busy)} onClick={()=>void checkPermissions()}>{busy==="permissions"?"Checking Geotab permissions…":"Run full Geotab permission check"}</button>
       </div>
 
       {!connected&&status?.error&&<div style={errorBox}><strong>Geotab response</strong><div style={{marginTop:4}}>{status.error}</div></div>}
       {message&&<div style={notice}>{message}</div>}
+      {fullDiagnostic&&<div style={infoCard} role="status"><strong>{fullDiagnostic.ok?"Geotab permissions verified":"Geotab requires attention"}</strong><p style={smallCopy}>Live read-only tests using the saved service account. These checks do not modify DVIRs, repairs, or equipment.</p>{Object.entries(fullDiagnostic.checks).map(([name,check])=><div key={name} style={{padding:"5px 0"}}><strong>{name}:</strong> {check.ok?`Passed (${check.count??0} records returned)`:`Failed: ${check.error||"Permission denied"}`}</div>)}{fullDiagnostic.error&&<p style={smallCopy}>{fullDiagnostic.error}</p>}</div>}
 
       <div style={{marginTop:16,display:'grid',gridTemplateColumns:'minmax(260px,.8fr) minmax(420px,1.5fr)',gap:14,alignItems:'start'}}>
         <div style={infoCard}>
