@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Northern Navistar VIN Lookup Helper",
+  "version": "0.1.0",
+  "description": "Admin/Inventory test: fill Navistar VIN Catalog with the last eight VIN characters on user request.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_title": "Navistar VIN lookup",
+    "default_popup": "popup.html"
+  }
+}
