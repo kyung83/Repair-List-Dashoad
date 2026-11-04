@@ -1,0 +1,29 @@
+name: Maintenance sheet import 2026-11-04
+on:
+  push:
+    branches: [ops/maintenance-sheet-import-20261104]
+    paths:
+      - '.github/workflows/maintenance-sheet-import.yml'
+      - 'scripts/maintenance-sheet-oneoff/**'
+permissions:
+  contents: read
+concurrency:
+  group: norlow-maintenance-sheet-import-20261104
+  cancel-in-progress: false
+jobs:
+  import:
+    if: github.repository == 'kyung83/Repair-List-Dashoad' && github.actor == 'kyung83'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Validate import script
+        run: node --check scripts/maintenance-sheet-oneoff/runner.mjs
+      - name: Prepare or execute scoped maintenance import
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/maintenance-sheet-oneoff/runner.mjs
