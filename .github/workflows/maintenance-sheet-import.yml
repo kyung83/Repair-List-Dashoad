@@ -26,4 +26,20 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: node scripts/maintenance-sheet-oneoff/runner.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/maintenance-sheet-oneoff/runner.mjs | tee /tmp/maintenance-import-safe.log
+          if grep -q '^MAINTENANCE_KEY_BEGIN$' /tmp/maintenance-import-safe.log; then
+            sed -n '/^MAINTENANCE_KEY_BEGIN$/{n;p;}' /tmp/maintenance-import-safe.log > key-package.json
+          fi
+      - name: Retain encrypted verification output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maintenance-import-${{ github.run_id }}
+          path: |
+            key-package.json
+            encrypted-report.json
+          if-no-files-found: ignore
+          retention-days: 1
