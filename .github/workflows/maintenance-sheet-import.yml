@@ -20,26 +20,22 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '22'
-      - name: Validate import script
-        run: node --check scripts/maintenance-sheet-oneoff/runner.mjs
-      - name: Prepare or execute scoped maintenance import
+      - name: Install pinned workbook reader
+        run: python -m pip install --disable-pip-version-check openpyxl==3.1.5
+      - name: Validate import scripts
+        run: |
+          node --check scripts/maintenance-sheet-oneoff/runner.mjs
+          python -m py_compile scripts/maintenance-sheet-oneoff/plan_import.py scripts/maintenance-sheet-oneoff/sql_import.py
+      - name: Execute approved ordered maintenance import
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/maintenance-sheet-oneoff/runner.mjs | tee /tmp/maintenance-import-safe.log
-          if grep -q '^MAINTENANCE_KEY_BEGIN$' /tmp/maintenance-import-safe.log; then
-            sed -n '/^MAINTENANCE_KEY_BEGIN$/{n;p;}' /tmp/maintenance-import-safe.log > key-package.json
-          fi
+        run: node scripts/maintenance-sheet-oneoff/runner.mjs
       - name: Retain encrypted verification output
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: maintenance-import-${{ github.run_id }}
-          path: |
-            key-package.json
-            encrypted-report.json
+          path: encrypted-report.json
           if-no-files-found: ignore
           retention-days: 1
