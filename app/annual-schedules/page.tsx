@@ -206,8 +206,8 @@ export default function AnnualSchedulesPage() {
       <header style={headerStyle}>
         <div>
           <p style={eyebrowStyle}>TRUCK &amp; TRAILER COMPLIANCE</p>
-          <h1 style={{ margin: "7px 0 4px", fontSize: 34, color: "#0d1b2b" }}>Annual Schedules</h1>
-          <p style={{ margin: 0, maxWidth: 900, color: "#64748b", lineHeight: 1.5 }}>
+          <h1 style={{ margin: "7px 0 4px", fontSize: 34, color: "#173f37" }}>Annual Schedules</h1>
+          <p style={{ margin: 0, maxWidth: 900, color: "#68746f", lineHeight: 1.5 }}>
             Update completed Annual dates and normal intervals here. If you want an Annual performed early, use Create Annual Job Now so the mechanic gets the normal inspection checklist and completed form without changing the historical Annual date first.
           </p>
         </div>
@@ -226,7 +226,7 @@ export default function AnnualSchedulesPage() {
       <section style={bulkCardStyle}>
         <div>
           <strong>{selected.length} selected</strong>
-          <span style={{ display: "block", marginTop: 3, color: "#64748b", fontSize: 12 }}>Select units below to assign or remove their Annual schedule.</span>
+          <span style={{ display: "block", marginTop: 3, color: "#68746f", fontSize: 12 }}>Select units below to assign or remove their Annual schedule.</span>
         </div>
         <label style={{ display: "grid", gap: 4, color: "#52616e", fontSize: 11, fontWeight: 900 }}>
           Annual days
@@ -287,19 +287,19 @@ export default function AnnualSchedulesPage() {
   );
 }
 
-const pageStyle = { minHeight: "100vh", padding: "30px 32px 100px", background: "#fff", color: "#172033" } as const;
+const pageStyle = { minHeight: "100vh", padding: "30px 32px 100px", background: "#fff", color: "#1b2421" } as const;
 const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 18, flexWrap: "wrap" as const } as const;
-const eyebrowStyle = { margin: 0, color: "#f47b20", fontWeight: 950, letterSpacing: ".14em", fontSize: 11 } as const;
-const toolbarCardStyle = { marginTop: 18, padding: 14, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" as const, border: "1px solid #dce2e7", borderRadius: 12, background: "#f8fafb" } as const;
-const bulkCardStyle = { marginTop: 12, padding: 14, display: "flex", justifyContent: "flex-end", gap: 10, alignItems: "end", flexWrap: "wrap" as const, border: "1px solid #dce2e7", borderRadius: 12, background: "white" } as const;
-const tableCardStyle = { marginTop: 12, overflow: "hidden", border: "1px solid #dce2e7", borderRadius: 12, background: "white", boxShadow: "0 4px 18px #12202f0a" } as const;
-const inputStyle = { minHeight: 40, boxSizing: "border-box" as const, padding: "7px 10px", border: "1px solid #cbd5dd", borderRadius: 8, background: "white", color: "#172033" } as const;
-const buttonStyle = { minHeight: 40, padding: "0 13px", border: "1px solid #cbd5dd", borderRadius: 8, background: "white", color: "#263746", fontWeight: 900, cursor: "pointer" } as const;
-const orangeButtonStyle = { ...buttonStyle, borderColor: "#f47b20", background: "#f47b20", color: "white" } as const;
-const jobButtonStyle = { ...buttonStyle, minWidth: 168, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
+const eyebrowStyle = { margin: 0, color: "#2f6f60", fontWeight: 950, letterSpacing: ".14em", fontSize: 11 } as const;
+const toolbarCardStyle = { marginTop: 18, padding: 14, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" as const, border: "1px solid #d7ded9", borderRadius: 12, background: "#fbfcfb" } as const;
+const bulkCardStyle = { marginTop: 12, padding: 14, display: "flex", justifyContent: "flex-end", gap: 10, alignItems: "end", flexWrap: "wrap" as const, border: "1px solid #d7ded9", borderRadius: 12, background: "white" } as const;
+const tableCardStyle = { marginTop: 12, overflow: "hidden", border: "1px solid #d7ded9", borderRadius: 12, background: "white", boxShadow: "0 4px 18px #12202f0a" } as const;
+const inputStyle = { minHeight: 40, boxSizing: "border-box" as const, padding: "7px 10px", border: "1px solid #c9d4cf", borderRadius: 8, background: "white", color: "#1b2421" } as const;
+const buttonStyle = { minHeight: 40, padding: "0 13px", border: "1px solid #c9d4cf", borderRadius: 8, background: "white", color: "#24312c", fontWeight: 900, cursor: "pointer" } as const;
+const orangeButtonStyle = { ...buttonStyle, borderColor: "#2f6f60", background: "#2f6f60", color: "white" } as const;
+const jobButtonStyle = { ...buttonStyle, minWidth: 168, borderColor: "#173f37", background: "#173f37", color: "white" } as const;
 const disabledJobButtonStyle = { ...buttonStyle, minWidth: 168, background: "#eef2f5", color: "#52616e", cursor: "default" } as const;
 const tabStyle = { ...buttonStyle, minWidth: 130 } as const;
-const activeTabStyle = { ...tabStyle, borderColor: "#0d1b2b", background: "#0d1b2b", color: "white" } as const;
+const activeTabStyle = { ...tabStyle, borderColor: "#173f37", background: "#173f37", color: "white" } as const;
 const noticeStyle = { marginTop: 14, padding: 12, border: "1px solid #f2c66d", borderRadius: 9, background: "#fff8e6", color: "#654d18" } as const;
 const cellStyle = { padding: "10px 11px", verticalAlign: "middle" as const } as const;
 const badgeStyle: Record<Tone, { display: "inline-flex"; padding: string; borderRadius: number; fontSize: number; fontWeight: number; background: string; color: string }> = {
