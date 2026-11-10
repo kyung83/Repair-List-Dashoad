@@ -122,20 +122,6 @@ export async function setPartWarehouseStatus(
     .bind(warehouseCode).first<{id:number;code:string;name:string}>();
   if (!warehouse) throw new Error('Warehouse was not found.');
 
-  if (input.status !== 'active') {
-    const stock = await db.prepare(`
-      SELECT COALESCE(SUM(quantity_on_hand),0) AS physical,
-             COALESCE(SUM(on_order),0) AS on_order
-      FROM part_warehouse_stock
-      WHERE part_id=? AND warehouse_id=?
-    `).bind(partId,warehouse.id).first<{physical:number;on_order:number}>();
-    const physical = Number(stock?.physical ?? 0);
-    const onOrder = Number(stock?.on_order ?? 0);
-    if (Math.abs(physical) > 0.000001 || Math.abs(onOrder) > 0.000001) {
-      throw new Error(`${part.part_number} still has stock or on-order quantity at ${warehouse.name}. Count or transfer it to zero before archiving/removing it from that warehouse.`);
-    }
-  }
-
   await db.prepare(`
     INSERT INTO part_warehouse_catalog_status(part_id,warehouse_id,status,updated_by_user_id,updated_at)
     VALUES(?,?,?,?,CURRENT_TIMESTAMP)
