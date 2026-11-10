@@ -24,10 +24,10 @@ function time(value:string|null){
   return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();
 }
 function dollars(value:string){const n=Number(value);return Number.isFinite(n)?n.toLocaleString('en-US',{style:'currency',currency:'USD'}):'$0.00';}
-const input:React.CSSProperties={width:'100%',minHeight:44,padding:'9px 11px',border:'1px solid #cbd5e1',borderRadius:9,background:'#fff',color:'#172033',boxSizing:'border-box',fontSize:14};
+const input:React.CSSProperties={width:'100%',minHeight:44,padding:'9px 11px',border:'1px solid #cbd5e1',borderRadius:9,background:'#fff',color:'#1b2421',boxSizing:'border-box',fontSize:14};
 const label:React.CSSProperties={display:'grid',gap:5,fontSize:11,fontWeight:900,color:'#435565',textTransform:'uppercase',letterSpacing:'.03em'};
 const button:React.CSSProperties={minHeight:42,padding:'0 13px',border:'1px solid #c8d3dd',borderRadius:9,background:'#fff',color:'#25384a',fontWeight:900,cursor:'pointer'};
-const orange:React.CSSProperties={...button,borderColor:'#f47b20',background:'#f47b20',color:'#fff'};
+const orange:React.CSSProperties={...button,borderColor:'#2f6f60',background:'#2f6f60',color:'#fff'};
 
 export default function DriverReceiptReview({breakdownId,initialCost,providerName,onClosed}:{breakdownId:number;initialCost:number|null;providerName:string|null;onClosed:()=>void}){
   const[review,setReview]=useState<ReceiptReview|null>(null);
@@ -105,7 +105,7 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
     finally{setBusy(false);}
   }
 
-  if(loading)return <div style={{marginTop:12,padding:14,border:'1px solid #dfe6ee',borderRadius:10,background:'#f8fafc',color:'#64748b'}}>Loading closeout status…</div>;
+  if(loading)return <div style={{marginTop:12,padding:14,border:'1px solid #dfe6ee',borderRadius:10,background:'#f8fafc',color:'#68746f'}}>Loading closeout status…</div>;
   if(!review)return message?<div style={{marginTop:12,padding:11,border:'1px solid #efc16c',borderRadius:9,background:'#fff8e8'}}>{message}</div>:null;
   const receiptRecord=review.receipt;
   const receipt=receiptRecord&&receiptRecord.pages.length>0?receiptRecord:null;
@@ -128,7 +128,7 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
         <label style={label}>Invoice #<input style={input} value={draft.invoiceNumber} onChange={event=>setField('invoiceNumber',event.target.value.slice(0,100))}/></label>
         <label style={label}>Invoice Date<input style={input} type="date" value={draft.invoiceDate} onChange={event=>setField('invoiceDate',event.target.value)}/></label>
       </div>
-    </details>:<div style={{padding:10,border:receiptRecordWithoutImage?'1px solid #efc16c':'1px dashed #cbd5df',borderRadius:9,background:receiptRecordWithoutImage?'#fff8e8':'transparent',color:receiptRecordWithoutImage?'#765218':'#667482',fontSize:12}}>{receiptRecordWithoutImage?'A receipt upload was started, but no saved receipt image is attached to this breakdown. The driver should upload it again.':'No receipt uploaded. Receipt is optional and does not block closeout.'}</div>}
+    </details>:<div style={{padding:10,border:receiptRecordWithoutImage?'1px solid #efc16c':'1px dashed #c9d4cf',borderRadius:9,background:receiptRecordWithoutImage?'#fff8e8':'transparent',color:receiptRecordWithoutImage?'#765218':'#68746f',fontSize:12}}>{receiptRecordWithoutImage?'A receipt upload was started, but no saved receipt image is attached to this breakdown. The driver should upload it again.':'No receipt uploaded. Receipt is optional and does not block closeout.'}</div>}
 
     <section style={{padding:14,border:'2px solid #f2a35f',borderRadius:11,background:'#fff9f3'}}>
       <div style={{display:'grid',gridTemplateColumns:'minmax(180px,.55fr) minmax(260px,1.45fr)',gap:12,alignItems:'start'}} className="breakdown-closeout-fields">
@@ -149,6 +149,6 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
   </div>;
 }
 
-const statusBox:React.CSSProperties={display:'grid',padding:'10px 11px',border:'1px solid #dce3e9',borderRadius:9,background:'#f8fafb',fontSize:12,color:'#263b4e'};
+const statusBox:React.CSSProperties={display:'grid',padding:'10px 11px',border:'1px solid #d7ded9',borderRadius:9,background:'#fbfcfb',fontSize:12,color:'#263b4e'};
 const statusLabel:React.CSSProperties={marginBottom:4,color:'#73808b',fontSize:9,fontWeight:900,textTransform:'uppercase',letterSpacing:'.05em'};
 const warning:React.CSSProperties={marginTop:9,padding:9,border:'1px solid #efc16c',borderRadius:8,background:'#fff8e8',color:'#765218',fontSize:11};
