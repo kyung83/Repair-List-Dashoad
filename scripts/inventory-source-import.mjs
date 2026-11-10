@@ -50,7 +50,7 @@ async function query(context, sql, params = []) {
 
 async function readTable(context, table, limit) {
   // Identifiers are selected exclusively from this fixed internal allowlist.
-  if (!new Set(['parts', 'part_warehouse_stock', 'warehouses', 'part_warehouse_locations']).has(table)) throw new Error('Unsupported inventory backup table.');
+  if (!new Set(['parts', 'part_warehouse_stock', 'warehouses', 'part_warehouse_locations','part_cross_references']).has(table)) throw new Error('Unsupported inventory backup table.');
   const rows = [];
   let after = 0;
   while (true) {
@@ -67,7 +67,7 @@ export async function exportInventory(context) {
   const schema = await query(context, "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('part_warehouse_locations','inventory_source_imports')");
   const binsTablePresent = schema.some((entry) => entry.name === 'part_warehouse_locations');
   const tables = {};
-  for (const [name, limit] of [['parts', 30000], ['part_warehouse_stock', 90000], ['warehouses', 500]]) tables[name] = await readTable(context, name, limit);
+  for (const [name, limit] of [['parts', 30000], ['part_warehouse_stock', 90000], ['warehouses', 500],['part_cross_references',90000]]) tables[name] = await readTable(context, name, limit);
   tables.part_warehouse_locations = binsTablePresent ? await readTable(context, 'part_warehouse_locations', 60000) : [];
   const inventoryOperationTail = await query(context, `
     SELECT l.warehouse_stock_id, l.operation_id, l.id AS line_id

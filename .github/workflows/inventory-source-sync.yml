@@ -27,6 +27,21 @@ jobs:
           cache: npm
       - name: Install project tooling
         run: npm ci
+      - name: Resolve the authorized Cloudflare account
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            npx wrangler whoami --json > "$RUNNER_TEMP/inventory-account.json"
+            node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const identity = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/inventory-account.json', 'utf8'));
+          if (identity.loggedIn !== true || identity.accounts?.length !== 1 || !/^[a-f0-9]{32}$/i.test(identity.accounts[0].id)) throw new Error('A unique authorized Cloudflare account is required.');
+          fs.appendFileSync(process.env.GITHUB_ENV, `CLOUDFLARE_ACCOUNT_ID=${identity.accounts[0].id}\n`);
+          NODE
+          fi
       - name: Resolve the existing production database
         shell: bash
         run: |
