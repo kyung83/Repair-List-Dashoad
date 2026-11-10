@@ -70,11 +70,11 @@ export default function ReceivingHistoryButton({partId,partNumber,description}:{
 const backdrop={position:"fixed" as const,inset:0,zIndex:10000,background:"rgba(8,20,32,.58)",display:"grid",placeItems:"center",padding:18};
 const modal={width:"min(1180px,96vw)",maxHeight:"88vh",overflowY:"auto" as const,background:"white",borderRadius:14,padding:20,boxShadow:"0 24px 70px rgba(0,0,0,.30)"};
 const head={display:"flex",justifyContent:"space-between",gap:16,alignItems:"start",marginBottom:12};
-const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
-const muted={margin:"2px 0 0",color:"#667482",fontSize:12} as const;
+const eyebrow={margin:0,color:"#2f6f60",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
+const muted={margin:"2px 0 0",color:"#68746f",fontSize:12} as const;
 const close={border:"1px solid #aebac4",borderRadius:8,padding:"8px 11px",background:"white",fontWeight:900,cursor:"pointer"} as const;
 const empty={padding:22,textAlign:"center" as const,color:"#71808e",border:"1px dashed #d2d9df",borderRadius:9};
 const errorBox={padding:12,border:"1px solid #e0a3a3",borderRadius:8,background:"#fff0f0",color:"#8a2f2f",fontWeight:700};
-const th={padding:"10px 9px",textAlign:"left" as const,background:"#f7f9fa",color:"#657383",fontSize:10,whiteSpace:"nowrap" as const};
+const th={padding:"10px 9px",textAlign:"left" as const,background:"#f7f9fa",color:"#68746f",fontSize:10,whiteSpace:"nowrap" as const};
 const td={padding:"10px 9px",verticalAlign:"top" as const,fontSize:12};
-const small={display:"block",marginTop:3,fontSize:10,color:"#6c7886"} as const;
+const small={display:"block",marginTop:3,fontSize:10,color:"#68746f"} as const;
