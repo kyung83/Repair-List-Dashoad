@@ -108,13 +108,13 @@ export default function InventoryChoicePicker({
           aria-controls={`${id}-choices`}
           aria-labelledby={`${id}-label ${id}-summary`}
           onClick={() => expanded ? close() : setOpen(true)}
-          style={{ width: "100%", minHeight: 44, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 13px", border: `1px solid ${expanded ? "#f47b20" : "#b9c6d2"}`, borderRadius: 8, background: disabled ? "#f3f5f7" : "white", color: "#182331", textAlign: "left", opacity: disabled ? 0.65 : 1 }}
+          style={{ width: "100%", minHeight: 44, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "11px 13px", border: `1px solid ${expanded ? "#2f7c6b" : "#b9c6d2"}`, borderRadius: 8, background: disabled ? "#f3f7f5" : "white", color: "#20312d", textAlign: "left", opacity: disabled ? 0.65 : 1 }}
         >
           <span id={`${id}-summary`}>{selected.size ? `${selected.size} selected` : placeholder}</span>
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : undefined }}><path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
 
-        {expanded && <div id={`${id}-choices`} style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, padding: 10, border: "1px solid #b9c6d2", borderRadius: 10, background: "white", boxShadow: "0 10px 28px #0d1b2b24" }}>
+        {expanded && <div id={`${id}-choices`} style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, padding: 10, border: "1px solid #b9c6d2", borderRadius: 10, background: "white", boxShadow: "0 10px 28px #153f3724" }}>
           <label htmlFor={`${id}-search`} style={{ display: "block", marginBottom: 5, color: "#657383", fontSize: 12, fontWeight: 700 }}>Search {label.toLowerCase()}</label>
           <input
             ref={search}
@@ -124,19 +124,19 @@ export default function InventoryChoicePicker({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Type a name or number…"
-            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", border: "1px solid #b9c6d2", borderRadius: 7, color: "#182331", background: "white" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", border: "1px solid #b9c6d2", borderRadius: 7, color: "#20312d", background: "white" }}
           />
           <div role="status" aria-live="polite" style={{ margin: "8px 1px", color: "#657383", fontSize: 12 }}>
             {matches.length > resultLimit ? `Showing ${resultLimit} of ${matches.length} matches. Type more to narrow the list.` : `${matches.length} ${matches.length === 1 ? "option" : "options"}`}
           </div>
           <div ref={choices} role="group" aria-label={`${label} options`} style={{ maxHeight: "min(280px, 40vh)", overflowY: "auto", overscrollBehavior: "contain" }}>
-            {shownOptions.map((option) => <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 42, boxSizing: "border-box", marginBottom: 3, padding: "8px 9px", borderRadius: 7, cursor: "pointer", background: selected.has(option.id) ? "#fff3e8" : "white", color: "#182331" }}>
+            {shownOptions.map((option) => <label key={option.id} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 42, boxSizing: "border-box", marginBottom: 3, padding: "8px 9px", borderRadius: 7, cursor: "pointer", background: selected.has(option.id) ? "#fff3e8" : "white", color: "#20312d" }}>
               <input
                 type="checkbox"
                 checked={selected.has(option.id)}
                 onChange={() => onToggle(option.id)}
                 onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onToggle(option.id); } }}
-                style={{ width: 18, height: 18, flexShrink: 0, margin: 0, padding: 0, accentColor: "#f47b20" }}
+                style={{ width: 18, height: 18, flexShrink: 0, margin: 0, padding: 0, accentColor: "#2f7c6b" }}
               />
               <span style={{ minWidth: 0, overflowWrap: "anywhere" }}><span style={{ fontSize: 13, fontWeight: 700 }}>{option.label}</span>{option.description && <small style={{ display: "block", marginTop: 2, color: "#657383", fontSize: 11 }}>{option.description}</small>}</span>
             </label>)}
@@ -144,7 +144,7 @@ export default function InventoryChoicePicker({
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 8, paddingTop: 8, borderTop: "1px solid #edf0f2" }}>
             <span style={{ color: "#657383", fontSize: 12 }}>{selected.size} selected</span>
-            <button type="button" onClick={() => close(true)} style={{ minHeight: 34, padding: "6px 13px", border: "1px solid #0d1b2b", borderRadius: 7, color: "#0d1b2b", background: "white", fontSize: 12, fontWeight: 800 }}>Done</button>
+            <button type="button" onClick={() => close(true)} style={{ minHeight: 34, padding: "6px 13px", border: "1px solid #153f37", borderRadius: 7, color: "#153f37", background: "white", fontSize: 12, fontWeight: 800 }}>Done</button>
           </div>
         </div>}
       </div>
