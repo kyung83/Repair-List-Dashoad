@@ -172,6 +172,8 @@ export default function EquipmentMasterPage() {
   const [editing, setEditing] = useState<EquipmentDraft | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<EquipmentItem | null>(null);
   const [archiveReason, setArchiveReason] = useState("");
+  const [reuseTarget, setReuseTarget] = useState<EquipmentItem | null>(null);
+  const [reuseTransferGeotab, setReuseTransferGeotab] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -203,6 +205,10 @@ export default function EquipmentMasterPage() {
         existing?: boolean;
         archived?: boolean;
         created?: boolean;
+        reused?: boolean;
+        priorEquipmentId?: number;
+        replacementEquipmentId?: number;
+        transferredGeotab?: boolean;
       };
       if (!response.ok || !result.ok) throw new Error(result.error || "Equipment could not be saved.");
       await load();
@@ -283,6 +289,29 @@ export default function EquipmentMasterPage() {
 
   async function restore(item: EquipmentItem) {
     await post({ action: "restore", id: item.id }, `${item.unit} restored to the active equipment list.`);
+  }
+
+  function openReuse(item: EquipmentItem) {
+    setReuseTarget(item);
+    setReuseTransferGeotab(!item.archived && Boolean(item.geotabDeviceId));
+  }
+
+  async function reuseUnitNumber() {
+    if (!reuseTarget) return;
+    const current = reuseTarget;
+    const result = await post({
+      action: "reuseUnitNumber",
+      id: current.id,
+      transferCurrentGeotab: reuseTransferGeotab,
+    }, `Replacement asset created for ${current.unit}.`);
+    if (!result) return;
+    setReuseTarget(null);
+    setStatusFilter("active");
+    setQuery(current.unit);
+    setMessage(
+      `Unit ${current.unit} now has a new equipment record. The prior physical asset is archived with all old repair, PM, annual and cost history preserved.` +
+      (result.transferredGeotab ? " The current Geotab device was moved to the replacement asset." : "")
+    );
   }
 
   const locations = useMemo(() => {
@@ -443,6 +472,7 @@ export default function EquipmentMasterPage() {
                       {item.archived
                         ? <button type="button" disabled={busy} onClick={() => void restore(item)}>Restore</button>
                         : <button type="button" className="danger-text" onClick={() => { setArchiveTarget(item); setArchiveReason(""); }}>Archive</button>}
+                      <button type="button" disabled={busy} onClick={() => openReuse(item)}>Reuse #</button>
                     </div>
                   </td>
                 </tr>
@@ -515,6 +545,31 @@ export default function EquipmentMasterPage() {
             <div className="master-modal-actions">
               <button type="button" className="module-button secondary" disabled={busy} onClick={() => setArchiveTarget(null)}>Cancel</button>
               <button type="button" className="module-button danger" disabled={busy} onClick={() => void archive()}>{busy ? "Archiving…" : "Archive unit"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reuseTarget && (
+        <div className="master-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setReuseTarget(null); }}>
+          <div className="archive-modal">
+            <p className="module-eyebrow">REUSE UNIT NUMBER</p>
+            <h2>Use {reuseTarget.unit} on a different physical asset?</h2>
+            <p>This creates a <strong>new equipment ID</strong> for the replacement asset. The current record becomes a historical archived asset, so its repairs, PMs, annuals, costs and imported history do not follow the new truck.</p>
+            <div className="history-retention-box">
+              <strong>{historyTotal(reuseTarget)} historical records stay with the prior asset</strong>
+              <span>{reuseTarget.history.repairs} repairs · {reuseTarget.history.maintenanceEvents} PM/annual events · {reuseTarget.history.historicalRos} imported ROs · {reuseTarget.history.expenses} expenses</span>
+            </div>
+            {!reuseTarget.archived && reuseTarget.geotabDeviceId && (
+              <label className="archive-reason" style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <input type="checkbox" checked={reuseTransferGeotab} onChange={(event) => setReuseTransferGeotab(event.target.checked)} style={{ marginTop: 3 }} />
+                <span><strong>Move current Geotab device to the replacement asset</strong><br/><small>Only leave this checked if that device is physically installed in the new asset.</small></span>
+              </label>
+            )}
+            <div className="form-note">The replacement starts with a clean maintenance/history identity. Year, make, model, VIN, purchase information and other new-asset details can then be entered on the new record.</div>
+            <div className="master-modal-actions">
+              <button type="button" className="module-button secondary" disabled={busy} onClick={() => setReuseTarget(null)}>Cancel</button>
+              <button type="button" className="module-button primary" disabled={busy} onClick={() => void reuseUnitNumber()}>{busy ? "Creating replacement…" : "Create replacement asset"}</button>
             </div>
           </div>
         </div>
