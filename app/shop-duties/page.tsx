@@ -168,6 +168,7 @@ export default function ShopDutiesSetupPage(){
     const tone=currentTone(current);
     const started=current?.status==="in_progress";
     const completed=current?.status==="completed";
+    const assignmentLocked=started||(completed&&kind!=="shop");
     const assignmentLabel=kind==="bathroom"
       ? (current?"CHANGE THIS WEEK'S PERSON":"ASSIGN THIS WEEK")
       : kind==="shop"
@@ -202,14 +203,14 @@ export default function ShopDutiesSetupPage(){
           value={assignmentChoice[template.templateKey]??""}
           onChange={event=>setAssignmentChoice(currentChoices=>({...currentChoices,[template.templateKey]:event.target.value}))}
           style={input}
-          disabled={busy||started||completed}
+          disabled={busy||assignmentLocked}
         >
           <option value="">Choose mechanic…</option>
           {mechanics.map(person=><option key={person.id} value={person.id}>{person.displayName}</option>)}
         </select>
       </label>
-      <button type="button" style={primaryButton} disabled={busy||started||completed||!assignmentChoice[template.templateKey]} onClick={()=>void assign(template)}>
-        {started?"IN PROGRESS — CANNOT REASSIGN":completed?"COMPLETED":assignmentLabel}
+      <button type="button" style={primaryButton} disabled={busy||assignmentLocked||!assignmentChoice[template.templateKey]} onClick={()=>void assign(template)}>
+        {started?"IN PROGRESS — CANNOT REASSIGN":completed&&kind!=="shop"?"COMPLETED":completed&&kind==="shop"?"ASSIGN NEXT SHOP CHECK":assignmentLabel}
       </button>
       <small style={help}>You can change the assignee while it is still pending. Once the mechanic starts it, the assignment locks until completion.</small>
 
