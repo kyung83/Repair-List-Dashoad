@@ -22,8 +22,8 @@ export default function SessionNav() {
   if (!user) return null;
   return (
     <>
-      {user.role === "admin" && <a href="/admin/users" style={{ padding: "10px 14px", borderRadius: 999, background: "#49657a", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Users</a>}
-      <span title={user.email} style={{ padding: "10px 14px", borderRadius: 999, background: "white", color: "#0d1b2b", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>{user.displayName} · {user.role}</span>
+      {user.role === "admin" && <a href="/admin/users" style={{ padding: "10px 14px", borderRadius: 999, background: "#2f6f60", color: "white", textDecoration: "none", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>Users</a>}
+      <span title={user.email} style={{ padding: "10px 14px", borderRadius: 999, background: "white", color: "#173f37", fontWeight: 800, boxShadow: "0 6px 20px #0003" }}>{user.displayName} · {user.role}</span>
       <button onClick={() => void signOut()} style={{ border: 0, padding: "10px 14px", borderRadius: 999, background: "#5c6670", color: "white", fontWeight: 800, boxShadow: "0 6px 20px #0003", cursor: "pointer" }}>Sign out</button>
     </>
   );
