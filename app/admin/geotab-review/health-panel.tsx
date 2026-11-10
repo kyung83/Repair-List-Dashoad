@@ -69,7 +69,7 @@ export default function GeotabHealthPanel(){
     return rows;
   },[data,filter]);
 
-  return <section id="gps-yard-health" style={{background:'#f3f5f7',padding:'0 clamp(16px,4vw,46px) 0',color:'#182331'}}>
+  return <section id="gps-yard-health" style={{background:'#f4f6f4',padding:'0 clamp(16px,4vw,46px) 0',color:'#1b2421'}}>
     <div style={{background:'#fff',border:`1px solid ${healthy?'#acd7bb':'#e8c475'}`,borderRadius:14,padding:16,boxShadow:'0 2px 10px rgba(15,32,48,.05)'}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:14,alignItems:'center',flexWrap:'wrap'}}>
         <div>
@@ -133,7 +133,7 @@ export default function GeotabHealthPanel(){
 }
 
 function Metric({label,value,warn=false,danger=false,active=false,onClick}:{label:string;value:string|number;warn?:boolean;danger?:boolean;active?:boolean;onClick?:()=>void}){
-  const border=active?'#8fa7b9':danger?'#e0a49e':warn?'#eccb8e':'#e3e8ec';
+  const border=active?'#8fa7b9':danger?'#e0a49e':warn?'#eccb8e':'#dce3df';
   const background=active?'#eef3f7':danger?'#fff2f1':warn?'#fff6e8':'#f7f9fa';
   const style:CSSProperties={padding:'10px 11px',borderRadius:9,background,border:`1px solid ${border}`,textAlign:'left',width:'100%',minHeight:70,color:'inherit'};
   const body=<><div style={{fontSize:11,fontWeight:800,color:'#72808e',textTransform:'uppercase',letterSpacing:'.04em'}}>{label}</div><div style={{fontSize:20,fontWeight:900,marginTop:3,color:danger?'#a12b22':warn?'#8a5a05':'#19324a'}}>{value}</div>{onClick&&<div style={{fontSize:9,color:'#7a8791',marginTop:3}}>Click to inspect</div>}</>;
