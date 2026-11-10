@@ -9,12 +9,12 @@ type Report = {range:{startDate:string;endDate:string;days:number};summary:Metri
 type Period = {start:string;end:string};
 type Sort = "name"|"productivityPercent"|"directHours"|"indirectHours"|"totalHours"|"repairCount"|"loggedDays"|"noTimerHours";
 
-const panel:CSSProperties={background:"#fff",border:"1px solid #dce2e7",borderRadius:13,overflow:"hidden"};
+const panel:CSSProperties={background:"#fff",border:"1px solid #d7ded9",borderRadius:13,overflow:"hidden"};
 const input:CSSProperties={border:"1px solid #cbd5e1",borderRadius:8,padding:"10px 11px",background:"#fff",color:"#162638",font:"inherit"};
 const action:CSSProperties={border:0,borderRadius:8,padding:"10px 14px",background:"#102b46",color:"#fff",fontWeight:850,cursor:"pointer"};
 const light:CSSProperties={...action,background:"#e9eff5",color:"#263a4d"};
 const td:CSSProperties={padding:"10px 11px",borderBottom:"1px solid #ebeff3",fontSize:13,whiteSpace:"nowrap",verticalAlign:"middle"};
-const th:CSSProperties={...td,position:"sticky",top:0,zIndex:2,background:"#f1f5f9",textAlign:"left",color:"#334155",fontSize:12};
+const th:CSSProperties={...td,position:"sticky",top:0,zIndex:2,background:"#f1f5f9",textAlign:"left",color:"#30463f",fontSize:12};
 function ymd(date:Date){return [date.getFullYear(),String(date.getMonth()+1).padStart(2,"0"),String(date.getDate()).padStart(2,"0")].join("-");}
 function daysBack(days:number){const now=new Date();return ymd(new Date(now.getFullYear(),now.getMonth(),now.getDate()-days));}
 function presetRange(preset:string):Period{
@@ -103,7 +103,7 @@ export default function TechnicianProductivityPage(){
     {key:"totalHours",label:"Total logged"},{key:"repairCount",label:"Repairs worked"},
     {key:"loggedDays",label:"Logged days"},{key:"noTimerHours",label:"Untimed / legacy hrs"},
   ];
-  return <main id="technician-productivity-page" style={{minHeight:"100vh",background:"#f3f5f7",color:"#172536",padding:"clamp(14px,2.2vw,30px)"}}>
+  return <main id="technician-productivity-page" style={{minHeight:"100vh",background:"#f4f6f4",color:"#1b2421",padding:"clamp(14px,2.2vw,30px)"}}>
     <style>{"@media print { .tech-prod-no-print,.app-sidebar,.app-shell-sidebar,.sidebar-shell,.app-nav {display:none!important} #technician-productivity-page {padding:0!important;background:#fff!important} .tech-prod-scroll {max-height:none!important;overflow:visible!important} #technician-productivity-page tr {break-inside:avoid} }"}</style>
     <header style={{display:"flex",gap:14,justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",marginBottom:15}}>
       <div>
@@ -140,12 +140,12 @@ export default function TechnicianProductivityPage(){
           <input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name…" style={input}/>
         </label>
       </form>
-      <p style={{margin:"9px 0 0",fontSize:12,color:"#64748b"}}>Report dates may span up to 366 days. Select a preset or choose custom dates and Run Report.</p>
+      <p style={{margin:"9px 0 0",fontSize:12,color:"#68746f"}}>Report dates may span up to 366 days. Select a preset or choose custom dates and Run Report.</p>
     </section>
     {error&&<p role="alert" style={{...panel,padding:13,color:"#be123c",borderColor:"#fecaca"}}>{error}</p>}
-    {!report&&!error&&<p role="status" style={{padding:20,color:"#64748b"}}>Loading logged labor hours…</p>}
+    {!report&&!error&&<p role="status" style={{padding:20,color:"#68746f"}}>Loading logged labor hours…</p>}
     {report&&<>
-      <p style={{display:"flex",gap:12,justifyContent:"space-between",flexWrap:"wrap",margin:"0 0 11px",fontSize:12,color:"#475569"}}>
+      <p style={{display:"flex",gap:12,justifyContent:"space-between",flexWrap:"wrap",margin:"0 0 11px",fontSize:12,color:"#53645d"}}>
         <strong>Report: {applied.start} through {applied.end}</strong>
         <span>Updated {new Date(report.updatedAt).toLocaleString()}</span>
       </p>
@@ -158,18 +158,18 @@ export default function TechnicianProductivityPage(){
           ["Techs with hours",String(report.summary.techniciansWithHours),"Of "+report.summary.techniciansListed+" technicians"],
           ["Hours lacking timestamps",hours(report.summary.noTimerHours)+" h","Manual or older labor records"],
         ].map(([label,value,note])=><div key={label} style={{...panel,padding:15}}>
-          <div style={{fontSize:11,color:"#65758b",fontWeight:850}}>{label}</div>
+          <div style={{fontSize:11,color:"#68746f",fontWeight:850}}>{label}</div>
           <div style={{fontSize:23,fontWeight:900,margin:"7px 0 4px",fontVariantNumeric:"tabular-nums"}}>{value}</div>
-          <div style={{fontSize:11,color:"#8190a0"}}>{note}</div>
+          <div style={{fontSize:11,color:"#7a8781"}}>{note}</div>
         </div>)}
       </section>
       <section style={{...panel,padding:14,marginBottom:14}}>
         <strong style={{fontSize:13}}>How the percentage is calculated</strong>
-        <p style={{fontSize:13,lineHeight:1.55,margin:"6px 0 6px",color:"#475569"}}>
+        <p style={{fontSize:13,lineHeight:1.55,margin:"6px 0 6px",color:"#53645d"}}>
           <strong>Tracked Productivity % = Direct Repair Hours ÷ (Direct + Indirect Logged Hours) × 100.</strong>
           {" "}This is the share of recorded time spent on maintenance, not the percent of paid shift hours worked or flat-rate efficiency.
         </p>
-        <p style={{fontSize:12,lineHeight:1.5,margin:0,color:"#64748b"}}>
+        <p style={{fontSize:12,lineHeight:1.5,margin:0,color:"#68746f"}}>
           Technicians with no saved labor show <strong>—</strong>, not 0%. Dates follow the saved UTC labor date when the timer stops.
           Manual and older entries without start/end timestamps count but are flagged. Running timers ({report.summary.runningTimers}) are excluded until stopped.
           Time not recorded in the software cannot be counted as either productive or unproductive.
@@ -178,24 +178,24 @@ export default function TechnicianProductivityPage(){
       <section style={{...panel,marginBottom:14}}>
         <div style={{padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <div><h2 style={{fontSize:19,margin:0}}>Technician Breakdown</h2>
-            <p style={{fontSize:12,color:"#64748b",margin:"5px 0 0"}}>Select a column heading to sort or view a technician's daily details. Summary totals above include all techs, not just search matches.</p></div>
-          <span style={{fontSize:12,color:"#64748b"}}>{visible.length} shown</span>
+            <p style={{fontSize:12,color:"#68746f",margin:"5px 0 0"}}>Select a column heading to sort or view a technician's daily details. Summary totals above include all techs, not just search matches.</p></div>
+          <span style={{fontSize:12,color:"#68746f"}}>{visible.length} shown</span>
         </div>
         <div className="tech-prod-scroll" role="region" aria-label="Technician productivity by employee" tabIndex={0} style={{maxHeight:610,overflow:"auto"}}>
           <table style={{borderCollapse:"collapse",width:"100%",minWidth:1080}}>
             <thead><tr>{columns.map(col=><th scope="col" key={col.key} aria-sort={sort.key===col.key?(sort.desc?"descending":"ascending"):"none"} style={th}>
-              <button type="button" onClick={()=>toggleSort(col.key)} style={{border:0,background:"transparent",padding:0,cursor:"pointer",fontSize:12,fontWeight:850,color:"#334155"}}>
+              <button type="button" onClick={()=>toggleSort(col.key)} style={{border:0,background:"transparent",padding:0,cursor:"pointer",fontSize:12,fontWeight:850,color:"#30463f"}}>
                 {col.label} <span aria-hidden="true">{sort.key===col.key?(sort.desc?"↓":"↑"):"↕"}</span>
               </button></th>)}<th style={th}>Daily</th></tr></thead>
-            <tbody>{visible.length===0&&<tr><td colSpan={9} style={{padding:25,color:"#64748b",textAlign:"center"}}>No technicians match the selected filters.</td></tr>}
-              {visible.map(t=><tr key={t.id} style={{background:selected?.id===t.id?"#eef6ff":t.totalHours>0?"#fff":"#fafbfd"}}>
+            <tbody>{visible.length===0&&<tr><td colSpan={9} style={{padding:25,color:"#68746f",textAlign:"center"}}>No technicians match the selected filters.</td></tr>}
+              {visible.map(t=><tr key={t.id} style={{background:selected?.id===t.id?"#edf4f1":t.totalHours>0?"#fff":"#fbfcfb"}}>
                 <td style={td}><strong>{t.name}</strong>
-                  {!t.active&&<small style={{display:"block",color:"#64748b"}}>Inactive</small>}
+                  {!t.active&&<small style={{display:"block",color:"#68746f"}}>Inactive</small>}
                   {t.runningTimers>0&&<small style={{display:"block",color:"#b45309"}}>Timer running (excluded)</small>}
                 </td>
                 <td style={td}><strong>{percent(t.productivityPercent)}</strong>
-                  {t.productivityPercent!==null&&<div aria-hidden="true" style={{width:120,height:7,background:"#e9eef2",borderRadius:10,marginTop:5,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:t.productivityPercent+"%",background:"#2874c9"}}/>
+                  {t.productivityPercent!==null&&<div aria-hidden="true" style={{width:120,height:7,background:"#e7eeea",borderRadius:10,marginTop:5,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:t.productivityPercent+"%",background:"#2f6f60"}}/>
                   </div>}
                   {t.productivityPercent===null&&<small style={{display:"block",color:"#94a3b8"}}>No logged time</small>}
                 </td>
@@ -213,7 +213,7 @@ export default function TechnicianProductivityPage(){
       {selected&&<section style={{...panel,marginBottom:14}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:9,alignItems:"center",flexWrap:"wrap",padding:"14px 16px"}}>
           <div><h2 style={{fontSize:19,margin:0}}>{selected.name} · Daily Labor</h2>
-            <p style={{fontSize:12,color:"#64748b",margin:"4px 0 0"}}>{hours(selected.directHours)} direct + {hours(selected.indirectHours)} indirect = {percent(selected.productivityPercent)} tracked productivity</p>
+            <p style={{fontSize:12,color:"#68746f",margin:"4px 0 0"}}>{hours(selected.directHours)} direct + {hours(selected.indirectHours)} indirect = {percent(selected.productivityPercent)} tracked productivity</p>
           </div>
           <div className="tech-prod-no-print" style={{display:"flex",gap:8}}>
             <button type="button" style={light} disabled={!report.daily.length} onClick={exportDays}>Export daily CSV</button>
