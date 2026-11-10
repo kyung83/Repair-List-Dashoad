@@ -221,11 +221,15 @@ async function assignmentDetails(db:D1Database, assignmentId:number) {
 }
 
 export async function getCurrentShopDutiesForUser(db:D1Database, user:ShopDutySessionUser, now:Date|number = Date.now()) {
-  const current = await ensureCurrentShopDutyAssignments(db, now);
-  const mine = current.filter((assignment) => Number(assignment.assigned_user_id) === Number(user.id));
+  await ensureCurrentShopDutyAssignments(db, now);
+  const rows = await db.prepare(q(
+    'SELECT id FROM shop_duty_assignments',
+    "WHERE assigned_user_id=? AND status IN ('pending','in_progress')",
+    'ORDER BY due_date,id'
+  )).bind(user.id).all<{id:number}>();
   const duties = [];
-  for (const assignment of mine) {
-    const details = await assignmentDetails(db, Number(assignment.id));
+  for (const row of rows.results) {
+    const details = await assignmentDetails(db, Number(row.id));
     if (details) duties.push(details);
   }
   return duties;
@@ -460,34 +464,85 @@ export async function getShopDutySetupData(db:D1Database, now:Date|number = Date
     selectedByTemplate.set(Number(row.template_id), list);
   }
 
+  const today = dateString(now);
   const templateData = [];
   for (const template of templateRows) {
     const currentSpec = await periodSpec(db, template, now);
-    const current = currentSpec ? await db.prepare(q(
-      'SELECT a.id,a.period_key,a.due_date,a.assigned_user_id,a.status,u.display_name AS assigned_name',
-      'FROM shop_duty_assignments a JOIN app_users u ON u.id=a.assigned_user_id',
-      'WHERE a.template_id=? AND a.period_key=?'
-    )).bind(template.id, currentSpec.periodKey).first<{
-      id:number;period_key:string;due_date:string;assigned_user_id:number;status:string;assigned_name:string;
-    }>() : null;
-    const count = await db.prepare(
-      'SELECT COUNT(*) AS count FROM shop_duty_template_items WHERE template_id=? AND active=1'
-    ).bind(template.id).first<{count:number}>();
+    const current = template.template_key === 'shift-shop-inspection'
+      ? await db.prepare(q(
+          'SELECT a.id,a.period_key,a.due_date,a.assigned_user_id,a.status,u.display_name AS assigned_name',
+          'FROM shop_duty_assignments a JOIN app_users u ON u.id=a.assigned_user_id',
+          'WHERE a.template_id=?',
+          "ORDER BY CASE WHEN a.status IN ('pending','in_progress') THEN 0 ELSE 1 END,a.id DESC LIMIT 1"
+        )).bind(template.id).first<{
+          id:number;period_key:string;due_date:string;assigned_user_id:number;status:string;assigned_name:string;
+        }>()
+      : currentSpec ? await db.prepare(q(
+          'SELECT a.id,a.period_key,a.due_date,a.assigned_user_id,a.status,u.display_name AS assigned_name',
+          'FROM shop_duty_assignments a JOIN app_users u ON u.id=a.assigned_user_id',
+          'WHERE a.template_id=? AND a.period_key=?'
+        )).bind(template.id, currentSpec.periodKey).first<{
+          id:number;period_key:string;due_date:string;assigned_user_id:number;status:string;assigned_name:string;
+        }>() : null;
+    const itemRows = await db.prepare(q(
+      'SELECT id,section_name,item_text,sort_order,required',
+      'FROM shop_duty_template_items WHERE template_id=? AND active=1',
+      'ORDER BY sort_order,id'
+    )).bind(template.id).all<{id:number;section_name:string;item_text:string;sort_order:number;required:number}>();
 
     templateData.push({
       id:Number(template.id), templateKey:template.template_key, name:template.name, description:template.description,
       cadence:template.cadence, assignmentMode:template.assignment_mode, dueDay:template.due_day,
       shiftId:template.shift_id, active:Boolean(template.active), sourceLabel:template.source_label ?? '',
-      itemCount:Number(count?.count ?? 0), selectedUserIds:selectedByTemplate.get(Number(template.id)) ?? [],
+      itemCount:itemRows.results.length, selectedUserIds:selectedByTemplate.get(Number(template.id)) ?? [],
+      items:itemRows.results.map((item)=>({
+        id:Number(item.id), section:item.section_name, text:item.item_text,
+        sortOrder:Number(item.sort_order), required:Boolean(item.required),
+      })),
       currentAssignment:current ? {
         id:Number(current.id), periodKey:current.period_key, dueDate:current.due_date,
         assignedUserId:Number(current.assigned_user_id), assignedName:current.assigned_name, status:current.status,
+        overdue:current.status !== 'completed' && current.status !== 'skipped' && current.due_date < today,
+        dueToday:current.status !== 'completed' && current.status !== 'skipped' && current.due_date === today,
       } : null,
     });
   }
 
+  const overdueRows = await db.prepare(q(
+    'SELECT a.id,a.due_date,a.status,a.assigned_user_id,u.display_name AS assigned_name,',
+    't.id AS template_id,t.template_key,t.name AS template_name',
+    'FROM shop_duty_assignments a',
+    'JOIN app_users u ON u.id=a.assigned_user_id',
+    'JOIN shop_duty_templates t ON t.id=a.template_id',
+    "WHERE a.status IN ('pending','in_progress') AND a.due_date < ?",
+    'ORDER BY a.due_date,a.id'
+  )).bind(today).all<{
+    id:number;due_date:string;status:string;assigned_user_id:number;assigned_name:string;
+    template_id:number;template_key:string;template_name:string;
+  }>();
+
+  const dueTodayRows = await db.prepare(q(
+    'SELECT a.id,a.due_date,a.status,a.assigned_user_id,u.display_name AS assigned_name,',
+    't.id AS template_id,t.template_key,t.name AS template_name',
+    'FROM shop_duty_assignments a',
+    'JOIN app_users u ON u.id=a.assigned_user_id',
+    'JOIN shop_duty_templates t ON t.id=a.template_id',
+    "WHERE a.status IN ('pending','in_progress') AND a.due_date = ?",
+    'ORDER BY a.id'
+  )).bind(today).all<{
+    id:number;due_date:string;status:string;assigned_user_id:number;assigned_name:string;
+    template_id:number;template_key:string;template_name:string;
+  }>();
+
+  const mapAlert=(row:{id:number;due_date:string;status:string;assigned_user_id:number;assigned_name:string;template_id:number;template_key:string;template_name:string})=>({
+    id:Number(row.id), templateId:Number(row.template_id), templateKey:row.template_key, templateName:row.template_name,
+    dueDate:row.due_date, status:row.status, assignedUserId:Number(row.assigned_user_id), assignedName:row.assigned_name,
+  });
+
   return {
     templates:templateData,
+    overdueAssignments:overdueRows.results.map(mapAlert),
+    dueTodayAssignments:dueTodayRows.results.map(mapAlert),
     mechanics:mechanics.results.map((row) => ({
       id:Number(row.id), displayName:row.display_name, role:row.role, technicianId:Number(row.technician_id),
     })),
@@ -569,7 +624,6 @@ export async function assignCurrentShopDuty(
 
   const template = (await getTemplates(db,false)).find((row) => Number(row.id) === templateId);
   if (!template) throw new Error('Shop Duty template was not found.');
-  if (template.template_key !== 'monthly-facility') throw new Error('Manual monthly assignment is only used for the Once-a-Month duty.');
 
   const user = await db.prepare(q(
     'SELECT id,display_name,technician_id FROM app_users',
@@ -578,29 +632,58 @@ export async function assignCurrentShopDuty(
   )).bind(assignedUserId).first<EligibleUser>();
   if (!user) throw new Error('Choose an active working mechanic.');
 
-  const spec = await periodSpec(db,template,Date.now());
-  if (!spec) throw new Error('The current monthly duty period could not be resolved.');
+  const today = dateString(Date.now());
+  let spec:{periodKey:string;dueDate:string}|null = null;
 
-  const existing = await db.prepare(q(
-    'SELECT id,status FROM shop_duty_assignments',
-    'WHERE template_id=? AND period_key=?'
-  )).bind(templateId,spec.periodKey).first<{id:number;status:string}>();
+  if (template.template_key === 'shift-shop-inspection') {
+    const open = await db.prepare(q(
+      'SELECT id,status FROM shop_duty_assignments',
+      "WHERE template_id=? AND status IN ('pending','in_progress')",
+      'ORDER BY id DESC LIMIT 1'
+    )).bind(templateId).first<{id:number;status:string}>();
 
-  if (existing && (existing.status === 'in_progress' || existing.status === 'completed')) {
-    throw new Error('This month\'s duty is already in progress or completed and cannot be reassigned.');
-  }
+    if (open?.status === 'in_progress') {
+      throw new Error('The current Shop Check is already in progress. Complete it before assigning the next one.');
+    }
+    if (open?.status === 'pending') {
+      await db.prepare(q(
+        "UPDATE shop_duty_assignments SET assigned_user_id=?,status='pending',repair_id=NULL,",
+        "supplies_needed='',notes='',started_at=NULL,completed_at=NULL,due_date=?,updated_at=CURRENT_TIMESTAMP",
+        'WHERE id=?'
+      )).bind(assignedUserId,today,open.id).run();
+      return {
+        ok:true, templateId, assignmentId:Number(open.id), assignedUserId,
+        assignedName:user.display_name, dueDate:today, periodKey:'manual-open',
+        updatedByUserId:managerUserId,
+      };
+    }
 
-  if (existing) {
-    await db.prepare(q(
-      "UPDATE shop_duty_assignments SET assigned_user_id=?,status='pending',repair_id=NULL,",
-      "supplies_needed='',notes='',started_at=NULL,completed_at=NULL,updated_at=CURRENT_TIMESTAMP",
-      'WHERE id=?'
-    )).bind(assignedUserId,existing.id).run();
-    return {
-      ok:true, templateId, assignmentId:Number(existing.id), assignedUserId,
-      assignedName:user.display_name, dueDate:spec.dueDate, periodKey:spec.periodKey,
-      updatedByUserId:managerUserId,
-    };
+    spec = { periodKey:'manual:' + today + ':' + crypto.randomUUID(), dueDate:today };
+  } else {
+    spec = await periodSpec(db,template,Date.now());
+    if (!spec) throw new Error('The current duty period could not be resolved.');
+
+    const existing = await db.prepare(q(
+      'SELECT id,status FROM shop_duty_assignments',
+      'WHERE template_id=? AND period_key=?'
+    )).bind(templateId,spec.periodKey).first<{id:number;status:string}>();
+
+    if (existing && (existing.status === 'in_progress' || existing.status === 'completed')) {
+      throw new Error('This duty has already started or been completed and cannot be reassigned.');
+    }
+
+    if (existing) {
+      await db.prepare(q(
+        "UPDATE shop_duty_assignments SET assigned_user_id=?,status='pending',repair_id=NULL,",
+        "supplies_needed='',notes='',started_at=NULL,completed_at=NULL,updated_at=CURRENT_TIMESTAMP",
+        'WHERE id=?'
+      )).bind(assignedUserId,existing.id).run();
+      return {
+        ok:true, templateId, assignmentId:Number(existing.id), assignedUserId,
+        assignedName:user.display_name, dueDate:spec.dueDate, periodKey:spec.periodKey,
+        updatedByUserId:managerUserId,
+      };
+    }
   }
 
   const created = await db.prepare(
@@ -611,4 +694,67 @@ export async function assignCurrentShopDuty(
     assignedName:user.display_name, dueDate:spec.dueDate, periodKey:spec.periodKey,
     updatedByUserId:managerUserId,
   };
+}
+
+export async function saveShopDutyChecklist(
+  db:D1Database,
+  managerUserId:number,
+  body:Record<string,unknown>
+) {
+  const templateId = integer(body.templateId);
+  if (!templateId) throw new Error('Shop Duty template was not found.');
+  const template = await db.prepare('SELECT id,name FROM shop_duty_templates WHERE id=?')
+    .bind(templateId).first<{id:number;name:string}>();
+  if (!template) throw new Error('Shop Duty template was not found.');
+
+  const activeAssignment = await db.prepare(q(
+    'SELECT id FROM shop_duty_assignments',
+    "WHERE template_id=? AND status='in_progress' LIMIT 1"
+  )).bind(templateId).first<{id:number}>();
+  if (activeAssignment) throw new Error('This checklist cannot be edited while a mechanic is actively working it. Finish that duty first.');
+
+  const rawItems = Array.isArray(body.items) ? body.items : [];
+  const items = rawItems.map((raw,index)=>{
+    const row = (raw ?? {}) as Record<string,unknown>;
+    const text = cleanText(row.text,500);
+    if (!text) throw new Error('Every checklist line needs text.');
+    return {
+      id:integer(row.id),
+      section:cleanText(row.section,120) || 'CHECKLIST',
+      text,
+      required:row.required !== false,
+      sortOrder:index+1,
+    };
+  });
+  if (!items.length) throw new Error('Keep at least one checklist line.');
+
+  const existing = await db.prepare(
+    'SELECT id FROM shop_duty_template_items WHERE template_id=? AND active=1'
+  ).bind(templateId).all<{id:number}>();
+  const keep = new Set(items.filter((item)=>item.id>0).map((item)=>item.id));
+
+  for (const row of existing.results) {
+    if (!keep.has(Number(row.id))) {
+      await db.prepare(
+        'UPDATE shop_duty_template_items SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=? AND template_id=?'
+      ).bind(row.id,templateId).run();
+    }
+  }
+
+  for (const item of items) {
+    if (item.id > 0) {
+      const updated = await db.prepare(q(
+        'UPDATE shop_duty_template_items SET section_name=?,item_text=?,sort_order=?,required=?,active=1,updated_at=CURRENT_TIMESTAMP',
+        'WHERE id=? AND template_id=?'
+      )).bind(item.section,item.text,item.sortOrder,item.required?1:0,item.id,templateId).run();
+      if (Number(updated.meta.changes ?? 0) === 0) throw new Error('One checklist line no longer belongs to this duty. Refresh and try again.');
+    } else {
+      await db.prepare(q(
+        'INSERT INTO shop_duty_template_items(template_id,section_name,item_text,sort_order,required,active)',
+        'VALUES(?,?,?,?,?,1)'
+      )).bind(templateId,item.section,item.text,item.sortOrder,item.required?1:0).run();
+    }
+  }
+
+  return {ok:true,templateId,itemCount:items.length,updatedByUserId:managerUserId};
 }
