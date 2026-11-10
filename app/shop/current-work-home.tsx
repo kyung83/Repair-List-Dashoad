@@ -107,14 +107,14 @@ export default function CurrentWorkHome(props:Props){
   </main>;
 }
 
-const page={minHeight:"100vh",background:"#f4f6f8",padding:"18px clamp(10px,2vw,20px) 36px",color:"#13283d"} as const;
+const page={minHeight:"100vh",background:"#f4f6f4",padding:"18px clamp(10px,2vw,20px) 36px",color:"#173f37"} as const;
 const shell={maxWidth:860,margin:"0 auto",display:"grid",gap:12} as const;
 const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
-const unitStrip={display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",padding:"14px 16px",borderRadius:14,background:"white",border:"1px solid #dbe2e8",boxShadow:"0 5px 18px #13283d0b"} as const;
+const unitStrip={display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",padding:"14px 16px",borderRadius:14,background:"white",border:"1px solid #dbe2e8",boxShadow:"0 5px 18px #173f370b"} as const;
 const crumb={display:"block",fontSize:11,fontWeight:900,color:"#617181",letterSpacing:".08em",marginBottom:4} as const;
 const unitLink={display:"block",fontSize:27,fontWeight:950,color:"#102a53",textDecoration:"none"} as const;
 const unitStatus={display:"grid",justifyItems:"end",gap:5,fontSize:12,color:"#5f6f7d"} as const;
-const workingCard={display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",padding:"19px",borderRadius:16,background:"linear-gradient(135deg,#102a43,#0d1b2b)",color:"white",boxShadow:"0 9px 26px #102a432b"} as const;
+const workingCard={display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",padding:"19px",borderRadius:16,background:"linear-gradient(135deg,#173f37,#173f37)",color:"white",boxShadow:"0 9px 26px #173f372b"} as const;
 const workingEyebrow={margin:"0 0 5px",fontSize:12,fontWeight:950,letterSpacing:".15em",color:"#ff8b32"} as const;
 const workingUnit={margin:0,fontSize:30,lineHeight:1.08} as const;
 const workingIssue={marginTop:7,fontSize:18,lineHeight:1.25,fontWeight:750} as const;
@@ -125,13 +125,13 @@ const actionBase={minHeight:122,borderRadius:14,padding:"14px 10px",display:"gri
 const repairedButton={...actionBase,border:0,background:"#19945d",color:"white"} as const;
 const doneButton={...actionBase,border:"1px solid #c8d8e7",background:"#e9f2fb",color:"#102a53"} as const;
 const actionIcon={fontSize:26,lineHeight:1} as const;
-const card={padding:"14px",borderRadius:14,background:"white",border:"1px solid #d8e0e7",boxShadow:"0 4px 15px #13283d09"} as const;
+const card={padding:"14px",borderRadius:14,background:"white",border:"1px solid #d8e0e7",boxShadow:"0 4px 15px #173f3709"} as const;
 const cardTitleRow={display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:9} as const;
 const cardTitle={fontSize:16,color:"#102a53"} as const;
 const countBadge={minWidth:24,height:24,borderRadius:999,display:"grid",placeItems:"center",background:"#edf2f6",fontSize:11,fontWeight:950} as const;
 const repairList={display:"grid",gap:8} as const;
-const repairRow={width:"100%",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:10,padding:"12px",borderRadius:10,border:"1px solid #dce3e8",background:"#fbfcfd",color:"#182331",cursor:"pointer"} as const;
-const repairMeta={marginTop:4,fontSize:11,color:"#667482",fontWeight:800} as const;
+const repairRow={width:"100%",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center",gap:10,padding:"12px",borderRadius:10,border:"1px solid #dce3e8",background:"#fbfcfb",color:"#1b2421",cursor:"pointer"} as const;
+const repairMeta={marginTop:4,fontSize:11,color:"#68746f",fontWeight:800} as const;
 const chevron={fontSize:28,color:"#102a53"} as const;
 const handoffNotice={padding:"12px",border:"1px solid #75a6df",borderRadius:11,background:"#f2f7fd",fontSize:12,color:"#24445f",display:"grid",gap:4} as const;
 const twoCol={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginTop:12} as const;
