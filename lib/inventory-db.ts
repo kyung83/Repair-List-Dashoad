@@ -35,6 +35,7 @@ type WarehouseStockRow = {
 };
 
 type WarehouseRow = { id: number; code: string; name: string };
+type WarehouseCatalogStatusRow = { part_id: number; warehouse_code: string; status: 'active'|'archived'|'removed' };
 type WarehouseMinimumRow = { part_id: number; warehouse_code: string; minimum_quantity: number };
 type EquipmentRow = { id: number; unit: string; category: string; equipment_type: string };
 type PartEquipmentRow = { part_id: number; equipment_id: number; unit: string };
@@ -50,7 +51,7 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
     : status === 'all'
       ? 'WHERE p.deleted_at IS NULL'
       : 'WHERE p.active = 1 AND p.deleted_at IS NULL';
-  const [partsResult, vendorsResult, stockResult, warehousesResult, minimumsResult, equipmentResult, partEquipmentResult] = await Promise.all([
+  const [partsResult, vendorsResult, stockResult, warehousesResult, warehouseStatusesResult, minimumsResult, equipmentResult, partEquipmentResult] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.part_number, p.description, p.quantity_on_hand, p.reorder_level,
              p.unit_cost, p.location, p.preferred_vendor_id, v.name AS vendor_name, p.active
@@ -72,6 +73,12 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
       ORDER BY s.part_id, w.name, s.variant_key
     `).all<WarehouseStockRow>(),
     db.prepare('SELECT id, code, name FROM warehouses WHERE active = 1 ORDER BY name').all<WarehouseRow>(),
+    db.prepare(`
+      SELECT cs.part_id,w.code AS warehouse_code,cs.status
+      FROM part_warehouse_catalog_status cs
+      JOIN warehouses w ON w.id=cs.warehouse_id
+      WHERE w.active=1
+    `).all<WarehouseCatalogStatusRow>(),
     db.prepare(`
       SELECT m.part_id, w.code AS warehouse_code, m.minimum_quantity
       FROM part_warehouse_minimums m
@@ -100,6 +107,13 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
     const list = stockByPart.get(stock.part_id) ?? [];
     list.push(stock);
     stockByPart.set(stock.part_id, list);
+  }
+
+  const warehouseStatusByPart = new Map<number, Record<string,'active'|'archived'|'removed'>>();
+  for (const row of warehouseStatusesResult.results) {
+    const statuses = warehouseStatusByPart.get(row.part_id) ?? {};
+    statuses[row.warehouse_code] = row.status;
+    warehouseStatusByPart.set(row.part_id,statuses);
   }
 
   const minimumByPartWarehouse = new Map<string, number>();
@@ -155,6 +169,7 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
       compatibleEquipment,
       compatibleEquipmentIds: compatibleEquipment.map((item) => item.id),
       crossReferences: crossReferencesByPart.get(row.id) ?? [],
+      warehouseStatuses: warehouseStatusByPart.get(row.id) ?? {},
       lowStock: quantityOnHand <= Number(row.reorder_level),
     };
   });
