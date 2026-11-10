@@ -88,11 +88,11 @@ export default function InventoryControlsPage(){
   const sourceStocks=(selected?.warehouseStocks??[]).filter(stock=>Number(stock.available??stock.quantityOnHand)>0);
   const otherWarehouses=(data?.warehouses??[]).filter(warehouse=>warehouse.code!==source&&warehouse.code!=="NO_WAREHOUSE");
 
-  return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"38px 34px 100px",color:"#182331"}}>
+  return <main style={{minHeight:"100vh",background:"#f4f6f4",padding:"38px 34px 100px",color:"#1b2421"}}>
     <ModuleTabs module="parts"/>
     <header>
       <p style={eyebrow}>PARTS OPERATIONS</p>
-      <h1 style={{margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"}}>Transfers & Cross References</h1>
+      <h1 style={{margin:"7px 0 5px",fontSize:34,color:"#173f37"}}>Transfers & Cross References</h1>
       <p style={muted}>One place to tie interchange numbers to your stocked part and move inventory to another terminal, outside, or out of inventory.</p>
     </header>
     {message&&<div style={notice}>{message}</div>}
@@ -159,23 +159,23 @@ export default function InventoryControlsPage(){
   </main>
 }
 
-const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
-const title={margin:"5px 0 7px",fontSize:22,color:"#0d1b2b"} as const;
-const muted={margin:"3px 0 12px",color:"#667482",fontSize:12} as const;
-const panel={marginTop:18,padding:18,border:"1px solid #dce2e7",borderRadius:13,background:"white"} as const;
+const eyebrow={margin:0,color:"#2f6f60",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
+const title={margin:"5px 0 7px",fontSize:22,color:"#173f37"} as const;
+const muted={margin:"3px 0 12px",color:"#68746f",fontSize:12} as const;
+const panel={marginTop:18,padding:18,border:"1px solid #d7ded9",borderRadius:13,background:"white"} as const;
 const panelHead={display:"flex",justifyContent:"space-between",gap:12,alignItems:"end",flexWrap:"wrap" as const} as const;
 const notice={marginTop:16,padding:12,border:"1px solid #efc16c",borderRadius:9,background:"#fff8e6",fontWeight:750} as const;
-const search={width:"100%",boxSizing:"border-box" as const,padding:"12px 13px",border:"1px solid #cbd5dd",borderRadius:9,fontSize:15} as const;
+const search={width:"100%",boxSizing:"border-box" as const,padding:"12px 13px",border:"1px solid #c9d4cf",borderRadius:9,fontSize:15} as const;
 const results={display:"grid",gap:7,marginTop:10,maxHeight:360,overflowY:"auto" as const} as const;
-const resultButton={display:"flex",justifyContent:"space-between",gap:14,textAlign:"left" as const,padding:"10px 11px",border:"1px solid #dce2e7",borderRadius:9,background:"#fbfcfd",cursor:"pointer"} as const;
-const small={display:"block",marginTop:3,fontSize:10,color:"#6c7886",fontWeight:600} as const;
-const pill={padding:"6px 10px",borderRadius:999,background:"#eaf2f8",color:"#173a5d",fontSize:12,fontWeight:950} as const;
+const resultButton={display:"flex",justifyContent:"space-between",gap:14,textAlign:"left" as const,padding:"10px 11px",border:"1px solid #d7ded9",borderRadius:9,background:"#fbfcfb",cursor:"pointer"} as const;
+const small={display:"block",marginTop:3,fontSize:10,color:"#68746f",fontWeight:600} as const;
+const pill={padding:"6px 10px",borderRadius:999,background:"#eaf2f8",color:"#2f6f60",fontSize:12,fontWeight:950} as const;
 const twoCol={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(330px,1fr))",gap:16} as const;
-const textarea={width:"100%",boxSizing:"border-box" as const,padding:11,border:"1px solid #cbd5dd",borderRadius:9,resize:"vertical" as const,fontSize:14} as const;
-const input={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #cbd5dd",borderRadius:8,background:"white"} as const;
+const textarea={width:"100%",boxSizing:"border-box" as const,padding:11,border:"1px solid #c9d4cf",borderRadius:9,resize:"vertical" as const,fontSize:14} as const;
+const input={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #c9d4cf",borderRadius:8,background:"white"} as const;
 const label={display:"grid",gap:5,fontSize:11,fontWeight:900,color:"#52616d"} as const;
-const darkButton={marginTop:10,border:0,borderRadius:8,padding:"11px 13px",background:"#0d1b2b",color:"white",fontWeight:950,cursor:"pointer"} as const;
-const orangeButton={...darkButton,marginTop:0,background:"#f47b20"} as const;
+const darkButton={marginTop:10,border:0,borderRadius:8,padding:"11px 13px",background:"#173f37",color:"white",fontWeight:950,cursor:"pointer"} as const;
+const orangeButton={...darkButton,marginTop:0,background:"#2f6f60"} as const;
 const empty={padding:20,textAlign:"center" as const,color:"#71808e",border:"1px dashed #d2d9df",borderRadius:9} as const;
-const historyRow={display:"grid",gridTemplateColumns:"minmax(180px,1.3fr) minmax(170px,1fr) minmax(220px,1.5fr) minmax(150px,.8fr)",gap:12,alignItems:"center",padding:"10px 11px",border:"1px solid #e5e9ed",borderRadius:9,background:"#fbfcfd"} as const;
+const historyRow={display:"grid",gridTemplateColumns:"minmax(180px,1.3fr) minmax(170px,1fr) minmax(220px,1.5fr) minmax(150px,.8fr)",gap:12,alignItems:"center",padding:"10px 11px",border:"1px solid #e5e9ed",borderRadius:9,background:"#fbfcfb"} as const;
 const kindPill={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#edf2f6",fontSize:10,fontWeight:950} as const;
