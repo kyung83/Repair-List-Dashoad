@@ -7,6 +7,8 @@ type Work = { id:string; source:string; unit:string; issue:string; status:string
 type Equipment = { id:number; unit:string; equipmentType:string; driver:string; location:string };
 type Oos = { equipmentId:number; unit:string; reason:string; since:string|null; openWork:{id:string;issue:string;status:string}[] };
 type Board = { user:User; repairs:Work[]; equipment:Equipment[]; oosUnits:Oos[]; summary:{total:number;oos:number;dvirOpen:number;maintenanceDue:number;unassigned:number;activeLabor:number}; updatedAt:string };
+type DutyAlert = { id:number; templateName:string; dueDate:string; status:string; assignedName:string };
+type DutySetup = { overdueAssignments?:DutyAlert[]; dueTodayAssignments?:DutyAlert[] };
 
 function maintenance(source:string){return ['pm','annual','pm-repair','annual-repair'].includes(source);}
 function workIsRepair(source:string){return ['repair','dvir','dvir-repair'].includes(source);}
@@ -15,12 +17,25 @@ export default function TodayPage(){
   const [data,setData]=useState<Board|null>(null);
   const [message,setMessage]=useState("");
   const [unit,setUnit]=useState("");
+  const [dutyAlerts,setDutyAlerts]=useState<DutySetup>({overdueAssignments:[],dueTodayAssignments:[]});
 
   async function load(){
     const response=await fetch('/api/repair-board',{cache:'no-store'});
     const payload=await response.json() as Board&{error?:string};
     if(!response.ok)throw new Error(payload.error||'Today could not be loaded.');
     setData(payload);
+    if(payload.user.role==='manager'||payload.user.role==='admin'){
+      try{
+        const dutyResponse=await fetch('/api/shop-duties/setup',{cache:'no-store'});
+        if(dutyResponse.ok){
+          const dutyPayload=await dutyResponse.json() as DutySetup;
+          setDutyAlerts({
+            overdueAssignments:dutyPayload.overdueAssignments??[],
+            dueTodayAssignments:dutyPayload.dueTodayAssignments??[],
+          });
+        }
+      }catch{}
+    }
   }
   useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:'Today could not be loaded.'));},[]);
 
@@ -33,8 +48,10 @@ export default function TodayPage(){
       stale:rows.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('stale')).length,
       unassigned:rows.filter(row=>row.technicianId===null).length,
       active:rows.filter(row=>row.activeTimer!==null).length,
+      dutyOverdue:dutyAlerts.overdueAssignments?.length??0,
+      dutyDueToday:dutyAlerts.dueTodayAssignments?.length??0,
     };
-  },[data]);
+  },[data,dutyAlerts]);
 
   const attention=useMemo(()=>{
     if(!data)return [] as {key:string;unit:string;title:string;detail:string;tone:'red'|'orange'}[];
@@ -76,7 +93,19 @@ export default function TodayPage(){
       <a className="easy-card easy-metric" href="/repair-board"><span>PM / Annual attention</span><strong>{counts.maintenance}</strong><small>{counts.overdue?`${counts.overdue} overdue`:counts.stale?`${counts.stale} mileage stale`:'No overdue maintenance'}</small></a>
       <a className="easy-card easy-metric" href="/repair-board"><span>Out of service</span><strong>{data?.oosUnits.length??0}</strong><small>Units that should not be dispatched</small></a>
       <a className="easy-card easy-metric" href="/repair-board"><span>Being worked now</span><strong>{counts.active}</strong><small>{counts.unassigned} open items still unassigned</small></a>
+      <a className="easy-card easy-metric" href="/shop-duties"><span>Shop duties overdue</span><strong>{counts.dutyOverdue}</strong><small>{counts.dutyOverdue ? counts.dutyOverdue+" overdue" : counts.dutyDueToday ? counts.dutyDueToday+" due today" : "No missed shop duties"}</small></a>
     </section>
+
+    {!!dutyAlerts.overdueAssignments?.length&&<section className="easy-card easy-card-body" style={{marginTop:16,border:"2px solid #d9665d",background:"#fff0ef"}}>
+      <h2 className="easy-section-title" style={{color:"#982d25"}}>Shop duties overdue</h2>
+      <p className="easy-section-copy">These stay here until the mechanic completes them.</p>
+      <div className="easy-list">
+        {dutyAlerts.overdueAssignments.map(item=><a key={item.id} className="easy-row" href="/shop-duties" style={{textDecoration:"none"}}>
+          <div className="easy-row-main"><strong>{item.templateName} — {item.assignedName}</strong><span>Due {item.dueDate}. Open Shop Duties to review or manage it.</span></div>
+          <span className="easy-badge red">OVERDUE</span>
+        </a>)}
+      </div>
+    </section>}
 
     <section className="easy-finder">
       <label>Find a truck or trailer
