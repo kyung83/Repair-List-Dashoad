@@ -130,9 +130,9 @@ type ReportingData = {
 
 type User = { role: "viewer" | "mechanic" | "manager" | "admin" };
 
-const panel = { background: "white", border: "1px solid #dce2e7", borderRadius: 14, padding: 18 } as const;
+const panel = { background: "white", border: "1px solid #d7ded9", borderRadius: 14, padding: 18 } as const;
 const inputStyle = { padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white" } as const;
-const buttonStyle = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#0d1b2b", color: "white", fontWeight: 850, cursor: "pointer" } as const;
+const buttonStyle = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#173f37", color: "white", fontWeight: 850, cursor: "pointer" } as const;
 
 function money(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "—";
@@ -177,7 +177,7 @@ function Section({ title, subtitle, action, children }: { title: string; subtitl
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 21 }}>{title}</h2>
-          {subtitle && <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>{subtitle}</p>}
+          {subtitle && <p style={{ margin: "5px 0 0", color: "#68746f", fontSize: 13 }}>{subtitle}</p>}
         </div>
         {action}
       </div>
@@ -188,7 +188,7 @@ function Section({ title, subtitle, action, children }: { title: string; subtitl
 
 function TableWrap({ children, maxHeight = 420 }: { children: React.ReactNode; maxHeight?: number }) {
   return (
-    <div role="region" aria-label="Scrollable report table" tabIndex={0} style={{ maxHeight, overflow: "auto", overscrollBehavior: "contain", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+    <div role="region" aria-label="Scrollable report table" tabIndex={0} style={{ maxHeight, overflow: "auto", overscrollBehavior: "contain", border: "1px solid #dce3df", borderRadius: 8 }}>
       {children}
     </div>
   );
@@ -337,15 +337,15 @@ export default function ReportsPage() {
         <th
           key={key}
           aria-sort={selected ? (active.direction === "asc" ? "ascending" : "descending") : "none"}
-          style={{ position: "sticky", top: 0, zIndex: 2, background: "white", textAlign: "left", padding, borderBottom: "1px solid #dce2e7", fontSize: 12, whiteSpace: "nowrap" }}
+          style={{ position: "sticky", top: 0, zIndex: 2, background: "white", textAlign: "left", padding, borderBottom: "1px solid #d7ded9", fontSize: 12, whiteSpace: "nowrap" }}
         >
           <button
             type="button"
             title={`Sort by ${title}`}
             onClick={() => toggleSort(tableId, key)}
-            style={{ border: 0, background: "transparent", color: "#172033", font: "inherit", fontWeight: 850, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, padding: 0, whiteSpace: "nowrap" }}
+            style={{ border: 0, background: "transparent", color: "#1b2421", font: "inherit", fontWeight: 850, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, padding: 0, whiteSpace: "nowrap" }}
           >
-            {title} <span aria-hidden="true" style={{ color: selected ? "#6d28d9" : "#64748b" }}>{selected ? (active.direction === "asc" ? "↑" : "↓") : "↕"}</span>
+            {title} <span aria-hidden="true" style={{ color: selected ? "#6d28d9" : "#68746f" }}>{selected ? (active.direction === "asc" ? "↑" : "↓") : "↕"}</span>
           </button>
         </th>
       );
@@ -354,17 +354,17 @@ export default function ReportsPage() {
 
   const maxCategoryCost = Math.max(1, ...(data?.categoryCosts ?? []).map((item) => item.totalCost));
 
-  if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading reports…</main>;
-  if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>{message || "Reports are unavailable."}</main>;
+  if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f4f6f4" }}>Loading reports…</main>;
+  if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f4f6f4" }}>{message || "Reports are unavailable."}</main>;
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "34px 34px 110px" }}>
+    <main style={{ minHeight: "100vh", background: "#f4f6f4", color: "#1b2421", padding: "34px 34px 110px" }}>
       <ModuleTabs module="reports" />
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 18, flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#6d28d9", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>FLEET INTELLIGENCE</p>
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Reporting & Cost Analysis</h1>
-          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 820 }}>Repair history, parts and labor cost, unit-by-unit yearly and lifetime cost, ownership expenses, PM/annual history, common failures, technician workload, and CSV exports.</p>
+          <p style={{ margin: "8px 0 0", color: "#68746f", maxWidth: 820 }}>Repair history, parts and labor cost, unit-by-unit yearly and lifetime cost, ownership expenses, PM/annual history, common failures, technician workload, and CSV exports.</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {canEdit && <a href="/reports/technician-productivity" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Technician Productivity</a>}
@@ -392,7 +392,7 @@ export default function ReportsPage() {
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Unit, repair, technician…" style={inputStyle} />
         </label>
       </section>
-      <p style={{ margin: "9px 0 0", color: "#64748b", fontSize: 12 }}>Scroll inside report tables to see more rows. Column headings stay visible. Select a heading to sort, then select it again to reverse the order.</p>
+      <p style={{ margin: "9px 0 0", color: "#68746f", fontSize: 12 }}>Scroll inside report tables to see more rows. Column headings stay visible. Select a heading to sort, then select it again to reverse the order.</p>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 12 }}>
         {[
@@ -406,19 +406,19 @@ export default function ReportsPage() {
           ["LIFETIME RECORDED", money(data.summary.fleetLifetimeOwnershipCost), "Purchase + recorded operating cost"],
         ].map(([label, value, note]) => (
           <article key={label} style={panel}>
-            <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: ".11em", color: "#64748b" }}>{label}</span>
+            <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: ".11em", color: "#68746f" }}>{label}</span>
             <strong style={{ display: "block", marginTop: 8, fontSize: 23 }}>{value}</strong>
-            <small style={{ color: "#64748b" }}>{note}</small>
+            <small style={{ color: "#68746f" }}>{note}</small>
           </article>
         ))}
       </section>
 
       <Section title="Data coverage" subtitle="These indicators show which costs are real historical entries and which categories still need data.">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-          <div><strong>{pct(data.dataQuality.unitsWithPurchasePrice, data.dataQuality.totalUnits)}%</strong><div style={{ color: "#64748b" }}>units with purchase price ({data.dataQuality.unitsWithPurchasePrice}/{data.dataQuality.totalUnits})</div></div>
-          <div><strong>{pct(data.dataQuality.repairsWithLaborEntry, data.dataQuality.totalRepairs)}%</strong><div style={{ color: "#64748b" }}>repairs with labor entered ({data.dataQuality.repairsWithLaborEntry}/{data.dataQuality.totalRepairs})</div></div>
-          <div><strong>{pct(data.dataQuality.snapshotPartLines, data.dataQuality.totalPartLines)}%</strong><div style={{ color: "#64748b" }}>part lines with historical cost snapshot</div></div>
-          <div><strong>{data.dataQuality.ownershipExpenseEntries}</strong><div style={{ color: "#64748b" }}>ownership expense ledger entries</div></div>
+          <div><strong>{pct(data.dataQuality.unitsWithPurchasePrice, data.dataQuality.totalUnits)}%</strong><div style={{ color: "#68746f" }}>units with purchase price ({data.dataQuality.unitsWithPurchasePrice}/{data.dataQuality.totalUnits})</div></div>
+          <div><strong>{pct(data.dataQuality.repairsWithLaborEntry, data.dataQuality.totalRepairs)}%</strong><div style={{ color: "#68746f" }}>repairs with labor entered ({data.dataQuality.repairsWithLaborEntry}/{data.dataQuality.totalRepairs})</div></div>
+          <div><strong>{pct(data.dataQuality.snapshotPartLines, data.dataQuality.totalPartLines)}%</strong><div style={{ color: "#68746f" }}>part lines with historical cost snapshot</div></div>
+          <div><strong>{data.dataQuality.ownershipExpenseEntries}</strong><div style={{ color: "#68746f" }}>ownership expense ledger entries</div></div>
         </div>
       </Section>
 
@@ -454,18 +454,18 @@ export default function ReportsPage() {
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(380px,1fr))", gap: 18 }}>
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Cost by Category — {data.selectedYear}</h2>
-          <p style={{ color: "#64748b", fontSize: 13 }}>Compare tractors, shuttle trucks, trailers and the rest of the fleet.</p>
+          <p style={{ color: "#68746f", fontSize: 13 }}>Compare tractors, shuttle trucks, trailers and the rest of the fleet.</p>
           <div style={{ display: "grid", gap: 12 }}>
             {data.categoryCosts.map((item) => <div key={item.category}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}><strong>{item.category}</strong><span>{money(item.totalCost)}</span></div>
               <div style={{ height: 9, background: "#eef2f5", borderRadius: 999, overflow: "hidden", marginTop: 5 }}><div style={{ width: `${Math.max(2, (item.totalCost / maxCategoryCost) * 100)}%`, height: "100%", background: "#6d28d9" }} /></div>
-              <small style={{ color: "#64748b" }}>{item.units} units · repairs {money(item.repairCost)} · other {money(item.expenseCost)}</small>
+              <small style={{ color: "#68746f" }}>{item.units} units · repairs {money(item.repairCost)} · other {money(item.expenseCost)}</small>
             </div>)}
           </div>
         </div>
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Year-over-Year Fleet Cost</h2>
-          <p style={{ color: "#64748b", fontSize: 13 }}>Recorded repair and ownership spending by calendar year.</p>
+          <p style={{ color: "#68746f", fontSize: 13 }}>Recorded repair and ownership spending by calendar year.</p>
           <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("yearly", [["Year","year"],["Repairs","repairCount"],["Repair cost","repairCost"],["Other expenses","expenseCost"],["Purchases","purchaseCost"],["Total","totalCost"]], 8)}</tr></thead><tbody>{sortRows([...data.yearlyTrend].reverse(), "yearly").map((item) => <tr key={item.year}><td style={{ padding: 8 }}>{item.year}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{money(item.repairCost)}</td><td style={{ padding: 8 }}>{money(item.expenseCost)}</td><td style={{ padding: 8 }}>{money(item.purchaseCost)}</td><td style={{ padding: 8, fontWeight: 800 }}>{money(item.totalCost)}</td></tr>)}</tbody></table></TableWrap>
         </div>
       </section>
@@ -485,7 +485,7 @@ export default function ReportsPage() {
         </div>
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Common Repairs / Failure Analysis</h2>
-          <p style={{ color: "#64748b", fontSize: 13 }}>Which repair descriptions occur most often and cost the most in {data.selectedYear}.</p>
+          <p style={{ color: "#68746f", fontSize: 13 }}>Which repair descriptions occur most often and cost the most in {data.selectedYear}.</p>
           <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("issues", [["Repair / issue","issue"],["Count","repairCount"],["Units","unitCount"],["Total cost","totalCost"],["Avg cost","averageCost"]], 8)}</tr></thead><tbody>{sortRows(data.issueAnalysis, "issues").slice(0, 75).map((item) => <tr key={item.issue}><td style={{ padding: 8 }}>{item.issue}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{item.unitCount}</td><td style={{ padding: 8 }}>{money(item.totalCost)}</td><td style={{ padding: 8 }}>{money(item.averageCost)}</td></tr>)}</tbody></table></TableWrap>
         </div>
       </section>
@@ -493,7 +493,7 @@ export default function ReportsPage() {
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))", gap: 18 }}>
         <div style={panel}>
           <h2 style={{ margin: 0, fontSize: 21 }}>Technician / Workload Report</h2>
-          <p style={{ color: "#64748b", fontSize: 13 }}>Repair counts, completed work and average repair-cycle time.</p>
+          <p style={{ color: "#68746f", fontSize: 13 }}>Repair counts, completed work and average repair-cycle time.</p>
           <TableWrap><table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr>{sortHeads("technicians", [["Technician","technician"],["Repairs","repairCount"],["Completed","completedCount"],["Repair cost","totalCost"],["Avg cycle hrs","averageRepairCycleHours"]], 8)}</tr></thead><tbody>{sortRows(data.technicianAnalysis, "technicians").map((item) => <tr key={item.technician}><td style={{ padding: 8 }}>{item.technician}</td><td style={{ padding: 8 }}>{item.repairCount}</td><td style={{ padding: 8 }}>{item.completedCount}</td><td style={{ padding: 8 }}>{money(item.totalCost)}</td><td style={{ padding: 8 }}>{num(item.averageRepairCycleHours, 1)}</td></tr>)}</tbody></table></TableWrap>
         </div>
         <div style={panel}>
@@ -513,9 +513,9 @@ export default function ReportsPage() {
       {canEdit && (
         <Section title="Cost Data Entry" subtitle="Managers/admins can fill missing financial information here. These entries immediately feed the reports above.">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))", gap: 16 }}>
-            <form style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); if (!selectedUnit) return setMessage("Choose a unit first."); void post({ action: "saveUnitFinancials", equipmentId: selectedUnit.equipmentId, ...financial }, `Ownership information saved for ${selectedUnit.unit}.`); }}>
+            <form style={{ border: "1px solid #dce3df", borderRadius: 12, padding: 14, display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); if (!selectedUnit) return setMessage("Choose a unit first."); void post({ action: "saveUnitFinancials", equipmentId: selectedUnit.equipmentId, ...financial }, `Ownership information saved for ${selectedUnit.unit}.`); }}>
               <strong>Unit ownership information</strong>
-              <small style={{ color: "#64748b" }}>Choose a specific unit in the filter above, then enter purchase and mileage baseline information.</small>
+              <small style={{ color: "#68746f" }}>Choose a specific unit in the filter above, then enter purchase and mileage baseline information.</small>
               <input type="date" aria-label="Purchase date" value={financial.purchaseDate} onChange={(event) => setFinancial({ ...financial, purchaseDate: event.target.value })} style={inputStyle} disabled={!selectedUnit} />
               <input type="number" min="0" step="0.01" placeholder="Purchase price" value={financial.purchasePrice} onChange={(event) => setFinancial({ ...financial, purchasePrice: event.target.value })} style={inputStyle} disabled={!selectedUnit} />
               <input type="date" aria-label="In-service date" value={financial.inServiceDate} onChange={(event) => setFinancial({ ...financial, inServiceDate: event.target.value })} style={inputStyle} disabled={!selectedUnit} />
@@ -525,9 +525,9 @@ export default function ReportsPage() {
               <button style={buttonStyle} disabled={!selectedUnit || saving}>{saving ? "Saving…" : "Save unit financials"}</button>
             </form>
 
-            <form style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); if (!selectedUnit) return setMessage("Choose a unit first."); void post({ action: "addExpense", equipmentId: selectedUnit.equipmentId, ...expense }, `Expense added to ${selectedUnit.unit}.`); }}>
+            <form style={{ border: "1px solid #dce3df", borderRadius: 12, padding: 14, display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); if (!selectedUnit) return setMessage("Choose a unit first."); void post({ action: "addExpense", equipmentId: selectedUnit.equipmentId, ...expense }, `Expense added to ${selectedUnit.unit}.`); }}>
               <strong>Add ownership / operating expense</strong>
-              <small style={{ color: "#64748b" }}>For costs that are not already captured by repair parts, labor or outside repair charge.</small>
+              <small style={{ color: "#68746f" }}>For costs that are not already captured by repair parts, labor or outside repair charge.</small>
               <input type="date" value={expense.expenseDate} onChange={(event) => setExpense({ ...expense, expenseDate: event.target.value })} style={inputStyle} disabled={!selectedUnit} />
               <select value={expense.category} onChange={(event) => setExpense({ ...expense, category: event.target.value })} style={inputStyle} disabled={!selectedUnit}>{data.expenseCategories.map((item) => <option key={item}>{item}</option>)}</select>
               <input type="number" min="0.01" step="0.01" placeholder="Amount" value={expense.amount} onChange={(event) => setExpense({ ...expense, amount: event.target.value })} style={inputStyle} disabled={!selectedUnit} />
@@ -536,7 +536,7 @@ export default function ReportsPage() {
               <button style={buttonStyle} disabled={!selectedUnit || saving}>{saving ? "Saving…" : "Add expense"}</button>
             </form>
 
-            <form style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); if (!selectedRepair) return setMessage("Choose a repair first."); void post({ action: "saveRepairCost", repairId: selectedRepair.id, ...repairCost }, `Labor / outside cost saved for repair ${selectedRepair.id}.`); }}>
+            <form style={{ border: "1px solid #dce3df", borderRadius: 12, padding: 14, display: "grid", gap: 10 }} onSubmit={(event) => { event.preventDefault(); if (!selectedRepair) return setMessage("Choose a repair first."); void post({ action: "saveRepairCost", repairId: selectedRepair.id, ...repairCost }, `Labor / outside cost saved for repair ${selectedRepair.id}.`); }}>
               <strong>Add labor / outside cost to repair</strong>
               <select value={repairId} onChange={(event) => setRepairId(event.target.value)} style={inputStyle}>
                 <option value="">Choose repair</option>
@@ -551,7 +551,7 @@ export default function ReportsPage() {
         </Section>
       )}
 
-      <div style={{ marginTop: 18, color: "#64748b", fontSize: 12 }}>
+      <div style={{ marginTop: 18, color: "#68746f", fontSize: 12 }}>
         Lifetime ownership cost = recorded purchase price + repair cost + ownership expense ledger. Net lifecycle subtracts the expected residual value. Fuel/insurance/lease/etc. are only included after they are entered or imported into the expense ledger.
       </div>
     </main>
