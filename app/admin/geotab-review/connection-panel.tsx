@@ -97,7 +97,7 @@ export default function GeotabConnectionPanel(){
   const tone=connected?'#b9d9c3':'#e5b765';
   const background=connected?'#f4fbf6':'#fff9ed';
 
-  return <section style={{background:'#f3f5f7',padding:'0 clamp(16px,4vw,46px) 16px',color:'#182331'}}>
+  return <section style={{background:'#f4f6f4',padding:'0 clamp(16px,4vw,46px) 16px',color:'#1b2421'}}>
     <div style={{background,border:`2px solid ${tone}`,borderRadius:14,padding:18,boxShadow:'0 3px 14px rgba(15,32,48,.05)'}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:15,alignItems:'flex-start',flexWrap:'wrap'}}>
         <div style={{maxWidth:900}}>
@@ -143,13 +143,13 @@ export default function GeotabConnectionPanel(){
 }
 
 const copy:CSSProperties={margin:'7px 0 0',color:'#586979',lineHeight:1.55,fontSize:14};
-const smallCopy:CSSProperties={margin:'7px 0 12px',color:'#657482',lineHeight:1.5,fontSize:12};
-const infoCard:CSSProperties={padding:14,border:'1px solid #dce2e7',borderRadius:10,background:'white'};
-const formCard:CSSProperties={padding:14,border:'1px solid #dce2e7',borderRadius:10,background:'white',display:'grid',gap:11};
+const smallCopy:CSSProperties={margin:'7px 0 12px',color:'#68746f',lineHeight:1.5,fontSize:12};
+const infoCard:CSSProperties={padding:14,border:'1px solid #d7ded9',borderRadius:10,background:'white'};
+const formCard:CSSProperties={padding:14,border:'1px solid #d7ded9',borderRadius:10,background:'white',display:'grid',gap:11};
 const label:CSSProperties={display:'grid',gap:5,color:'#485b6b',fontSize:11,fontWeight:900};
-const input:CSSProperties={minHeight:42,padding:'0 10px',border:'1px solid #cbd5dd',borderRadius:8,background:'white',color:'#172536',fontSize:13};
+const input:CSSProperties={minHeight:42,padding:'0 10px',border:'1px solid #c9d4cf',borderRadius:8,background:'white',color:'#1b2421',fontSize:13};
 const notice:CSSProperties={marginTop:12,padding:'10px 11px',border:'1px solid #d8c17b',borderRadius:8,background:'#fffdf2',fontSize:13};
 const errorBox:CSSProperties={marginTop:12,padding:'10px 11px',border:'1px solid #e1b45d',borderRadius:8,background:'#fff4dd',color:'#715116',fontSize:12,lineHeight:1.45};
 const linkButton:CSSProperties={display:'inline-flex',alignItems:'center',minHeight:36,padding:'0 10px',border:'1px solid #ccd5dd',borderRadius:8,color:'#17324a',textDecoration:'none',fontWeight:850,fontSize:12};
-const primaryButton:CSSProperties={border:0,borderRadius:7,padding:'8px 11px',background:'#0d1b2b',color:'white',fontWeight:900};
+const primaryButton:CSSProperties={border:0,borderRadius:7,padding:'8px 11px',background:'#173f37',color:'white',fontWeight:900};
 const dangerButton:CSSProperties={border:'1px solid #d8a19d',borderRadius:7,padding:'8px 11px',background:'#fff5f4',color:'#9b2c25',fontWeight:850};
