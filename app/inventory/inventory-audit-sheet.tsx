@@ -69,18 +69,18 @@ export default function InventoryAuditSheet({ snapshot }: { snapshot: InventoryA
   return <section className="inventory-audit-sheet" aria-label="Parts inventory audit sheet">
     <style>{auditCss}</style>
     {groups.map((group) => <section className="inventory-audit-warehouse" key={group.code}>
+      <div className="inventory-audit-first-page-header">
+        <div className="inventory-audit-title"><div><strong>NORTHERN LOGISTICS</strong><h1>Parts Inventory Audit</h1></div><div><h2>{group.name}</h2><span>{group.rows.length} count lines</span></div></div>
+        <div className="inventory-audit-meta"><span><b>Inventory as of:</b> {timestamp}</span><span><b>Scope:</b> {snapshot.warehouseName} · {snapshot.parts.length} parts · {totalRows} count lines</span></div>
+        <p className="inventory-audit-filters"><b>{filtered ? "FILTERED AUDIT" : "FULL ACTIVE INVENTORY"}</b> · {snapshot.stockFilter}{snapshot.query ? ` · Search: “${snapshot.query}”` : ""} · Sort: {snapshot.sort}</p>
+        <div className="inventory-audit-counted"><span>Counted by: ___________________________________</span><span>Count date / time: ______________________________</span></div>
+        <p className="inventory-audit-instructions">System qty is physical stock on hand, including reserved parts. Count in the listed unit. Difference = counted qty − system qty.</p>
+        <p className="inventory-audit-instructions">Count all listed bins for each part and enter one combined quantity.</p>
+        {!group.code && <p className="inventory-audit-instructions"><b>Warehouse assignment needed:</b> Confirm where these parts are stored before applying a physical count.</p>}
+      </div>
       <table>
         <colgroup>{[4, 13, 24, 6, 8, 11, 10, 8, 16].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
         <thead>
-          <tr><td colSpan={9} className="inventory-audit-heading">
-            <div className="inventory-audit-title"><div><strong>NORTHERN LOGISTICS</strong><h1>Parts Inventory Audit</h1></div><div><h2>{group.name}</h2><span>{group.rows.length} count lines</span></div></div>
-            <div className="inventory-audit-meta"><span><b>Inventory as of:</b> {timestamp}</span><span><b>Scope:</b> {snapshot.warehouseName} · {snapshot.parts.length} parts · {totalRows} count lines</span></div>
-            <p className="inventory-audit-filters"><b>{filtered ? "FILTERED AUDIT" : "FULL ACTIVE INVENTORY"}</b> · {snapshot.stockFilter}{snapshot.query ? ` · Search: “${snapshot.query}”` : ""} · Sort: {snapshot.sort}</p>
-            <div className="inventory-audit-counted"><span>Counted by: ___________________________________</span><span>Count date / time: ______________________________</span></div>
-            <p className="inventory-audit-instructions">System qty is physical stock on hand, including reserved parts. Count in the listed unit. Difference = counted qty − system qty.</p>
-            <p className="inventory-audit-instructions">Count all listed bins for each part and enter one combined quantity.</p>
-            {!group.code && <p className="inventory-audit-instructions"><b>Warehouse assignment needed:</b> Confirm where these parts are stored before applying a physical count.</p>}
-          </td></tr>
           <tr>{["Line", "Part #", "Description", "Unit", "System qty", "Bin location", "Counted qty", "Difference +/−", "Notes"].map((label) => <th key={label} scope="col">{label}</th>)}</tr>
         </thead>
         <tbody>{group.rows.map((row, index) => <tr key={`${row.partId}:${index}`}>
@@ -121,7 +121,7 @@ const auditCss = `
   .inventory-audit-sheet th, .inventory-audit-sheet td { border: 1px solid #777; padding: 2px 2px; overflow-wrap: anywhere; vertical-align: middle; color: #111; }
   .inventory-audit-sheet th { font-size: 7pt; text-align: left; white-space: normal; text-transform: none; letter-spacing: normal; background: #eee !important; color: #111 !important; }
   .inventory-audit-sheet tbody td { height: .19in; }
-  .inventory-audit-sheet .inventory-audit-heading { border: 0; padding: 0 0 6px; }
+  .inventory-audit-first-page-header { margin: 0 0 6px; }
   .inventory-audit-title { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
   .inventory-audit-title strong { font-size: 9pt; letter-spacing: .08em; }
   .inventory-audit-title h1 { margin: 2px 0 4px; font-size: 14pt; line-height: 1.15; white-space: nowrap; }
