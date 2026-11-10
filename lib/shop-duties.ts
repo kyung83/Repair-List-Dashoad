@@ -143,6 +143,9 @@ async function ensureAssignment(db:D1Database, template:DutyTemplateRow, now:Dat
   }>();
   if (existing) return existing;
 
+  // Monthly facility work is intentionally assigned by a manager each month.
+  if (template.template_key === 'monthly-facility' && template.assignment_mode === 'fixed') return null;
+
   const pool = await eligibleUsers(db, template);
   if (!pool.length) return null;
   const prior = await db.prepare('SELECT COUNT(*) AS count FROM shop_duty_assignments WHERE template_id=?')
@@ -519,11 +522,14 @@ export async function updateShopDutyTemplate(
     ? [...new Set(body.selectedUserIds.map((value) => integer(value)).filter((value) => value > 0))]
     : [];
 
-  if (active && (assignmentMode === 'selected_rotation' || assignmentMode === 'fixed') && !selectedUserIds.length) {
+  if (active && assignmentMode === 'selected_rotation' && !selectedUserIds.length) {
     throw new Error('Choose at least one mechanic before activating this duty.');
   }
-  if (active && assignmentMode === 'shift_rotation' && !shiftId) {
-    throw new Error('Choose a maintenance shift before activating this duty.');
+  if (active && assignmentMode === 'fixed' && template.template_key !== 'monthly-facility' && !selectedUserIds.length) {
+    throw new Error('Choose the mechanic for this duty before activating it.');
+  }
+  if (active && cadence === 'shift' && !shiftId) {
+    throw new Error('Choose the maintenance shift for this Shop Check before activating it.');
   }
 
   await db.batch([
@@ -548,4 +554,60 @@ export async function updateShopDutyTemplate(
   }
 
   return { ok:true, templateId, templateKey:template.template_key, active, updatedByUserId:userId };
+}
+
+
+export async function assignCurrentShopDuty(
+  db:D1Database,
+  managerUserId:number,
+  body:Record<string,unknown>
+) {
+  const templateId = integer(body.templateId);
+  const assignedUserId = integer(body.assignedUserId);
+  if (!templateId || !assignedUserId) throw new Error('Choose a Shop Duty and mechanic.');
+
+  const template = (await getTemplates(db,false)).find((row) => Number(row.id) === templateId);
+  if (!template) throw new Error('Shop Duty template was not found.');
+  if (template.template_key !== 'monthly-facility') throw new Error('Manual monthly assignment is only used for the Once-a-Month duty.');
+
+  const user = await db.prepare(q(
+    'SELECT id,display_name,technician_id FROM app_users',
+    "WHERE id=? AND active=1 AND COALESCE(dispatch_access,0)=0 AND technician_id IS NOT NULL",
+    "AND role IN ('mechanic','manager','admin')"
+  )).bind(assignedUserId).first<EligibleUser>();
+  if (!user) throw new Error('Choose an active working mechanic.');
+
+  const spec = await periodSpec(db,template,Date.now());
+  if (!spec) throw new Error('The current monthly duty period could not be resolved.');
+
+  const existing = await db.prepare(q(
+    'SELECT id,status FROM shop_duty_assignments',
+    'WHERE template_id=? AND period_key=?'
+  )).bind(templateId,spec.periodKey).first<{id:number;status:string}>();
+
+  if (existing && (existing.status === 'in_progress' || existing.status === 'completed')) {
+    throw new Error('This month\'s duty is already in progress or completed and cannot be reassigned.');
+  }
+
+  if (existing) {
+    await db.prepare(q(
+      "UPDATE shop_duty_assignments SET assigned_user_id=?,status='pending',repair_id=NULL,",
+      "supplies_needed='',notes='',started_at=NULL,completed_at=NULL,updated_at=CURRENT_TIMESTAMP",
+      'WHERE id=?'
+    )).bind(assignedUserId,existing.id).run();
+    return {
+      ok:true, templateId, assignmentId:Number(existing.id), assignedUserId,
+      assignedName:user.display_name, dueDate:spec.dueDate, periodKey:spec.periodKey,
+      updatedByUserId:managerUserId,
+    };
+  }
+
+  const created = await db.prepare(
+    "INSERT INTO shop_duty_assignments(template_id,period_key,due_date,assigned_user_id,status) VALUES(?,?,?,?,'pending')"
+  ).bind(templateId,spec.periodKey,spec.dueDate,assignedUserId).run();
+  return {
+    ok:true, templateId, assignmentId:Number(created.meta.last_row_id), assignedUserId,
+    assignedName:user.display_name, dueDate:spec.dueDate, periodKey:spec.periodKey,
+    updatedByUserId:managerUserId,
+  };
 }
