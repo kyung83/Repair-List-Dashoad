@@ -172,7 +172,7 @@ export default function RepairBoardSelfAssignPanel() {
         <label style={label}>Unit<select value={oosEquipmentId} onChange={event=>setOosEquipmentId(event.target.value)} style={input}><option value="">Choose my unit</option>{myUnits.map(item=><option key={item.equipmentId} value={item.equipmentId}>Unit {item.unit}</option>)}</select></label>
         <label style={{...label,gridColumn:"span 2"}}>Reason<input value={oosReason} onChange={event=>setOosReason(event.target.value)} placeholder="Why can this unit not be used?" style={input}/></label>
         <button type="button" disabled={Boolean(busy)} onClick={()=>void placeOos()} style={dangerButton}>{busy==="oos"?"SAVING…":"PLACE OUT OF SERVICE"}</button>
-      </div>:<div style={{marginTop:10,color:"#667482",fontSize:13}}>You do not have an assigned unit available to place out of service.</div>}
+      </div>:<div style={{marginTop:10,color:"#68746f",fontSize:13}}>You do not have an assigned unit available to place out of service.</div>}
     </div>}
 
     <div style={{marginTop:16,borderTop:"1px solid #e4e9ed",paddingTop:14}}>
@@ -186,26 +186,26 @@ export default function RepairBoardSelfAssignPanel() {
           </div>
           <button disabled={Boolean(busy)} onClick={()=>void claim(row)} style={claimButton}>{busy===row.id?"ASSIGNING…":"ASSIGN TO ME"}</button>
         </article>)}
-      </div>:<div style={{marginTop:12,color:"#667482",fontSize:13}}>No unassigned work is available to claim right now.</div>}
+      </div>:<div style={{marginTop:12,color:"#68746f",fontSize:13}}>No unassigned work is available to claim right now.</div>}
     </div>
   </section>;
 }
 
 const panel={margin:"18px 30px 0",padding:18,background:"#fff",border:"1px solid #d8e0e7",borderRadius:14,color:"#172431"} as const;
-const eyebrow={margin:0,fontSize:10,fontWeight:900,letterSpacing:".16em",color:"#f47b20"} as const;
+const eyebrow={margin:0,fontSize:10,fontWeight:900,letterSpacing:".16em",color:"#2f6f60"} as const;
 const grid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(290px,1fr))",gap:10,marginTop:12} as const;
 const card={display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",padding:12,border:"1px solid #e2e7eb",borderRadius:10,background:"#f9fafb"} as const;
 const badge={fontSize:9,fontWeight:900,letterSpacing:".08em",padding:"3px 6px",borderRadius:999,background:"#e8eef4",color:"#40566b"} as const;
 const claimButton={border:0,borderRadius:8,padding:"10px 12px",background:"#176440",color:"white",fontSize:11,fontWeight:900,whiteSpace:"nowrap",cursor:"pointer"} as const;
-const shopLink={display:"inline-block",padding:"9px 12px",borderRadius:8,background:"#0d1b2b",color:"white",fontWeight:900,fontSize:12,textDecoration:"none"} as const;
-const addButton={border:0,borderRadius:8,padding:"9px 12px",background:"#f47b20",color:"white",fontWeight:900,fontSize:12,cursor:"pointer"} as const;
+const shopLink={display:"inline-block",padding:"9px 12px",borderRadius:8,background:"#173f37",color:"white",fontWeight:900,fontSize:12,textDecoration:"none"} as const;
+const addButton={border:0,borderRadius:8,padding:"9px 12px",background:"#2f6f60",color:"white",fontWeight:900,fontSize:12,cursor:"pointer"} as const;
 const oosButton={border:"1px solid #a23c34",borderRadius:8,padding:"9px 12px",background:"#fff",color:"#8b2f29",fontWeight:900,fontSize:12,cursor:"pointer"} as const;
-const actionBox={marginTop:14,padding:14,border:"1px solid #d9e1e8",borderRadius:11,background:"#f8fafb"} as const;
+const actionBox={marginTop:14,padding:14,border:"1px solid #d9e1e8",borderRadius:11,background:"#fbfcfb"} as const;
 const actionTitle={display:"block",fontSize:15,color:"#182b3d"} as const;
 const help={display:"block",fontSize:11,color:"#6b7884",marginTop:2} as const;
 const formGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:9,alignItems:"end",marginTop:11} as const;
 const label={display:"grid",gap:4,fontSize:11,fontWeight:900,color:"#53616d"} as const;
-const input={width:"100%",boxSizing:"border-box",padding:"10px 11px",border:"1px solid #cbd5dd",borderRadius:8,background:"white",color:"#172431",fontSize:14} as const;
+const input={width:"100%",boxSizing:"border-box",padding:"10px 11px",border:"1px solid #c9d4cf",borderRadius:8,background:"white",color:"#172431",fontSize:14} as const;
 const saveButton={border:0,borderRadius:8,padding:"11px 12px",background:"#176440",color:"white",fontWeight:900,cursor:"pointer"} as const;
 const dangerButton={border:0,borderRadius:8,padding:"11px 12px",background:"#9a312b",color:"white",fontWeight:900,cursor:"pointer"} as const;
 const notice={marginTop:12,padding:10,border:"1px solid #f1c66d",borderRadius:8,background:"#fff8e6",color:"#5d4b22",fontSize:13} as const;
