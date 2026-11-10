@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { buildInventoryImportSql, inventoryImportHash, planInventoryImport, verifyInventoryImportPlan, inventoryImportAuditVerificationSql } from '../lib/inventory-import.js';
+import { buildInventoryImportSql, inventoryImportHash, planInventoryImport, verifyInventoryImportPlan, inventoryImportAuditVerificationSql, inventoryWarehouseZeroVerificationSql } from '../lib/inventory-import.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const source = { name: 'Synthetic inventory.xlsx', sha256: 'a'.repeat(64), asOf: '2026-11-10T06:48:00' };
@@ -190,6 +190,73 @@ test('positive-only imports leave omitted negative and zero variants, other part
     assert.equal(f.table('part_warehouse_stock').find((entry)=>entry.id===21).quantity_on_hand,-2);
     assert.equal(f.table('parts').find((entry)=>entry.id===2).quantity_on_hand,7);
     assert.deepEqual(f.table('part_warehouse_stock')[0],original);
+  }finally{f.db.close();}
+});
+
+const boyneZero = [{warehouseCode:'BOYNE',reason:'User requested Boyne inventory be set to zero before the EMDECS upload.'}];
+test('explicit Boyne zero handles all balances and archived parts without changing metadata, other warehouses, or reservations',()=>{
+  const f=fixture();try {
+    f.db.exec("INSERT INTO parts(id,part_number,description,quantity_on_hand,active,deleted_at) VALUES(3,'ARCHIVED','Archived part',6,0,NULL),(4,'DELETED','Deleted part',0,0,'2026-11-01'); INSERT INTO part_warehouse_stock(id,part_id,warehouse_id,variant_key,quantity_on_hand,unit_of_measure,unit_cost,on_order,source_updated_at,updated_at) VALUES(30,1,3,'old',4,'EA',22,3,'2026-08-06','2026-08-07'),(31,3,3,'negative',-3,'EA',33,2,'2026-08-06','2026-08-07'),(32,4,3,'zero',0,'EA',44,1,'2026-08-06','2026-08-07'),(33,1,2,'untargeted',6,'BOX',55,5,'2026-08-06','2026-08-07'),(34,3,2,'untargeted',9,'EA',66,4,'2026-08-06','2026-08-07'); UPDATE parts SET quantity_on_hand=15 WHERE id=1; INSERT INTO repair_part_requests VALUES(2,2,1,3,1,0,'open','2026-11-01','2026-11-01'); INSERT INTO part_warehouse_locations(part_id,warehouse_id,bin_location,source) VALUES(1,3,'B old','manual');");
+    const before=f.snapshot(),requests=f.table('repair_part_requests');
+    const plan=planInventoryImport({source,rows:[row({binLocation:'C new'})],zeroWarehouses:boyneZero},before);
+    assert.equal(plan.canApply,true);assert.equal(plan.summary.positiveSourceRows,1);assert.equal(plan.summary.warehouseZeroRows,3);assert.equal(plan.summary.warehouseZeroChangedRows,2);assert.equal(plan.summary.sourceRows,4);
+    assert.equal(plan.normalized.rows.length,1);assert.deepEqual(plan.normalized.zeroWarehouses,boyneZero);
+    f.apply(plan);
+    const after=f.snapshot();
+    for(const stock of before.tables.part_warehouse_stock.filter((entry)=>entry.warehouse_id===3)) {
+      const changed=after.tables.part_warehouse_stock.find((entry)=>entry.id===stock.id);assert.equal(changed.quantity_on_hand,0);
+      for(const key of Object.keys(stock).filter((key)=>!['quantity_on_hand','updated_at'].includes(key))) assert.equal(changed[key],stock[key]);
+      const audit=f.table('inventory_source_import_rows').find((entry)=>entry.warehouse_stock_id===stock.id);
+      assert.equal(JSON.parse(audit.source_json).action,'warehouse_zero');assert.equal(JSON.parse(audit.source_json).reason,boyneZero[0].reason);assert.equal(JSON.parse(audit.after_json).stock.quantity_on_hand,0);
+    }
+    assert.deepEqual(after.tables.part_warehouse_stock.filter((entry)=>[20,21,33,34].includes(entry.id)),before.tables.part_warehouse_stock.filter((entry)=>[20,21,33,34].includes(entry.id)));
+    assert.deepEqual(after.tables.warehouses,before.tables.warehouses);assert.deepEqual(f.table('repair_part_requests'),requests);
+    for(const id of [3,4]) for(const field of ['active','deleted_at','description']) assert.equal(after.tables.parts.find((entry)=>entry.id===id)[field],before.tables.parts.find((entry)=>entry.id===id)[field]);
+    assert.equal(after.tables.parts.find((entry)=>entry.id===1).quantity_on_hand,18);assert.equal(after.tables.parts.find((entry)=>entry.id===3).quantity_on_hand,9);
+    assert.equal(after.tables.part_warehouse_locations.find((entry)=>entry.warehouse_id===3).bin_location,'B old');
+    assert.deepEqual({...f.db.prepare(inventoryWarehouseZeroVerificationSql).get(3)},{warehouse_active:0,stock_rows:3,zero_stock_rows:3,quantity_on_hand:0});
+    const auditMatch={...f.db.prepare(inventoryImportAuditVerificationSql).get(plan.importKey)};
+    assert.equal(auditMatch.audited_matching_balances,4);assert.equal(auditMatch.current_matching_balances,4);
+    assert.equal(f.table('inventory_operations').filter((entry)=>entry.operation_type==='warehouse_inventory_zero').length,3);
+    const applied=JSON.stringify([f.snapshot(),f.table('inventory_operations'),f.table('inventory_source_import_rows')]);f.apply(plan);
+    assert.equal(JSON.stringify([f.snapshot(),f.table('inventory_operations'),f.table('inventory_source_import_rows')]),applied);
+  }finally{f.db.close();}
+});
+
+test('the warehouse-zero exception cannot be forged by source rows or extended beyond the inactive Boyne warehouse',()=>{
+  const f=fixture();try {
+    for(const zeroWarehouses of [[{warehouseCode:'CLARE',reason:'Not authorized'}],[{warehouseCode:'BOYNE',reason:''}],boyneZero.concat(boyneZero),'BOYNE']) assert.throws(()=>planInventoryImport({source,rows:[row()],zeroWarehouses},f.snapshot()),/Boyne|BOYNE|warehouse-zero/);
+    assert.equal(planInventoryImport({source,rows:[row({quantity:0,warehouseCode:'BOYNE',action:'warehouse_zero',isWarehouseZero:true})],zeroWarehouses:boyneZero},f.snapshot()).canApply,false);
+    assert.throws(()=>planInventoryImport({source,rows:[row({sourceRowId:'warehouse-zero:BOYNE:99'})],zeroWarehouses:boyneZero},f.snapshot()),/reserved/);
+    f.db.exec('UPDATE parts SET active=0 WHERE id=1');assert.equal(planInventoryImport({source,rows:[row()],zeroWarehouses:boyneZero},f.snapshot()).canApply,false);
+    f.db.exec('UPDATE warehouses SET active=1 WHERE id=3');assert.throws(()=>planInventoryImport({source,rows:[row()],zeroWarehouses:boyneZero},f.snapshot()),/inactive warehouse/);
+    assert.equal(f.table('inventory_operations').length,0);
+  }finally{f.db.close();}
+});
+
+test('Boyne membership and state changes invalidate the entire zero and positive import atomically',()=>{
+  const changes=[
+    "INSERT INTO parts(id,part_number,description) VALUES(99,'ZZ-NEW-BOYNE','Concurrent part'); INSERT INTO part_warehouse_stock(id,part_id,warehouse_id,variant_key,quantity_on_hand) VALUES(99,99,3,'new',7)",
+    "DELETE FROM part_warehouse_stock WHERE id=30",
+    "UPDATE part_warehouse_stock SET id=99 WHERE id=30",
+    "UPDATE part_warehouse_stock SET quantity_on_hand=8 WHERE id=30",
+    "UPDATE warehouses SET active=1 WHERE id=3",
+    "UPDATE part_warehouse_stock SET quantity_on_hand=8 WHERE id=10",
+    "INSERT INTO inventory_operations(id,operation_key,operation_type) VALUES(99,'later-boyne','physical_count_resolution'); INSERT INTO inventory_operation_lines(operation_id,part_id,warehouse_stock_id,warehouse_id,quantity_delta,line_type) VALUES(99,1,30,3,0,'physical_count_resolution')",
+  ];
+  for(const mutation of changes){const f=fixture();try {
+    f.db.exec("INSERT INTO part_warehouse_stock(id,part_id,warehouse_id,variant_key,quantity_on_hand) VALUES(30,1,3,'old',4)");
+    const plan=planInventoryImport({source,rows:[row()],zeroWarehouses:boyneZero},f.snapshot());assert.equal(plan.canApply,true);f.db.exec(mutation);
+    const before=JSON.stringify([f.snapshot(),f.table('inventory_operations')]);assert.throws(()=>f.apply(plan),/CHECK constraint/);
+    assert.equal(JSON.stringify([f.snapshot(),f.table('inventory_operations')]),before);assert.equal(f.table('inventory_source_import_rows').length,0);
+  }finally{f.db.close();}}
+});
+
+test('an empty Boyne zero action still guards against a concurrently added warehouse stock',()=>{
+  const f=fixture();try {
+    const plan=planInventoryImport({source,rows:[row()],zeroWarehouses:boyneZero},f.snapshot());assert.equal(plan.summary.warehouseZeroRows,0);assert.equal(plan.canApply,true);
+    f.db.exec("INSERT INTO part_warehouse_stock(id,part_id,warehouse_id,variant_key,quantity_on_hand) VALUES(30,1,3,'new',0)");
+    assert.throws(()=>f.apply(plan),/CHECK constraint/);assert.equal(f.table('part_warehouse_stock').find((entry)=>entry.id===10).quantity_on_hand,5);
   }finally{f.db.close();}
 });
 
