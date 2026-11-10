@@ -62,10 +62,10 @@ type CorrectionDraft = {
 };
 
 const emptyRule: RuleDraft = { profileId: "", mileageInterval: "", timeIntervalDays: "", annualIntervalDays: "365" };
-const inputStyle = { width: "100%", minHeight: 34, padding: "6px 8px", border: "1px solid #cbd3d9", borderRadius: 4, background: "white", color: "#172033" } as const;
+const inputStyle = { width: "100%", minHeight: 34, padding: "6px 8px", border: "1px solid #cbd3d9", borderRadius: 4, background: "white", color: "#1b2421" } as const;
 const labelStyle = { display: "grid", gap: 4, fontSize: 11, fontWeight: 800, color: "#53616e" } as const;
-const buttonStyle = { minHeight: 32, padding: "0 10px", border: "1px solid #c5cdd3", borderRadius: 4, background: "white", color: "#263746", fontWeight: 800, fontSize: 11 } as const;
-const orangeButtonStyle = { ...buttonStyle, borderColor: "#d56e13", background: "#f47b20", color: "white" } as const;
+const buttonStyle = { minHeight: 32, padding: "0 10px", border: "1px solid #c5cdd3", borderRadius: 4, background: "white", color: "#24312c", fontWeight: 800, fontSize: 11 } as const;
+const orangeButtonStyle = { ...buttonStyle, borderColor: "#d56e13", background: "#2f6f60", color: "white" } as const;
 
 function ruleFromPreset(preset?: Preset): RuleDraft {
   if (!preset) return { ...emptyRule };
@@ -300,17 +300,17 @@ export default function PmSchedulesPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "28px 32px 70px", color: "#172033" }}>
+    <main style={{ minHeight: "100vh", background: "#f4f6f4", padding: "28px 32px 70px", color: "#1b2421" }}>
       <MaintenanceTabs />
       <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div>
-          <p style={{ margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>MAINTENANCE SCHEDULES</p>
-          <h1 style={{ margin: "6px 0 0", fontSize: 30, color: "#0d1b2b" }}>PM Schedules</h1>
-          <p style={{ margin: "6px 0 0", color: "#64748b", maxWidth: 900, fontSize: 13 }}>
+          <p style={{ margin: 0, color: "#2f6f60", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" }}>MAINTENANCE SCHEDULES</p>
+          <h1 style={{ margin: "6px 0 0", fontSize: 30, color: "#173f37" }}>PM Schedules</h1>
+          <p style={{ margin: "6px 0 0", color: "#68746f", maxWidth: 900, fontSize: 13 }}>
             Set PM schedules and baselines here. To perform a PM early, use Create PM Job Now; the current PM step goes to the Repair Board and the baseline/rotation changes only after the mechanic completes the PM checklist.
           </p>
         </div>
-        <div style={{ fontSize: 12, color: unconfigured ? "#9a5b00" : "#64748b", fontWeight: 800 }}>{unconfigured} units uncategorized</div>
+        <div style={{ fontSize: 12, color: unconfigured ? "#9a5b00" : "#68746f", fontWeight: 800 }}>{unconfigured} units uncategorized</div>
       </header>
 
       {message && <div style={{ marginTop: 12, padding: 10, borderRadius: 5, background: "#fff8e6", border: "1px solid #f2c66d", fontSize: 12 }}>{message}</div>}
@@ -329,7 +329,7 @@ export default function PmSchedulesPage() {
           return (
             <div key={category} style={{ borderBottom: "1px solid #e3e7ea" }}>
               <div style={{ display: "grid", gridTemplateColumns: "minmax(140px,1.3fr) minmax(180px,2fr) 110px 100px 110px 95px 72px", alignItems: "center", minHeight: 44, padding: "5px 10px", fontSize: 12 }}>
-                <strong style={{ color: "#172033" }}>{category}</strong>
+                <strong style={{ color: "#1b2421" }}>{category}</strong>
                 <span>{selectedProfile ? `${selectedProfile.name} · ${selectedProfile.sequence.join(" → ")}` : "No PM reminder"}</span>
                 <span>{trailer ? "—" : rule.mileageInterval ? `${Number(rule.mileageInterval).toLocaleString()} mi` : "—"}</span>
                 <span>{rule.timeIntervalDays ? `${rule.timeIntervalDays} d` : "—"}</span>
@@ -375,12 +375,12 @@ export default function PmSchedulesPage() {
                         return (
                           <div key={item.id} style={{ display: "grid", gridTemplateColumns: "95px 1fr auto", gap: 8, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #e7eaec", fontSize: 11 }}>
                             <strong>{item.unit}</strong>
-                            <span style={{ color: warnings.length ? "#8b5a08" : "#64748b" }}>{scheduleText(item)}{warnings.length ? ` · ${warnings.join(" / ")}` : ""}</span>
+                            <span style={{ color: warnings.length ? "#8b5a08" : "#68746f" }}>{scheduleText(item)}{warnings.length ? ` · ${warnings.join(" / ")}` : ""}</span>
                             <button type="button" style={buttonStyle} onClick={() => openCorrection(item)}>Correct</button>
                           </div>
                         );
                       })}
-                      {!members.length && <div style={{ padding: 8, color: "#64748b", fontSize: 11 }}>No units assigned.</div>}
+                      {!members.length && <div style={{ padding: 8, color: "#68746f", fontSize: 11 }}>No units assigned.</div>}
                     </div>
                   </div>
                 </div>
@@ -391,10 +391,10 @@ export default function PmSchedulesPage() {
       </section>
 
       <section style={{ marginTop: 16, background: "white", border: "1px solid #cfd6db" }}>
-        <div style={{ padding: 12, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ padding: 12, borderBottom: "1px solid #d7ded9", display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>Assign schedule groups</h2>
-            <p style={{ margin: "3px 0 0", color: "#64748b", fontSize: 11 }}>Check units, choose the schedule group, then assign them in bulk.</p>
+            <p style={{ margin: "3px 0 0", color: "#68746f", fontSize: 11 }}>Check units, choose the schedule group, then assign them in bulk.</p>
           </div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
             <select value={assignCategory} onChange={(event) => setAssignCategory(event.target.value)} style={{ ...inputStyle, width: 190 }}>
@@ -438,8 +438,8 @@ export default function PmSchedulesPage() {
                     <td style={{ padding: 8 }}>{item.equipmentType}</td>
                     <td style={{ padding: 8, fontWeight: item.category === "Uncategorized" ? 800 : 500 }}>{item.category}</td>
                     <td style={{ padding: 8 }}>{item.currentMileage == null ? "—" : `${item.currentMileage.toLocaleString()} (${item.mileageSource})`}</td>
-                    <td style={{ padding: 8 }}><div>{scheduleText(item)}</div>{warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <small style={{ color: "#9a5b00", fontWeight: 800 }}>{warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}</small>}{item.customRotationItem && <small style={{ display: "block", color: "#64748b" }}>Custom rotational PM</small>}</td>
-                    <td style={{ padding: 8 }}><div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>{item.lastAnnualDate && <small style={{ color: "#64748b" }}>Last {item.lastAnnualDate}</small>}{warnings.includes("Annual date needed") && <small style={{ display: "block", color: "#9a5b00", fontWeight: 800 }}>Annual date needed</small>}</td>
+                    <td style={{ padding: 8 }}><div>{scheduleText(item)}</div>{warnings.filter((warning) => warning.startsWith("PM")).length > 0 && <small style={{ color: "#9a5b00", fontWeight: 800 }}>{warnings.filter((warning) => warning.startsWith("PM")).join(" · ")}</small>}{item.customRotationItem && <small style={{ display: "block", color: "#68746f" }}>Custom rotational PM</small>}</td>
+                    <td style={{ padding: 8 }}><div>{item.annualIntervalDays ? `${item.annualIntervalDays} days` : "No annual rule"}</div>{item.lastAnnualDate && <small style={{ color: "#68746f" }}>Last {item.lastAnnualDate}</small>}{warnings.includes("Annual date needed") && <small style={{ display: "block", color: "#9a5b00", fontWeight: 800 }}>Annual date needed</small>}</td>
                     <td style={{ padding: 8 }}>{item.location || "—"}</td>
                     <td style={{ padding: 8 }}>
                       <button
@@ -457,14 +457,14 @@ export default function PmSchedulesPage() {
               })}
             </tbody>
           </table>
-          {!visible.length && <div style={{ padding: 18, color: "#64748b", fontSize: 12 }}>No units match this filter.</div>}
+          {!visible.length && <div style={{ padding: 18, color: "#68746f", fontSize: 12 }}>No units match this filter.</div>}
         </div>
       </section>
 
       {correction && <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.46)", display: "grid", placeItems: "center", padding: 20, zIndex: 50 }}>
         <div style={{ width: "min(620px, 100%)", maxHeight: "90vh", overflowY: "auto", background: "white", borderRadius: 10, padding: 18, boxShadow: "0 20px 60px rgba(15,23,42,.25)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-            <div><p style={{ margin: 0, color: "#f47b20", fontSize: 10, fontWeight: 900, letterSpacing: ".12em" }}>MANUAL CORRECTION</p><h2 style={{ margin: "5px 0 0", fontSize: 22 }}>{correction.unit}</h2><p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 12 }}>Correct stored PM and annual baselines without changing the schedule rule.</p></div>
+            <div><p style={{ margin: 0, color: "#2f6f60", fontSize: 10, fontWeight: 900, letterSpacing: ".12em" }}>MANUAL CORRECTION</p><h2 style={{ margin: "5px 0 0", fontSize: 22 }}>{correction.unit}</h2><p style={{ margin: "5px 0 0", color: "#68746f", fontSize: 12 }}>Correct stored PM and annual baselines without changing the schedule rule.</p></div>
             <button type="button" style={buttonStyle} onClick={() => setCorrection(null)}>Close</button>
           </div>
           <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
@@ -472,7 +472,7 @@ export default function PmSchedulesPage() {
             <label style={labelStyle}>Last PM mileage<input disabled={correction.equipmentType === "Trailer"} type="number" min="0" value={correction.lastMileage} onChange={(event) => setCorrection((current) => current ? { ...current, lastMileage: event.target.value } : current)} style={inputStyle} placeholder={correction.equipmentType === "Trailer" ? "Not used for trailers" : "Enter corrected mileage"} /></label>
             <label style={labelStyle}>Next PM type<select disabled={!correctionProfile?.sequence.length} value={correction.nextPmType} onChange={(event) => setCorrection((current) => current ? { ...current, nextPmType: event.target.value } : current)} style={inputStyle}>{!correctionProfile?.sequence.length && <option value="">No PM rule assigned</option>}{(correctionProfile?.sequence ?? []).map((pmType) => <option key={pmType} value={pmType}>{pmType}</option>)}</select></label>
             <label style={labelStyle}>Last annual / inspection date<input type="date" value={correction.lastAnnualDate} onChange={(event) => setCorrection((current) => current ? { ...current, lastAnnualDate: event.target.value } : current)} style={inputStyle} /></label>
-            <div style={{ padding: 9, background: "#f8fafc", color: "#64748b", fontSize: 11 }}>This corrects the stored baseline only. It does not mark a new PM or annual complete.</div>
+            <div style={{ padding: 9, background: "#f8fafc", color: "#68746f", fontSize: 11 }}>This corrects the stored baseline only. It does not mark a new PM or annual complete.</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 7 }}><button type="button" disabled={saving} style={buttonStyle} onClick={() => setCorrection(null)}>Cancel</button><button type="button" disabled={saving} onClick={() => void saveCorrection()} style={orangeButtonStyle}>{saving ? "Saving..." : "Save correction"}</button></div>
           </div>
         </div>
