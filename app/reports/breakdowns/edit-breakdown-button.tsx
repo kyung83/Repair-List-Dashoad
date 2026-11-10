@@ -28,7 +28,7 @@ const input: React.CSSProperties = {
   border: '1px solid #cbd5e1',
   borderRadius: 8,
   background: '#fff',
-  color: '#172033',
+  color: '#1b2421',
   boxSizing: 'border-box',
   fontSize: 14,
 };
@@ -37,7 +37,7 @@ const label: React.CSSProperties = {
   gap: 5,
   fontSize: 11,
   fontWeight: 850,
-  color: '#475569',
+  color: '#53645d',
   textTransform: 'uppercase',
   letterSpacing: '.03em',
 };
@@ -169,7 +169,7 @@ export default function EditBreakdownButton({
           <div>
             <p style={{ margin: 0, fontSize: 11, fontWeight: 900, letterSpacing: '.08em', color: '#b45309' }}>COMPLETED BREAKDOWN CORRECTION</p>
             <h2 style={{ margin: '5px 0 0', fontSize: 24 }}>Breakdown #{breakdownId} · Unit {unit}</h2>
-            <p style={{ margin: '7px 0 0', color: '#64748b', fontSize: 13 }}>Correct the final outside invoice information without reopening the breakdown. Parts and labor stay unchanged.</p>
+            <p style={{ margin: '7px 0 0', color: '#68746f', fontSize: 13 }}>Correct the final outside invoice information without reopening the breakdown. Parts and labor stay unchanged.</p>
           </div>
           <button type="button" style={button} disabled={saving || savingEquipment} onClick={() => setOpen(false)}>Close</button>
         </div>
@@ -217,7 +217,7 @@ export default function EditBreakdownButton({
           {message && <div style={{ padding: 10, border: '1px solid #efc16c', borderRadius: 8, background: '#fff8e8', color: '#6b4d14', fontSize: 12, fontWeight: 700 }}>{message}</div>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button type="button" style={button} disabled={saving || savingEquipment} onClick={() => setOpen(false)}>Cancel</button>
-            <button type="button" style={{ ...button, background: '#f47b20', borderColor: '#f47b20', color: '#fff', minWidth: 170 }} disabled={saving || savingEquipment || loading} onClick={() => void save()}>{saving ? 'Saving…' : 'Save Correction'}</button>
+            <button type="button" style={{ ...button, background: '#2f6f60', borderColor: '#2f6f60', color: '#fff', minWidth: 170 }} disabled={saving || savingEquipment || loading} onClick={() => void save()}>{saving ? 'Saving…' : 'Save Correction'}</button>
           </div>
         </div>}
       </div>
