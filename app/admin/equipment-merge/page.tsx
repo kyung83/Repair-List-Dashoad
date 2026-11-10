@@ -90,9 +90,9 @@ export default function EquipmentMergePage(){
   }
 
   const groups=useMemo(()=>data?.historicalForks??[],[data]);
-  return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'36px clamp(16px,4vw,46px)',color:'#182331'}}>
+  return <main style={{minHeight:'100vh',background:'#f4f6f4',padding:'36px clamp(16px,4vw,46px)',color:'#1b2421'}}>
     <header style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:20,flexWrap:'wrap'}}>
-      <div><p style={eyebrow}>ADMIN · DATA INTEGRITY</p><h1 style={{margin:'7px 0 0',fontSize:34,color:'#0d1b2b'}}>Equipment fork merge</h1><p style={sub}>Consolidate old equipment rows that share the same Geotab device. Preview is read-only. Merge moves every known linked record transactionally, records an audit snapshot, and retires—not deletes—the duplicate.</p></div>
+      <div><p style={eyebrow}>ADMIN · DATA INTEGRITY</p><h1 style={{margin:'7px 0 0',fontSize:34,color:'#173f37'}}>Equipment fork merge</h1><p style={sub}>Consolidate old equipment rows that share the same Geotab device. Preview is read-only. Merge moves every known linked record transactionally, records an audit snapshot, and retires—not deletes—the duplicate.</p></div>
       <div style={{display:'flex',gap:10}}><a href="/admin/geotab-review" style={link}>Geotab Review</a><button disabled={Boolean(busy)} onClick={()=>void load()}>Refresh</button></div>
     </header>
     {message&&<div style={notice}>{message}</div>}
@@ -125,12 +125,12 @@ export default function EquipmentMergePage(){
   </main>;
 }
 
-const section={marginTop:22,background:'white',border:'1px solid #dce2e7',borderRadius:12,padding:20};
-const card={border:'1px solid #dce2e7',borderRadius:10,padding:16,background:'white'};
-const h2={margin:'0 0 5px',fontSize:21,color:'#0d1b2b'};
-const sub={margin:'6px 0 0',maxWidth:900,color:'#657482',lineHeight:1.5};
-const eyebrow={margin:0,color:'#f47b20',fontSize:12,fontWeight:900,letterSpacing:'.16em'};
-const th={padding:'10px 9px',textAlign:'left' as const,background:'#f7f9fa',color:'#657383',fontSize:11,whiteSpace:'nowrap' as const};
+const section={marginTop:22,background:'white',border:'1px solid #d7ded9',borderRadius:12,padding:20};
+const card={border:'1px solid #d7ded9',borderRadius:10,padding:16,background:'white'};
+const h2={margin:'0 0 5px',fontSize:21,color:'#173f37'};
+const sub={margin:'6px 0 0',maxWidth:900,color:'#68746f',lineHeight:1.5};
+const eyebrow={margin:0,color:'#2f6f60',fontSize:12,fontWeight:900,letterSpacing:'.16em'};
+const th={padding:'10px 9px',textAlign:'left' as const,background:'#f7f9fa',color:'#68746f',fontSize:11,whiteSpace:'nowrap' as const};
 const td={padding:'11px 9px',fontSize:13,verticalAlign:'middle' as const};
 const notice={marginTop:18,padding:12,borderRadius:9,background:'#fff8e6',border:'1px solid #f2c66d'};
 const empty={marginTop:14,padding:18,border:'1px dashed #ccd5dd',borderRadius:9,color:'#687786'};
@@ -138,4 +138,4 @@ const canonicalBadge={padding:'6px 9px',borderRadius:999,background:'#eaf7ee',co
 const blocked={marginTop:14,padding:14,borderRadius:9,background:'#fff0f0',border:'1px solid #e2a2a2',color:'#8d2828'};
 const warning={marginTop:14,padding:14,borderRadius:9,background:'#fff8e6',border:'1px solid #f2c66d'};
 const metric={display:'flex',justifyContent:'space-between',gap:10,padding:10,border:'1px solid #e4e9ed',borderRadius:8,color:'#586775'};
-const link={display:'inline-flex',alignItems:'center',padding:'8px 10px',border:'1px solid #ccd5dd',borderRadius:8,color:'#0d1b2b',fontWeight:800,textDecoration:'none'};
+const link={display:'inline-flex',alignItems:'center',padding:'8px 10px',border:'1px solid #ccd5dd',borderRadius:8,color:'#173f37',fontWeight:800,textDecoration:'none'};
