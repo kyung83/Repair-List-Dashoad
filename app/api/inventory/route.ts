@@ -42,6 +42,7 @@ export async function POST(request: Request) {
       if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required to change warehouse part status.');
       const status = String(body.status ?? '');
       if (!['active','archived','removed'].includes(status)) throw new Error('Warehouse part status is invalid.');
+      if (status === 'removed' && user.role !== 'admin') throw new Error('Administrator access is required to remove a part from a warehouse.');
       return Response.json(await setPartWarehouseStatus(env.DB,{
         partId:body.partId,
         warehouseCode:body.warehouseCode,
