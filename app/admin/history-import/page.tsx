@@ -5,8 +5,8 @@ import {HistoricalPackage,parseNorlowHistoryXls} from "@/lib/ro-history-xls-clie
 type S=any;
 type ImportRo=HistoricalPackage['ros'][number];
 type ImportSource={meta:{importKey:string;sourceName:string;sourceSha256:string;rawSourceRows:number;rawSourceRos:number;historyStart:string;historyEnd:string};ros:ImportRo[]};
-const panel={background:"white",border:"1px solid #dce2e7",borderRadius:14,padding:18} as const;
-const button={padding:"10px 14px",border:0,borderRadius:8,background:"#0d1b2b",color:"white",fontWeight:850,cursor:"pointer"} as const;
+const panel={background:"white",border:"1px solid #d7ded9",borderRadius:14,padding:18} as const;
+const button={padding:"10px 14px",border:0,borderRadius:8,background:"#173f37",color:"white",fontWeight:850,cursor:"pointer"} as const;
 const money=(v:number)=>Number(v||0).toLocaleString(undefined,{style:"currency",currency:"USD"});
 const num=(v:number)=>Number(v||0).toLocaleString();
 
@@ -51,16 +51,16 @@ export default function Page(){
     }catch(x){setMsg(x instanceof Error?x.message:'Import failed')}finally{setBusy(false);setPhase('')}
   }
   const pct=progress.total?Math.round(progress.done/progress.total*100):0;
-  return <main style={{minHeight:'100vh',background:'#f3f5f7',color:'#172033',padding:'34px 34px 110px'}}>
+  return <main style={{minHeight:'100vh',background:'#f4f6f4',color:'#1b2421',padding:'34px 34px 110px'}}>
     <header><p style={{margin:0,color:'#6d28d9',fontWeight:900}}>ADMIN · DATA IMPORT</p><h1>Historical Repair Orders</h1><p>Upload the full cumulative Norlow Excel export each time. Existing ROs are refreshed, new ROs are added, existing active equipment is matched, and no equipment is created.</p></header>
     {msg&&<div style={{...panel,marginTop:14,borderColor:'#f2c66d'}}><b>{phase||'Status'}</b><div style={{marginTop:5}}>{msg}</div></div>}
     <section style={{...panel,marginTop:18}}>
       <h2 style={{marginTop:0}}>Cumulative Excel import</h2>
       <p><b>Use the same “RO History Account Export” Excel report you provided originally, with the date range kept cumulative so it contains the prior history plus all new ROs.</b></p>
       <p>The .xls file is parsed and SHA-256 checked locally in your browser. Only normalized batches of 250 repair orders are sent to the dashboard API, so the entire Excel file is not uploaded to Cloudflare in one request.</p>
-      <p style={{color:'#64748b'}}>Scope stays consistent with the original approved import: standard <b>WO…</b> repair orders are included, exact duplicate source rows are removed, duplicate repair categories inside an RO are combined, and non-final statuses are audited rather than counted as completed history.</p>
+      <p style={{color:'#68746f'}}>Scope stays consistent with the original approved import: standard <b>WO…</b> repair orders are included, exact duplicate source rows are removed, duplicate repair categories inside an RO are combined, and non-final statuses are audited rather than counted as completed history.</p>
       <label style={{...button,display:'inline-block',opacity:busy?.6:1}}>Select Excel history export<input type="file" accept=".xls,.json,application/vnd.ms-excel,application/json" onChange={choose} disabled={busy} style={{display:'none'}}/></label> <a href="/reports/history" style={{...button,background:'#6d28d9',textDecoration:'none'}}>RO History Reports</a>
-      <div style={{marginTop:8,fontSize:12,color:'#64748b'}}>Prepared JSON remains supported as a recovery/testing path.</div>
+      <div style={{marginTop:8,fontSize:12,color:'#68746f'}}>Prepared JSON remains supported as a recovery/testing path.</div>
       {progress.total>0&&<div style={{marginTop:14}}><div style={{height:10,background:'#e8edf2',borderRadius:99}}><div style={{height:'100%',width:`${pct}%`,background:'#6d28d9',borderRadius:99}}/></div><b>{pct}% · {num(progress.done)} / {num(progress.total)} ROs</b></div>}
     </section>
     <section style={{...panel,marginTop:18}}><h2 style={{marginTop:0}}>Production status</h2>{d?.status?<div>
