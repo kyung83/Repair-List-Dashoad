@@ -41,14 +41,14 @@ type Preview = {
   plan:string[];
 };
 
-const panel={background:"white",border:"1px solid #dce2e7",borderRadius:14,padding:18} as const;
+const panel={background:"white",border:"1px solid #d7ded9",borderRadius:14,padding:18} as const;
 const number=(value:number)=>Number(value||0).toLocaleString();
 
 function Metric({label,value,note}:{label:string;value:string|number;note?:string}){
   return <div style={{...panel,minWidth:190,flex:"1 1 190px"}}>
-    <div style={{fontSize:12,fontWeight:900,letterSpacing:.5,color:"#64748b",textTransform:"uppercase"}}>{label}</div>
+    <div style={{fontSize:12,fontWeight:900,letterSpacing:.5,color:"#68746f",textTransform:"uppercase"}}>{label}</div>
     <div style={{fontSize:30,fontWeight:950,marginTop:5}}>{typeof value==="number"?number(value):value}</div>
-    {note&&<div style={{fontSize:12,color:"#64748b",marginTop:5,lineHeight:1.4}}>{note}</div>}
+    {note&&<div style={{fontSize:12,color:"#68746f",marginTop:5,lineHeight:1.4}}>{note}</div>}
   </div>;
 }
 
@@ -71,14 +71,14 @@ export default function Page(){
 
   useEffect(()=>{void load()},[]);
 
-  return <main style={{minHeight:"100vh",background:"#f3f5f7",color:"#172033",padding:"34px 34px 110px"}}>
+  return <main style={{minHeight:"100vh",background:"#f4f6f4",color:"#1b2421",padding:"34px 34px 110px"}}>
     <header style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:20,flexWrap:"wrap"}}>
       <div>
         <p style={{margin:0,color:"#b45309",fontWeight:950,fontSize:12,letterSpacing:.7}}>ADMIN · GO-LIVE PREPARATION</p>
         <h1 style={{margin:"6px 0 6px"}}>Go-Live Cutover Center</h1>
         <p style={{margin:0,maxWidth:900,lineHeight:1.55,color:"#475569"}}>Dry-run the production cutover before launch day. This screen reads the current database and shows exactly what the future shop reset would clear and what must remain protected.</p>
       </div>
-      <button onClick={()=>void load()} disabled={busy} style={{padding:"10px 15px",border:0,borderRadius:9,background:"#172033",color:"white",fontWeight:900,cursor:"pointer",opacity:busy?.6:1}}>{busy?"Checking…":"Refresh Dry Run"}</button>
+      <button onClick={()=>void load()} disabled={busy} style={{padding:"10px 15px",border:0,borderRadius:9,background:"#1b2421",color:"white",fontWeight:900,cursor:"pointer",opacity:busy?.6:1}}>{busy?"Checking…":"Refresh Dry Run"}</button>
     </header>
 
     <section style={{...panel,marginTop:18,borderColor:"#f59e0b",background:"#fffbeb"}}>
@@ -132,7 +132,7 @@ export default function Page(){
       <section style={{...panel,marginTop:18,borderColor:"#cbd5e1"}}>
         <h2 style={{marginTop:0}}>DVIR cutover</h2>
         <p style={{marginBottom:6}}>Current saved cutoff: <b>{data.dvirCutoffAt||"Not set — normal 24-hour Geotab lookback is still active"}</b></p>
-        <p style={{margin:0,color:"#64748b"}}>On the real cutover, we will save the go-live timestamp first, clear the local DVIR staging rows, and Geotab will only be queried from the later of that cutoff or the normal 24-hour lookback.</p>
+        <p style={{margin:0,color:"#68746f"}}>On the real cutover, we will save the go-live timestamp first, clear the local DVIR staging rows, and Geotab will only be queried from the later of that cutoff or the normal 24-hour lookback.</p>
       </section>
     </>}
   </main>;
