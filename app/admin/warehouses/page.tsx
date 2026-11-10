@@ -152,23 +152,23 @@ function WarehouseTable(props:{
 
 function formatQty(value:number){return Number.isInteger(value)?String(value):value.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")}
 
-const page={minHeight:"100vh",background:"#f3f5f7",padding:"42px",color:"#182331",display:"grid",gap:18} as const;
+const page={minHeight:"100vh",background:"#f4f6f4",padding:"42px",color:"#1b2421",display:"grid",gap:18} as const;
 const header={display:"flex",justifyContent:"space-between",gap:20,alignItems:"flex-end",flexWrap:"wrap" as const} as const;
-const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
-const h1={margin:"7px 0 0",fontSize:34,color:"#0d1b2b"} as const;
-const sub={margin:"8px 0 0",maxWidth:850,color:"#657383",fontSize:13,lineHeight:1.5} as const;
+const eyebrow={margin:0,color:"#2f6f60",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
+const h1={margin:"7px 0 0",fontSize:34,color:"#173f37"} as const;
+const sub={margin:"8px 0 0",maxWidth:850,color:"#68746f",fontSize:13,lineHeight:1.5} as const;
 const link={color:"#173f65",fontWeight:900,textDecoration:"none"} as const;
 const notice={padding:12,border:"1px solid #f2c66d",borderRadius:9,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
-const card={background:"white",border:"1px solid #dce2e7",borderRadius:12,padding:18} as const;
+const card={background:"white",border:"1px solid #d7ded9",borderRadius:12,padding:18} as const;
 const sectionHead={display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",marginBottom:14} as const;
 const h2={margin:0,fontSize:20} as const;
-const hint={margin:"5px 0 0",color:"#6c7886",fontSize:12} as const;
+const hint={margin:"5px 0 0",color:"#68746f",fontSize:12} as const;
 const form={display:"grid",gridTemplateColumns:"minmax(160px,.65fr) minmax(220px,1.35fr) auto",gap:10,alignItems:"end"} as const;
 const field={display:"grid",gap:5,fontSize:11,fontWeight:900,color:"#52616d"} as const;
-const input={padding:11,border:"1px solid #bdc9d3",borderRadius:8,background:"white",fontSize:14,color:"#182331"} as const;
+const input={padding:11,border:"1px solid #bdc9d3",borderRadius:8,background:"white",fontSize:14,color:"#1b2421"} as const;
 const addButton={border:0,borderRadius:8,padding:"12px 16px",background:"#173f65",color:"white",fontWeight:950,cursor:"pointer"} as const;
 const table={width:"100%",borderCollapse:"collapse" as const,minWidth:880} as const;
-const th={padding:"10px 11px",textAlign:"left" as const,background:"#f7f9fa",color:"#657383",fontSize:10,letterSpacing:".04em"} as const;
+const th={padding:"10px 11px",textAlign:"left" as const,background:"#f7f9fa",color:"#68746f",fontSize:10,letterSpacing:".04em"} as const;
 const tr={borderTop:"1px solid #edf0f2"} as const;
 const td={padding:"12px 11px",fontSize:12} as const;
 const code={marginTop:3,color:"#7c8994",fontSize:10,fontWeight:900,letterSpacing:".06em"} as const;
@@ -176,4 +176,4 @@ const smallButton={marginRight:6,border:"1px solid #9aa8b3",borderRadius:7,paddi
 const archiveButton={...smallButton,borderColor:"#a56a00",color:"#8a5a00"} as const;
 const restoreButton={...smallButton,borderColor:"#176448",color:"#176448"} as const;
 const deleteButton={...smallButton,borderColor:"#b42318",color:"#b42318"} as const;
-const empty={padding:18,border:"1px dashed #cbd4db",borderRadius:9,color:"#6c7886",fontSize:12,textAlign:"center" as const} as const;
+const empty={padding:18,border:"1px dashed #cbd4db",borderRadius:9,color:"#68746f",fontSize:12,textAlign:"center" as const} as const;
