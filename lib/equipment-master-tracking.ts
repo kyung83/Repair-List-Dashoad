@@ -158,6 +158,34 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
   const trackingChoiceProvided = Object.prototype.hasOwnProperty.call(body, 'trackWithGeotab');
 
   if (id == null) {
+    const existing = await db.prepare(`
+      SELECT id, unit, active, archived_at, geotab_device_id, geotab_trailer_id
+      FROM equipment
+      WHERE lower(trim(unit)) = lower(trim(?))
+      ORDER BY CASE WHEN active = 1 AND archived_at IS NULL THEN 0 ELSE 1 END, id
+      LIMIT 1
+    `).bind(unitInput).first<{
+      id:number;
+      unit:string;
+      active:number;
+      archived_at:string|null;
+      geotab_device_id:string|null;
+      geotab_trailer_id:string|null;
+    }>();
+
+    if (existing) {
+      const archived = existing.active !== 1 || Boolean(existing.archived_at);
+      return {
+        ok: true,
+        id: existing.id,
+        created: false,
+        existing: true,
+        archived,
+        unit: existing.unit,
+        source: existing.geotab_device_id || existing.geotab_trailer_id ? 'Geotab' : 'Manual',
+      };
+    }
+
     const trackWithGeotab = body.trackWithGeotab === true;
     const currentMileage = trackWithGeotab ? null : requestedMileage;
     const result = await db.prepare(`
@@ -193,7 +221,19 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
     ).run();
     const equipmentId = Number(result.meta.last_row_id);
     if (trackingChoiceProvided) await setTracking(db, equipmentId, trackWithGeotab, body.geotabDeviceId);
-    return { ok: true, id: equipmentId, created: true, source: trackWithGeotab ? 'Geotab' : 'Manual' };
+    return { ok: true, id: equipmentId, created: true, existing: false, archived: false, unit: unitInput, source: trackWithGeotab ? 'Geotab' : 'Manual' };
+  }
+
+  const collision = await db.prepare(`
+    SELECT id, unit, active, archived_at
+    FROM equipment
+    WHERE lower(trim(unit)) = lower(trim(?)) AND id <> ?
+    ORDER BY CASE WHEN active = 1 AND archived_at IS NULL THEN 0 ELSE 1 END, id
+    LIMIT 1
+  `).bind(unitInput, id).first<{id:number;unit:string;active:number;archived_at:string|null}>();
+  if (collision) {
+    const location = collision.active === 1 && !collision.archived_at ? 'active Equipment' : 'Archived Equipment';
+    throw new Error(`Unit ${collision.unit} already exists in ${location}. Open that record instead of creating a duplicate unit number.`);
   }
 
   const current = await db.prepare(`
