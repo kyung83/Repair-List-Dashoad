@@ -384,7 +384,7 @@ export default function InventoryPage() {
     const warehouse = (data?.warehouses ?? []).find((entry) => entry.code === code);
     const label = warehouse?.name ?? code;
     const actionLabel = status === "active" ? "restore" : status === "archived" ? "archive" : "remove";
-    if (status !== "active" && !window.confirm(`${actionLabel === "remove" ? "Remove" : "Archive"} ${item.partNumber} at ${label}?\n\nThis only affects ${label}. Other warehouses keep the part. The warehouse must have zero stock and zero on-order quantity first.`)) return;
+    if (status !== "active" && !window.confirm(`${actionLabel === "remove" ? "Remove" : "Archive"} ${item.partNumber} at ${label}?\n\nThis only affects ${label}. Other warehouses keep the part. Existing stock and history at ${label} will be preserved.`)) return;
     setMessage("");
     const response = await fetch("/api/inventory", {
       method: "POST",
@@ -747,7 +747,7 @@ export default function InventoryPage() {
 
             {part.id && editingItem && <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Warehouse availability</legend>
-              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Archive or remove this part from one warehouse without affecting the other warehouse. Stock and on-order quantity must be zero first.</p>
+              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Archive or remove this part from one warehouse without affecting the other warehouse. Existing stock, receipts, and history are preserved.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 10 }}>
                 {(data?.warehouses ?? []).map((warehouse) => {
                   const status = warehouseStatusFor(editingItem, warehouse.code);
