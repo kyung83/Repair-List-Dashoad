@@ -8,7 +8,7 @@ type Category={id:number;name:string;requiresPosition:boolean;requiresTireSize:b
 type CategoryDraft={name:string;requiresPosition:boolean;requiresTireSize:boolean;active:boolean;sortOrder:number};
 type SubDraft={name:string;active:boolean;sortOrder:number};
 
-const input:React.CSSProperties={width:'100%',minHeight:42,padding:'8px 10px',border:'1px solid #cbd5e1',borderRadius:9,background:'#fff',color:'#172033',fontSize:14,boxSizing:'border-box'};
+const input:React.CSSProperties={width:'100%',minHeight:42,padding:'8px 10px',border:'1px solid #cbd5e1',borderRadius:9,background:'#fff',color:'#1b2421',fontSize:14,boxSizing:'border-box'};
 const label:React.CSSProperties={display:'grid',gap:5,fontSize:12,fontWeight:850,color:'#334155'};
 
 export default function BreakdownSetupPage(){
@@ -102,7 +102,7 @@ export default function BreakdownSetupPage(){
     {loading?<div className="easy-empty" style={{marginTop:18}}>Loading breakdown setup...</div>:<div style={{display:'grid',gap:14,marginTop:18}}>{categories.map((category)=>{
       const draft=categoryDrafts[category.id]||{name:category.name,requiresPosition:category.requiresPosition,requiresTireSize:category.requiresTireSize,active:category.active,sortOrder:category.sortOrder};
       return <section key={category.id} className="easy-card"><div className="easy-card-body">
-        <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}><div><p className="easy-eyebrow">CATEGORY</p><strong style={{fontSize:20,color:'#172033'}}>{category.name}</strong></div><span className={`easy-badge ${draft.active?'green':''}`}>{draft.active?'Active on driver screen':'Inactive / history only'}</span></div>
+        <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}><div><p className="easy-eyebrow">CATEGORY</p><strong style={{fontSize:20,color:'#1b2421'}}>{category.name}</strong></div><span className={`easy-badge ${draft.active?'green':''}`}>{draft.active?'Active on driver screen':'Inactive / history only'}</span></div>
         <div style={{display:'grid',gridTemplateColumns:'2fr 110px 1fr 1fr auto',gap:10,alignItems:'end',marginTop:12}}>
           <label style={label}>Name<input value={draft.name} onChange={(e)=>setCategoryDrafts((c)=>({...c,[category.id]:{...draft,name:e.target.value.slice(0,120)}}))} style={input}/></label>
           <label style={label}>Order<input value={draft.sortOrder} onChange={(e)=>setCategoryDrafts((c)=>({...c,[category.id]:{...draft,sortOrder:Number(e.target.value)||0}}))} style={input} inputMode="numeric"/></label>
@@ -111,7 +111,7 @@ export default function BreakdownSetupPage(){
           <button type="button" className="easy-button orange" disabled={busy===`category-${category.id}`} onClick={()=>void saveCategory(category.id)}>{busy===`category-${category.id}`?'Saving...':'Save'}</button>
         </div>
 
-        <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid #e2e8f0'}}>
+        <div style={{marginTop:18,paddingTop:16,borderTop:'1px solid #dce3df'}}>
           <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center',flexWrap:'wrap'}}><div><p className="easy-eyebrow">SUBCATEGORIES / ISSUE CHOICES</p><p className="easy-section-copy" style={{marginTop:4}}>When a category has active subcategories, the driver must pick one.</p></div></div>
           {category.subcategories.length===0?<div className="easy-empty" style={{marginTop:10}}>No subcategories. The driver will only choose the main category.</div>:<div style={{display:'grid',gap:8,marginTop:10}}>{category.subcategories.map((sub)=>{
             const subDraft=subDrafts[sub.id]||{name:sub.name,active:sub.active,sortOrder:sub.sortOrder};
