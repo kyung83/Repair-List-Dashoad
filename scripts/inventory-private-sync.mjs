@@ -11,6 +11,7 @@ const configPath = 'wrangler.jsonc';
 const outputDir = resolve(process.env.RUNNER_TEMP || '/tmp', 'protected-inventory-output');
 const privateDir = resolve(process.env.RUNNER_TEMP || '/tmp', 'private-inventory-work');
 let context;
+let privateCommandOutput = null;
 
 async function query(sql, params = []) {
   let response;
@@ -27,7 +28,10 @@ async function query(sql, params = []) {
 
 function runPrivate(args) {
   const result = spawnSync(process.execPath, ['scripts/inventory-source-import.mjs', ...args], { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error('Inventory administration did not complete; private command output was withheld.');
+  if (result.status !== 0) {
+    privateCommandOutput = { mode: args[0], status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
+    throw new Error('Inventory administration did not complete; private command output was withheld.');
+  }
 }
 
 async function readJson(path) { return JSON.parse(await readFile(path, 'utf8')); }
@@ -88,6 +92,14 @@ async function main() {
     console.log('Private inventory preview completed and encrypted.');
     return;
   }
+  const existing = (await query('SELECT import_key,source_sha256,payload_sha256,plan_sha256,snapshot_sha256,status,source_row_count,part_count,quantity_before,quantity_after,applied_at FROM inventory_source_imports WHERE import_key=?', [plan.importKey]))[0];
+  if (existing) {
+    if (existing.status !== 'applied' || existing.source_sha256 !== plan.source.sha256 || existing.payload_sha256 !== plan.payloadSha256 || existing.plan_sha256 !== request.expectedPlanHash) throw new Error('The retained import receipt does not match this approved request.');
+    await protect('inventory-receipt.json.enc', { ok: true, idempotent: true, ...existing }, recipient);
+    await protect('inventory-after.json.enc', before, recipient);
+    console.log('The reviewed inventory import was already applied; no balances were written again.');
+    return;
+  }
   if (!request.expectedPlanHash || plan.planHash !== request.expectedPlanHash) throw new Error('The current preview does not match the reviewed inventory plan.');
   const receiptPath = resolve(privateDir, 'inventory-receipt.json');
   runPrivate(['apply', '--source', sourcePath, '--snapshot', beforePath, '--plan', planPath, '--out', receiptPath, '--config', configPath, '--expected-plan-hash', request.expectedPlanHash]);
@@ -98,4 +110,17 @@ async function main() {
   console.log('Reviewed inventory import applied; verification artifacts are encrypted.');
 }
 
-main().catch(() => { console.error('Protected inventory workflow stopped. No private data or credentials were logged.'); process.exitCode = 1; });
+main().catch(async (error) => {
+  try {
+    await mkdir(outputDir, { recursive: true, mode: 0o700 });
+    const recipient = await readFile('ops/inventory-recipient-public.pem', 'utf8');
+    const readOptional = async (name) => { try { return await readFile(resolve(privateDir, name), 'utf8'); } catch { return null; } };
+    const diagnostic = { ok: false, message: String(error?.message || 'Unknown failure'), command: privateCommandOutput,
+      cliDiagnostic: await readOptional('inventory-cli-error.json'), applyLog: await readOptional('inventory-apply-private.log') };
+    // Never retain the existing API credential, even inside an encrypted diagnostic.
+    const clean = context?.token ? JSON.parse(JSON.stringify(diagnostic).replaceAll(context.token, '[redacted]')) : diagnostic;
+    await protect('inventory-failure.json.enc', clean, recipient);
+  } catch { /* A missing recipient never permits plaintext diagnostic output. */ }
+  console.error('Protected inventory workflow stopped. No private data or credentials were logged.');
+  process.exitCode = 1;
+});

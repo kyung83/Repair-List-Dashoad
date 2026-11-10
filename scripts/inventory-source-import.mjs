@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { inventoryImportHash, normalizeInventoryImport, planInventoryImport, buildInventoryImportSql, verifyInventoryImportPlan } from '../lib/inventory-import.js';
+import { inventoryImportHash, normalizeInventoryImport, planInventoryImport, buildInventoryImportSql, verifyInventoryImportPlan, inventoryImportAuditVerificationSql } from '../lib/inventory-import.js';
 
 function argumentsFor(argv) {
   const [mode, ...rest] = argv;
@@ -99,7 +99,8 @@ async function main() {
     const plan = planInventoryImport(source,snapshot);
     await privateJson(options.out,plan);
     if (options.sql && plan.canApply) await writeFile(options.sql,buildInventoryImportSql(plan),{mode:0o600});
-    console.log(JSON.stringify({ok:true,mode,canApply:plan.canApply,planHash:plan.planHash,planSha256:plan.planSha256,importKey:plan.importKey,summary:plan.summary}));
+    const {quantityBefore,quantityAfter,...counts}=plan.summary;
+    console.log(JSON.stringify({ok:true,mode,canApply:plan.canApply,planHash:plan.planHash,planSha256:plan.planSha256,importKey:plan.importKey,counts}));
     return;
   }
   if (mode === 'apply') {
@@ -136,16 +137,33 @@ async function main() {
     if(exitCode!==0) throw new Error('Atomic D1 file import failed; inspect only the encrypted private log.');
     const receipt=(await query(context,receiptSql,[plan.importKey]))[0];
     if(!receipt||receipt.status!=='applied'||receipt.source_row_count!==plan.summary.sourceRows||receipt.plan_sha256!==plan.planSha256) throw new Error('Production import receipt verification did not match the approved plan.');
-    const verification=await query(context,`SELECT COUNT(*) AS audited_rows,SUM(CASE WHEN ABS(s.quantity_on_hand-CAST(json_extract(r.source_json,'$.quantity') AS REAL))<0.000001 THEN 1 ELSE 0 END) AS matching_balances FROM inventory_source_import_rows r JOIN part_warehouse_stock s ON s.id=r.warehouse_stock_id WHERE r.import_key=?`,[plan.importKey]);
+    const verification=await query(context,inventoryImportAuditVerificationSql,[plan.importKey]);
     const match=verification[0];
-    if(Number(match?.audited_rows)!==plan.summary.sourceRows||Number(match?.matching_balances)!==plan.summary.sourceRows) throw new Error('Post-import stock changed or verification failed; inspect the retained import audit before retrying.');
+    if(Number(match?.audited_rows)!==plan.summary.sourceRows||Number(match?.audited_matching_balances)!==plan.summary.sourceRows||Number(match?.audited_matching_bins)!==plan.summary.sourceRows) throw new Error('Post-import audit verification failed; inspect the retained import audit before retrying.');
     await privateJson(receiptPath,{ok:true,idempotent:false,...receipt,verification:match});
-    console.log(JSON.stringify({ok:true,mode,idempotent:false,sourceRows:receipt.source_row_count,parts:receipt.part_count,matchingBalances:match.matching_balances}));
+    console.log(JSON.stringify({ok:true,mode,idempotent:false,sourceRows:receipt.source_row_count,parts:receipt.part_count,auditedMatchingBalances:match.audited_matching_balances,auditedMatchingBins:match.audited_matching_bins,currentMatchingBalances:match.current_matching_balances,currentMatchingBins:match.current_matching_bins}));
     return;
   }
   throw new Error('Choose export, preview, or apply.');
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  main().catch(() => { console.error('Inventory source administration failed. Private source data and response details were not logged.'); process.exitCode = 1; });
+  main().catch(async (error) => {
+    // Keep actionable failure evidence beside the private output so the workflow
+    // can encrypt it. Never include a stack, response payload, or environment.
+    try {
+      const { options } = argumentsFor(process.argv.slice(2));
+      const outputPath = options.out || options.receipt || options.plan;
+      if (outputPath) {
+        let message = error instanceof Error ? error.message : 'Inventory source administration failed.';
+        for (const name of ['CLOUDFLARE_API_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN']) {
+          const secret = process.env[name];
+          if (secret) message = message.split(secret).join('[redacted]');
+        }
+        await privateJson(resolve(dirname(outputPath), 'inventory-cli-error.json'), { message });
+      }
+    } catch { /* Failure diagnostics must not expose details or hide the failure. */ }
+    console.error('Inventory source administration failed. Private source data and response details were not logged.');
+    process.exitCode = 1;
+  });
 }
