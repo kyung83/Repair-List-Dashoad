@@ -25,5 +25,25 @@ export default function LoginPage() {
     } catch { setMessage("The dashboard could not be reached."); } finally { setBusy(false); }
   }
 
-  return <main style={{position:"fixed",inset:0,zIndex:1000,overflow:"auto",background:"#0f0f0f",color:"#f5f5f5",display:"grid",placeItems:"center",padding:24}}><section style={{width:"min(460px, 100%)",background:"#151515",border:"1px solid #444444",borderRadius:18,padding:32,boxShadow:"0 24px 70px #00000024"}}><div style={{marginBottom:22}}><img src="/northern-logistics-logo.webp" alt="Northern Logistics — Employee Owned" style={{display:"block",width:230,maxWidth:"100%",height:"auto"}}/><span style={{display:"block",marginTop:8,color:"#b8b8b8",fontSize:12}}>Repair, PM, inventory and shop labor</span></div><h1 style={{margin:0,fontSize:30,color:"#f5f5f5"}}>Sign in</h1><p style={{margin:"8px 0 24px",color:"#b8b8b8",lineHeight:1.5}}>Use the username and password created for you by an administrator.</p>{message&&<div style={{marginBottom:16,padding:12,borderRadius:9,background:"#fff3e9",border:"1px solid #f6b47d",color:"#88420b"}}>{message}</div>}<form onSubmit={signIn} style={{display:"grid",gap:14}}><label style={{display:"grid",gap:6,fontWeight:700}}>Username<input autoComplete="username" required value={username} onChange={e=>setUsername(e.target.value)} style={{border:"1px solid #555555",background:"#0b0b0b",color:"#f5f5f5",borderRadius:9,padding:"12px 13px",fontSize:15}}/></label><label style={{display:"grid",gap:6,fontWeight:700}}>Password<input autoComplete="current-password" type="password" required value={password} onChange={e=>setPassword(e.target.value)} style={{border:"1px solid #555555",background:"#0b0b0b",color:"#f5f5f5",borderRadius:9,padding:"12px 13px",fontSize:15}}/></label><button disabled={busy} type="submit" style={{border:0,borderRadius:9,padding:"13px 18px",background:"#f7f7f7",color:"#111111",fontWeight:900,fontSize:15,cursor:busy?"wait":"pointer",opacity:busy?.7:1}}>{busy?"Signing in…":"Sign in"}</button></form><p style={{margin:"18px 0 0",fontSize:12,color:"#87929c"}}>Existing administrator email logins remain supported during the username rollout.</p></section></main>;
+  return <main style={{position:"fixed",inset:0,zIndex:1000,overflow:"auto",background:"#f1f4f2",color:"#1b2421",display:"grid",placeItems:"center",padding:24}}>
+    <section style={{width:"min(460px, 100%)",background:"white",border:"1px solid #d7ded9",borderRadius:18,padding:32,boxShadow:"0 24px 70px #173f3718"}}>
+      <div style={{marginBottom:22}}>
+        <img src="/northern-logistics-logo.webp" alt="Northern Logistics — Employee Owned" style={{display:"block",width:230,maxWidth:"100%",height:"auto"}}/>
+        <span style={{display:"block",marginTop:8,color:"#68746f",fontSize:12}}>Repair, PM, inventory and shop labor</span>
+      </div>
+      <h1 style={{margin:0,fontSize:30,color:"#173f37"}}>Sign in</h1>
+      <p style={{margin:"8px 0 24px",color:"#68746f",lineHeight:1.5}}>Use the username and password created for you by an administrator.</p>
+      {message&&<div style={{marginBottom:16,padding:12,borderRadius:9,background:"#fff3e9",border:"1px solid #f6b47d",color:"#88420b"}}>{message}</div>}
+      <form onSubmit={signIn} style={{display:"grid",gap:14}}>
+        <label style={{display:"grid",gap:6,fontWeight:700}}>Username
+          <input autoComplete="username" required value={username} onChange={e=>setUsername(e.target.value)} style={{border:"1px solid #b9c6c0",background:"white",color:"#1b2421",borderRadius:9,padding:"12px 13px",fontSize:15}}/>
+        </label>
+        <label style={{display:"grid",gap:6,fontWeight:700}}>Password
+          <input autoComplete="current-password" type="password" required value={password} onChange={e=>setPassword(e.target.value)} style={{border:"1px solid #b9c6c0",background:"white",color:"#1b2421",borderRadius:9,padding:"12px 13px",fontSize:15}}/>
+        </label>
+        <button disabled={busy} type="submit" style={{border:0,borderRadius:9,padding:"13px 18px",background:"#2f6f60",color:"white",fontWeight:900,fontSize:15,cursor:busy?"wait":"pointer",opacity:busy?.7:1}}>{busy?"Signing in…":"Sign in"}</button>
+      </form>
+      <p style={{margin:"18px 0 0",fontSize:12,color:"#87928d"}}>Existing administrator email logins remain supported during the username rollout.</p>
+    </section>
+  </main>;
 }
