@@ -230,7 +230,7 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
     <main className="easy-page">
       <div className="easy-page-narrow" style={{maxWidth:720}}>
         <section className="easy-card" style={{overflow:'hidden'}}>
-          <div style={{padding:26,background:'#0d1b2b',color:'#fff'}}>
+          <div style={{padding:26,background:'#173f37',color:'#fff'}}>
             <p className="easy-eyebrow">BREAKDOWN SUBMITTED</p>
             <h1 style={{margin:'8px 0 0',fontSize:32}}>Breakdown #{breakdownId}</h1>
             <p style={{margin:'10px 0 0',color:'#c5d0da',lineHeight:1.5}}>
@@ -286,9 +286,9 @@ export default function DriverFollowup({breakdownId,token,onReportAnother}:Props
                   aria-label="Upload Receipt"
                   disabled={busy!==''||Boolean(state?.closed)}
                   onChange={(event)=>void uploadReceipt(Array.from(event.target.files||[]).slice(0,3))}
-                  style={{width:'100%',minHeight:68,padding:'14px',border:'1px solid #cbd5dd',borderRadius:12,background:'#fff',color:'#172033',fontSize:16,boxSizing:'border-box'}}
+                  style={{width:'100%',minHeight:68,padding:'14px',border:'1px solid #c9d4cf',borderRadius:12,background:'#fff',color:'#1b2421',fontSize:16,boxSizing:'border-box'}}
                 />
-                {busy==='receipt'&&<small style={{color:'#64748b'}}>Preparing and uploading receipt...</small>}
+                {busy==='receipt'&&<small style={{color:'#68746f'}}>Preparing and uploading receipt...</small>}
               </div>
 
               <button
