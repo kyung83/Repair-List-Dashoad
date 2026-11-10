@@ -101,3 +101,49 @@ export async function deletePartPreservingHistory(
     historyPreserved:true,
   };
 }
+
+
+function warehouseCodeValue(value: unknown) {
+  const code = String(value ?? '').trim().toUpperCase();
+  if (!code || code.length > 64 || code === 'ALL') throw new Error('Choose a specific warehouse.');
+  return code;
+}
+
+export async function setPartWarehouseStatus(
+  db: D1Database,
+  input: {partId: unknown; warehouseCode: unknown; status: 'active'|'archived'|'removed'; userId?: number|null},
+) {
+  const partId = partIdValue(input.partId);
+  const warehouseCode = warehouseCodeValue(input.warehouseCode);
+  const part = await requirePart(db,partId);
+  if (part.deleted_at) throw new Error('Deleted parts cannot be changed by warehouse.');
+
+  const warehouse = await db.prepare('SELECT id,code,name FROM warehouses WHERE code=? AND active=1')
+    .bind(warehouseCode).first<{id:number;code:string;name:string}>();
+  if (!warehouse) throw new Error('Warehouse was not found.');
+
+  if (input.status !== 'active') {
+    const stock = await db.prepare(`
+      SELECT COALESCE(SUM(quantity_on_hand),0) AS physical,
+             COALESCE(SUM(on_order),0) AS on_order
+      FROM part_warehouse_stock
+      WHERE part_id=? AND warehouse_id=?
+    `).bind(partId,warehouse.id).first<{physical:number;on_order:number}>();
+    const physical = Number(stock?.physical ?? 0);
+    const onOrder = Number(stock?.on_order ?? 0);
+    if (Math.abs(physical) > 0.000001 || Math.abs(onOrder) > 0.000001) {
+      throw new Error(`${part.part_number} still has stock or on-order quantity at ${warehouse.name}. Count or transfer it to zero before archiving/removing it from that warehouse.`);
+    }
+  }
+
+  await db.prepare(`
+    INSERT INTO part_warehouse_catalog_status(part_id,warehouse_id,status,updated_by_user_id,updated_at)
+    VALUES(?,?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(part_id,warehouse_id) DO UPDATE SET
+      status=excluded.status,
+      updated_by_user_id=excluded.updated_by_user_id,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(partId,warehouse.id,input.status,input.userId ?? null).run();
+
+  return {ok:true,partId,partNumber:part.part_number,warehouseCode:warehouse.code,warehouseName:warehouse.name,status:input.status};
+}
