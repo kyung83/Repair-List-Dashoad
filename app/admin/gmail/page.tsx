@@ -127,7 +127,7 @@ export default function GmailConnectionPage() {
   const defaultRecipient = status?.defaultRecipient || 'breakdown@norloworld.com';
   const testingRecipient = recipient.trim().toLowerCase() !== defaultRecipient.toLowerCase();
 
-  return <section style={{ background: '#f3f5f7', padding: '0 clamp(16px,4vw,46px) 20px', color: '#182331' }}>
+  return <section style={{ background: '#f4f6f4', padding: '0 clamp(16px,4vw,46px) 20px', color: '#1b2421' }}>
     <div style={{ ...card, borderColor: connected ? '#b9d9c3' : '#e5b765', background: connected ? '#f4fbf6' : '#fff9ed' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 15, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div>
@@ -210,14 +210,14 @@ export default function GmailConnectionPage() {
 
 const card: CSSProperties = { border: '2px solid', borderRadius: 14, padding: 18, boxShadow: '0 3px 14px rgba(15,32,48,.05)' };
 const copy: CSSProperties = { margin: '7px 0 0', color: '#586979', lineHeight: 1.55, fontSize: 14 };
-const smallCopy: CSSProperties = { margin: '7px 0 12px', color: '#657482', lineHeight: 1.5, fontSize: 12 };
-const infoCard: CSSProperties = { padding: 14, border: '1px solid #dce2e7', borderRadius: 10, background: 'white', display: 'grid', gap: 10 };
-const formCard: CSSProperties = { padding: 14, border: '1px solid #dce2e7', borderRadius: 10, background: 'white', display: 'grid', gap: 11 };
+const smallCopy: CSSProperties = { margin: '7px 0 12px', color: '#68746f', lineHeight: 1.5, fontSize: 12 };
+const infoCard: CSSProperties = { padding: 14, border: '1px solid #d7ded9', borderRadius: 10, background: 'white', display: 'grid', gap: 10 };
+const formCard: CSSProperties = { padding: 14, border: '1px solid #d7ded9', borderRadius: 10, background: 'white', display: 'grid', gap: 11 };
 const label: CSSProperties = { display: 'grid', gap: 5, color: '#485b6b', fontSize: 11, fontWeight: 900 };
-const input: CSSProperties = { minHeight: 42, padding: '0 10px', border: '1px solid #cbd5dd', borderRadius: 8, background: 'white', color: '#172536', fontSize: 16 };
+const input: CSSProperties = { minHeight: 42, padding: '0 10px', border: '1px solid #c9d4cf', borderRadius: 8, background: 'white', color: '#1b2421', fontSize: 16 };
 const notice: CSSProperties = { marginTop: 12, padding: '10px 11px', border: '1px solid #d8c17b', borderRadius: 8, background: '#fffdf2', fontSize: 13 };
 const linkButton: CSSProperties = { display: 'inline-flex', width: 'fit-content', alignItems: 'center', minHeight: 36, padding: '0 10px', border: '1px solid #ccd5dd', borderRadius: 8, color: '#17324a', textDecoration: 'none', fontWeight: 850, fontSize: 12 };
-const primaryButton: CSSProperties = { border: 0, borderRadius: 7, padding: '8px 11px', minHeight: 42, background: '#0d1b2b', color: 'white', fontWeight: 900 };
+const primaryButton: CSSProperties = { border: 0, borderRadius: 7, padding: '8px 11px', minHeight: 42, background: '#173f37', color: 'white', fontWeight: 900 };
 const dangerButton: CSSProperties = { border: '1px solid #d8a19d', borderRadius: 7, padding: '8px 11px', background: '#fff5f4', color: '#9b2c25', fontWeight: 850 };
 const codeBox: CSSProperties = { display: 'block', flex: 1, padding: '9px 10px', border: '1px solid #dce3e8', borderRadius: 8, background: '#f7f9fa', fontSize: 11, overflowWrap: 'anywhere' };
 const detail: CSSProperties = { display: 'grid', gridTemplateColumns: '90px 1fr', gap: 8, fontSize: 12, alignItems: 'baseline' };
