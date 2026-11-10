@@ -166,10 +166,10 @@ export default function PartsReceivingPage(){
     finally{setBusy("")}
   }
 
-  return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"38px 34px 100px",color:"#182331"}}>
+  return <main style={{minHeight:"100vh",background:"#f4f6f4",padding:"38px 34px 100px",color:"#1b2421"}}>
     <ModuleTabs module="parts"/>
     <header style={{display:"flex",justifyContent:"space-between",gap:18,alignItems:"end",flexWrap:"wrap"}}>
-      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"}}>Parts Receiving</h1><p style={muted}>Scan an invoice or enter a receipt manually. Vendor/source name, invoice number, who received it, and every received part stay in the receiving record.</p></div>
+      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:"7px 0 5px",fontSize:34,color:"#173f37"}}>Parts Receiving</h1><p style={muted}>Scan an invoice or enter a receipt manually. Vendor/source name, invoice number, who received it, and every received part stay in the receiving record.</p></div>
       <label style={warehouseLabel}>RECEIVING WAREHOUSE<select value={warehouseCode} onChange={event=>setWarehouseCode(event.target.value)} style={input}><option value="">Choose warehouse…</option>{(data?.warehouses??[]).filter(row=>row.code!=="NO_WAREHOUSE").map(row=><option key={row.code} value={row.code}>{row.name}</option>)}</select></label>
     </header>
     {message&&<div style={notice}>{message}</div>}
@@ -260,38 +260,38 @@ export default function PartsReceivingPage(){
   </main>
 }
 
-const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
-const title={margin:"5px 0 6px",fontSize:22,color:"#0d1b2b"} as const;
-const muted={margin:"3px 0 8px",color:"#667482",fontSize:12} as const;
-const panel={marginTop:18,padding:18,border:"1px solid #dce2e7",borderRadius:13,background:"white"} as const;
+const eyebrow={margin:0,color:"#2f6f60",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
+const title={margin:"5px 0 6px",fontSize:22,color:"#173f37"} as const;
+const muted={margin:"3px 0 8px",color:"#68746f",fontSize:12} as const;
+const panel={marginTop:18,padding:18,border:"1px solid #d7ded9",borderRadius:13,background:"white"} as const;
 const panelHead={display:"flex",justifyContent:"space-between",gap:12,alignItems:"end",flexWrap:"wrap" as const} as const;
 const notice={marginTop:16,padding:12,border:"1px solid #efc16c",borderRadius:9,background:"#fff8e6",fontWeight:750} as const;
 const warehouseLabel={display:"grid",gap:5,minWidth:230,fontSize:11,fontWeight:900,color:"#52616d"} as const;
-const input={boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #cbd5dd",borderRadius:8,background:"white"} as const;
+const input={boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #c9d4cf",borderRadius:8,background:"white"} as const;
 const label={display:"grid",gap:5,fontSize:11,fontWeight:900,color:"#52616d"} as const;
 const invoiceGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:10} as const;
-const darkButton={display:"inline-block",border:0,borderRadius:8,padding:"11px 14px",background:"#0d1b2b",color:"white",fontWeight:950,cursor:"pointer"} as const;
-const lightButton={...darkButton,border:"1px solid #aebac4",background:"white",color:"#173a5d"} as const;
-const manualButton={...darkButton,border:"1px solid #173a5d",background:"#eaf2f8",color:"#173a5d"} as const;
-const addVendorButton={border:"1px solid #173a5d",borderRadius:7,padding:"7px 9px",background:"#f4f8fb",color:"#173a5d",fontSize:10,fontWeight:950,cursor:"pointer"} as const;
+const darkButton={display:"inline-block",border:0,borderRadius:8,padding:"11px 14px",background:"#173f37",color:"white",fontWeight:950,cursor:"pointer"} as const;
+const lightButton={...darkButton,border:"1px solid #aebac4",background:"white",color:"#2f6f60"} as const;
+const manualButton={...darkButton,border:"1px solid #2f6f60",background:"#eaf2f8",color:"#2f6f60"} as const;
+const addVendorButton={border:"1px solid #2f6f60",borderRadius:7,padding:"7px 9px",background:"#f1f5f2",color:"#2f6f60",fontSize:10,fontWeight:950,cursor:"pointer"} as const;
 const vendorSearchWrap={position:"relative" as const} as const;
-const vendorSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:35,maxHeight:240,overflowY:"auto" as const,border:"1px solid #cbd5dd",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
+const vendorSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:35,maxHeight:240,overflowY:"auto" as const,border:"1px solid #c9d4cf",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
 const vendorSearchResult={display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf0f2",background:"white",textAlign:"left" as const,cursor:"pointer",color:"#243341"} as const;
-const vendorEmpty={padding:10,fontSize:11,color:"#6c7886"} as const;
+const vendorEmpty={padding:10,fontSize:11,color:"#68746f"} as const;
 const vendorBackdrop={position:"fixed" as const,inset:0,zIndex:10000,background:"rgba(8,20,32,.55)",display:"grid",placeItems:"center",padding:18} as const;
 const vendorModal={width:"min(540px,100%)",background:"white",borderRadius:14,padding:20,boxShadow:"0 24px 70px rgba(0,0,0,.28)",display:"grid",gap:11} as const;
-const orangeButton={...darkButton,background:"#f47b20"} as const;
-const pill={padding:"6px 10px",borderRadius:999,background:"#eaf2f8",color:"#173a5d",fontSize:12,fontWeight:950} as const;
+const orangeButton={...darkButton,background:"#2f6f60"} as const;
+const pill={padding:"6px 10px",borderRadius:999,background:"#eaf2f8",color:"#2f6f60",fontSize:12,fontWeight:950} as const;
 const warning={marginTop:12,padding:10,border:"1px solid #efc16c",borderRadius:8,background:"#fff8e6",display:"grid",gap:4,fontSize:12} as const;
-const th={padding:"10px 9px",textAlign:"left" as const,background:"#f7f9fa",color:"#657383",fontSize:10,whiteSpace:"nowrap" as const} as const;
+const th={padding:"10px 9px",textAlign:"left" as const,background:"#f7f9fa",color:"#68746f",fontSize:10,whiteSpace:"nowrap" as const} as const;
 const td={padding:"10px 9px",verticalAlign:"top" as const,fontSize:12} as const;
-const small={display:"block",marginTop:3,fontSize:10,color:"#6c7886",fontWeight:600} as const;
+const small={display:"block",marginTop:3,fontSize:10,color:"#68746f",fontWeight:600} as const;
 const matchNote={display:"block",marginTop:4,fontSize:10,color:"#176448",fontWeight:800} as const;
 const good={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#eaf7ef",color:"#155f3d",fontSize:10,fontWeight:950} as const;
 const needsReview={display:"inline-block",padding:"4px 7px",borderRadius:999,background:"#fff0d7",color:"#9a5a05",fontSize:10,fontWeight:950} as const;
 const removeButton={display:"block",marginTop:7,padding:"4px 7px",border:"1px solid #d7a3a3",borderRadius:6,background:"white",color:"#8a2f2f",fontSize:9,fontWeight:900,cursor:"pointer"} as const;
 const partSearchWrap={position:"relative" as const,minWidth:245} as const;
-const partSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:20,maxHeight:260,overflowY:"auto" as const,border:"1px solid #cbd5dd",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
+const partSearchResults={position:"absolute" as const,left:0,right:0,top:"calc(100% + 4px)",zIndex:20,maxHeight:260,overflowY:"auto" as const,border:"1px solid #c9d4cf",borderRadius:8,background:"white",boxShadow:"0 8px 24px rgba(18,35,52,.16)"} as const;
 const partSearchResult={display:"block",width:"100%",padding:"9px 10px",border:0,borderBottom:"1px solid #edf0f2",background:"white",textAlign:"left" as const,cursor:"pointer",fontSize:12,color:"#243341"} as const;
-const receiptRow={display:"grid",gridTemplateColumns:"minmax(180px,1.3fr) minmax(140px,.8fr) minmax(190px,1fr) minmax(150px,.7fr)",gap:12,alignItems:"center",padding:"10px 11px",border:"1px solid #e5e9ed",borderRadius:9,background:"#fbfcfd"} as const;
+const receiptRow={display:"grid",gridTemplateColumns:"minmax(180px,1.3fr) minmax(140px,.8fr) minmax(190px,1fr) minmax(150px,.7fr)",gap:12,alignItems:"center",padding:"10px 11px",border:"1px solid #e5e9ed",borderRadius:9,background:"#fbfcfb"} as const;
 const empty={padding:20,textAlign:"center" as const,color:"#71808e",border:"1px dashed #d2d9df",borderRadius:9} as const;
