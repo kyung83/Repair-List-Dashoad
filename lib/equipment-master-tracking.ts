@@ -304,3 +304,168 @@ export async function archiveEquipmentMasterItem(db: D1Database, body: Record<st
   `).bind(id).run();
   return result;
 }
+
+
+export async function reuseEquipmentUnitNumber(db: D1Database, body: Record<string, unknown>) {
+  const priorId = positiveId(body.id, 'Existing equipment');
+  const transferCurrentGeotab = body.transferCurrentGeotab === true;
+
+  const prior = await db.prepare(`
+    SELECT id, unit, category, equipment_type, trailer_type, trailer_subtype,
+           current_mileage, mileage_updated_at, geotab_device_id, geotab_trailer_id,
+           merged_into_equipment_id
+    FROM equipment
+    WHERE id = ?
+  `).bind(priorId).first<{
+    id:number;
+    unit:string;
+    category:string;
+    equipment_type:string;
+    trailer_type:string|null;
+    trailer_subtype:string|null;
+    current_mileage:number|null;
+    mileage_updated_at:string|null;
+    geotab_device_id:string|null;
+    geotab_trailer_id:string|null;
+    merged_into_equipment_id:number|null;
+  }>();
+
+  if (!prior) throw new Error('Equipment was not found.');
+  if (prior.merged_into_equipment_id != null) throw new Error('Merged equipment cannot be reused as a new physical asset.');
+
+  const unit = text(prior.unit, 100);
+  if (!unit) throw new Error('The existing equipment does not have a usable unit number.');
+
+  const duplicate = await db.prepare(`
+    SELECT id FROM equipment
+    WHERE lower(trim(unit)) = lower(trim(?)) AND id <> ?
+    LIMIT 1
+  `).bind(unit, priorId).first<{id:number}>();
+  if (duplicate) throw new Error(`Unit ${unit} already has another equipment record. Resolve that duplicate before reusing the number.`);
+
+  const retiredUnit = `HIST-${unit}-${priorId}`;
+  const geotabDeviceId = transferCurrentGeotab ? prior.geotab_device_id : null;
+  const geotabTrailerId = transferCurrentGeotab ? prior.geotab_trailer_id : null;
+
+  const statements = [
+    db.prepare(`
+      UPDATE equipment
+      SET unit = ?,
+          active = 0,
+          archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP),
+          archive_reason = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(retiredUnit, `Prior physical asset retained because fleet number ${unit} was reused`, priorId),
+
+    db.prepare(`
+      INSERT INTO equipment (
+        unit, category, equipment_type, trailer_type, trailer_subtype, active,
+        current_mileage, mileage_updated_at, geotab_device_id, geotab_trailer_id,
+        notes, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).bind(
+      unit,
+      prior.category,
+      prior.equipment_type,
+      prior.trailer_type,
+      prior.trailer_subtype,
+      transferCurrentGeotab ? prior.current_mileage : null,
+      transferCurrentGeotab ? prior.mileage_updated_at : null,
+      geotabDeviceId,
+      geotabTrailerId,
+      `Replacement physical asset using reused fleet number ${unit}. Prior asset history is retained separately.`,
+    ),
+  ];
+
+  if (transferCurrentGeotab) {
+    statements.push(
+      db.prepare(`
+        UPDATE equipment_geotab_devices
+        SET equipment_id = (
+              SELECT id FROM equipment
+              WHERE unit = ? AND active = 1 AND archived_at IS NULL
+              ORDER BY id DESC LIMIT 1
+            ),
+            linked_by = 'equipment-master-unit-reuse',
+            last_seen_at = CURRENT_TIMESTAMP
+        WHERE equipment_id = ? AND current = 1
+      `).bind(unit, priorId),
+      db.prepare(`
+        UPDATE geotab_unit_state
+        SET equipment_id = (
+              SELECT id FROM equipment
+              WHERE unit = ? AND active = 1 AND archived_at IS NULL
+              ORDER BY id DESC LIMIT 1
+            ),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE equipment_id = ?
+      `).bind(unit, priorId),
+    );
+  } else {
+    statements.push(
+      db.prepare(`
+        UPDATE equipment_geotab_devices
+        SET current = 0,
+            ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+            last_seen_at = CURRENT_TIMESTAMP
+        WHERE equipment_id = ? AND current = 1
+      `).bind(priorId),
+    );
+  }
+
+  statements.push(
+    db.prepare(`
+      UPDATE equipment
+      SET geotab_device_id = NULL,
+          geotab_trailer_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(priorId),
+    db.prepare(`
+      INSERT INTO equipment_unit_reuse_events (
+        prior_equipment_id,
+        replacement_equipment_id,
+        unit,
+        prior_internal_unit,
+        geotab_device_id,
+        note
+      )
+      SELECT ?, id, ?, ?, ?, ?
+      FROM equipment
+      WHERE unit = ? AND active = 1 AND archived_at IS NULL
+      ORDER BY id DESC LIMIT 1
+    `).bind(
+      priorId,
+      unit,
+      retiredUnit,
+      geotabDeviceId,
+      transferCurrentGeotab
+        ? 'Unit number reused; prior history retained and current Geotab assignment moved to replacement asset.'
+        : 'Unit number reused; prior history retained and prior Geotab assignment ended.',
+      unit,
+    ),
+  );
+
+  await db.batch(statements);
+
+  const replacement = await db.prepare(`
+    SELECT id, unit, geotab_device_id
+    FROM equipment
+    WHERE unit = ? AND active = 1 AND archived_at IS NULL
+    ORDER BY id DESC LIMIT 1
+  `).bind(unit).first<{id:number;unit:string;geotab_device_id:string|null}>();
+
+  if (!replacement) throw new Error('Replacement equipment record could not be verified after unit-number reuse.');
+
+  return {
+    ok: true,
+    reused: true,
+    priorEquipmentId: priorId,
+    replacementEquipmentId: replacement.id,
+    unit: replacement.unit,
+    transferredGeotab: transferCurrentGeotab,
+    geotabDeviceId: replacement.geotab_device_id ?? '',
+  };
+}
