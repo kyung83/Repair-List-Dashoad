@@ -90,12 +90,12 @@ export default function WorkOrdersPage(){
 
   const summary=data?.summary??{needsReview:0,reviewed:0,openRepairs:0,completedRepairs:0,completedValue:0};
 
-  return <main style={{minHeight:"100vh",background:"#f3f5f7",padding:"30px 34px 80px",color:"#182331"}}>
+  return <main style={{minHeight:"100vh",background:"#f4f6f4",padding:"30px 34px 80px",color:"#1b2421"}}>
     <header style={{display:"flex",justifyContent:"space-between",gap:20,alignItems:"flex-end",flexWrap:"wrap"}}>
       <div>
-        <p style={{margin:0,color:"#f47b20",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>COMPLETED WORK</p>
+        <p style={{margin:0,color:"#2f6f60",fontSize:11,fontWeight:900,letterSpacing:".14em"}}>COMPLETED WORK</p>
         <h1 style={{margin:"6px 0 0",fontSize:31}}>Review finished shop work</h1>
-        <p style={{margin:"7px 0 0",color:"#64748b",maxWidth:900,fontSize:13}}>Review the Repair Type along with the repair wording, labor, parts and outside cost. Approval makes the work order eligible for invoicing.</p>
+        <p style={{margin:"7px 0 0",color:"#68746f",maxWidth:900,fontSize:13}}>Review the Repair Type along with the repair wording, labor, parts and outside cost. Approval makes the work order eligible for invoicing.</p>
       </div>
       <div style={{display:"flex",gap:7}}><a href="/repair-board" style={linkButtonStyle}>Repair Board</a><button type="button" onClick={()=>void load()} style={buttonStyle}>Refresh</button></div>
     </header>
@@ -111,11 +111,11 @@ export default function WorkOrdersPage(){
     </section>
 
     <section style={{marginTop:12,border:"1px solid #cfd6db",background:"white"}}>
-      <div style={{padding:10,borderBottom:"1px solid #dce2e7",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+      <div style={{padding:10,borderBottom:"1px solid #d7ded9",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <strong style={{fontSize:12,marginRight:4}}>COMPLETED WORK ORDERS</strong>
         <input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search unit, repair type, technician, repair, note, part..." style={{...inputStyle,flex:1,minWidth:280}}/>
         <select value={reviewFilter} onChange={(event)=>setReviewFilter(event.target.value as ReviewFilter)} style={{...inputStyle,width:165}}><option value="needs">Needs review</option><option value="reviewed">Reviewed history</option><option value="all">All completed</option></select>
-        <span style={{color:"#6c7886",fontSize:11,minWidth:85,textAlign:"right"}}>{visiblePackages.length} shown</span>
+        <span style={{color:"#68746f",fontSize:11,minWidth:85,textAlign:"right"}}>{visiblePackages.length} shown</span>
       </div>
 
       <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:1380}}>
@@ -124,7 +124,7 @@ export default function WorkOrdersPage(){
           const open=expanded.has(item.id);
           return <Fragment key={item.id}>
             <tr style={{borderTop:"1px solid #e7ebee",background:item.reviewed?"#f8faf9":"#fffdf6"}}>
-              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={{...tdStyle,fontWeight:850}}>{repairTypes(item)}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.repairPhotos.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#64748b"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button>{item.reviewed&&<a href={billingHref(item)} style={billingSmallStyle}>Create Invoice</a>}</div></td>
+              <td style={{...tdStyle,fontWeight:900,fontSize:13}}>{item.unit||"—"}</td><td style={tdStyle}>{dateTime(item.completedAt)}</td><td style={tdStyle}><strong>{item.technician||"Unassigned"}</strong></td><td style={tdStyle}>{item.repairs.length}</td><td style={{...tdStyle,fontWeight:850}}>{repairTypes(item)}</td><td style={tdStyle}>{item.technicianNotes.length}</td><td style={tdStyle}>{item.repairPhotos.length}</td><td style={tdStyle}>{item.laborHours.toFixed(2)} hr<br/><small>{money(item.laborCost)}</small></td><td style={tdStyle}>{item.usedParts.length} line{item.usedParts.length===1?"":"s"}<br/><small>{money(item.partCost)}{item.missingPartCostLines?` · ${item.missingPartCostLines} cost missing`:""}</small></td><td style={tdStyle}>{money(item.outsideCost)}</td><td style={{...tdStyle,fontWeight:900}}>{money(item.totalCost)}</td><td style={tdStyle}><span style={{display:"inline-flex",padding:"3px 7px",border:`1px solid ${item.reviewed?"#9fcab4":"#e7b34e"}`,background:item.reviewed?"#e9f6ef":"#fff4cf",color:item.reviewed?"#176440":"#8a5a00",fontSize:10,fontWeight:900}}>{item.reviewed?"REVIEWED":"NEEDS REVIEW"}</span>{item.reviewed&&<small style={{display:"block",marginTop:3,color:"#68746f"}}>{item.reviewedBy||"Manager"}</small>}</td><td style={tdStyle}><div style={{display:"flex",gap:5,flexWrap:"wrap"}}><button type="button" onClick={()=>toggle(item.id)} style={buttonStyle}>{open?"Close":"Review"}</button>{item.reviewed&&<a href={billingHref(item)} style={billingSmallStyle}>Create Invoice</a>}</div></td>
             </tr>
             {open&&<tr style={{borderTop:"1px solid #e7ebee",background:"#fafbfc"}}><td colSpan={13} style={{padding:14}}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(6,minmax(140px,1fr))",gap:10}}><Detail label="Unit" value={item.unit||"—"}/><Detail label="Repair Types" value={repairTypes(item)}/><Detail label="Technician" value={item.technician||"Unassigned"}/><Detail label="Completed" value={dateTime(item.completedAt)}/><Detail label="Labor cost" value={money(item.laborCost)}/><Detail label={item.missingPartCostLines?"Recorded total":"Total cost"} value={money(item.totalCost)}/></div>
@@ -138,7 +138,7 @@ export default function WorkOrdersPage(){
                 </div>
                 {item.repairPhotos.length
                   ? <div style={{marginTop:10,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,220px))",gap:10}}>
-                      {item.repairPhotos.map((photo)=><a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{display:"block",border:"1px solid #d9e0e5",borderRadius:8,overflow:"hidden",background:"#f8fafb",textDecoration:"none",color:"#243746"}}>
+                      {item.repairPhotos.map((photo)=><a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{display:"block",border:"1px solid #d9e0e5",borderRadius:8,overflow:"hidden",background:"#fbfcfb",textDecoration:"none",color:"#243746"}}>
                         <img src={photo.url} alt={photo.note||photo.fileName||"Repair photo"} loading="lazy" style={{display:"block",width:"100%",height:140,objectFit:"cover",background:"#e9eef2"}}/>
                         <div style={{padding:8}}>
                           <strong style={{display:"block",fontSize:10,lineHeight:1.3}}>{photo.repairIssue||"Repair photo"}</strong>
@@ -155,20 +155,20 @@ export default function WorkOrdersPage(){
             </td></tr>}
           </Fragment>;
         })}</tbody>
-      </table>{!visiblePackages.length&&<div style={{padding:24,color:"#64748b",textAlign:"center",fontSize:12}}>No completed work orders match this view.</div>}</div>
+      </table>{!visiblePackages.length&&<div style={{padding:24,color:"#68746f",textAlign:"center",fontSize:12}}>No completed work orders match this view.</div>}</div>
     </section>
 
-    <section style={{marginTop:14,border:"1px solid #cfd6db",background:"white"}}><div style={{padding:10,borderBottom:"1px solid #dce2e7",fontSize:12,fontWeight:900}}>OPEN REPAIRS — NOT YET COMPLETED</div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}><thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Repair Type</th><th style={thStyle}>Repair</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Labor</th></tr></thead><tbody>{openRepairs.slice(0,100).map((repair)=><tr key={repair.id} style={{borderTop:"1px solid #e7ebee"}}><td style={{...tdStyle,fontWeight:900}}>{repair.unit||"—"}</td><td style={{...tdStyle,fontWeight:850}}>{repair.repairType||"Uncategorized"}</td><td style={tdStyle}>{repair.issue}</td><td style={tdStyle}>{repair.assignedTo||"Unassigned"}</td><td style={tdStyle}>{repair.location||"—"}</td><td style={tdStyle}>{repair.laborHours.toFixed(2)} hr</td></tr>)}</tbody></table>{!openRepairs.length&&<div style={emptyStyle}>No open repairs match this search.</div>}</div></section>
+    <section style={{marginTop:14,border:"1px solid #cfd6db",background:"white"}}><div style={{padding:10,borderBottom:"1px solid #d7ded9",fontSize:12,fontWeight:900}}>OPEN REPAIRS — NOT YET COMPLETED</div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}><thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Repair Type</th><th style={thStyle}>Repair</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Labor</th></tr></thead><tbody>{openRepairs.slice(0,100).map((repair)=><tr key={repair.id} style={{borderTop:"1px solid #e7ebee"}}><td style={{...tdStyle,fontWeight:900}}>{repair.unit||"—"}</td><td style={{...tdStyle,fontWeight:850}}>{repair.repairType||"Uncategorized"}</td><td style={tdStyle}>{repair.issue}</td><td style={tdStyle}>{repair.assignedTo||"Unassigned"}</td><td style={tdStyle}>{repair.location||"—"}</td><td style={tdStyle}>{repair.laborHours.toFixed(2)} hr</td></tr>)}</tbody></table>{!openRepairs.length&&<div style={emptyStyle}>No open repairs match this search.</div>}</div></section>
 
     <footer style={{marginTop:9,color:"#74808a",fontSize:10,textAlign:"right"}}>{data?`Snapshot updated ${new Date(data.updatedAt).toLocaleString()}`:"Loading work order review..."}</footer>
   </main>;
 }
 
-function Metric({label,value,last=false}:{label:string;value:string;last?:boolean}){return <article style={{minHeight:64,padding:"10px 12px",borderRight:last?0:"1px solid #dce2e7"}}><span style={{display:"block",color:"#6f7b84",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>{label}</span><strong style={{display:"block",marginTop:4,color:"#0d1b2b",fontSize:21}}>{value}</strong></article>;}
-function Detail({label,value}:{label:string;value:string}){return <div><span style={{display:"block",color:"#74808a",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</span><strong style={{display:"block",marginTop:2,fontSize:11,color:"#263746"}}>{value}</strong></div>;}
+function Metric({label,value,last=false}:{label:string;value:string;last?:boolean}){return <article style={{minHeight:64,padding:"10px 12px",borderRight:last?0:"1px solid #d7ded9"}}><span style={{display:"block",color:"#6f7b84",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".05em"}}>{label}</span><strong style={{display:"block",marginTop:4,color:"#173f37",fontSize:21}}>{value}</strong></article>;}
+function Detail({label,value}:{label:string;value:string}){return <div><span style={{display:"block",color:"#74808a",fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".04em"}}>{label}</span><strong style={{display:"block",marginTop:2,fontSize:11,color:"#24312c"}}>{value}</strong></div>;}
 
-const inputStyle={minHeight:34,padding:"6px 8px",border:"1px solid #c7ced3",borderRadius:4,background:"white",color:"#263746"} as const;
-const buttonStyle={minHeight:30,padding:"0 9px",border:"1px solid #bcc5cb",borderRadius:4,background:"white",color:"#263746",fontSize:10,fontWeight:900,cursor:"pointer"} as const;
+const inputStyle={minHeight:34,padding:"6px 8px",border:"1px solid #c7ced3",borderRadius:4,background:"white",color:"#24312c"} as const;
+const buttonStyle={minHeight:30,padding:"0 9px",border:"1px solid #bcc5cb",borderRadius:4,background:"white",color:"#24312c",fontSize:10,fontWeight:900,cursor:"pointer"} as const;
 const linkButtonStyle={...buttonStyle,display:"inline-flex",alignItems:"center",textDecoration:"none"} as const;
 const billingSmallStyle={...linkButtonStyle,borderColor:"#92bda4",background:"#f2fbf5",color:"#176440"} as const;
 const billingButtonStyle={minHeight:36,padding:"0 12px",border:"1px solid #176440",borderRadius:6,background:"#176440",color:"white",display:"inline-flex",alignItems:"center",textDecoration:"none",fontSize:11,fontWeight:900} as const;
