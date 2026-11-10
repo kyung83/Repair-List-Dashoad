@@ -72,6 +72,7 @@ type PartForm = {
   preferredVendorId: string;
   vendorIds: number[];
   warehouseMinimums: Record<string, string>;
+  warehouseBins: Record<string, string>;
   equipmentIds: number[];
   crossReferences: string[];
 };
@@ -103,6 +104,7 @@ const blankPart: PartForm = {
   preferredVendorId: "",
   vendorIds: [],
   warehouseMinimums: {},
+  warehouseBins: {},
   equipmentIds: [],
   crossReferences: [],
 };
@@ -309,6 +311,35 @@ export default function InventoryPage() {
     return summary;
   }, { partCount: 0, lowStockCount: 0, negativeStockCount: 0, totalUnits: 0, inventoryValue: 0 });
 
+  async function savePartWarehouseBins(partId: number) {
+    for (const stock of editingWarehouseStocks) {
+      const desiredBins = [...new Set(String(part.warehouseBins[stock.warehouseCode] ?? "").split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
+      const currentBins = [...new Set(String(stock.binLocation ?? "").split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
+      if (JSON.stringify(desiredBins) === JSON.stringify(currentBins)) continue;
+
+      const settingsResponse = await fetch(`/api/inventory/warehouse-settings?partId=${partId}&warehouseCode=${encodeURIComponent(stock.warehouseCode)}`, { cache: "no-store" });
+      const settings = await settingsResponse.json() as { ok?: boolean; error?: string; minimumQuantity?: number | null; settingsVersion?: string };
+      if (!settingsResponse.ok || !settings.ok || !settings.settingsVersion) {
+        throw new Error(settings.error || `Could not load ${stock.warehouseName} bin settings.`);
+      }
+
+      const response = await fetch("/api/inventory/warehouse-settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          partId,
+          warehouseCode: stock.warehouseCode,
+          binLocations: desiredBins,
+          minimumQuantity: settings.minimumQuantity ?? null,
+          settingsVersion: settings.settingsVersion,
+          operationKey: `warehouse-settings:${crypto.randomUUID()}`,
+        }),
+      });
+      const result = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || `Could not save ${stock.warehouseName} bin location.`);
+    }
+  }
+
   async function savePart(event: FormEvent) {
     event.preventDefault();
     if (partSaving) return;
@@ -354,10 +385,16 @@ export default function InventoryPage() {
     if (!vendorResponse.ok) return setMessage(vendorResult.error || "Part saved, but vendors could not be saved");
     if (!settingsResponse.ok) return setMessage(settingsResult.error || "Part saved, but minimums/equipment could not be saved");
     if (!crossReferenceResponse.ok) return setMessage(crossReferenceResult.error || "Part saved, but cross-reference numbers could not be saved");
+    if (part.id) {
+      try { await savePartWarehouseBins(result.id); }
+      catch (error) {
+        return setMessage(error instanceof Error ? `Part saved, but warehouse bin locations were not fully saved: ${error.message}` : "Part saved, but warehouse bin locations were not fully saved.");
+      }
+    }
 
     setPart(blankPart);
     setShowPartForm(false);
-    setMessage("Part, cross-reference numbers, vendors, minimums, and equipment saved.");
+    setMessage("Part, warehouse bins, cross-reference numbers, vendors, minimums, and equipment saved.");
     await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Part could not be saved. Please try again.");
@@ -521,8 +558,10 @@ export default function InventoryPage() {
     setMessage("");
     const links = vendorsForPart(item);
     const warehouseMinimums: Record<string, string> = {};
+    const warehouseBins: Record<string, string> = {};
     for (const stock of item.warehouseStocks ?? []) {
       if (stock.minimumQuantity != null) warehouseMinimums[stock.warehouseCode] = String(stock.minimumQuantity);
+      warehouseBins[stock.warehouseCode] = stock.binLocation ?? "";
     }
     setPart({
       id: item.id,
@@ -535,6 +574,7 @@ export default function InventoryPage() {
       preferredVendorId: item.preferredVendorId == null ? "" : String(item.preferredVendorId),
       vendorIds: links.map((itemVendor) => itemVendor.id).filter((id) => id > 0),
       warehouseMinimums,
+      warehouseBins,
       equipmentIds: item.compatibleEquipmentIds ?? [],
       crossReferences: item.crossReferences ?? [],
     });
@@ -700,7 +740,7 @@ export default function InventoryPage() {
             </div> : <label className={pageStyles.field}>Initial quantity on hand<input type="number" min="0" step="any" value={part.quantityOnHand} onChange={(event) => setPart({ ...part, quantityOnHand: Number(event.target.value) })} disabled={partSaving} /></label>}
             <label className={pageStyles.field}>Default minimum stock<input type="number" min="0" step="any" value={part.reorderLevel} onChange={(event) => setPart({ ...part, reorderLevel: Number(event.target.value) })} disabled={partSaving} /><small>Used when a warehouse does not have its own minimum.</small></label>
             <label className={pageStyles.field}>Unit cost ($)<input type="number" min="0" step="0.01" value={part.unitCost} onChange={(event) => setPart({ ...part, unitCost: event.target.value })} disabled={partSaving} /></label>
-            <label className={pageStyles.field}>General location / fallback bin<input value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} disabled={partSaving} /><small>For parts without a warehouse. Use Update on the inventory row to change warehouse bins.</small></label>
+            <label className={pageStyles.field}>General location / fallback bin<input value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} disabled={partSaving} /><small>Only for parts without a warehouse. Edit Clare/Cadillac bin locations in Warehouse physical stock below.</small></label>
 
             <label className={pageStyles.field} style={{ gridColumn: "1 / -1" }}>Cross Reference Part Numbers
               <textarea
@@ -718,9 +758,19 @@ export default function InventoryPage() {
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Warehouse physical stock</legend>
               <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Physical stock includes reserved parts. Choose <b>Physical Count</b> for the warehouse you counted.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 9 }}>
-                {editingWarehouseStocks.length ? editingWarehouseStocks.map((stock) => <div key={stock.warehouseCode} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: 10, border: "1px solid #edf0f2", borderRadius: 8, background: Number(stock.quantityOnHand) < 0 ? "#fff0f0" : "white" }}>
-                  <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}{Number(stock.reserved ?? 0) > 0 ? ` · ${stock.reserved} reserved` : ""}</small><small style={{ display: "block", color: "#44515e", marginTop: 5, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>Bin: {stock.binLocation || "Not recorded"}</small></span>
+                {editingWarehouseStocks.length ? editingWarehouseStocks.map((stock) => <div key={stock.warehouseCode} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "start", padding: 10, border: "1px solid #edf0f2", borderRadius: 8, background: Number(stock.quantityOnHand) < 0 ? "#fff0f0" : "white" }}>
+                  <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}{Number(stock.reserved ?? 0) > 0 ? ` · ${stock.reserved} reserved` : ""}</small></span>
                   <span style={{ textAlign: "right" }}><strong style={{ display: "block", color: Number(stock.physicalOnHand ?? stock.quantityOnHand) < 0 ? "#b42318" : "#182331", fontSize: 18 }}>{stock.physicalOnHand ?? stock.quantityOnHand}</strong><small style={{ display: "block", color: "#6c7886" }}>physical</small><button type="button" disabled={partSaving} onClick={() => void physicalCount(editingItem, stock.warehouseCode)} style={{ marginTop: 4, padding: "6px 9px", border: "1px solid #0d1b2b", borderRadius: 7, background: "white", color: "#0d1b2b", fontSize: 10, fontWeight: 900 }}>PHYSICAL COUNT</button></span>
+                  <label style={{ gridColumn: "1 / -1", display: "grid", gap: 5, color: "#334d63", fontSize: 12, fontWeight: 800 }}>Bin location(s)
+                    <textarea
+                      rows={2}
+                      disabled={partSaving}
+                      value={part.warehouseBins[stock.warehouseCode] ?? ""}
+                      onChange={(event) => setPart((current) => ({ ...current, warehouseBins: { ...current.warehouseBins, [stock.warehouseCode]: event.target.value } }))}
+                      placeholder="Enter bin location; use a new line for each additional bin"
+                      style={{ width: "100%", boxSizing: "border-box", resize: "vertical", minHeight: 44, padding: "8px 10px", border: "1px solid #a9b9c7", borderRadius: 7, background: "white", color: "#172d40", fontSize: 13 }}
+                    />
+                  </label>
                 </div>) : <div style={{ color: "#6c7886", fontSize: 12 }}>No warehouse stock rows exist for this part yet.</div>}
               </div>
             </fieldset>}
