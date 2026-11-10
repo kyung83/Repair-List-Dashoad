@@ -88,7 +88,7 @@
   padding: 0 11px;
   border: 1px solid transparent;
   border-radius: 8px;
-  color: #64748b;
+  color: #68746f;
   background: transparent;
   display: flex;
   gap: 7px;
@@ -110,7 +110,7 @@
   min-height: calc(100vh - 64px);
   padding: 26px 34px 54px;
   background: #f4f6f4;
-  color: #182331;
+  color: #1b2421;
 }
 .module-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
 .module-eyebrow { margin: 0 0 6px; color: #2f6f60; font-size: 10px; font-weight: 900; letter-spacing: .15em; }
@@ -128,7 +128,7 @@
 .summary-strip span { color: #778491; font-size: 10px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; }
 .summary-strip strong { color: #173f37; font-size: 23px; }
 .module-panel { margin-top: 12px; border: 1px solid #d7ded9; border-radius: 12px; overflow: hidden; background: white; box-shadow: 0 4px 16px #17243508; }
-.filter-bar { padding: 12px; display: grid; grid-template-columns: minmax(250px,2fr) repeat(6,minmax(120px,1fr)); gap: 8px; align-items: end; background: #f8fafb; border-bottom: 1px solid #e4e9ed; }
+.filter-bar { padding: 12px; display: grid; grid-template-columns: minmax(250px,2fr) repeat(6,minmax(120px,1fr)); gap: 8px; align-items: end; background: #fbfcfb; border-bottom: 1px solid #e4e9ed; }
 .filter-bar label { min-width: 0; display: grid; gap: 4px; }
 .filter-bar label > span { color: #6f7d8a; font-size: 9px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
 .filter-bar input,
@@ -179,7 +179,7 @@
 .equipment-form-grid input,
 .equipment-form-grid select,
 .equipment-form-grid textarea,
-.archive-reason textarea { width: 100%; border: 1px solid #ccd5dc; border-radius: 7px; padding: 9px 10px; background: white; color: #182331; font-size: 11px; outline: 0; }
+.archive-reason textarea { width: 100%; border: 1px solid #ccd5dc; border-radius: 7px; padding: 9px 10px; background: white; color: #1b2421; font-size: 11px; outline: 0; }
 .equipment-form-grid input:focus,
 .equipment-form-grid select:focus,
 .equipment-form-grid textarea:focus,
