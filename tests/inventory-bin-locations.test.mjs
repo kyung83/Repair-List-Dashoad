@@ -59,6 +59,7 @@ function fixture() {
     INSERT INTO derived_repair_part_reservations VALUES (1, 1, 1);
   `);
   sqlite.exec(read('migrations/0155_part_warehouse_bin_locations.sql'));
+  sqlite.exec(read('migrations/0156_part_warehouse_catalog_status.sql'));
   sqlite.prepare(`INSERT INTO part_warehouse_locations(part_id, warehouse_id, bin_location, source)
     VALUES (?, ?, ?, 'EMDECS')`).run(1, 1, 'Room 1 / Shelf A / Bin 03\nRoom 1 / Shelf A / Bin 04');
   sqlite.prepare(`INSERT INTO part_warehouse_locations(part_id, warehouse_id, bin_location, source)
