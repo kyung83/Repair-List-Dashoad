@@ -634,7 +634,7 @@ export default function UnifiedBreakdownTextingPage() {
                     <label style={{ ...label, flex: '1 1 260px' }}>Coverage name<input style={input} value={window.label} onChange={event => patchWindow(contact.contactId, window.id, { label: event.target.value })} placeholder={index === 0 ? 'Office Hours' : 'On Call Schedule'} /></label>
                     <button type="button" onClick={() => removeWindow(contact.contactId, window.id)} style={dangerOutlineButton}>Remove Window</button>
                   </div>
-                  <div><div style={label}>Days this window starts</div><div style={dayGrid}>{DAYS.map(day => <label key={day.id} style={{ ...dayChip, borderColor: window.days.includes(day.id) ? '#4c7b5b' : '#d7e0e6', background: window.days.includes(day.id) ? '#edf7ef' : '#fff' }}><input type="checkbox" checked={window.days.includes(day.id)} onChange={() => toggleWindowDay(contact.contactId, window.id, day.id)} />{day.label}</label>)}</div></div>
+                  <div><div style={label}>Days this window starts</div><div style={dayGrid}>{DAYS.map(day => <label key={day.id} style={{ ...dayChip, borderColor: window.days.includes(day.id) ? '#4c7b5b' : '#d7ded9', background: window.days.includes(day.id) ? '#edf7ef' : '#fff' }}><input type="checkbox" checked={window.days.includes(day.id)} onChange={() => toggleWindowDay(contact.contactId, window.id, day.id)} />{day.label}</label>)}</div></div>
                   <div style={threeColumn}>
                     <label style={label}>Start time<input type="time" style={input} value={window.startTime} onChange={event => patchWindow(contact.contactId, window.id, { startTime: event.target.value })} /></label>
                     <label style={label}>End time<input type="time" style={input} value={window.endTime} onChange={event => patchWindow(contact.contactId, window.id, { endTime: event.target.value })} /></label>
@@ -719,22 +719,22 @@ export default function UnifiedBreakdownTextingPage() {
   </section>;
 }
 
-const page: CSSProperties = { background: '#f3f5f7', padding: '0 clamp(14px,3vw,34px) 28px', color: '#182331' };
-const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'center', flexWrap: 'wrap', padding: 18, border: '1px solid #d7e0e6', borderRadius: 14, background: '#fff' };
-const liveControl: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: 12, border: '1px solid #d4dee5', borderRadius: 10, background: '#f8fafb' };
+const page: CSSProperties = { background: '#f4f6f4', padding: '0 clamp(14px,3vw,34px) 28px', color: '#1b2421' };
+const hero: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'center', flexWrap: 'wrap', padding: 18, border: '1px solid #d7ded9', borderRadius: 14, background: '#fff' };
+const liveControl: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: 12, border: '1px solid #d4dee5', borderRadius: 10, background: '#fbfcfb' };
 const liveDot: CSSProperties = { width: 11, height: 11, borderRadius: 99, display: 'inline-block' };
-const sectionCard: CSSProperties = { marginTop: 16, padding: 18, border: '1px solid #d7e0e6', borderRadius: 14, background: '#fff', boxShadow: '0 3px 14px rgba(15,32,48,.04)' };
+const sectionCard: CSSProperties = { marginTop: 16, padding: 18, border: '1px solid #d7ded9', borderRadius: 14, background: '#fff', boxShadow: '0 3px 14px rgba(15,32,48,.04)' };
 const sectionHeader: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' };
 const heading: CSSProperties = { margin: '4px 0 0', fontSize: 28, color: '#102238' };
 const subheading: CSSProperties = { margin: '4px 0 0', fontSize: 21, color: '#102238' };
 const eyebrow: CSSProperties = { fontSize: 11, fontWeight: 950, letterSpacing: '.12em', color: '#415d74' };
 const copy: CSSProperties = { margin: '6px 0 0', color: '#586979', lineHeight: 1.5, fontSize: 14 };
-const smallCopy: CSSProperties = { margin: '5px 0 0', color: '#657482', lineHeight: 1.45, fontSize: 12 };
+const smallCopy: CSSProperties = { margin: '5px 0 0', color: '#68746f', lineHeight: 1.45, fontSize: 12 };
 const muted: CSSProperties = { marginTop: 3, color: '#6b7b89', fontSize: 12 };
 const notice: CSSProperties = { marginTop: 12, padding: '10px 12px', border: '1px solid #d8c17b', borderRadius: 9, background: '#fffdf2', fontSize: 13 };
 const addPersonBox: CSSProperties = { marginTop: 14, display: 'grid', gridTemplateColumns: 'minmax(160px,1fr) minmax(190px,1fr) auto', gap: 10, alignItems: 'end', padding: 14, border: '1px solid #cbd8e2', borderRadius: 10, background: '#f8fbfd' };
 const peopleGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(390px,1fr))', gap: 14, marginTop: 16 };
-const personCard: CSSProperties = { border: '1px solid #d8e1e7', borderRadius: 12, background: '#fbfcfd', padding: 15, display: 'grid', gap: 12, alignContent: 'start' };
+const personCard: CSSProperties = { border: '1px solid #d8e1e7', borderRadius: 12, background: '#fbfcfb', padding: 15, display: 'grid', gap: 12, alignContent: 'start' };
 const personTop: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' };
 const statusPill: CSSProperties = { display: 'inline-flex', alignItems: 'center', minHeight: 30, padding: '0 9px', border: '1px solid', borderRadius: 999, fontSize: 11, fontWeight: 950, whiteSpace: 'nowrap' };
 const summaryBlock: CSSProperties = { display: 'grid', gap: 7, padding: 11, border: '1px solid #dce4e9', borderRadius: 9, background: '#fff' };
@@ -748,17 +748,17 @@ const editorPanel: CSSProperties = { display: 'grid', gap: 12, padding: 13, bord
 const awayEditor: CSSProperties = { display: 'grid', gap: 12, padding: 13, border: '1px solid #e5b4aa', borderRadius: 10, background: '#fff8f6' };
 const editorTitle: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' };
 const windowList: CSSProperties = { display: 'grid', gap: 10 };
-const windowEditor: CSSProperties = { display: 'grid', gap: 11, padding: 12, border: '1px solid #d8e1e7', borderRadius: 9, background: '#fbfcfd' };
+const windowEditor: CSSProperties = { display: 'grid', gap: 11, padding: 12, border: '1px solid #d8e1e7', borderRadius: 9, background: '#fbfcfb' };
 const windowHeader: CSSProperties = { display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' };
 const dayGrid: CSSProperties = { marginTop: 7, display: 'grid', gridTemplateColumns: 'repeat(7,minmax(48px,1fr))', gap: 6 };
 const dayChip: CSSProperties = { minHeight: 38, border: '1px solid', borderRadius: 8, padding: '0 7px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontSize: 12, fontWeight: 850 };
 const twoColumn: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(250px,1fr))', gap: 12 };
 const threeColumn: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 };
 const label: CSSProperties = { display: 'grid', gap: 5, color: '#485b6b', fontSize: 12, fontWeight: 900 };
-const input: CSSProperties = { minHeight: 42, width: '100%', boxSizing: 'border-box', padding: '0 10px', border: '1px solid #cbd5dd', borderRadius: 8, background: '#fff', color: '#172536', fontSize: 15 };
+const input: CSSProperties = { minHeight: 42, width: '100%', boxSizing: 'border-box', padding: '0 10px', border: '1px solid #c9d4cf', borderRadius: 8, background: '#fff', color: '#1b2421', fontSize: 15 };
 const checkLabel: CSSProperties = { display: 'flex', gap: 7, alignItems: 'center', color: '#485b6b', fontSize: 12, fontWeight: 900 };
 const inlineHelp: CSSProperties = { padding: 10, border: '1px solid #cbdce7', borderRadius: 8, background: '#f4f9fc', color: '#3f596c', fontSize: 12, lineHeight: 1.45 };
-const primaryButton: CSSProperties = { minHeight: 40, border: 0, borderRadius: 8, padding: '8px 12px', background: '#0d1b2b', color: '#fff', fontWeight: 900, cursor: 'pointer' };
+const primaryButton: CSSProperties = { minHeight: 40, border: 0, borderRadius: 8, padding: '8px 12px', background: '#173f37', color: '#fff', fontWeight: 900, cursor: 'pointer' };
 const secondaryButton: CSSProperties = { minHeight: 40, border: '1px solid #9fb3c4', borderRadius: 8, padding: '8px 11px', background: '#f7fafc', color: '#17324a', fontWeight: 900, cursor: 'pointer' };
 const vacationButton: CSSProperties = { minHeight: 40, border: '1px solid #cb806f', borderRadius: 8, padding: '8px 11px', background: '#fff5f2', color: '#9a3c2b', fontWeight: 900, cursor: 'pointer' };
 const plainButton: CSSProperties = { minHeight: 40, border: '1px solid #d0d9df', borderRadius: 8, padding: '8px 11px', background: '#fff', color: '#435667', fontWeight: 850, cursor: 'pointer' };
@@ -766,11 +766,11 @@ const pauseButton: CSSProperties = { minHeight: 40, border: '1px solid #c85142',
 const dangerOutlineButton: CSSProperties = { minHeight: 38, border: '1px solid #d1a1a1', borderRadius: 8, padding: '7px 10px', background: '#fff7f7', color: '#8a2f2f', fontWeight: 900, cursor: 'pointer' };
 const periodList: CSSProperties = { display: 'grid', gap: 8 };
 const periodRow: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: 10, border: '1px solid #ead0ca', borderRadius: 8, background: '#fff' };
-const empty: CSSProperties = { padding: 18, border: '1px dashed #cbd5dd', borderRadius: 10, color: '#64748b', textAlign: 'center' };
+const empty: CSSProperties = { padding: 18, border: '1px dashed #c9d4cf', borderRadius: 10, color: '#68746f', textAlign: 'center' };
 const advancedCard: CSSProperties = { marginTop: 16, border: '1px solid #cbd7df', borderRadius: 14, background: '#fff', overflow: 'hidden' };
 const advancedSummary: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', cursor: 'pointer', padding: 16, listStyle: 'none' };
 const advancedBody: CSSProperties = { borderTop: '1px solid #dce4e9', padding: 16, display: 'grid', gap: 16 };
-const innerCard: CSSProperties = { display: 'grid', gap: 10, padding: 13, border: '1px solid #dce4e9', borderRadius: 10, background: '#fbfcfd' };
+const innerCard: CSSProperties = { display: 'grid', gap: 10, padding: 13, border: '1px solid #dce4e9', borderRadius: 10, background: '#fbfcfb' };
 const codeBox: CSSProperties = { padding: 9, border: '1px solid #d8e0e5', borderRadius: 7, background: '#f4f7f9', fontFamily: 'monospace', fontSize: 11, overflowWrap: 'anywhere' };
-const templateCard: CSSProperties = { display: 'grid', gap: 9, padding: 12, border: '1px solid #dce4e9', borderRadius: 9, background: '#fbfcfd' };
-const textarea: CSSProperties = { width: '100%', boxSizing: 'border-box', padding: 10, border: '1px solid #cbd5dd', borderRadius: 8, background: '#fff', color: '#172536', fontSize: 14, lineHeight: 1.45, resize: 'vertical' };
+const templateCard: CSSProperties = { display: 'grid', gap: 9, padding: 12, border: '1px solid #dce4e9', borderRadius: 9, background: '#fbfcfb' };
+const textarea: CSSProperties = { width: '100%', boxSizing: 'border-box', padding: 10, border: '1px solid #c9d4cf', borderRadius: 8, background: '#fff', color: '#1b2421', fontSize: 14, lineHeight: 1.45, resize: 'vertical' };
