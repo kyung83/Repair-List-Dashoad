@@ -154,22 +154,22 @@ export default function MechanicUnitHistory({repairId,unit,currentIssue}:Props){
 
 const card={border:"2px solid #9fb8cf",borderRadius:14,background:"#f8fbfe",padding:14,display:"grid",gap:11} as const;
 const head={display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap" as const} as const;
-const title={display:"block",fontSize:16,color:"#173a5d"} as const;
+const title={display:"block",fontSize:16,color:"#2f6f60"} as const;
 const help={marginTop:3,fontSize:11,color:"#687783"} as const;
-const openButton={border:0,borderRadius:9,padding:"10px 13px",background:"#173a5d",color:"white",fontWeight:950,cursor:"pointer"} as const;
+const openButton={border:0,borderRadius:9,padding:"10px 13px",background:"#2f6f60",color:"white",fontWeight:950,cursor:"pointer"} as const;
 const repeatNotice={display:"grid",gap:3,padding:"10px 12px",border:"2px solid #e8a044",borderRadius:10,background:"#fff7e9",color:"#6e4314",fontSize:12} as const;
 const preview={display:"grid",gap:2,padding:"10px 12px",border:"1px solid #cfdae3",borderRadius:9,background:"white",fontSize:12,color:"#52616d"} as const;
 const errorBox={padding:"9px 11px",border:"1px solid #e7b7b2",borderRadius:9,background:"#fff1f0",fontSize:12,fontWeight:800,color:"#7a2f29"} as const;
 const tabs={display:"flex",gap:7,flexWrap:"wrap" as const} as const;
 const tabButton={border:"1px solid #c2ced8",borderRadius:999,padding:"8px 11px",background:"white",color:"#425565",fontSize:11,fontWeight:950,cursor:"pointer"} as const;
-const activeTab={...tabButton,background:"#173a5d",borderColor:"#173a5d",color:"white"} as const;
-const searchBox={width:"100%",boxSizing:"border-box" as const,padding:"11px 12px",border:"1px solid #aebdca",borderRadius:9,background:"white",color:"#182331",fontSize:14} as const;
+const activeTab={...tabButton,background:"#2f6f60",borderColor:"#2f6f60",color:"white"} as const;
+const searchBox={width:"100%",boxSizing:"border-box" as const,padding:"11px 12px",border:"1px solid #aebdca",borderRadius:9,background:"white",color:"#1b2421",fontSize:14} as const;
 const privacyBox={padding:"8px 10px",borderRadius:8,background:"#edf4f9",color:"#5c6b77",fontSize:10,fontWeight:800} as const;
 const list={display:"grid",gap:10} as const;
 const entryCard={padding:13,border:"1px solid #d4dde5",borderRadius:11,background:"white",display:"grid",gap:8} as const;
 const entryHead={display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"} as const;
 const entryDate={fontSize:10,fontWeight:900,color:"#71808b",textTransform:"uppercase" as const} as const;
-const entryType={display:"block",marginTop:3,fontSize:13,color:"#173a5d"} as const;
+const entryType={display:"block",marginTop:3,fontSize:13,color:"#2f6f60"} as const;
 const relatedBadge={padding:"5px 7px",borderRadius:999,background:"#fff0da",color:"#9b5814",fontSize:9,fontWeight:950} as const;
 const issue={fontSize:15,fontWeight:950,color:"#1d2e3c"} as const;
 const details={padding:"8px 9px",borderRadius:8,background:"#f6f8fa",fontSize:12,lineHeight:1.4,color:"#4d5d69",whiteSpace:"pre-wrap" as const} as const;
