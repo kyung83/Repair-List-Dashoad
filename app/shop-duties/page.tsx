@@ -107,10 +107,10 @@ export default function ShopDutiesSetupPage(){
         <div style={cardHead}><div><span style={orangeTag}>WEEKLY</span><h2 style={title}>Bathroom Cleaning & Check</h2></div><span style={activePill}>ACTIVE</span></div>
         <p style={description}>Automatically rotates through every active mechanic. No manager assignment is needed each week.</p>
         <div style={facts}>
-          <div><span>Rotation</span><strong>All mechanics · round robin</strong></div>
-          <div><span>Checklist</span><strong>{bathroom?.itemCount??0} items</strong></div>
-          <div><span>This week</span><strong>{bathroom?.currentAssignment?.assignedName||"Waiting for assignment"}</strong></div>
-          <div><span>Due</span><strong>{dueLabel(bathroom?.currentAssignment?.dueDate)}</strong></div>
+          <div style={fact}><span>Rotation</span><strong>All mechanics · round robin</strong></div>
+          <div style={fact}><span>Checklist</span><strong>{bathroom?.itemCount??0} items</strong></div>
+          <div style={fact}><span>This week</span><strong>{bathroom?.currentAssignment?.assignedName||"Waiting for assignment"}</strong></div>
+          <div style={fact}><span>Due</span><strong>{dueLabel(bathroom?.currentAssignment?.dueDate)}</strong></div>
         </div>
         {bathroom?.currentAssignment&&<div style={assignmentBar}><b>{bathroom.currentAssignment.assignedName}</b><span>{statusLabel(bathroom.currentAssignment.status)}</span></div>}
       </section>
@@ -144,10 +144,10 @@ export default function ShopDutiesSetupPage(){
         <div style={cardHead}><div><span style={greenTag}>MONTHLY</span><h2 style={title}>Once-a-Month Facility List</h2></div><span style={activePill}>MANUAL ASSIGN</span></div>
         <p style={description}>No automatic rotation. Each month you choose the mechanic yourself. The selected mechanic gets the full monthly checklist in their Shop Duties area.</p>
         <div style={facts}>
-          <div><span>Checklist</span><strong>{monthly?.itemCount??0} items</strong></div>
-          <div><span>Current month</span><strong>{monthly?.currentAssignment?.assignedName||"Not assigned yet"}</strong></div>
-          <div><span>Status</span><strong>{statusLabel(monthly?.currentAssignment?.status)}</strong></div>
-          <div><span>Due</span><strong>{dueLabel(monthly?.currentAssignment?.dueDate)}</strong></div>
+          <div style={fact}><span>Checklist</span><strong>{monthly?.itemCount??0} items</strong></div>
+          <div style={fact}><span>Current month</span><strong>{monthly?.currentAssignment?.assignedName||"Not assigned yet"}</strong></div>
+          <div style={fact}><span>Status</span><strong>{statusLabel(monthly?.currentAssignment?.status)}</strong></div>
+          <div style={fact}><span>Due</span><strong>{dueLabel(monthly?.currentAssignment?.dueDate)}</strong></div>
         </div>
         <label style={label}>ASSIGN THIS MONTH TO
           <select value={monthlyUserId} onChange={event=>setMonthlyUserId(event.target.value)} style={input} disabled={busy}>
@@ -183,8 +183,7 @@ const greenTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#18724a"} 
 const activePill={padding:"5px 8px",borderRadius:999,background:"#e9f7ef",color:"#176440",fontSize:9,fontWeight:950,whiteSpace:"nowrap" as const} as const;
 const inactivePill={...activePill,background:"#edf1f4",color:"#64717d"} as const;
 const facts={display:"grid",gridTemplateColumns:"1fr 1fr",gap:8} as const;
-const fact={padding:10,borderRadius:9,background:"#f6f8fa"} as const;
-Object.assign(facts,{});
+const fact={padding:10,borderRadius:9,background:"#f6f8fa",display:"grid",gap:3,fontSize:10,color:"#667482"} as const;
 const label={display:"grid",gap:6,fontSize:10,fontWeight:950,color:"#506271",letterSpacing:".04em"} as const;
 const input={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #bdc9d4",borderRadius:8,background:"white",color:"#182331",fontSize:13} as const;
 const peopleGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:7} as const;
