@@ -160,7 +160,8 @@ export async function GET(request: Request) {
         LEFT JOIN technicians t ON t.id = r.technician_id
         LEFT JOIN repair_labor_timers rt ON rt.repair_id = r.id
         LEFT JOIN technicians tt ON tt.id = rt.technician_id
-        WHERE lower(COALESCE(r.status,'')) NOT LIKE '%complete%' AND COALESCE(r.source,'') <> 'roadside-breakdown'
+        WHERE lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+          AND COALESCE(r.source,'') NOT IN ('roadside-breakdown','shop-duty')
         ORDER BY COALESCE(e.unit,''), r.id DESC
       `).all<{
         id:number; priority:number; location:string; unit:string; driver:string; title:string; parts_text:string;
