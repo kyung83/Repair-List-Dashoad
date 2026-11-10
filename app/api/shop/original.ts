@@ -136,6 +136,7 @@ export async function GET(request: Request) {
         LEFT JOIN equipment e ON e.id = r.equipment_id
         LEFT JOIN technicians t ON t.id = r.technician_id
         WHERE lower(COALESCE(r.status, '')) NOT LIKE '%complete%'
+          AND COALESCE(r.source,'') <> 'shop-duty'
         ORDER BY CASE WHEN r.technician_id = ? THEN 0 WHEN r.technician_id IS NULL THEN 1 ELSE 2 END,
                  r.updated_at DESC, r.id DESC
       `).bind(user.technicianId ?? -1).all<{
