@@ -136,9 +136,10 @@ export default function AppNav(){
 
   return <aside className={`app-sidebar ${collapsed?'collapsed':'expanded'}`} aria-label="Northern Logistics navigation">
     <div className="app-sidebar-head">
-      <a className="app-sidebar-brand" href={home} title="Northern Logistics Fleet Operations">
-        <span className="app-sidebar-mark">N</span>
-        {!collapsed&&<span className="app-sidebar-brand-copy"><strong>Northern Logistics</strong><small>Fleet Operations</small></span>}
+      <a className="app-sidebar-brand" href={home} title="Northern Logistics">
+        {collapsed
+          ? <span className="app-sidebar-mark">N</span>
+          : <img className="app-sidebar-brand-logo" src="/northern-logistics-logo.svg" alt="Northern Logistics — Employee Owned" />}
       </a>
       <button className="app-sidebar-collapse" type="button" onClick={toggleCollapsed} aria-label={collapsed?'Expand navigation':'Collapse navigation'} title={collapsed?'Expand navigation':'Collapse navigation'}>{collapsed?'›':'‹'}</button>
     </div>
