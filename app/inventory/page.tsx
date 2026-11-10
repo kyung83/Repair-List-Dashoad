@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
 import ReceivingHistoryButton from "./receiving-history-button";
+import InventoryAuditSheet, { type InventoryAuditSnapshot } from "./inventory-audit-sheet";
 
 type WarehouseStock = {
   id: number;
@@ -26,6 +27,7 @@ type Part = {
   description: string;
   quantityOnHand: number;
   reorderLevel: number;
+  physicalOnHand?: number;
   unitCost: number | null;
   location: string;
   preferredVendorId: number | null;
@@ -98,6 +100,20 @@ const blankPart: PartForm = {
 
 const blankVendor: VendorForm = { id: 0, name: "", phone: "", email: "", notes: "" };
 
+async function fetchInventory(status: "active" | "archived") {
+  const [inventoryResponse, linksResponse] = await Promise.all([
+    fetch(`/api/inventory?status=${status}`, { cache: "no-store" }),
+    fetch("/api/inventory/part-vendors", { cache: "no-store" }),
+  ]);
+  if (!inventoryResponse.ok) throw new Error("Unable to load inventory");
+  if (!linksResponse.ok) throw new Error("Unable to load part vendors");
+  const [inventory, links] = await Promise.all([inventoryResponse.json(), linksResponse.json()]);
+  return {
+    inventory: inventory as InventoryData,
+    links: (links as { byPart?: Record<string, VendorLink[]> }).byPart ?? {},
+  };
+}
+
 export default function InventoryPage() {
   const [data, setData] = useState<InventoryData | null>(null);
   const [vendorLinks, setVendorLinks] = useState<Record<string, VendorLink[]>>({});
@@ -112,22 +128,46 @@ export default function InventoryPage() {
   const [showPartForm, setShowPartForm] = useState(false);
   const [showVendorForm, setShowVendorForm] = useState(false);
   const [equipmentQuery, setEquipmentQuery] = useState("");
+  const [printingAudit, setPrintingAudit] = useState(false);
+  const [auditSnapshot, setAuditSnapshot] = useState<InventoryAuditSnapshot | null>(null);
 
   async function load() {
-    const [inventoryResponse, linksResponse] = await Promise.all([
-      fetch(`/api/inventory?status=${partStatus}`, { cache: "no-store" }),
-      fetch("/api/inventory/part-vendors", { cache: "no-store" }),
-    ]);
-    if (!inventoryResponse.ok) throw new Error("Unable to load inventory");
-    if (!linksResponse.ok) throw new Error("Unable to load part vendors");
-    const [inventory, links] = await Promise.all([inventoryResponse.json(), linksResponse.json()]);
-    setData(inventory as InventoryData);
-    setVendorLinks((links as { byPart?: Record<string, VendorLink[]> }).byPart ?? {});
+    const result = await fetchInventory(partStatus);
+    setData(result.inventory);
+    setVendorLinks(result.links);
   }
 
   useEffect(() => {
-    void load().catch((error: unknown) => setMessage(error instanceof Error ? error.message : "Unable to load inventory"));
+    let current = true;
+    void fetchInventory(partStatus).then((result) => {
+      if (!current) return;
+      setData(result.inventory);
+      setVendorLinks(result.links);
+    }).catch((error: unknown) => {
+      if (current) setMessage(error instanceof Error ? error.message : "Unable to load inventory");
+    });
+    return () => { current = false; };
   }, [partStatus]);
+
+  useEffect(() => {
+    if (!auditSnapshot) return;
+    const afterPrint = () => setAuditSnapshot(null);
+    window.addEventListener("afterprint", afterPrint);
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        window.print();
+      } catch {
+        setMessage("The print dialog could not be opened. Please try Print Audit Sheet again.");
+        setAuditSnapshot(null);
+      } finally {
+        setPrintingAudit(false);
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("afterprint", afterPrint);
+    };
+  }, [auditSnapshot]);
 
   function vendorsForPart(item: Part) {
     const linked = vendorLinks[String(item.id)] ?? [];
@@ -135,7 +175,7 @@ export default function InventoryPage() {
     return item.vendorName ? [{ id: item.preferredVendorId ?? 0, name: item.vendorName, preferred: true }] : [];
   }
 
-  function stockFor(item: Part) {
+  const stockFor = useCallback((item: Part) => {
     if (warehouseCode === "ALL") {
       return {
         quantityOnHand: Number(item.quantityOnHand),
@@ -153,19 +193,20 @@ export default function InventoryPage() {
       onOrder: Number(stock?.onOrder ?? 0),
       minimumQuantity: stock?.minimumQuantity == null ? Number(item.reorderLevel) : Number(stock.minimumQuantity),
     };
-  }
+  }, [warehouseCode]);
 
   const scopedParts = useMemo(() => (data?.parts ?? []).filter((item) =>
     warehouseCode === "ALL" || (item.warehouseStocks ?? []).some((stock) => stock.warehouseCode === warehouseCode),
   ), [data, warehouseCode]);
 
-  const visibleParts = useMemo(() => {
+  const filterParts = useCallback((parts: Part[], links: Record<string, VendorLink[]>) => {
     const q = query.trim().toLowerCase();
-    const rows = scopedParts.filter((item) => {
+    const rows = parts.filter((item) => {
+      if (warehouseCode !== "ALL" && !(item.warehouseStocks ?? []).some((stock) => stock.warehouseCode === warehouseCode)) return false;
       const stock = stockFor(item);
       if (stockFilter === "negative" && stock.quantityOnHand >= 0) return false;
       if (stockFilter === "below-minimum" && stock.quantityOnHand >= stock.minimumQuantity) return false;
-      const vendorNames = (vendorLinks[String(item.id)] ?? []).map((itemVendor) => itemVendor.name).join(" ");
+      const vendorNames = (links[String(item.id)] ?? []).map((itemVendor) => itemVendor.name).join(" ");
       const equipmentNames = (item.compatibleEquipment ?? []).map((equipment) => equipment.unit).join(" ");
       return [item.partNumber, item.description, ...(item.crossReferences ?? []), item.location, item.vendorName, vendorNames, equipmentNames].join(" ").toLowerCase().includes(q);
     });
@@ -179,7 +220,33 @@ export default function InventoryPage() {
       return a.description.localeCompare(b.description) || a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true });
     });
     return rows;
-  }, [query, scopedParts, sortMode, stockFilter, vendorLinks, warehouseCode]);
+  }, [query, sortMode, stockFilter, stockFor, warehouseCode]);
+
+  const visibleParts = useMemo(() => filterParts(data?.parts ?? [], vendorLinks), [data, filterParts, vendorLinks]);
+
+  async function printAudit() {
+    if (printingAudit || partStatus !== "active") return;
+    setPrintingAudit(true);
+    setAuditSnapshot(null);
+    setMessage("");
+    try {
+      const fresh = await fetchInventory("active");
+      const parts = filterParts(fresh.inventory.parts, fresh.links);
+      if (!parts.length) throw new Error("No active inventory records match these filters. Choose All parts or clear the search, then try again.");
+      setAuditSnapshot({
+        parts,
+        warehouseCode,
+        warehouseName: warehouseCode === "ALL" ? "All warehouses" : fresh.inventory.warehouses?.find((warehouse) => warehouse.code === warehouseCode)?.name ?? warehouseCode,
+        updatedAt: fresh.inventory.updatedAt,
+        query: query.trim(),
+        stockFilter: stockFilter === "negative" ? "Negative available stock only" : stockFilter === "below-minimum" ? "Below minimum available stock only" : "All parts",
+        sort: { description: "Description A-Z", "negative-first": "Negative available stock first", "qty-asc": "Available quantity low to high", "qty-desc": "Available quantity high to low", "part-number": "Part number" }[sortMode],
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Inventory audit sheet could not be loaded.");
+      setPrintingAudit(false);
+    }
+  }
 
   const scopedSummary = scopedParts.reduce((summary, item) => {
     const stock = stockFor(item);
@@ -410,7 +477,7 @@ export default function InventoryPage() {
   const selectedWarehouseName = warehouseCode === "ALL" ? "All warehouses" : (data?.warehouses ?? []).find((warehouse) => warehouse.code === warehouseCode)?.name ?? warehouseCode;
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", padding: "42px", color: "#182331" }}>
+    <main className="inventory-page" style={{ minHeight: "100vh", background: "#f3f5f7", padding: "42px", color: "#182331" }}>
       <ModuleTabs module="parts" />
       <header style={{ display: "flex", justifyContent: "space-between", gap: 24, alignItems: "flex-end" }}>
         <div>
@@ -419,6 +486,7 @@ export default function InventoryPage() {
           <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Warehouse stock, minimums, vendors, equipment compatibility, repair usage, and controlled physical counts.</p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button type="button" onClick={() => void printAudit()} disabled={!data || printingAudit || partStatus !== "active"} title={partStatus === "archived" ? "Select Active Parts to print a stock audit." : "Print the selected warehouse and filters with blank physical-count columns, or save as PDF."} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800, opacity: !data || printingAudit || partStatus !== "active" ? 0.55 : 1 }}>{printingAudit ? "Preparing audit…" : "Print Audit Sheet"}</button>
           <button onClick={() => { setVendor(blankVendor); setShowVendorForm(true); }} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800 }}>+ Add vendor</button>
           <button onClick={() => { setPart(blankPart); setEquipmentQuery(""); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ Add part</button>
         </div>
@@ -476,6 +544,7 @@ export default function InventoryPage() {
         <div style={{ padding: 18, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, cross-reference, vendor, equipment…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
           <span style={{ color: "#6c7886", fontSize: 13 }}><b>{partStatus === "archived" ? "Archived Parts" : selectedWarehouseName}</b> · {visibleParts.length} visible</span>
+          <small style={{ width: "100%", color: "#6c7886" }}>{partStatus === "archived" ? "Select Active Parts to print a stock audit." : "Print Audit Sheet uses the selected warehouse, search, stock view, and sort. For a full audit, choose All parts and clear the search."}</small>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
@@ -522,7 +591,7 @@ export default function InventoryPage() {
       {showVendorForm && (
         <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 60 }}>
           <form onSubmit={saveVendor} style={{ width: "min(560px,100%)", background: "white", borderRadius: 14, padding: 24, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div style={{ gridColumn: "1 / -1" }}><h2 style={{ margin: 0 }}>Add vendor</h2><p style={{ margin: "7px 0 0", color: "#6c7886", fontSize: 13 }}>New vendors become available immediately in every part's supplier list.</p></div>
+            <div style={{ gridColumn: "1 / -1" }}><h2 style={{ margin: 0 }}>Add vendor</h2><p style={{ margin: "7px 0 0", color: "#6c7886", fontSize: 13 }}>New vendors become available immediately in every part&apos;s supplier list.</p></div>
             <input required placeholder="Vendor name" value={vendor.name} onChange={(event) => setVendor({ ...vendor, name: event.target.value })} style={{ gridColumn: "1 / -1", padding: 11 }} />
             <input placeholder="Phone" value={vendor.phone} onChange={(event) => setVendor({ ...vendor, phone: event.target.value })} style={{ padding: 11 }} />
             <input type="email" placeholder="Email" value={vendor.email} onChange={(event) => setVendor({ ...vendor, email: event.target.value })} style={{ padding: 11 }} />
@@ -602,6 +671,7 @@ export default function InventoryPage() {
           </form>
         </div>
       )}
+      {auditSnapshot && <InventoryAuditSheet snapshot={auditSnapshot} />}
     </main>
   );
 }
