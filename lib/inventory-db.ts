@@ -31,6 +31,7 @@ type WarehouseStockRow = {
   unit_cost: number | null;
   on_order: number;
   bin_location: string | null;
+  warehouse_status: string | null;
 };
 
 type WarehouseRow = { id: number; code: string; name: string };
@@ -61,10 +62,12 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
     db.prepare('SELECT id, name, phone, email, notes FROM vendors WHERE COALESCE(active, 1) = 1 ORDER BY name').all<VendorRow>(),
     db.prepare(`
       SELECT s.id, s.part_id, w.code AS warehouse_code, w.name AS warehouse_name,
-             s.quantity_on_hand, s.unit_of_measure, s.unit_cost, s.on_order, l.bin_location
+             s.quantity_on_hand, s.unit_of_measure, s.unit_cost, s.on_order, l.bin_location,
+             COALESCE(cs.status,'active') AS warehouse_status
       FROM part_warehouse_stock s
       JOIN warehouses w ON w.id = s.warehouse_id
       LEFT JOIN part_warehouse_locations l ON l.part_id = s.part_id AND l.warehouse_id = s.warehouse_id
+      LEFT JOIN part_warehouse_catalog_status cs ON cs.part_id=s.part_id AND cs.warehouse_id=s.warehouse_id
       WHERE w.active = 1
       ORDER BY s.part_id, w.name, s.variant_key
     `).all<WarehouseStockRow>(),
@@ -123,6 +126,7 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
       onOrder: Number(stock.on_order),
       binLocation: stock.bin_location ?? '',
       minimumQuantity: minimumByPartWarehouse.get(`${row.id}:${stock.warehouse_code}`) ?? null,
+      warehouseStatus: stock.warehouse_status ?? 'active',
     }));
     const quantityOnHand = rows.length
       ? rows.reduce((sum, stock) => sum + Number(stock.quantity_on_hand), 0)
