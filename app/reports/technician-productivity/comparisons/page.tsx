@@ -48,9 +48,9 @@ function downloadCsv(filename:string,values:Array<Record<string,unknown>>){
 function Info({children}:{children:React.ReactNode}){return <p style={{fontSize:12,color:"#5c7185",lineHeight:1.5,margin:"7px 0 0"}}>{children}</p>;}
 function Counter({label,value,description}:{label:string;value:string;description:string}){
   return <div style={{...card,padding:14}}>
-    <span style={{fontSize:11,color:"#64748b",fontWeight:850}}>{label}</span>
+    <span style={{fontSize:11,color:"#68746f",fontWeight:850}}>{label}</span>
     <div style={{fontSize:24,fontWeight:900,color:"#0f2945",margin:"6px 0 4px",fontVariantNumeric:"tabular-nums"}}>{value}</div>
-    <small style={{color:"#64748b"}}>{description}</small>
+    <small style={{color:"#68746f"}}>{description}</small>
   </div>;
 }
 function TableBox({children,label}:{children:React.ReactNode;label:string}){
@@ -150,13 +150,13 @@ export default function TechnicianPeerComparisons(){
     {key:"peerAverageHours",label:"Other techs avg hrs"},{key:"timeVsPeersPercent",label:"Time vs peers"},
     {key:"totalHours",label:"Logged hours"},
   ];
-  return <main id="technician-peer-report" style={{minHeight:"100vh",background:"#f3f5f7",color:"#182b3f",padding:"clamp(14px,2.2vw,30px)"}}>
+  return <main id="technician-peer-report" style={{minHeight:"100vh",background:"#f4f6f4",color:"#1b2421",padding:"clamp(14px,2.2vw,30px)"}}>
     <style>{"@media print {.tech-peer-no-print,.app-sidebar,.sidebar-shell,.app-shell-sidebar{display:none!important} #technician-peer-report{padding:0!important;background:#fff!important} .tech-peer-scroll{max-height:none!important;overflow:visible!important} #technician-peer-report tr{break-inside:avoid}}"}
     </style>
     <header style={{display:"flex",gap:15,justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",marginBottom:16}}>
       <div><p style={{fontSize:11,fontWeight:900,letterSpacing:".13em",color:"#ea6a16",margin:0}}>NORTHERN LOGISTICS · REPORTS</p>
         <h1 style={{fontSize:"clamp(23px,2.4vw,32px)",margin:"5px 0 5px"}}>Technician Job Comparisons</h1>
-        <p style={{fontSize:13,color:"#64748b",margin:0,maxWidth:850}}>Compare mechanics doing the same classified work and see how labor is shared on the same exact work order.</p>
+        <p style={{fontSize:13,color:"#68746f",margin:0,maxWidth:850}}>Compare mechanics doing the same classified work and see how labor is shared on the same exact work order.</p>
       </div>
       <div className="tech-peer-no-print" style={{display:"flex",flexWrap:"wrap",gap:8}}>
         <a href="/reports/technician-productivity" style={{...light,textDecoration:"none"}}>← Productivity Overview</a>
@@ -206,9 +206,9 @@ export default function TechnicianPeerComparisons(){
       <Info>Filtering technicians does not change the underlying peer benchmarks: each mechanic is compared to the other technicians who did the same type of work. Date ranges use saved labor dates and are limited to 366 days.</Info>
     </section>
     {error&&<p role="alert" style={{...card,padding:15,color:"#b91c1c",borderColor:"#fecaca"}}>{error}</p>}
-    {!data&&!error&&<p role="status" style={{padding:20,color:"#64748b"}}>Loading completed job comparisons…</p>}
+    {!data&&!error&&<p role="status" style={{padding:20,color:"#68746f"}}>Loading completed job comparisons…</p>}
     {data&&<>
-      <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",fontSize:12,margin:"0 0 12px",color:"#475569"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",fontSize:12,margin:"0 0 12px",color:"#53645d"}}>
         <strong>{applied.start} through {applied.end}</strong><span>Updated {new Date(data.updatedAt).toLocaleString()}</span>
       </div>
       <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(164px,1fr))",gap:10,marginBottom:13}}>
@@ -235,38 +235,38 @@ export default function TechnicianPeerComparisons(){
       </nav>
       {view==="peers"&&<div style={{display:"grid",gap:13}}>
         <section style={card}>
-          <div style={{padding:15,borderBottom:"1px solid #e2e8f0",display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+          <div style={{padding:15,borderBottom:"1px solid #dce3df",display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
             <div><h2 style={sectionHeading}>Compare Technician Hours on the Same Job Type</h2>
               <Info>Each peer baseline excludes the technician's own jobs. “Small comparison sample” flags job counts too small to confidently compare.</Info></div>
-            <span style={{fontSize:12,color:"#64748b"}}>{comparisons.length} rows</span>
+            <span style={{fontSize:12,color:"#68746f"}}>{comparisons.length} rows</span>
           </div>
           <TableBox label="Sortable same type technician comparisons">
             <table style={{minWidth:1080,width:"100%",borderCollapse:"collapse"}}>
               <thead><tr>{sortColumns.map(col=><th key={col.key} style={th} aria-sort={sort.key===col.key?(sort.desc?"descending":"ascending"):"none"}>
-                <button type="button" style={{border:0,background:"none",fontWeight:850,cursor:"pointer",fontSize:12,color:"#334155",padding:0}} onClick={()=>setSort(old=>({key:col.key,desc:old.key===col.key?!old.desc:col.key!=="jobType"}))}>
+                <button type="button" style={{border:0,background:"none",fontWeight:850,cursor:"pointer",fontSize:12,color:"#30463f",padding:0}} onClick={()=>setSort(old=>({key:col.key,desc:old.key===col.key?!old.desc:col.key!=="jobType"}))}>
                   {col.label} <span aria-hidden="true">{sort.key===col.key?(sort.desc?"↓":"↑"):"↕"}</span>
                 </button></th>)}<th style={th}>Comparison sample</th></tr></thead>
               <tbody>{comparisons.map(row=><tr key={row.categoryKey+"-"+row.technicianId}>
-                <td style={td}><strong>{row.jobType}</strong><small style={{display:"block",color:"#64748b"}}>{row.scope}</small></td>
+                <td style={td}><strong>{row.jobType}</strong><small style={{display:"block",color:"#68746f"}}>{row.scope}</small></td>
                 <td style={td}>{row.technician}</td><td style={td}>{row.jobCount}</td>
                 <td style={{...td,fontWeight:850}}>{fmtHours(row.averageHours)}</td>
                 <td style={td}>{row.peerAverageHours===null?"—":fmtHours(row.peerAverageHours)}</td>
-                <td style={{...td,color:row.timeVsPeersPercent===null?"#64748b":row.timeVsPeersPercent>0?"#9a3412":"#0369a1",fontWeight:850}}>
+                <td style={{...td,color:row.timeVsPeersPercent===null?"#68746f":row.timeVsPeersPercent>0?"#9a3412":"#0369a1",fontWeight:850}}>
                   {fmtPercent(row.timeVsPeersPercent)}
                 </td>
                 <td style={td}>{fmtHours(row.totalHours)}</td>
                 <td style={td}>
                   <strong>{row.peerTechnicians} peer{row.peerTechnicians===1?"":"s"} / {row.peerJobs} job{row.peerJobs===1?"":"s"}</strong>
-                  <small style={{display:"block",color:row.sample==="Small comparison sample"?"#a16207":"#64748b"}}>{row.sample}</small>
+                  <small style={{display:"block",color:row.sample==="Small comparison sample"?"#a16207":"#68746f"}}>{row.sample}</small>
                 </td>
               </tr>)}
-              {!comparisons.length&&<tr><td colSpan={8} style={{padding:22,color:"#64748b"}}>No two technicians have comparable completed jobs of the same type for these filters. Try Last 90 days or view All Work Order Labor to see why jobs were excluded.</td></tr>}
+              {!comparisons.length&&<tr><td colSpan={8} style={{padding:22,color:"#68746f"}}>No two technicians have comparable completed jobs of the same type for these filters. Try Last 90 days or view All Work Order Labor to see why jobs were excluded.</td></tr>}
               </tbody>
             </table>
           </TableBox>
         </section>
         <section style={card}>
-          <div style={{padding:15,borderBottom:"1px solid #e2e8f0"}}>
+          <div style={{padding:15,borderBottom:"1px solid #dce3df"}}>
             <h2 style={sectionHeading}>Recorded Job Types & Coverage</h2>
             <Info>These counts include all direct labor in the selected period, even jobs that cannot be used for a fair peer comparison.</Info>
           </div>
@@ -285,7 +285,7 @@ export default function TechnicianPeerComparisons(){
         </section>
       </div>}
       {view==="shared"&&<section style={card}>
-        <div style={{padding:15,display:"flex",justifyContent:"space-between",gap:11,alignItems:"center",flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+        <div style={{padding:15,display:"flex",justifyContent:"space-between",gap:11,alignItems:"center",flexWrap:"wrap",borderBottom:"1px solid #dce3df"}}>
           <div><h2 style={sectionHeading}>Same Exact Work Order · Shared Labor</h2>
             <Info>If more than one mechanic worked a single WO, see every person's logged time and percent of that WO's recorded labor. These are contributions, not competing completion times.</Info></div>
           <label style={{fontSize:12,fontWeight:750}}>Sort{" "}
@@ -295,19 +295,19 @@ export default function TechnicianPeerComparisons(){
           </label>
         </div>
         <div className="tech-peer-scroll" style={{maxHeight:680,overflow:"auto",padding:14}}>
-          {shared.length===0&&<p style={{color:"#64748b",fontSize:13}}>No shared work orders match these filters. The same technician may have handled jobs alone, or other mechanics may not have logged time to the same work order.</p>}
+          {shared.length===0&&<p style={{color:"#68746f",fontSize:13}}>No shared work orders match these filters. The same technician may have handled jobs alone, or other mechanics may not have logged time to the same work order.</p>}
           {shared.map(row=><article key={row.repairId} style={{border:"1px solid #dce3eb",borderRadius:10,padding:13,marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:9}}>
               <div><strong>WO #{row.repairId} · Unit {row.unit}</strong>
                 <p style={{fontSize:13,margin:"3px 0 0"}}>{row.title}</p>
-                <small style={{color:"#64748b"}}>{row.category} · {row.status}</small>
+                <small style={{color:"#68746f"}}>{row.category} · {row.status}</small>
               </div>
-              <div><strong style={{fontSize:17}}>{fmtHours(row.totalHours)} hrs</strong><small style={{display:"block",color:"#64748b"}}>Combined logged time</small></div>
+              <div><strong style={{fontSize:17}}>{fmtHours(row.totalHours)} hrs</strong><small style={{display:"block",color:"#68746f"}}>Combined logged time</small></div>
             </div>
             {row.members.map(member=><div key={member.technicianId} style={{display:"grid",gridTemplateColumns:"minmax(120px,1fr) minmax(140px,3fr) 78px 58px",alignItems:"center",gap:9,marginTop:7,fontSize:12}}>
               <span style={{fontWeight:700}}>{member.technician}</span>
-              <div aria-hidden="true" style={{background:"#e2e8f0",height:11,borderRadius:9,overflow:"hidden"}}>
-                <div style={{height:"100%",background:"#2271bd",width:String(member.sharePercent??0)+"%"}}/>
+              <div aria-hidden="true" style={{background:"#dce3df",height:11,borderRadius:9,overflow:"hidden"}}>
+                <div style={{height:"100%",background:"#2f6f60",width:String(member.sharePercent??0)+"%"}}/>
               </div>
               <span style={{textAlign:"right"}}>{fmtHours(member.hours)} h</span><strong style={{textAlign:"right"}}>{member.sharePercent===null?"—":member.sharePercent.toFixed(1)+"%"}</strong>
             </div>)}
@@ -315,7 +315,7 @@ export default function TechnicianPeerComparisons(){
         </div>
       </section>}
       {view==="jobs"&&<section style={card}>
-        <div style={{padding:15,display:"flex",gap:10,justifyContent:"space-between",alignItems:"end",flexWrap:"wrap",borderBottom:"1px solid #e2e8f0"}}>
+        <div style={{padding:15,display:"flex",gap:10,justifyContent:"space-between",alignItems:"end",flexWrap:"wrap",borderBottom:"1px solid #dce3df"}}>
           <div><h2 style={sectionHeading}>All Direct Work Order Labor · Audit</h2>
             <Info>Actual labor records for each technician and work order. Reasons show why an item is or isn't included in like-for-like averages.</Info></div>
           <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
@@ -331,7 +331,7 @@ export default function TechnicianPeerComparisons(){
             </label>
           </div>
         </div>
-        <p style={{fontSize:12,color:"#64748b",padding:"0 14px"}}>{jobs.length} technician/WO entries match. Showing {Math.min(showJobs,jobs.length)}; CSV includes all matches.</p>
+        <p style={{fontSize:12,color:"#68746f",padding:"0 14px"}}>{jobs.length} technician/WO entries match. Showing {Math.min(showJobs,jobs.length)}; CSV includes all matches.</p>
         <TableBox label="Detailed technician work order labor and benchmark eligibility">
           <table style={{borderCollapse:"collapse",width:"100%",minWidth:1170}}>
             <thead><tr>{["Last worked","Technician","Unit","WO #","Work type","Repair / description","Status","Logged hours","Benchmark eligibility"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
@@ -343,14 +343,14 @@ export default function TechnicianPeerComparisons(){
               <td style={{...td,fontWeight:800}}>{fmtHours(row.hours)}</td>
               <td style={{...td,maxWidth:290,whiteSpace:"normal",color:row.comparable?"#166534":"#92400e"}}>{row.comparable?"Eligible completed solo job":row.excludedReason}</td>
             </tr>)}
-            {!jobs.length&&<tr><td colSpan={9} style={{padding:24,color:"#64748b"}}>No direct labor entries match these filters.</td></tr>}</tbody>
+            {!jobs.length&&<tr><td colSpan={9} style={{padding:24,color:"#68746f"}}>No direct labor entries match these filters.</td></tr>}</tbody>
           </table>
         </TableBox>
         {showJobs<jobs.length&&<div className="tech-peer-no-print" style={{display:"flex",justifyContent:"center",padding:13}}>
           <button type="button" style={light} onClick={()=>setShowJobs(v=>v+75)}>Show 75 more</button>
         </div>}
       </section>}
-      <p style={{fontSize:12,color:"#64748b",lineHeight:1.55,marginTop:14}}>
+      <p style={{fontSize:12,color:"#68746f",lineHeight:1.55,marginTop:14}}>
         <strong>Data coverage:</strong> {summary?.technicianJobRows??0} technician/WO records; {summary?.unclassifiedOrUnversionedRows??0} without comparable type/checklist;
         {" "}{summary?.untimedExcludedRows??0} excluded due to manual or legacy hours; {summary?.openWorkOrderRows??0} still incomplete.
         Results cannot measure work never logged, job quality, repeat repairs, paid hours, or manufacturer book-time efficiency. A comparison is descriptive, not a performance score.
