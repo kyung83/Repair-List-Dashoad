@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
-import { assignCurrentShopDuty, getShopDutySetupData, updateShopDutyTemplate } from '@/lib/shop-duties';
+import { assignCurrentShopDuty, getShopDutySetupData, saveShopDutyChecklist, updateShopDutyTemplate } from '@/lib/shop-duties';
 
 async function requireManager(request:Request) {
   const user = await getSessionUser(env.DB, request);
@@ -28,6 +28,9 @@ export async function POST(request:Request) {
     }
     if (action === 'assignCurrent') {
       return Response.json(await assignCurrentShopDuty(env.DB, user.id, body));
+    }
+    if (action === 'saveChecklist') {
+      return Response.json(await saveShopDutyChecklist(env.DB, user.id, body));
     }
     return Response.json({ error:'Unknown Shop Duty setup action.' }, { status:400 });
   } catch (error) {
