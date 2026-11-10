@@ -18,6 +18,7 @@ const groups:SetupGroup[]=[
       {label:"Annual Schedule Setup",href:"/annual-schedules",description:"Annual inspection scheduling rules."},
       {label:"PM Kits",href:"/pm-kits",description:"Standard parts kits for PM work."},
       {label:"Repair Types",href:"/repair-types",description:"Repair categories and repair-specific checklist behavior."},
+      {label:"Shop Duties",href:"/shop-duties",description:"Bathroom rotation, selected-mechanic Shop Checks, and monthly duty assignment."},
     ],
   },
   {
