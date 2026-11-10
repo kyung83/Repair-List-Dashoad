@@ -21,6 +21,7 @@ type WarehouseStock = {
   unitCost: number | null;
   onOrder: number;
   minimumQuantity: number | null;
+  warehouseStatus?: "active" | "archived" | "removed";
 };
 
 type Equipment = { id: number; unit: string; category: string; equipmentType: string };
@@ -41,6 +42,7 @@ type Part = {
   compatibleEquipment?: CompatibleEquipment[];
   compatibleEquipmentIds?: number[];
   crossReferences?: string[];
+  warehouseStatuses?: Record<string, "active" | "archived" | "removed">;
   lowStock: boolean;
   active?: boolean;
 };
@@ -235,14 +237,23 @@ export default function InventoryPage() {
     };
   }, [warehouseCode]);
 
-  const scopedParts = useMemo(() => (data?.parts ?? []).filter((item) =>
-    warehouseCode === "ALL" || (item.warehouseStocks ?? []).some((stock) => stock.warehouseCode === warehouseCode),
-  ), [data, warehouseCode]);
+  const warehouseStatusFor = useCallback((item: Part, code: string) =>
+    item.warehouseStatuses?.[code] ?? (item.warehouseStocks ?? []).find((stock) => stock.warehouseCode === code)?.warehouseStatus ?? "active",
+  []);
+
+  const scopedParts = useMemo(() => (data?.parts ?? []).filter((item) => {
+    if (partStatus !== "active") return true;
+    if (warehouseCode === "ALL") return (data?.warehouses ?? []).some((warehouse) => warehouseStatusFor(item, warehouse.code) === "active");
+    return warehouseStatusFor(item, warehouseCode) === "active";
+  }), [data, partStatus, warehouseCode, warehouseStatusFor]);
 
   const filterParts = useCallback((parts: Part[], links: Record<string, VendorLink[]>) => {
     const q = query.trim().toLowerCase();
     const rows = parts.filter((item) => {
-      if (warehouseCode !== "ALL" && !(item.warehouseStocks ?? []).some((stock) => stock.warehouseCode === warehouseCode)) return false;
+      if (partStatus === "active") {
+        if (warehouseCode !== "ALL" && warehouseStatusFor(item, warehouseCode) !== "active") return false;
+        if (warehouseCode === "ALL" && !(data?.warehouses ?? []).some((warehouse) => warehouseStatusFor(item, warehouse.code) === "active")) return false;
+      }
       const stock = stockFor(item);
       if (stockFilter === "negative" && stock.quantityOnHand >= 0) return false;
       if (stockFilter === "below-minimum" && stock.quantityOnHand >= stock.minimumQuantity) return false;
@@ -260,7 +271,7 @@ export default function InventoryPage() {
       return a.description.localeCompare(b.description) || a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true });
     });
     return rows;
-  }, [query, sortMode, stockFilter, stockFor, warehouseCode]);
+  }, [data?.warehouses, partStatus, query, sortMode, stockFilter, stockFor, warehouseCode, warehouseStatusFor]);
 
   const visibleParts = useMemo(() => filterParts(data?.parts ?? [], vendorLinks), [data, filterParts, vendorLinks]);
 
@@ -366,6 +377,28 @@ export default function InventoryPage() {
     setVendor(blankVendor);
     setShowVendorForm(false);
     setMessage("Vendor added. It is now available on every part.");
+    await load();
+  }
+
+  async function setWarehousePartStatus(item: Part, code: string, status: "active" | "archived" | "removed") {
+    const warehouse = (data?.warehouses ?? []).find((entry) => entry.code === code);
+    const label = warehouse?.name ?? code;
+    const actionLabel = status === "active" ? "restore" : status === "archived" ? "archive" : "remove";
+    if (status !== "active" && !window.confirm(`${actionLabel === "remove" ? "Remove" : "Archive"} ${item.partNumber} at ${label}?\n\nThis only affects ${label}. Other warehouses keep the part. The warehouse must have zero stock and zero on-order quantity first.`)) return;
+    setMessage("");
+    const response = await fetch("/api/inventory", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "setWarehousePartStatus", partId: item.id, warehouseCode: code, status }),
+    });
+    const result = await response.json() as { ok?: boolean; error?: string };
+    if (!response.ok || !result.ok) {
+      setMessage(result.error || `Part could not be ${actionLabel}d at ${label}.`);
+      return;
+    }
+    setMessage(status === "active"
+      ? `${item.partNumber} restored at ${label}.`
+      : `${item.partNumber} ${status === "archived" ? "archived" : "removed"} at ${label}. Other warehouses are unchanged.`);
     await load();
   }
 
@@ -712,11 +745,33 @@ export default function InventoryPage() {
 
             <div style={{ gridColumn: "1 / -1" }}><InventoryChoicePicker label="Used on equipment" options={(data?.equipment ?? []).map((equipment) => ({ id: equipment.id, label: equipment.unit, description: `${equipment.category} · ${equipment.equipmentType}` }))} selectedIds={part.equipmentIds} onToggle={toggleEquipment} placeholder="Choose trucks, trailers, or other equipment…" emptyText="No active equipment is available." disabled={partSaving} /></div>
 
+            {part.id && editingItem && <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
+              <legend style={{ fontWeight: 800, padding: "0 6px" }}>Warehouse availability</legend>
+              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Archive or remove this part from one warehouse without affecting the other warehouse. Stock and on-order quantity must be zero first.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 10 }}>
+                {(data?.warehouses ?? []).map((warehouse) => {
+                  const status = warehouseStatusFor(editingItem, warehouse.code);
+                  return <div key={warehouse.code} style={{ padding: 12, border: "1px solid #dce2e7", borderRadius: 9, background: status === "active" ? "#f7fbf8" : status === "archived" ? "#fff8e6" : "#fff3f3" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                      <strong>{warehouse.name}</strong>
+                      <span style={{ fontSize: 11, fontWeight: 900, textTransform: "uppercase" }}>{status}</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 7, marginTop: 10, flexWrap: "wrap" }}>
+                      {status !== "active"
+                        ? <button type="button" disabled={partSaving} onClick={() => void setWarehousePartStatus(editingItem, warehouse.code, "active")} className={pageStyles.detailsButton}>Restore here</button>
+                        : <>
+                            <button type="button" disabled={partSaving} onClick={() => void setWarehousePartStatus(editingItem, warehouse.code, "archived")} className={pageStyles.detailsButton}>Archive here</button>
+                            {data?.viewerRole === "admin" && <button type="button" disabled={partSaving} onClick={() => void setWarehousePartStatus(editingItem, warehouse.code, "removed")} style={{ padding: "8px 11px", border: "1px solid #b42318", borderRadius: 7, background: "white", color: "#b42318", fontWeight: 800 }}>Remove here</button>}
+                          </>}
+                    </div>
+                  </div>;
+                })}
+              </div>
+            </fieldset>}
+
             <div className={pageStyles.modalFooter}>
               <div style={{ display: "flex", gap: 8 }}>
-                {part.id && editingItem && partStatus === "active" && <button type="button" disabled={partSaving} onClick={() => void archivePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #8a5a00", borderRadius: 8, background: "white", color: "#8a5a00", fontWeight: 900 }}>Archive Part</button>}
-                {part.id && editingItem && partStatus === "archived" && <button type="button" disabled={partSaving} onClick={() => void restorePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #176448", borderRadius: 8, background: "white", color: "#176448", fontWeight: 900 }}>Restore Part</button>}
-                {part.id && editingItem && data?.viewerRole === "admin" && <button type="button" disabled={partSaving} onClick={() => void deletePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #b42318", borderRadius: 8, background: "#fff5f5", color: "#b42318", fontWeight: 950 }}>Delete Part</button>}
+                {partStatus === "archived" && part.id && editingItem && <button type="button" disabled={partSaving} onClick={() => void restorePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #176448", borderRadius: 8, background: "white", color: "#176448", fontWeight: 900 }}>Restore Global Legacy Archive</button>}
               </div>
               <div style={{ display: "flex", gap: 10 }}><button type="button" disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }} className={pageStyles.detailsButton}>Cancel</button><button type="submit" disabled={partSaving} style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800, opacity: partSaving ? 0.6 : 1 }}>{partSaving ? "Saving…" : "Save part"}</button></div>
             </div>
