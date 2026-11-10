@@ -58,7 +58,7 @@
 
 .managerBoard :global(main[data-planning-center="true"] > div > header:first-child > div:first-child h1)::after{
   content:"Repair Board";
-  color:#0d1b2b;
+  color:#173f37;
   font-size:23px;
   font-weight:500;
   letter-spacing:-.03em;
