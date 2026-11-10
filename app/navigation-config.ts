@@ -126,6 +126,7 @@ const sidebarGroups: SidebarGroup[] = [
 
       { href: "/breakdown-vendors", label: "Breakdown Vendors", exact: true, roles: managerRoles, showInSidebar: false },
       { href: "/repair-types", label: "Repair Types", exact: true, roles: managerRoles, showInSidebar: false },
+      { href: "/shop-duties", label: "Shop Duties", exact: true, roles: managerRoles, showInSidebar: false },
       { href: "/maintenance-programs", label: "Custom PM Builder", roles: managerRoles, showInSidebar: false },
       { href: "/maintenance-checklists", label: "PM & Annual Checklists", roles: managerRoles, showInSidebar: false },
       { href: "/annual-schedules", label: "Annual Schedule Setup", roles: managerRoles, showInSidebar: false },
