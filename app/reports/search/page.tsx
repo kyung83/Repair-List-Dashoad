@@ -65,12 +65,12 @@ type Data = {
   updatedAt: string;
 };
 
-const panel = { background: "white", border: "1px solid #dce2e7", borderRadius: 14, padding: 18 } as const;
+const panel = { background: "white", border: "1px solid #d7ded9", borderRadius: 14, padding: 18 } as const;
 const input = { width: "100%", boxSizing: "border-box", padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white" } as const;
-const button = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#0d1b2b", color: "white", fontWeight: 850, cursor: "pointer" } as const;
-const lightButton = { ...button, background: "#e8edf2", color: "#172033" } as const;
+const button = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#173f37", color: "white", fontWeight: 850, cursor: "pointer" } as const;
+const lightButton = { ...button, background: "#e8edf2", color: "#1b2421" } as const;
 const label = { display: "grid", gap: 5, fontWeight: 750, fontSize: 13 } as const;
-const th = { textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7", whiteSpace: "nowrap", fontSize: 12 } as const;
+const th = { textAlign: "left", padding: 8, borderBottom: "1px solid #d7ded9", whiteSpace: "nowrap", fontSize: 12 } as const;
 const td = { padding: 8, borderBottom: "1px solid #eef2f5", verticalAlign: "top" } as const;
 
 function ymd(date: Date) {
@@ -221,20 +221,20 @@ export default function ReportSearchPage() {
     void load(next);
   }
 
-  if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading report search…</main>;
-  if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>{message || "Report search is unavailable."}</main>;
+  if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f4f6f4" }}>Loading report search…</main>;
+  if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f4f6f4" }}>{message || "Report search is unavailable."}</main>;
 
   const rangeSlug = `${data.range.startDate}-to-${data.range.endDate}`;
   const anyTruncated = data.truncated.repairs || data.truncated.maintenance || data.truncated.expenses;
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "34px 34px 110px" }}>
+    <main style={{ minHeight: "100vh", background: "#f4f6f4", color: "#1b2421", padding: "34px 34px 110px" }}>
       <ModuleTabs module="reports" />
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#6d28d9", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>REPORT SEARCH</p>
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Search Every Report Range</h1>
-          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 900 }}>Choose any date range, then drill into units, repair types, technicians, sources, locations, PM/annual records, expenses and parts usage.</p>
+          <p style={{ margin: "8px 0 0", color: "#68746f", maxWidth: 900 }}>Choose any date range, then drill into units, repair types, technicians, sources, locations, PM/annual records, expenses and parts usage.</p>
         </div>
         <button style={button} onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Run Report"}</button>
       </header>
@@ -295,16 +295,16 @@ export default function ReportSearchPage() {
         </div>
       </section>
 
-      <div style={{ marginTop: 14, color: "#64748b", fontSize: 13 }}>Showing {data.range.startDate} through {data.range.endDate}. Date and equipment filters scope every section; repair, maintenance and expense filters apply to their matching report sections.</div>
+      <div style={{ marginTop: 14, color: "#68746f", fontSize: 13 }}>Showing {data.range.startDate} through {data.range.endDate}. Date and equipment filters scope every section; repair, maintenance and expense filters apply to their matching report sections.</div>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 12 }}>
-        {[["UNITS IN SCOPE", num(data.summary.unitsInScope)],["REPAIRS / ROs", num(data.summary.repairCount)],["PARTS", money(data.summary.partsCost)],["LABOR", money(data.summary.laborCost)],["OUTSIDE / SUBLET", money(data.summary.outsideCost)],["REPAIR COST", money(data.summary.repairCost)],["PM / ANNUAL EVENTS", num(data.summary.maintenanceEvents)],["OTHER EXPENSES", money(data.summary.expenseCost)],["OPERATING COST", money(data.summary.operatingCost)]].map(([name, value]) => <article key={String(name)} style={panel}><small style={{ color: "#64748b", fontWeight: 850 }}>{name}</small><strong style={{ display: "block", fontSize: 23, marginTop: 7 }}>{value}</strong></article>)}
+        {[["UNITS IN SCOPE", num(data.summary.unitsInScope)],["REPAIRS / ROs", num(data.summary.repairCount)],["PARTS", money(data.summary.partsCost)],["LABOR", money(data.summary.laborCost)],["OUTSIDE / SUBLET", money(data.summary.outsideCost)],["REPAIR COST", money(data.summary.repairCost)],["PM / ANNUAL EVENTS", num(data.summary.maintenanceEvents)],["OTHER EXPENSES", money(data.summary.expenseCost)],["OPERATING COST", money(data.summary.operatingCost)]].map(([name, value]) => <article key={String(name)} style={panel}><small style={{ color: "#68746f", fontWeight: 850 }}>{name}</small><strong style={{ display: "block", fontSize: 23, marginTop: 7 }}>{value}</strong></article>)}
       </section>
 
       {anyTruncated && <div style={{ ...panel, marginTop: 18, borderColor: "#f2c66d", background: "#fff8e6" }}>More than 5,000 rows match at least one section. Totals remain calculated across the full match; narrow the filters to inspect every individual row.</div>}
 
       <section style={{ ...panel, marginTop: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}><div><h2 style={{ margin: 0 }}>Repair & RO History</h2><small style={{ color: "#64748b" }}>{data.summary.currentRepairCount} software repairs + {data.summary.historicalRepairCount} imported historical ROs</small></div><button style={button} onClick={() => downloadCsv(`repairs-${rangeSlug}.csv`, data.repairs)}>Export CSV</button></div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}><div><h2 style={{ margin: 0 }}>Repair & RO History</h2><small style={{ color: "#68746f" }}>{data.summary.currentRepairCount} software repairs + {data.summary.historicalRepairCount} imported historical ROs</small></div><button style={button} onClick={() => downloadCsv(`repairs-${rangeSlug}.csv`, data.repairs)}>Export CSV</button></div>
         <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1580 }}><thead><tr>{["Date","Unit","Type","Repair Type","Repair / RO","Status","Technician","Source","Location","Parts","Labor","Outside","Total"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.repairs.map((row) => <tr key={`${row.kind}-${row.id}`}><td style={td}>{row.date}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.kind}</td><td style={{...td,fontWeight:850}}>{row.repairType}</td><td style={td}>{row.repair}</td><td style={td}>{row.status}</td><td style={td}>{row.technician}</td><td style={td}>{row.source}</td><td style={td}>{row.location || "—"}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td></tr>)}</tbody></table></div>
       </section>
 
@@ -320,7 +320,7 @@ export default function ReportSearchPage() {
       </section>
 
       <section style={{ ...panel, marginTop: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Parts Usage</h2><small style={{ color: "#64748b" }}>Current software repair part lines matching the selected repair scope, including Repair Type.</small></div><button style={button} onClick={() => downloadCsv(`parts-${rangeSlug}.csv`, data.parts)}>Export CSV</button></div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}><div><h2 style={{ margin: 0 }}>Parts Usage</h2><small style={{ color: "#68746f" }}>Current software repair part lines matching the selected repair scope, including Repair Type.</small></div><button style={button} onClick={() => downloadCsv(`parts-${rangeSlug}.csv`, data.parts)}>Export CSV</button></div>
         <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}><thead><tr>{["Part","Description","Qty","Repairs","Units","Cost"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.parts.map((row) => <tr key={row.partNumber}><td style={{ ...td, fontWeight: 850 }}>{row.partNumber}</td><td style={td}>{row.description}</td><td style={td}>{num(row.quantity, 2)}</td><td style={td}>{row.repairCount}</td><td style={td}>{row.unitCount}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.cost)}</td></tr>)}</tbody></table></div>
       </section>
     </main>
