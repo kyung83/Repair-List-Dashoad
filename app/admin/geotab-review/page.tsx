@@ -109,9 +109,9 @@ export default function GeotabReviewPage(){
   const repairRows=useMemo(()=>data?.historicalForks.reduce((sum,group)=>sum+group.rows.reduce((n,row)=>n+row.repairCount,0),0)??0,[data]);
   const summary=data?.summary;
 
-  return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'36px clamp(16px,4vw,46px)',color:'#182331'}}>
+  return <main style={{minHeight:'100vh',background:'#f4f6f4',padding:'36px clamp(16px,4vw,46px)',color:'#1b2421'}}>
     <header style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:20,flexWrap:'wrap'}}>
-      <div><p style={eyebrow}>ADMIN · GEOTAB RELIABILITY</p><h1 style={{margin:'7px 0 0',fontSize:34,color:'#0d1b2b'}}>Identity & mileage review</h1><p style={{margin:'8px 0 0',maxWidth:850,color:'#627181',lineHeight:1.5}}>The sync now refuses ambiguous identity changes and questionable odometer jumps. Resolve those exceptions here without deleting equipment or guessing at repair history.</p></div>
+      <div><p style={eyebrow}>ADMIN · GEOTAB RELIABILITY</p><h1 style={{margin:'7px 0 0',fontSize:34,color:'#173f37'}}>Identity & mileage review</h1><p style={{margin:'8px 0 0',maxWidth:850,color:'#627181',lineHeight:1.5}}>The sync now refuses ambiguous identity changes and questionable odometer jumps. Resolve those exceptions here without deleting equipment or guessing at repair history.</p></div>
       <button onClick={()=>void load()} disabled={Boolean(busy)}>Refresh</button>
     </header>
 
@@ -146,20 +146,20 @@ export default function GeotabReviewPage(){
 }
 
 function Candidate({row,disabled,onChoose}:{row:Equipment;disabled:boolean;onChoose:()=>void}){return <div style={{border:'1px solid #dfe5e9',borderRadius:9,padding:12,background:'#fafbfc'}}><div style={{display:'flex',justifyContent:'space-between',gap:8}}><strong>{row.unit}</strong><span style={{fontSize:12,color:row.archivedAt?'#a64040':row.active?'#2f7d52':'#7c8791'}}>{row.archivedAt?'ARCHIVED':row.active?'ACTIVE':'INACTIVE'}</span></div><div style={{fontSize:12,color:'#687787',marginTop:6}}>#{row.id} · {row.equipmentType||'equipment'} · {miles(row.currentMileage)}</div><div style={{fontSize:12,color:'#687787',marginTop:4}}>VIN {row.vin||'—'} · {row.repairCount} repairs</div><button disabled={disabled||Boolean(row.archivedAt)} onClick={onChoose} style={{marginTop:9}}>Link this unit</button></div>}
-function Stat({label,value,detail,tone}:{label:string;value:number|string;detail:string;tone:'warn'|'good'|'neutral'}){const border=tone==='warn'?'#f1bd71':tone==='good'?'#9fd0b3':'#dce2e7';return <article style={{background:'white',border:`1px solid ${border}`,borderRadius:12,padding:16}}><div style={{fontSize:12,color:'#687787',fontWeight:800}}>{label}</div><div style={{fontSize:30,fontWeight:900,color:'#0d1b2b',marginTop:5}}>{value}</div><div style={{fontSize:12,color:'#7a8794',marginTop:5}}>{detail}</div></article>}
+function Stat({label,value,detail,tone}:{label:string;value:number|string;detail:string;tone:'warn'|'good'|'neutral'}){const border=tone==='warn'?'#f1bd71':tone==='good'?'#9fd0b3':'#d7ded9';return <article style={{background:'white',border:`1px solid ${border}`,borderRadius:12,padding:16}}><div style={{fontSize:12,color:'#687787',fontWeight:800}}>{label}</div><div style={{fontSize:30,fontWeight:900,color:'#173f37',marginTop:5}}>{value}</div><div style={{fontSize:12,color:'#7a8794',marginTop:5}}>{detail}</div></article>}
 function Metric({label,value}:{label:string;value:string}){return <div style={{background:'#f7f9fa',borderRadius:8,padding:10}}><div style={{fontSize:11,color:'#758290',fontWeight:800}}>{label}</div><strong style={{display:'block',marginTop:4}}>{value}</strong></div>}
 function Empty({text}:{text:string}){return <div style={{padding:'26px 6px',color:'#6e7b88'}}>{text}</div>}
 function Loading(){return <div style={{padding:'26px 6px',color:'#6e7b88'}}>Loading…</div>}
 function miles(value:number|null){return value===null?'—':`${Math.round(value).toLocaleString()} mi`}
 function formatTime(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?value:date.toLocaleString()}
-const eyebrow={margin:0,color:'#f47b20',fontSize:12,fontWeight:900,letterSpacing:'.15em'};
-const section={marginTop:22,background:'white',border:'1px solid #dce2e7',borderRadius:12,padding:20};
+const eyebrow={margin:0,color:'#2f6f60',fontSize:12,fontWeight:900,letterSpacing:'.15em'};
+const section={marginTop:22,background:'white',border:'1px solid #d7ded9',borderRadius:12,padding:20};
 const sectionHead={display:'flex',justifyContent:'space-between',gap:16,alignItems:'flex-start',flexWrap:'wrap' as const};
-const h2={margin:0,color:'#0d1b2b',fontSize:22};
-const sub={margin:'6px 0 0',color:'#6c7886',fontSize:13,lineHeight:1.45};
-const card={marginTop:14,border:'1px solid #dce2e7',borderRadius:10,padding:15,background:'#fff'};
+const h2={margin:0,color:'#173f37',fontSize:22};
+const sub={margin:'6px 0 0',color:'#68746f',fontSize:13,lineHeight:1.45};
+const card={marginTop:14,border:'1px solid #d7ded9',borderRadius:10,padding:15,background:'#fff'};
 const badge={display:'inline-block',padding:'5px 8px',borderRadius:999,background:'#fff4df',border:'1px solid #f0c273',fontSize:11,fontWeight:900,color:'#7c4c05'};
 const mono={fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',fontSize:12,color:'#5e6e7e',marginTop:5};
-const input={padding:9,border:'1px solid #ccd5dd',borderRadius:7,boxSizing:'border-box' as const,background:'white',color:'#182331'};
+const input={padding:9,border:'1px solid #ccd5dd',borderRadius:7,boxSizing:'border-box' as const,background:'white',color:'#1b2421'};
 const th={padding:'9px 8px',textAlign:'left' as const,background:'#f7f9fa',fontSize:11,color:'#687787'};
 const td={padding:'9px 8px',fontSize:13};
