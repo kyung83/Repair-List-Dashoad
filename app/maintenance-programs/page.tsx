@@ -520,27 +520,27 @@ export default function MaintenanceProgramsPage() {
   );
 }
 
-const pageStyle = { minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "28px 32px 100px" } as const;
+const pageStyle = { minHeight: "100vh", background: "#f4f6f4", color: "#1b2421", padding: "28px 32px 100px" } as const;
 const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 18, flexWrap: "wrap" as const } as const;
-const eyebrowStyle = { margin: 0, color: "#f47b20", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" } as const;
-const titleStyle = { margin: "6px 0 0", fontSize: 32, color: "#0d1b2b" } as const;
-const subheadStyle = { margin: "7px 0 0", maxWidth: 880, color: "#64748b", lineHeight: 1.5, fontSize: 13 } as const;
+const eyebrowStyle = { margin: 0, color: "#2f6f60", fontSize: 11, fontWeight: 900, letterSpacing: ".14em" } as const;
+const titleStyle = { margin: "6px 0 0", fontSize: 32, color: "#173f37" } as const;
+const subheadStyle = { margin: "7px 0 0", maxWidth: 880, color: "#68746f", lineHeight: 1.5, fontSize: 13 } as const;
 const summaryStyle = { color: "#52616c", fontSize: 12, whiteSpace: "nowrap" as const } as const;
 const noticeStyle = { marginTop: 14, padding: 11, borderRadius: 7, border: "1px solid #f2c66d", background: "#fff8e6", fontSize: 12 } as const;
 const tabBarStyle = { display: "flex", gap: 6, flexWrap: "wrap" as const, marginTop: 18, marginBottom: 16 } as const;
 const tabStyle = { minHeight: 38, padding: "0 14px", border: "1px solid #cbd3d9", borderRadius: 6, background: "white", color: "#53616e", fontWeight: 900, cursor: "pointer" } as const;
-const activeTabStyle = { ...tabStyle, background: "#0d1b2b", borderColor: "#0d1b2b", color: "white" } as const;
+const activeTabStyle = { ...tabStyle, background: "#173f37", borderColor: "#173f37", color: "white" } as const;
 const twoColumnStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 16, alignItems: "start" } as const;
 const builderGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 16, alignItems: "start" } as const;
 const panelStyle = { background: "white", border: "1px solid #cfd6db", borderRadius: 8, padding: 16 } as const;
 const sectionHeadingStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" as const } as const;
-const miniLabelStyle = { margin: 0, color: "#f47b20", fontSize: 9, fontWeight: 900, letterSpacing: ".12em" } as const;
-const h2Style = { margin: "3px 0 0", fontSize: 20, color: "#172033" } as const;
-const helpStyle = { margin: "7px 0 14px", color: "#64748b", fontSize: 12, lineHeight: 1.5 } as const;
+const miniLabelStyle = { margin: 0, color: "#2f6f60", fontSize: 9, fontWeight: 900, letterSpacing: ".12em" } as const;
+const h2Style = { margin: "3px 0 0", fontSize: 20, color: "#1b2421" } as const;
+const helpStyle = { margin: "7px 0 14px", color: "#68746f", fontSize: 12, lineHeight: 1.5 } as const;
 const labelStyle = { display: "grid", gap: 5, marginBottom: 11, color: "#53616e", fontSize: 11, fontWeight: 900 } as const;
-const inputStyle = { width: "100%", boxSizing: "border-box" as const, minHeight: 38, padding: "8px 10px", border: "1px solid #cbd3d9", borderRadius: 5, background: "white", color: "#172033", fontSize: 14 } as const;
-const primaryButtonStyle = { minHeight: 38, padding: "0 14px", border: 0, borderRadius: 5, background: "#f47b20", color: "white", fontWeight: 900, cursor: "pointer" } as const;
-const secondaryButtonStyle = { minHeight: 36, padding: "0 11px", border: "1px solid #c5cdd3", borderRadius: 5, background: "white", color: "#263746", fontWeight: 900, cursor: "pointer" } as const;
+const inputStyle = { width: "100%", boxSizing: "border-box" as const, minHeight: 38, padding: "8px 10px", border: "1px solid #cbd3d9", borderRadius: 5, background: "white", color: "#1b2421", fontSize: 14 } as const;
+const primaryButtonStyle = { minHeight: 38, padding: "0 14px", border: 0, borderRadius: 5, background: "#2f6f60", color: "white", fontWeight: 900, cursor: "pointer" } as const;
+const secondaryButtonStyle = { minHeight: 36, padding: "0 11px", border: "1px solid #c5cdd3", borderRadius: 5, background: "white", color: "#24312c", fontWeight: 900, cursor: "pointer" } as const;
 const smallButtonStyle = { ...secondaryButtonStyle, minHeight: 30, padding: "0 9px", fontSize: 11 } as const;
 const dangerButtonStyle = { minHeight: 30, padding: "0 8px", border: "1px solid #e2b8b5", borderRadius: 4, background: "#fff7f6", color: "#9b2c24", fontWeight: 800, fontSize: 10, cursor: "pointer" } as const;
 const iconButtonStyle = { ...smallButtonStyle, width: 31, padding: 0 } as const;
@@ -562,7 +562,7 @@ const independentCardStyle = { padding: 12, border: "1px solid #dce2e6", borderR
 const resetBoxStyle = { marginTop: 4, paddingTop: 9, borderTop: "1px solid #e3e7ea" } as const;
 const checkGridStyle = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 5, marginTop: 7 } as const;
 const checkLabelStyle = { display: "flex", gap: 6, alignItems: "center", fontSize: 11, color: "#53616e" } as const;
-const saveBarStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" as const, padding: 14, background: "#0d1b2b", color: "white", borderRadius: 7 } as const;
+const saveBarStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" as const, padding: 14, background: "#173f37", color: "white", borderRadius: 7 } as const;
 const programSummaryStyle = { ...listRowStyle, alignItems: "flex-start" } as const;
 const assignmentBarStyle = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const, marginTop: 12 } as const;
 const filtersStyle = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const, marginBottom: 10 } as const;
