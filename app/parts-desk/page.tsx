@@ -66,10 +66,10 @@ export default function PartsDeskPage(){
   const ready=useMemo(()=>data?.requests.filter(r=>(yard==='ALL'||r.warehouseCode===yard)&&r.reservedQuantity>0)??[],[data,yard]);
   const unmatched=useMemo(()=>(data?.unmatchedPartRequests??[]).filter(r=>yard==='ALL'||r.warehouseCode===yard),[data,yard]);
 
-  return <main style={{minHeight:'100vh',background:'#f3f5f7',padding:'36px 34px 100px',color:'#182331'}}>
+  return <main style={{minHeight:'100vh',background:'#f4f6f4',padding:'36px 34px 100px',color:'#1b2421'}}>
     <ModuleTabs module="parts" />
     <header style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'end',flexWrap:'wrap'}}>
-      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#0d1b2b'}}>Parts Desk</h1><p style={{margin:0,color:'#667482'}}>One queue for repair shortages, unknown part requests, receiving, reservations, and warehouse-level replenishment.</p></div>
+      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#173f37'}}>Parts Desk</h1><p style={{margin:0,color:'#68746f'}}>One queue for repair shortages, unknown part requests, receiving, reservations, and warehouse-level replenishment.</p></div>
       <div style={{display:'flex',gap:7,flexWrap:'wrap'}}><button onClick={()=>setYard('ALL')} style={yard==='ALL'?activeTab:tab}>All Warehouses</button>{(data?.warehouses??[]).map(warehouse=><button key={warehouse.code} onClick={()=>setYard(warehouse.code)} style={yard===warehouse.code?activeTab:tab}>{warehouse.name}</button>)}</div>
     </header>
     {message&&<div style={notice}>{message}</div>}
@@ -80,7 +80,7 @@ export default function PartsDeskPage(){
 
     <section style={panel}><div style={panelHead}><div><p style={eyebrow}>NEEDS IDENTIFICATION</p><h2 style={title}>Technician requested parts not in the catalog</h2></div><span style={muted}>{unmatched.length} open request{unmatched.length===1?'':'s'}</span></div>
       {!unmatched.length?<div style={empty}>No unmatched technician part requests in this warehouse.</div>:<div style={{display:'grid',gap:9}}>{unmatched.map(item=><article key={item.id} style={unmatchedCard}>
-        <div style={{minWidth:0}}><strong style={{fontSize:18,color:'#0d1b2b'}}>{item.requestedText}</strong><div style={muted}>Typed by technician · Unit {item.unit||'—'} · {item.assignedTo||'Unassigned'} · {item.warehouseCode||'Unknown yard'}</div></div>
+        <div style={{minWidth:0}}><strong style={{fontSize:18,color:'#173f37'}}>{item.requestedText}</strong><div style={muted}>Typed by technician · Unit {item.unit||'—'} · {item.assignedTo||'Unassigned'} · {item.warehouseCode||'Unknown yard'}</div></div>
         <div style={{textAlign:'center'}}><span style={smallLabel}>QTY</span><strong style={{display:'block',fontSize:22}}>{n(item.requestedQuantity)}</strong></div>
         <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
         <button disabled={Boolean(busy)} onClick={()=>void markUnmatchedHandled(item.id)} style={darkButton}>{busy===`unmatched:${item.id}`?'Saving…':'Mark handled'}</button>
@@ -106,25 +106,25 @@ export default function PartsDeskPage(){
   </main>
 }
 
-const eyebrow={margin:0,color:'#f47b20',fontSize:11,fontWeight:950,letterSpacing:'.14em'} as const;
-const title={margin:'5px 0 0',fontSize:22,color:'#0d1b2b'} as const;
-const muted={color:'#667482',fontSize:12} as const;
+const eyebrow={margin:0,color:'#2f6f60',fontSize:11,fontWeight:950,letterSpacing:'.14em'} as const;
+const title={margin:'5px 0 0',fontSize:22,color:'#173f37'} as const;
+const muted={color:'#68746f',fontSize:12} as const;
 const smallLabel={fontSize:10,color:'#77838d',fontWeight:900,letterSpacing:'.08em'} as const;
-const tab={border:'1px solid #cbd3da',borderRadius:999,padding:'9px 13px',background:'white',color:'#263746',fontWeight:900,cursor:'pointer'} as const;
-const activeTab={...tab,background:'#0d1b2b',borderColor:'#0d1b2b',color:'white'} as const;
+const tab={border:'1px solid #cbd3da',borderRadius:999,padding:'9px 13px',background:'white',color:'#24312c',fontWeight:900,cursor:'pointer'} as const;
+const activeTab={...tab,background:'#173f37',borderColor:'#173f37',color:'white'} as const;
 const notice={marginTop:16,padding:12,border:'1px solid #efc16c',borderRadius:9,background:'#fff8e6'} as const;
 const metrics={marginTop:18,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10} as const;
 const metric={padding:16,border:'1px solid #dde4e9',borderRadius:11,background:'white'} as const;
-const panel={marginTop:16,padding:18,border:'1px solid #dce2e7',borderRadius:13,background:'white'} as const;
+const panel={marginTop:16,padding:18,border:'1px solid #d7ded9',borderRadius:13,background:'white'} as const;
 const panelHead={display:'flex',justifyContent:'space-between',gap:12,alignItems:'end',flexWrap:'wrap',marginBottom:12} as const;
 const unmatchedCard={display:'grid',gridTemplateColumns:'minmax(220px,1fr) 70px 110px auto',gap:12,alignItems:'center',padding:14,border:'2px solid #e1b256',borderRadius:10,background:'#fff9ed'} as const;
-const queueCard={padding:15,border:'1px solid #e0e5e9',borderRadius:11,background:'#fbfcfd',marginTop:10} as const;
+const queueCard={padding:15,border:'1px solid #e0e5e9',borderRadius:11,background:'#fbfcfb',marginTop:10} as const;
 const warningPill={display:'inline-flex',alignItems:'center',padding:'6px 10px',borderRadius:999,background:'#fff0d7',color:'#9a5a05',fontWeight:950,fontSize:12} as const;
 const stockGrid={display:'grid',gridTemplateColumns:'repeat(4,minmax(90px,1fr))',gap:8,marginTop:12} as const;
 const jobRow={display:'grid',gridTemplateColumns:'minmax(150px,1fr) minmax(130px,1fr) auto',gap:10,alignItems:'center',padding:'9px 10px',border:'1px solid #e5e9ed',borderRadius:8,background:'white',fontSize:12} as const;
 const actions={display:'grid',gridTemplateColumns:'100px auto 110px auto',gap:7,marginTop:12,alignItems:'center'} as const;
 const input={width:'100%',boxSizing:'border-box',padding:'9px 10px',border:'1px solid #ccd5dd',borderRadius:8} as const;
-const darkButton={border:0,borderRadius:8,padding:'9px 11px',background:'#0d1b2b',color:'white',fontWeight:900,cursor:'pointer'} as const;
-const orangeButton={...darkButton,background:'#f47b20'} as const;
-const lowRow={display:'grid',gridTemplateColumns:'minmax(230px,1.5fr) repeat(3,minmax(75px,.5fr)) auto',gap:10,alignItems:'center',padding:'10px 11px',border:'1px solid #e5e9ed',borderRadius:9,background:'#fbfcfd',fontSize:12} as const;
+const darkButton={border:0,borderRadius:8,padding:'9px 11px',background:'#173f37',color:'white',fontWeight:900,cursor:'pointer'} as const;
+const orangeButton={...darkButton,background:'#2f6f60'} as const;
+const lowRow={display:'grid',gridTemplateColumns:'minmax(230px,1.5fr) repeat(3,minmax(75px,.5fr)) auto',gap:10,alignItems:'center',padding:'10px 11px',border:'1px solid #e5e9ed',borderRadius:9,background:'#fbfcfb',fontSize:12} as const;
 const empty={padding:20,textAlign:'center',color:'#71808e',border:'1px dashed #d2d9df',borderRadius:9} as const;
