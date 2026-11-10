@@ -38,10 +38,10 @@ export default function RepairTypesPage(){
  </main>
 }
 
-const page={minHeight:"100vh",background:"#f3f5f7",padding:"28px clamp(12px,3vw,34px) 80px",color:"#172a3b"} as const;
+const page={minHeight:"100vh",background:"#f4f6f4",padding:"28px clamp(12px,3vw,34px) 80px",color:"#1b2421"} as const;
 const header={maxWidth:1300,margin:"0 auto",display:"flex",justifyContent:"space-between",gap:16,alignItems:"end",flexWrap:"wrap" as const} as const;
-const eyebrow={margin:0,fontSize:10,fontWeight:950,letterSpacing:".13em",color:"#f47b20"} as const;
-const title={margin:"5px 0",fontSize:34,color:"#102a43"} as const;
+const eyebrow={margin:0,fontSize:10,fontWeight:950,letterSpacing:".13em",color:"#2f6f60"} as const;
+const title={margin:"5px 0",fontSize:34,color:"#173f37"} as const;
 const sub={margin:"4px 0 0",fontSize:13,color:"#687783",lineHeight:1.45} as const;
 const notice={maxWidth:1300,margin:"14px auto 0",padding:11,border:"1px solid #f2c66d",borderRadius:9,background:"#fff8e6",fontWeight:800,fontSize:13} as const;
 const layout={maxWidth:1300,margin:"16px auto 0",display:"grid",gridTemplateColumns:"minmax(250px,340px) minmax(0,1fr)",gap:14} as const;
@@ -51,17 +51,17 @@ const selectedButton={borderColor:"#176fe6",boxShadow:"0 0 0 2px #176fe622"} as 
 const panel={border:"1px solid #d8e0e7",borderRadius:13,background:"white",padding:16,display:"grid",gap:14} as const;
 const grid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,alignItems:"end"} as const;
 const label={display:"grid",gap:5,fontSize:10,fontWeight:950,color:"#5f6f7d",letterSpacing:".05em"} as const;
-const input={width:"100%",boxSizing:"border-box" as const,border:"1px solid #c9d4dd",borderRadius:8,padding:"9px 10px",fontSize:13,background:"white",color:"#172a3b"} as const;
+const input={width:"100%",boxSizing:"border-box" as const,border:"1px solid #c9d4dd",borderRadius:8,padding:"9px 10px",fontSize:13,background:"white",color:"#1b2421"} as const;
 const check={display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:850} as const;
-const primary={border:0,borderRadius:9,padding:"10px 14px",background:"#102a43",color:"white",fontWeight:950,cursor:"pointer",width:"fit-content"} as const;
-const secondary={border:"1px solid #cbd5dd",borderRadius:8,padding:"8px 10px",background:"white",fontWeight:850,cursor:"pointer"} as const;
+const primary={border:0,borderRadius:9,padding:"10px 14px",background:"#173f37",color:"white",fontWeight:950,cursor:"pointer",width:"fit-content"} as const;
+const secondary={border:"1px solid #c9d4cf",borderRadius:8,padding:"8px 10px",background:"white",fontWeight:850,cursor:"pointer"} as const;
 const info={padding:12,border:"1px solid #b8d7c6",borderRadius:10,background:"#eef8f2",display:"grid",gap:3,fontSize:12} as const;
 const checklistPanel={borderTop:"1px solid #e0e6eb",paddingTop:14,display:"grid",gap:12} as const;
 const sectionHead={display:"flex",justifyContent:"space-between",gap:12,alignItems:"end",flexWrap:"wrap" as const} as const;
 const h2={margin:"4px 0 0",fontSize:22,color:"#17324a"} as const;
 const actions={display:"flex",gap:7,flexWrap:"wrap" as const} as const;
 const itemsStyle={display:"grid",gap:9} as const;
-const itemCard={border:"1px solid #d8e0e7",borderRadius:10,padding:11,display:"grid",gap:8,background:"#fbfcfd"} as const;
+const itemCard={border:"1px solid #d8e0e7",borderRadius:10,padding:11,display:"grid",gap:8,background:"#fbfcfb"} as const;
 const itemTop={display:"grid",gridTemplateColumns:"auto minmax(140px,1fr) auto auto",gap:8,alignItems:"center"} as const;
 const optionRow={display:"flex",gap:12,flexWrap:"wrap" as const,fontSize:12,fontWeight:750} as const;
 const measure={display:"grid",gridTemplateColumns:"1fr 140px",gap:8} as const;
