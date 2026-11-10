@@ -137,6 +137,6 @@ const title={margin:0,fontSize:20,color:"#f5f5f5"} as const;
 const description={margin:"5px 0 0",color:"#b8b8b8",fontSize:12,lineHeight:1.45} as const;
 const linkList={display:"grid",gap:7} as const;
 const linkRow={display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 11px",border:"1px solid #ffffff",borderRadius:9,background:"#f7f7f7",textDecoration:"none",color:"#111111"} as const;
-const linkTitle={display:"block",fontSize:13} as const;
+const linkTitle={display:"block",fontSize:13,color:"#111111"} as const;
 const linkDescription={display:"block",marginTop:3,color:"#555555",fontSize:10,lineHeight:1.35} as const;
 const arrow={fontSize:22,color:"#111111",lineHeight:1} as const;
