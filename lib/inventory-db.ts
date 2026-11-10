@@ -30,6 +30,7 @@ type WarehouseStockRow = {
   unit_of_measure: string | null;
   unit_cost: number | null;
   on_order: number;
+  bin_location: string | null;
 };
 
 type WarehouseRow = { id: number; code: string; name: string };
@@ -60,9 +61,10 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
     db.prepare('SELECT id, name, phone, email, notes FROM vendors WHERE COALESCE(active, 1) = 1 ORDER BY name').all<VendorRow>(),
     db.prepare(`
       SELECT s.id, s.part_id, w.code AS warehouse_code, w.name AS warehouse_name,
-             s.quantity_on_hand, s.unit_of_measure, s.unit_cost, s.on_order
+             s.quantity_on_hand, s.unit_of_measure, s.unit_cost, s.on_order, l.bin_location
       FROM part_warehouse_stock s
       JOIN warehouses w ON w.id = s.warehouse_id
+      LEFT JOIN part_warehouse_locations l ON l.part_id = s.part_id AND l.warehouse_id = s.warehouse_id
       WHERE w.active = 1
       ORDER BY s.part_id, w.name, s.variant_key
     `).all<WarehouseStockRow>(),
@@ -119,17 +121,18 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
       unitOfMeasure: stock.unit_of_measure ?? '',
       unitCost: stock.unit_cost == null ? null : Number(stock.unit_cost),
       onOrder: Number(stock.on_order),
+      binLocation: stock.bin_location ?? '',
       minimumQuantity: minimumByPartWarehouse.get(`${row.id}:${stock.warehouse_code}`) ?? null,
     }));
     const quantityOnHand = rows.length
       ? rows.reduce((sum, stock) => sum + Number(stock.quantity_on_hand), 0)
       : Number(row.quantity_on_hand);
-    const location = rows.length
+    const warehouseSummary = rows.length
       ? warehouseStocks
           .filter((stock) => stock.quantityOnHand !== 0 || stock.onOrder !== 0)
           .map((stock) => `${stock.warehouseName}: ${stock.quantityOnHand}${stock.unitOfMeasure ? ` ${stock.unitOfMeasure}` : ''}`)
           .join(' | ')
-      : (row.location ?? '');
+      : '';
     const compatibleEquipment = equipmentByPart.get(row.id) ?? [];
 
     return {
@@ -139,7 +142,8 @@ export async function getInventoryData(db: D1Database, status: 'active'|'archive
       quantityOnHand,
       reorderLevel: Number(row.reorder_level),
       unitCost: row.unit_cost == null ? null : Number(row.unit_cost),
-      location,
+      location: row.location ?? '',
+      warehouseSummary,
       preferredVendorId: row.preferred_vendor_id,
       vendorName: row.vendor_name ?? '',
       active: Number(row.active) === 1,
