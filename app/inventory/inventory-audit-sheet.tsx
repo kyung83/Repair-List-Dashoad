@@ -11,6 +11,7 @@ type AuditPart = {
     quantityOnHand: number;
     physicalOnHand?: number;
     unitOfMeasure?: string;
+    binLocation?: string;
   }[];
 };
 
@@ -30,7 +31,7 @@ type AuditRow = {
   description: string;
   unit: string;
   systemQuantity: number;
-  location: string;
+  binLocation: string;
 };
 
 function auditGroups(snapshot: InventoryAuditSnapshot) {
@@ -46,13 +47,13 @@ function auditGroups(snapshot: InventoryAuditSnapshot) {
         description: part.description,
         unit: stock.unitOfMeasure || "—",
         systemQuantity: Number(stock.physicalOnHand ?? stock.quantityOnHand),
-        location: "",
+        binLocation: stock.binLocation ?? "",
       });
       groups.set(group.code, group);
     }
     if (!stocks.length && snapshot.warehouseCode === "ALL") {
       const group = groups.get("") ?? { code: "", name: "No warehouse assigned", rows: [] };
-      group.rows.push({ partId: part.id, partNumber: part.partNumber, description: part.description, unit: "—", systemQuantity: Number(part.physicalOnHand ?? part.quantityOnHand), location: part.location });
+      group.rows.push({ partId: part.id, partNumber: part.partNumber, description: part.description, unit: "—", systemQuantity: Number(part.physicalOnHand ?? part.quantityOnHand), binLocation: part.location });
       groups.set("", group);
     }
   }
@@ -69,27 +70,29 @@ export default function InventoryAuditSheet({ snapshot }: { snapshot: InventoryA
     <style>{auditCss}</style>
     {groups.map((group) => <section className="inventory-audit-warehouse" key={group.code}>
       <table>
-        <colgroup>{[5, 15, 29, 6, 9, 10, 8, 18].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
+        <colgroup>{[4, 13, 24, 6, 8, 11, 10, 8, 16].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
         <thead>
-          <tr><td colSpan={8} className="inventory-audit-heading">
+          <tr><td colSpan={9} className="inventory-audit-heading">
             <div className="inventory-audit-title"><div><strong>NORTHERN LOGISTICS</strong><h1>Parts Inventory Audit</h1></div><div><h2>{group.name}</h2><span>{group.rows.length} count lines</span></div></div>
             <div className="inventory-audit-meta"><span><b>Inventory as of:</b> {timestamp}</span><span><b>Scope:</b> {snapshot.warehouseName} · {snapshot.parts.length} parts · {totalRows} count lines</span></div>
             <p className="inventory-audit-filters"><b>{filtered ? "FILTERED AUDIT" : "FULL ACTIVE INVENTORY"}</b> · {snapshot.stockFilter}{snapshot.query ? ` · Search: “${snapshot.query}”` : ""} · Sort: {snapshot.sort}</p>
             <div className="inventory-audit-counted"><span>Counted by: ___________________________________</span><span>Count date / time: ______________________________</span></div>
             <p className="inventory-audit-instructions">System qty is physical stock on hand, including reserved parts. Count in the listed unit. Difference = counted qty − system qty.</p>
+            <p className="inventory-audit-instructions">Count all listed bins for each part and enter one combined quantity.</p>
             {!group.code && <p className="inventory-audit-instructions"><b>Warehouse assignment needed:</b> Confirm where these parts are stored before applying a physical count.</p>}
           </td></tr>
-          <tr>{["Line", "Part #", "Description", "Unit", "System qty", "Counted qty", "Difference +/−", "Notes / shelf / bin"].map((label) => <th key={label} scope="col">{label}</th>)}</tr>
+          <tr>{["Line", "Part #", "Description", "Unit", "System qty", "Bin location", "Counted qty", "Difference +/−", "Notes"].map((label) => <th key={label} scope="col">{label}</th>)}</tr>
         </thead>
         <tbody>{group.rows.map((row, index) => <tr key={`${row.partId}:${index}`}>
           <td className="inventory-audit-number">{index + 1}</td>
           <td><b>{row.partNumber}</b></td>
-          <td>{row.description}{row.location && <small>Location: {row.location}</small>}</td>
+          <td>{row.description}</td>
           <td className="inventory-audit-number">{row.unit}</td>
           <td className="inventory-audit-number">{Number.isFinite(row.systemQuantity) ? row.systemQuantity.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "Check stock"}</td>
+          <td className="inventory-audit-bin">{row.binLocation || "—"}</td>
           <td></td><td></td><td></td>
         </tr>)}</tbody>
-        <tfoot><tr><td colSpan={8} className="inventory-audit-footer">{group.name} · {group.rows.length} count lines total. Enter reviewed corrections using Physical Count in Inventory.</td></tr></tfoot>
+        <tfoot><tr><td colSpan={9} className="inventory-audit-footer">{group.name} · {group.rows.length} count lines total. Enter reviewed corrections using Physical Count in Inventory.</td></tr></tfoot>
       </table>
     </section>)}
   </section>;
@@ -129,6 +132,7 @@ const auditCss = `
   .inventory-audit-counted { display: flex; justify-content: space-between; gap: 18px; margin: 13px 0 8px; }
   .inventory-audit-instructions { margin: 4px 0 0; font-size: 8pt; }
   .inventory-audit-sheet .inventory-audit-number { text-align: center; }
+  .inventory-audit-sheet .inventory-audit-bin { white-space: pre-line; font-size: 8pt; }
   .inventory-audit-sheet small { display: block; font-size: 8pt; margin-top: 4px; }
   .inventory-audit-sheet .inventory-audit-footer { border: 0; padding: 8px 0 0; font-size: 8pt; }
 }

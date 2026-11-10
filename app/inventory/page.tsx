@@ -9,6 +9,7 @@ type WarehouseStock = {
   id: number;
   warehouseCode: string;
   warehouseName: string;
+  binLocation?: string;
   quantityOnHand: number;
   physicalOnHand?: number;
   reserved?: number;
@@ -30,6 +31,7 @@ type Part = {
   physicalOnHand?: number;
   unitCost: number | null;
   location: string;
+  warehouseSummary?: string;
   preferredVendorId: number | null;
   vendorName: string;
   warehouseStocks?: WarehouseStock[];
@@ -177,10 +179,13 @@ export default function InventoryPage() {
 
   const stockFor = useCallback((item: Part) => {
     if (warehouseCode === "ALL") {
+      const stocks = item.warehouseStocks ?? [];
+      const binLocations = [...new Set(stocks.filter((stock) => stock.binLocation?.trim()).map((stock) => `${stock.warehouseName || stock.warehouseCode}: ${stock.binLocation}`))];
       return {
         quantityOnHand: Number(item.quantityOnHand),
         unitCost: item.unitCost,
-        location: item.location,
+        location: item.warehouseSummary || [...new Set(stocks.map((stock) => stock.warehouseName || stock.warehouseCode))].join(" | ") || "No warehouse assigned",
+        binLocation: binLocations.join("\n") || (stocks.length ? "" : item.location),
         onOrder: (item.warehouseStocks ?? []).reduce((sum, stock) => sum + Number(stock.onOrder || 0), 0),
         minimumQuantity: Number(item.reorderLevel),
       };
@@ -190,6 +195,7 @@ export default function InventoryPage() {
       quantityOnHand: Number(stock?.quantityOnHand ?? 0),
       unitCost: stock?.unitCost ?? item.unitCost,
       location: stock?.warehouseName ?? warehouseCode,
+      binLocation: stock?.binLocation ?? "",
       onOrder: Number(stock?.onOrder ?? 0),
       minimumQuantity: stock?.minimumQuantity == null ? Number(item.reorderLevel) : Number(stock.minimumQuantity),
     };
@@ -208,7 +214,7 @@ export default function InventoryPage() {
       if (stockFilter === "below-minimum" && stock.quantityOnHand >= stock.minimumQuantity) return false;
       const vendorNames = (links[String(item.id)] ?? []).map((itemVendor) => itemVendor.name).join(" ");
       const equipmentNames = (item.compatibleEquipment ?? []).map((equipment) => equipment.unit).join(" ");
-      return [item.partNumber, item.description, ...(item.crossReferences ?? []), item.location, item.vendorName, vendorNames, equipmentNames].join(" ").toLowerCase().includes(q);
+      return [item.partNumber, item.description, ...(item.crossReferences ?? []), item.location, stock.location, stock.binLocation, item.vendorName, vendorNames, equipmentNames].join(" ").toLowerCase().includes(q);
     });
     rows.sort((a, b) => {
       const aQty = stockFor(a).quantityOnHand;
@@ -542,13 +548,13 @@ export default function InventoryPage() {
 
       <section style={{ marginTop: 22, background: "white", border: "1px solid #dce2e7", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: 18, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, cross-reference, vendor, equipment…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, cross-reference, vendor, equipment, bin…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
           <span style={{ color: "#6c7886", fontSize: 13 }}><b>{partStatus === "archived" ? "Archived Parts" : selectedWarehouseName}</b> · {visibleParts.length} visible</span>
           <small style={{ width: "100%", color: "#6c7886" }}>{partStatus === "archived" ? "Select Active Parts to print a stock audit." : "Print Audit Sheet uses the selected warehouse, search, stock view, and sort. For a full audit, choose All parts and clear the search."}</small>
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
-            <thead><tr>{["Part #", "Description", "Available", "Minimum", "On order", "Location", "Vendors", "Used on", "Unit cost", "Actions"].map((heading) => <th key={heading} style={{ padding: 13, textAlign: "left", background: "#f7f9fa", color: "#657383", fontSize: 11 }}>{heading}</th>)}</tr></thead>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1280 }}>
+            <thead><tr>{["Part #", "Description", "Available", "Minimum", "On order", "Warehouse", "Bin location", "Vendors", "Used on", "Unit cost", "Actions"].map((heading) => <th key={heading} style={{ padding: 13, textAlign: "left", background: "#f7f9fa", color: "#657383", fontSize: 11 }}>{heading}</th>)}</tr></thead>
             <tbody>
               {visibleParts.map((item) => {
                 const links = vendorsForPart(item);
@@ -564,6 +570,7 @@ export default function InventoryPage() {
                     <td style={{ padding: 13 }}>{stock.minimumQuantity}</td>
                     <td style={{ padding: 13 }}>{stock.onOrder || "—"}</td>
                     <td style={{ padding: 13 }}>{stock.location || "—"}</td>
+                    <td style={{ padding: 13, whiteSpace: "pre-line", overflowWrap: "anywhere", maxWidth: 280 }}>{stock.binLocation || "—"}</td>
                     <td style={{ padding: 13 }}>{links.length ? links.map((itemVendor) => `${itemVendor.name}${itemVendor.preferred ? " ★" : ""}`).join(", ") : "—"}</td>
                     <td style={{ padding: 13, maxWidth: 260 }}>{equipment.length ? `${equipment.slice(0, 5).map((entry) => entry.unit).join(", ")}${equipment.length > 5 ? ` +${equipment.length - 5}` : ""}` : "—"}</td>
                     <td style={{ padding: 13 }}>{stock.unitCost == null ? "—" : stock.unitCost.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
@@ -582,7 +589,7 @@ export default function InventoryPage() {
                   </tr>
                 );
               })}
-              {!visibleParts.length && <tr><td colSpan={10} style={{ padding: 30, textAlign: "center", color: "#6c7886" }}>No inventory records match these filters.</td></tr>}
+              {!visibleParts.length && <tr><td colSpan={11} style={{ padding: 30, textAlign: "center", color: "#6c7886" }}>No inventory records match these filters.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -614,14 +621,14 @@ export default function InventoryPage() {
             </div> : <input type="number" step="any" placeholder="Initial quantity on hand" value={part.quantityOnHand} onChange={(event) => setPart({ ...part, quantityOnHand: Number(event.target.value) })} style={{ padding: 11 }} />}
             <input type="number" step="any" placeholder="Fallback reorder level" value={part.reorderLevel} onChange={(event) => setPart({ ...part, reorderLevel: Number(event.target.value) })} style={{ padding: 11 }} />
             <input type="number" step="0.01" placeholder="Unit cost" value={part.unitCost} onChange={(event) => setPart({ ...part, unitCost: event.target.value })} style={{ padding: 11 }} />
-            <input placeholder="Location / bin" value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} style={{ padding: 11 }} />
+            <input aria-label="General location / fallback bin" placeholder="General location / fallback bin" title="Used for parts without an assigned warehouse. Warehouse bin locations are listed below." value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} style={{ padding: 11 }} />
 
             {part.id && editingItem && <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Warehouse physical stock</legend>
               <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>These warehouse quantities are what Inventory actually totals. Use <b>Physical Count</b> on the terminal you counted.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 9 }}>
                 {editingWarehouseStocks.length ? editingWarehouseStocks.map((stock) => <div key={stock.warehouseCode} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: 10, border: "1px solid #edf0f2", borderRadius: 8, background: Number(stock.quantityOnHand) < 0 ? "#fff0f0" : "white" }}>
-                  <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}{Number(stock.reserved ?? 0) > 0 ? ` · ${stock.reserved} reserved` : ""}</small></span>
+                  <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}{Number(stock.reserved ?? 0) > 0 ? ` · ${stock.reserved} reserved` : ""}</small><small style={{ display: "block", color: "#44515e", marginTop: 5, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>Bin: {stock.binLocation || "Not recorded"}</small></span>
                   <span style={{ textAlign: "right" }}><strong style={{ display: "block", color: Number(stock.physicalOnHand ?? stock.quantityOnHand) < 0 ? "#b42318" : "#182331", fontSize: 18 }}>{stock.physicalOnHand ?? stock.quantityOnHand}</strong><small style={{ display: "block", color: "#6c7886" }}>physical</small><button type="button" onClick={() => void physicalCount(editingItem, stock.warehouseCode)} style={{ marginTop: 4, padding: "6px 9px", border: "1px solid #0d1b2b", borderRadius: 7, background: "white", color: "#0d1b2b", fontSize: 10, fontWeight: 900 }}>PHYSICAL COUNT</button></span>
                 </div>) : <div style={{ color: "#6c7886", fontSize: 12 }}>No warehouse stock rows exist for this part yet.</div>}
               </div>
