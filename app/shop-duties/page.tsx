@@ -36,8 +36,8 @@ function statusLabel(value:string|undefined){
 }
 function currentTone(assignment:CurrentAssignment|null){
   if(assignment?.overdue)return {label:"OVERDUE",style:{background:"#ffe7e5",color:"#a12820"}};
-  if(assignment?.dueToday)return {label:"DUE TODAY",style:{background:"#1515150da",color:"#9a5609"}};
-  if(assignment)return {label:statusLabel(assignment.status),style:{background:"#e8f4fb",color:"#e8e8e8"}};
+  if(assignment?.dueToday)return {label:"DUE TODAY",style:{background:"#fff0da",color:"#9a5609"}};
+  if(assignment)return {label:statusLabel(assignment.status),style:{background:"#e8f4fb",color:"#245d81"}};
   return {label:"NOT ASSIGNED",style:{background:"#edf1f4",color:"#64717d"}};
 }
 
@@ -181,7 +181,7 @@ export default function ShopDutiesSetupPage(){
         ? "You assign the Shop Check yourself. It is not tied to a shift or automatic mechanic rotation."
         : "You choose the mechanic yourself each month. There is no automatic monthly rotation.";
 
-    return <section style={{...card,borderColor:current?.overdue?"#e69a93":"#3a3a3a"}}>
+    return <section style={{...card,borderColor:current?.overdue?"#e69a93":"#dce2e7"}}>
       <div style={cardHead}>
         <div><span style={kind==="bathroom"?orangeTag:kind==="shop"?blueTag:greenTag}>{kind==="bathroom"?"WEEKLY BATHROOM":kind==="shop"?"SHOP CHECK":"MONTHLY"}</span><h2 style={title}>{template.name}</h2></div>
         <span style={{...pill,...tone.style}}>{tone.label}</span>
@@ -244,33 +244,33 @@ export default function ShopDutiesSetupPage(){
   </main>;
 }
 
-const page={minHeight:"100vh",background:"#0f0f0f",padding:"34px 32px 100px",color:"#f5f5f5"} as const;
+const page={minHeight:"100vh",background:"#f3f5f7",padding:"34px 32px 100px",color:"#182331"} as const;
 const header={display:"flex",justifyContent:"space-between",alignItems:"end",gap:18,flexWrap:"wrap" as const} as const;
-const eyebrow={margin:0,color:"#f5f5f5",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
-const h1={margin:"6px 0 4px",fontSize:34,color:"#f5f5f5"} as const;
-const subtitle={margin:0,maxWidth:760,color:"#b8b8b8",fontSize:13,lineHeight:1.5} as const;
-const back={padding:"9px 12px",border:"1px solid #cdd6de",borderRadius:9,background:"white",color:"#d0d0d0",fontWeight:850,textDecoration:"none",fontSize:12} as const;
-const notice={marginTop:16,padding:12,border:"1px solid #efc16c",borderRadius:9,background:"#1515158e6",fontWeight:800} as const;
-const loading={marginTop:18,padding:22,border:"1px solid #3a3a3a",borderRadius:12,background:"white",color:"#b8b8b8"} as const;
+const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
+const h1={margin:"6px 0 4px",fontSize:34,color:"#0d1b2b"} as const;
+const subtitle={margin:0,maxWidth:760,color:"#667482",fontSize:13,lineHeight:1.5} as const;
+const back={padding:"9px 12px",border:"1px solid #cdd6de",borderRadius:9,background:"white",color:"#2b4053",fontWeight:850,textDecoration:"none",fontSize:12} as const;
+const notice={marginTop:16,padding:12,border:"1px solid #efc16c",borderRadius:9,background:"#fff8e6",fontWeight:800} as const;
+const loading={marginTop:18,padding:22,border:"1px solid #dce2e7",borderRadius:12,background:"white",color:"#667482"} as const;
 const grid={marginTop:18,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(350px,1fr))",gap:16,alignItems:"start"} as const;
-const card={padding:18,border:"1px solid #3a3a3a",borderRadius:14,background:"white",boxShadow:"0 5px 22px rgba(19,37,55,.05)",display:"grid",gap:13} as const;
+const card={padding:18,border:"1px solid #dce2e7",borderRadius:14,background:"white",boxShadow:"0 5px 22px rgba(19,37,55,.05)",display:"grid",gap:13} as const;
 const cardHead={display:"flex",justifyContent:"space-between",gap:12,alignItems:"start"} as const;
-const title={margin:"5px 0 0",fontSize:20,color:"#f5f5f5"} as const;
+const title={margin:"5px 0 0",fontSize:20,color:"#102a43"} as const;
 const descriptionStyle={margin:0,color:"#697784",fontSize:12,lineHeight:1.5} as const;
-const orangeTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#f5f5f5"} as const;
-const blueTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#d0d0d0"} as const;
-const greenTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#e8e8e8"} as const;
+const orangeTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#b85a0c"} as const;
+const blueTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#2365a5"} as const;
+const greenTag={fontSize:9,fontWeight:950,letterSpacing:".1em",color:"#18724a"} as const;
 const pill={padding:"5px 8px",borderRadius:999,fontSize:9,fontWeight:950,whiteSpace:"nowrap" as const} as const;
 const facts={display:"grid",gridTemplateColumns:"1fr 1fr",gap:8} as const;
-const fact={padding:10,borderRadius:9,background:"#f6f8fa",display:"grid",gap:3,fontSize:10,color:"#b8b8b8"} as const;
-const label={display:"grid",gap:6,fontSize:10,fontWeight:950,color:"#bdbdbd",letterSpacing:".04em"} as const;
-const input={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #bdc9d4",borderRadius:8,background:"white",color:"#f5f5f5",fontSize:13} as const;
-const primaryButton={border:0,borderRadius:9,padding:"11px 13px",background:"#f5f5f5",color:"white",fontWeight:950,cursor:"pointer"} as const;
-const secondaryButton={border:"1px solid #bcbcbc",borderRadius:9,padding:"10px 12px",background:"white",color:"#d0d0d0",fontWeight:900,cursor:"pointer"} as const;
+const fact={padding:10,borderRadius:9,background:"#f6f8fa",display:"grid",gap:3,fontSize:10,color:"#667482"} as const;
+const label={display:"grid",gap:6,fontSize:10,fontWeight:950,color:"#506271",letterSpacing:".04em"} as const;
+const input={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #bdc9d4",borderRadius:8,background:"white",color:"#182331",fontSize:13} as const;
+const primaryButton={border:0,borderRadius:9,padding:"11px 13px",background:"#102a43",color:"white",fontWeight:950,cursor:"pointer"} as const;
+const secondaryButton={border:"1px solid #9eafbd",borderRadius:9,padding:"10px 12px",background:"white",color:"#2b4053",fontWeight:900,cursor:"pointer"} as const;
 const help={color:"#74818c",fontSize:10,lineHeight:1.4} as const;
-const overdueBox={display:"grid",gap:3,padding:11,border:"1px solid #e5a09a",borderRadius:9,background:"#1515150ef",color:"#9e2d25",fontSize:11} as const;
-const dueBox={display:"grid",gap:3,padding:11,border:"1px solid #ecc783",borderRadius:9,background:"#1515158e9",color:"#91530b",fontSize:11} as const;
-const alertPanel={marginTop:16,padding:14,border:"2px solid #dc6e65",borderRadius:12,background:"#1515150ef",color:"#8f2821",display:"grid",gap:8} as const;
+const overdueBox={display:"grid",gap:3,padding:11,border:"1px solid #e5a09a",borderRadius:9,background:"#fff0ef",color:"#9e2d25",fontSize:11} as const;
+const dueBox={display:"grid",gap:3,padding:11,border:"1px solid #ecc783",borderRadius:9,background:"#fff8e9",color:"#91530b",fontSize:11} as const;
+const alertPanel={marginTop:16,padding:14,border:"2px solid #dc6e65",borderRadius:12,background:"#fff0ef",color:"#8f2821",display:"grid",gap:8} as const;
 const alertRow={display:"flex",justifyContent:"space-between",gap:12,paddingTop:8,borderTop:"1px solid #edc3bf",fontSize:11} as const;
 const editorWrap={display:"grid",gap:9,borderTop:"1px solid #e7ecef",paddingTop:12} as const;
 const editor={display:"grid",gap:10,padding:12,border:"1px solid #d8e0e7",borderRadius:10,background:"#f8fafb"} as const;
@@ -280,6 +280,6 @@ const editorRow={display:"grid",gridTemplateColumns:"auto 120px minmax(180px,1fr
 const orderControls={display:"grid",gap:3} as const;
 const sectionInput={width:"100%",boxSizing:"border-box" as const,padding:"7px 8px",border:"1px solid #c3ced7",borderRadius:7,fontSize:11} as const;
 const itemInput={width:"100%",boxSizing:"border-box" as const,padding:"7px 8px",border:"1px solid #c3ced7",borderRadius:7,fontSize:12,resize:"vertical" as const} as const;
-const requiredToggle={display:"flex",gap:5,alignItems:"center",fontSize:10,fontWeight:850,color:"#bdbdbd"} as const;
+const requiredToggle={display:"flex",gap:5,alignItems:"center",fontSize:10,fontWeight:850,color:"#506271"} as const;
 const removeButton={border:"1px solid #d99b96",borderRadius:7,padding:"7px 8px",background:"white",color:"#a23028",fontWeight:900,fontSize:9} as const;
-const addButton={border:"1px solid #a8a8a8",borderRadius:7,padding:"7px 9px",background:"white",color:"#e8e8e8",fontWeight:900,fontSize:9} as const;
+const addButton={border:"1px solid #7ea9c9",borderRadius:7,padding:"7px 9px",background:"white",color:"#245d81",fontWeight:900,fontSize:9} as const;
