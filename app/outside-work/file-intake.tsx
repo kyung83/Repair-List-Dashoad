@@ -208,12 +208,12 @@ export default function OutsideWorkIntake(){
 }
 
 function Field({label,help,children}:{label:string;help?:string;children:React.ReactNode}){return <label style={{display:'grid',gap:5,fontSize:11,fontWeight:900,color:'#405365'}}><span>{label}</span>{children}{help&&<small style={{fontWeight:500,color:'#74818c',lineHeight:1.35}}>{help}</small>}</label>;}
-const page:CSSProperties={minHeight:'100vh',background:'#f3f5f7',padding:'0 0 90px',color:'#172536'};
+const page:CSSProperties={minHeight:'100vh',background:'#f4f6f4',padding:'0 0 90px',color:'#1b2421'};
 const shell:CSSProperties={maxWidth:1500,margin:'0 auto',padding:'0 clamp(16px,4vw,46px)'};
-const eyebrow:CSSProperties={margin:0,color:'#f47b20',fontSize:12,fontWeight:950,letterSpacing:'.14em'};
-const title:CSSProperties={margin:'7px 0 0',fontSize:34,color:'#0d1b2b'};
+const eyebrow:CSSProperties={margin:0,color:'#2f6f60',fontSize:12,fontWeight:950,letterSpacing:'.14em'};
+const title:CSSProperties={margin:'7px 0 0',fontSize:34,color:'#173f37'};
 const subtitle:CSSProperties={margin:'8px 0 0',maxWidth:1000,color:'#657381',lineHeight:1.55};
-const panel:CSSProperties={background:'white',border:'1px solid #dce2e7',borderRadius:14,padding:18,boxShadow:'0 2px 10px rgba(15,32,48,.04)'};
+const panel:CSSProperties={background:'white',border:'1px solid #d7ded9',borderRadius:14,padding:18,boxShadow:'0 2px 10px rgba(15,32,48,.04)'};
 const sectionHead:CSSProperties={display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:14,flexWrap:'wrap',marginBottom:14};
 const h2:CSSProperties={margin:0,fontSize:21,color:'#14283c'};
 const copy:CSSProperties={margin:'5px 0 0',fontSize:13,color:'#6a7884',lineHeight:1.45};
@@ -221,16 +221,16 @@ const small:CSSProperties={fontSize:11,color:'#6c7a86',lineHeight:1.45};
 const mini:CSSProperties={fontSize:10,color:'#7c8993',marginTop:3};
 const notice:CSSProperties={marginTop:16,padding:'11px 13px',border:'1px solid #e2c278',borderRadius:9,background:'#fff9e8',lineHeight:1.45};
 const progressBox:CSSProperties={padding:'9px 10px',borderRadius:8,background:'#eef5f8',border:'1px solid #cddde6',fontSize:12,fontWeight:800,color:'#35556b'};
-const selectedFile:CSSProperties={padding:'8px 10px',borderRadius:8,background:'#f8fafb',border:'1px solid #dbe2e7',fontSize:12,color:'#435869',overflowWrap:'anywhere'};
-const previewBox:CSSProperties={minHeight:250,display:'grid',placeItems:'center',border:'1px solid #dbe2e7',borderRadius:10,background:'#f8fafb',overflow:'hidden'};
+const selectedFile:CSSProperties={padding:'8px 10px',borderRadius:8,background:'#fbfcfb',border:'1px solid #dbe2e7',fontSize:12,color:'#435869',overflowWrap:'anywhere'};
+const previewBox:CSSProperties={minHeight:250,display:'grid',placeItems:'center',border:'1px solid #dbe2e7',borderRadius:10,background:'#fbfcfb',overflow:'hidden'};
 const empty:CSSProperties={padding:24,color:'#7a8791',textAlign:'center'};
-const input:CSSProperties={width:'100%',boxSizing:'border-box',padding:'10px 11px',border:'1px solid #cbd5dd',borderRadius:8,background:'white',color:'#172536',fontSize:13};
+const input:CSSProperties={width:'100%',boxSizing:'border-box',padding:'10px 11px',border:'1px solid #c9d4cf',borderRadius:8,background:'white',color:'#1b2421',fontSize:13};
 const button:CSSProperties={border:'1px solid #bcc9d2',borderRadius:8,padding:'9px 12px',background:'white',color:'#17324a',fontWeight:850,cursor:'pointer'};
-const primary:CSSProperties={...button,border:0,background:'#0d1b2b',color:'white',fontWeight:950};
+const primary:CSSProperties={...button,border:0,background:'#173f37',color:'white',fontWeight:950};
 const hiddenInput:CSSProperties={position:'absolute',width:1,height:1,opacity:0,pointerEvents:'none'};
 const sourceGrid:CSSProperties={display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12};
-const sourceCard:CSSProperties={display:'grid',gridTemplateColumns:'auto 1fr',columnGap:10,rowGap:3,alignItems:'center',border:'2px solid #cbd5dd',borderRadius:12,padding:'14px 15px',background:'#fff',cursor:'pointer',color:'#17324a'};
-const sourceCardActive:CSSProperties={borderColor:'#0d1b2b',background:'#f1f5f8',boxShadow:'0 0 0 2px rgba(13,27,43,.06)'};
+const sourceCard:CSSProperties={display:'grid',gridTemplateColumns:'auto 1fr',columnGap:10,rowGap:3,alignItems:'center',border:'2px solid #c9d4cf',borderRadius:12,padding:'14px 15px',background:'#fff',cursor:'pointer',color:'#17324a'};
+const sourceCardActive:CSSProperties={borderColor:'#173f37',background:'#f1f5f8',boxShadow:'0 0 0 2px rgba(13,27,43,.06)'};
 const sourceIcon:CSSProperties={gridRow:'1/3',fontSize:24};
 const sourceHelp:CSSProperties={fontSize:11,color:'#6c7a86',fontWeight:500,lineHeight:1.35};
 const formGrid:CSSProperties={display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))',gap:12};
@@ -239,4 +239,4 @@ const pill:CSSProperties={padding:'5px 9px',borderRadius:999,background:'#edf4f8
 const th:CSSProperties={textAlign:'left',padding:'9px',fontSize:10,textTransform:'uppercase',letterSpacing:'.04em',color:'#64727e',background:'#f7f9fa'};
 const td:CSSProperties={padding:'10px 9px',verticalAlign:'top',fontSize:12};
 const link:CSSProperties={color:'#163b59',textDecoration:'none'};
-const actionLink:CSSProperties={display:'inline-flex',alignItems:'center',padding:'7px 9px',border:'1px solid #cbd5dd',borderRadius:7,color:'#17324a',textDecoration:'none',fontWeight:850,fontSize:11,whiteSpace:'nowrap'};
+const actionLink:CSSProperties={display:'inline-flex',alignItems:'center',padding:'7px 9px',border:'1px solid #c9d4cf',borderRadius:7,color:'#17324a',textDecoration:'none',fontWeight:850,fontSize:11,whiteSpace:'nowrap'};
