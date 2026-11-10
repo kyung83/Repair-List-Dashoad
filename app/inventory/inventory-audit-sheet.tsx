@@ -68,8 +68,8 @@ export default function InventoryAuditSheet({ snapshot }: { snapshot: InventoryA
 
   return <section className="inventory-audit-sheet" aria-label="Parts inventory audit sheet">
     <style>{auditCss}</style>
-    {groups.map((group) => <section className="inventory-audit-warehouse" key={group.code}>
-      <div className="inventory-audit-first-page-header">
+    {groups.map((group, groupIndex) => <section className="inventory-audit-warehouse" key={group.code}>
+      {groupIndex === 0 && <div className="inventory-audit-first-page-header">
         <div className="inventory-audit-title"><div><strong>NORTHERN LOGISTICS</strong><h1>Parts Inventory Audit</h1></div><div><h2>{group.name}</h2><span>{group.rows.length} count lines</span></div></div>
         <div className="inventory-audit-meta"><span><b>Inventory as of:</b> {timestamp}</span><span><b>Scope:</b> {snapshot.warehouseName} · {snapshot.parts.length} parts · {totalRows} count lines</span></div>
         <p className="inventory-audit-filters"><b>{filtered ? "FILTERED AUDIT" : "FULL ACTIVE INVENTORY"}</b> · {snapshot.stockFilter}{snapshot.query ? ` · Search: “${snapshot.query}”` : ""} · Sort: {snapshot.sort}</p>
@@ -77,7 +77,7 @@ export default function InventoryAuditSheet({ snapshot }: { snapshot: InventoryA
         <p className="inventory-audit-instructions">System qty is physical stock on hand, including reserved parts. Count in the listed unit. Difference = counted qty − system qty.</p>
         <p className="inventory-audit-instructions">Count all listed bins for each part and enter one combined quantity.</p>
         {!group.code && <p className="inventory-audit-instructions"><b>Warehouse assignment needed:</b> Confirm where these parts are stored before applying a physical count.</p>}
-      </div>
+      </div>}
       <table>
         <colgroup>{[4, 13, 24, 6, 8, 11, 10, 8, 16].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
         <thead>
