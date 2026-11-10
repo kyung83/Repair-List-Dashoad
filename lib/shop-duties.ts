@@ -233,10 +233,11 @@ export async function getCurrentShopDutiesForUser(db:D1Database, user:ShopDutySe
 
 export async function getActiveShopDutyForUser(db:D1Database, userId:number) {
   const row = await db.prepare(q(
-    'SELECT id FROM shop_duty_assignments',
-    "WHERE assigned_user_id=? AND status='in_progress' AND repair_id IS NOT NULL",
-    'ORDER BY started_at DESC,id DESC LIMIT 1'
-  )).bind(userId).first<{id:number}>();
+    'SELECT a.id FROM shop_duty_assignments a',
+    'JOIN repair_labor_timers rt ON rt.repair_id=a.repair_id AND rt.user_id=?',
+    "WHERE a.assigned_user_id=? AND a.status='in_progress' AND a.repair_id IS NOT NULL",
+    'ORDER BY a.started_at DESC,a.id DESC LIMIT 1'
+  )).bind(userId,userId).first<{id:number}>();
   return row ? assignmentDetails(db, Number(row.id)) : null;
 }
 
