@@ -22,7 +22,7 @@ function replaceFormControlsWithValues(root: HTMLElement) {
     span.style.display = "inline-block";
     span.style.padding = "4px 0";
     span.style.fontWeight = "700";
-    span.style.color = "#172033";
+    span.style.color = "#1b2421";
 
     if (control instanceof HTMLSelectElement) {
       span.textContent = control.selectedOptions[0]?.textContent?.trim() || "All";
@@ -155,7 +155,7 @@ function openPrintWindow(title: string, source: HTMLElement) {
   <style>
     @page { size: landscape; margin: 0.35in; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: #fff; color: #172033; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+    body { margin: 0; background: #fff; color: #1b2421; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
     main { min-height: auto !important; padding: 0 !important; background: #fff !important; }
     section, header, div { break-inside: auto; }
     article, tr { break-inside: avoid; }
@@ -163,7 +163,7 @@ function openPrintWindow(title: string, source: HTMLElement) {
     th, td { position: static !important; white-space: normal !important; padding: 5px !important; }
     h1 { font-size: 24px !important; }
     h2 { break-after: avoid; }
-    a { color: #172033; text-decoration: none; }
+    a { color: #1b2421; text-decoration: none; }
     [style*="overflow"], [style*="max-height"] {
       max-height: none !important;
       height: auto !important;
@@ -189,7 +189,7 @@ function makeMiniButton(text: string, onClick: () => void) {
   button.style.border = "1px solid #cbd5e1";
   button.style.borderRadius = "7px";
   button.style.background = "#fff";
-  button.style.color = "#172033";
+  button.style.color = "#1b2421";
   button.style.fontSize = "11px";
   button.style.fontWeight = "850";
   button.style.cursor = "pointer";
@@ -233,7 +233,7 @@ function configureBreakdownUnitSummaryScroller(root: HTMLElement) {
   wrapper.style.overflowX = "auto";
   wrapper.style.overflowY = "auto";
   wrapper.style.position = "relative";
-  wrapper.style.border = "1px solid #e2e8f0";
+  wrapper.style.border = "1px solid #dce3df";
   wrapper.style.borderRadius = "8px";
 
   table.querySelectorAll<HTMLElement>("thead th").forEach((cell) => {
@@ -241,7 +241,7 @@ function configureBreakdownUnitSummaryScroller(root: HTMLElement) {
     cell.style.top = "0";
     cell.style.zIndex = "3";
     cell.style.background = "#fff";
-    cell.style.boxShadow = "0 1px 0 #dce2e7";
+    cell.style.boxShadow = "0 1px 0 #d7ded9";
   });
 }
 
@@ -259,7 +259,7 @@ function configureBreakdownDetailScroller(root: HTMLElement) {
   wrapper.style.overflowX = "auto";
   wrapper.style.overflowY = "auto";
   wrapper.style.position = "relative";
-  wrapper.style.border = "1px solid #e2e8f0";
+  wrapper.style.border = "1px solid #dce3df";
   wrapper.style.borderRadius = "8px";
 
   table.querySelectorAll<HTMLElement>("thead th").forEach((cell) => {
@@ -267,7 +267,7 @@ function configureBreakdownDetailScroller(root: HTMLElement) {
     cell.style.top = "0";
     cell.style.zIndex = "3";
     cell.style.background = "#fff";
-    cell.style.boxShadow = "0 1px 0 #dce2e7";
+    cell.style.boxShadow = "0 1px 0 #d7ded9";
   });
 
   if (!section.querySelector("[data-breakdown-scroll-note]")) {
@@ -276,7 +276,7 @@ function configureBreakdownDetailScroller(root: HTMLElement) {
     note.textContent = "Scroll inside the detail table to review more breakdowns. The column headings stay visible.";
     note.style.marginTop = "8px";
     note.style.fontSize = "12px";
-    note.style.color = "#64748b";
+    note.style.color = "#68746f";
     wrapper.insertAdjacentElement("beforebegin", note);
   }
 }
@@ -349,24 +349,24 @@ export default function BreakdownReportActions() {
         gap: 10,
         padding: "10px 34px",
         background: "rgba(243,245,247,.96)",
-        borderBottom: "1px solid #dce2e7",
+        borderBottom: "1px solid #d7ded9",
         backdropFilter: "blur(8px)",
       }}
     >
-      <span style={{ marginRight: "auto", fontSize: 12, fontWeight: 900, letterSpacing: ".08em", color: "#64748b" }}>
+      <span style={{ marginRight: "auto", fontSize: 12, fontWeight: 900, letterSpacing: ".08em", color: "#68746f" }}>
         BREAKDOWN REPORT ACTIONS
       </span>
       <button
         type="button"
         onClick={printReport}
-        style={{ padding: "10px 14px", border: "1px solid #94a3b8", borderRadius: 8, background: "white", color: "#172033", fontWeight: 850, cursor: "pointer" }}
+        style={{ padding: "10px 14px", border: "1px solid #94a3b8", borderRadius: 8, background: "white", color: "#1b2421", fontWeight: 850, cursor: "pointer" }}
       >
         Print / Save PDF
       </button>
       <button
         type="button"
         onClick={downloadSummaryCsv}
-        style={{ padding: "10px 14px", border: "1px solid #94a3b8", borderRadius: 8, background: "white", color: "#172033", fontWeight: 850, cursor: "pointer" }}
+        style={{ padding: "10px 14px", border: "1px solid #94a3b8", borderRadius: 8, background: "white", color: "#1b2421", fontWeight: 850, cursor: "pointer" }}
       >
         Export Summary CSV
       </button>
@@ -374,7 +374,7 @@ export default function BreakdownReportActions() {
         type="button"
         onClick={exportCsv}
         disabled={!exportReady}
-        style={{ padding: "10px 14px", border: 0, borderRadius: 8, background: exportReady ? "#0d1b2b" : "#94a3b8", color: "white", fontWeight: 850, cursor: exportReady ? "pointer" : "wait" }}
+        style={{ padding: "10px 14px", border: 0, borderRadius: 8, background: exportReady ? "#173f37" : "#94a3b8", color: "white", fontWeight: 850, cursor: exportReady ? "pointer" : "wait" }}
       >
         Export CSV
       </button>
