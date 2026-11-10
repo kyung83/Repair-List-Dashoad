@@ -110,8 +110,8 @@ export default function UnitPage(){
       <button type="submit" className="easy-button orange">Open Unit</button>
     </form>
     {suggestions.length>0&&<div className="easy-card" style={{marginTop:10,padding:8,display:'grid',gap:6}}>
-      {suggestions.map(item=><a key={item.id} href={`/unit?unit=${encodeURIComponent(item.unit)}`} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'10px 11px',border:'1px solid #e1e6ea',borderRadius:8,textDecoration:'none',color:'#182331',background:'#fff'}}>
-        <strong>Unit {item.unit}</strong><span style={{color:'#6c7886',fontSize:12}}>{item.location||item.equipmentType}</span>
+      {suggestions.map(item=><a key={item.id} href={`/unit?unit=${encodeURIComponent(item.unit)}`} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'10px 11px',border:'1px solid #e1e6ea',borderRadius:8,textDecoration:'none',color:'#1b2421',background:'#fff'}}>
+        <strong>Unit {item.unit}</strong><span style={{color:'#68746f',fontSize:12}}>{item.location||item.equipmentType}</span>
       </a>)}
     </div>}
 
