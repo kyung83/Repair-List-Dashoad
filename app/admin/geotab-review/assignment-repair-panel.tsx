@@ -105,7 +105,7 @@ export default function GeotabAssignmentRepairPanel(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
-  return <section id="geotab-assignment-repair" style={{background:'#f3f5f7',padding:'0 clamp(16px,4vw,46px) 16px',color:'#182331'}}>
+  return <section id="geotab-assignment-repair" style={{background:'#f4f6f4',padding:'0 clamp(16px,4vw,46px) 16px',color:'#1b2421'}}>
     <div style={{background:'#fff',border:'1px solid #cfd9e1',borderRadius:14,padding:18,boxShadow:'0 2px 10px rgba(15,32,48,.05)'}}>
       <div style={{display:'flex',justifyContent:'space-between',gap:18,alignItems:'flex-start',flexWrap:'wrap'}}>
         <div style={{maxWidth:900}}>
@@ -156,13 +156,13 @@ export default function GeotabAssignmentRepairPanel(){
 
 const copy:CSSProperties={margin:'7px 0 0',color:'#5b6d7b',lineHeight:1.55,fontSize:14};
 const small:CSSProperties={margin:'6px 0 0',color:'#6a7985',lineHeight:1.45,fontSize:12};
-const card:CSSProperties={padding:14,border:'1px solid #dce3e8',borderRadius:11,background:'#fbfcfd',display:'grid',gap:11};
+const card:CSSProperties={padding:14,border:'1px solid #dce3e8',borderRadius:11,background:'#fbfcfb',display:'grid',gap:11};
 const searchRow:CSSProperties={display:'grid',gridTemplateColumns:'minmax(0,1fr) auto',gap:8};
-const input:CSSProperties={minHeight:40,padding:'0 10px',border:'1px solid #cbd5dd',borderRadius:8,background:'white',color:'#172536',fontSize:13};
+const input:CSSProperties={minHeight:40,padding:'0 10px',border:'1px solid #c9d4cf',borderRadius:8,background:'white',color:'#1b2421',fontSize:13};
 const resultButton:CSSProperties={display:'grid',gap:4,textAlign:'left',padding:11,border:'1px solid #dce3e8',borderRadius:9,color:'#1d2f41',cursor:'pointer'};
 const targetCard:CSSProperties={padding:11,border:'1px solid #dce3e8',borderRadius:9,background:'white'};
 const mono:CSSProperties={fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',fontSize:11,color:'#607180',wordBreak:'break-all'};
 const meta:CSSProperties={fontSize:11,color:'#778590',marginTop:3};
 const devicePill:CSSProperties={fontSize:10,fontWeight:850,color:'#38586f',background:'#edf4f8',border:'1px solid #d2e1ea',padding:'3px 6px',borderRadius:999,maxWidth:210,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'};
 const notice:CSSProperties={marginTop:12,padding:'10px 11px',border:'1px solid #d8c17b',borderRadius:8,background:'#fffdf2',fontSize:13};
-const primary:CSSProperties={border:0,borderRadius:7,padding:'8px 11px',background:'#0d1b2b',color:'white',fontWeight:900};
+const primary:CSSProperties={border:0,borderRadius:7,padding:'8px 11px',background:'#173f37',color:'white',fontWeight:900};
