@@ -1,4 +1,4 @@
-.panel { padding: 22px; background: #f4f8fb; border-top: 2px solid #2e668b; text-align: left; white-space: normal; }
+.panel { padding: 22px; background: #f1f5f2; border-top: 2px solid #2e668b; text-align: left; white-space: normal; }
 .header { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
 .header h3 { margin: 0; color: #132f47; font-size: 19px; font-weight: 800; }
 .header p { margin: 5px 0 0; color: #536677; font-size: 14px; }
@@ -13,7 +13,7 @@
 .fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 10px; }
 .label { display: grid; gap: 6px; color: #263f54; font-size: 13px; font-weight: 700; }
 .input { padding: 10px 12px; border: 1px solid #a8b7c4; border-radius: 7px; background: white; min-height: 42px; width: 100%; color: #172d40; font-size: 14px; font-weight: 400; box-sizing: border-box; }
-.input:focus { outline: 2px solid #287bae; outline-offset: 2px; }
+.input:focus { outline: 2px solid #2f6f60; outline-offset: 2px; }
 .input:disabled, .fields:disabled { opacity: .65; }
 .binRow { display: flex; gap: 8px; align-items: end; }
 .binRow label { min-width: 0; flex: 1; }
@@ -22,7 +22,7 @@
 .secondary { background: white; color: #25465f; border: 1px solid #b7c5d0; padding: 8px 12px; }
 .addBin { background: transparent; color: #1c577e; border: 0; padding: 4px 0; justify-self: start; margin-bottom: 5px; }
 .primary:disabled, .secondary:disabled, .addBin:disabled { cursor: default; opacity: .5; }
-.primary:focus-visible, .secondary:focus-visible, .addBin:focus-visible { outline: 2px solid #287bae; outline-offset: 2px; }
+.primary:focus-visible, .secondary:focus-visible, .addBin:focus-visible { outline: 2px solid #2f6f60; outline-offset: 2px; }
 .hint { color: #596c7a; font-size: 12px; line-height: 1.5; margin: 0 0 7px; }
 .error { background: #fff2f0; border: 1px solid #e7aaa3; color: #8d241d; padding: 10px; border-radius: 7px; font-size: 13px; line-height: 1.5; margin: 8px 0 12px; }
 .success { background: #edf8f0; color: #205b35; padding: 10px; border-radius: 7px; font-size: 13px; line-height: 1.5; margin: 12px 0 0; }
