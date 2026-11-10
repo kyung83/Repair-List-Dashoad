@@ -19,9 +19,11 @@ test('Inventory managers can archive and restore parts while delete stays admin-
 
   assert.match(page,/Active Parts/);
   assert.match(page,/Archived Parts/);
-  assert.match(page,/archivePart\(item\)/);
+  const details=page.slice(page.indexOf('{showPartForm &&'));
+  assert.match(details,/partStatus === "active" && <button[^>]*onClick=\{\(\) => void archivePart\(editingItem\)\}/);
   assert.match(page,/restorePart\(item\)/);
-  assert.match(page,/partStatus === "active"[\s\S]*data\?\.viewerRole === "admin"[\s\S]*deletePart\(item\)/);
+  assert.match(details,/partStatus === "archived" && <button[^>]*onClick=\{\(\) => void restorePart\(editingItem\)\}/);
+  assert.match(details,/data\?\.viewerRole === "admin" && <button[^>]*onClick=\{\(\) => void deletePart\(editingItem\)\}/);
   assert.match(page,/Delete Part/);
   assert.match(page,/Existing repair, receiving, transfer, count, and inventory history stays intact/);
 
