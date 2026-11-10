@@ -124,7 +124,7 @@ export default function ShopDutyWorkHome({timer,duty,onRefresh}:Props){
 
       <section style={actions}>
         <button type="button" onClick={()=>void pause()} disabled={busy} style={pauseButton}>PAUSE DUTY</button>
-        <button type="button" onClick={()=>void complete()} disabled={busy||requiredMissing>0} style={{...completeButton,opacity:(busy||requiredMissing>0)?.55:1}}>
+        <button type="button" onClick={()=>void complete()} disabled={busy||requiredMissing>0} style={{...completeButton,opacity:(busy||requiredMissing>0)?0.55:1}}>
           {requiredMissing>0?`COMPLETE ${requiredMissing} MORE CHECKS`:"COMPLETE DUTY"}
         </button>
       </section>
