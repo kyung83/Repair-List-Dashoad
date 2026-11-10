@@ -51,11 +51,11 @@ export default function SetupPage() {
   }
 
   return (
-    <main style={{ position: "fixed", inset: 0, zIndex: 1000, overflow: "auto", background: "#0d1b2b", color: "#182331", display: "grid", placeItems: "center", padding: 24 }}>
+    <main style={{ position: "fixed", inset: 0, zIndex: 1000, overflow: "auto", background: "#173f37", color: "#1b2421", display: "grid", placeItems: "center", padding: 24 }}>
       <section style={{ width: "min(620px, 100%)", background: "white", borderRadius: 18, padding: 32, boxShadow: "0 24px 70px #0007" }}>
-        <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 900, letterSpacing: ".16em" }}>ONE-TIME SECURITY SETUP</p>
-        <h1 style={{ margin: "8px 0 0", color: "#0d1b2b", fontSize: 30 }}>Create the first administrator</h1>
-        <p style={{ color: "#6c7886", lineHeight: 1.55 }}>This page only works while the dashboard has no users. The setup token must match the private <code>AUTH_BOOTSTRAP_TOKEN</code> Cloudflare Worker secret.</p>
+        <p style={{ margin: 0, color: "#2f6f60", fontSize: 12, fontWeight: 900, letterSpacing: ".16em" }}>ONE-TIME SECURITY SETUP</p>
+        <h1 style={{ margin: "8px 0 0", color: "#173f37", fontSize: 30 }}>Create the first administrator</h1>
+        <p style={{ color: "#68746f", lineHeight: 1.55 }}>This page only works while the dashboard has no users. The setup token must match the private <code>AUTH_BOOTSTRAP_TOKEN</code> Cloudflare Worker secret.</p>
 
         {!setupRequired && (
           <div style={{ marginTop: 18, padding: 14, borderRadius: 9, background: "#eef8f0", border: "1px solid #a8d5b0" }}>
@@ -91,7 +91,7 @@ export default function SetupPage() {
               Confirm password
               <input type="password" minLength={6} autoComplete="new-password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} style={{ padding: 12, border: "1px solid #ccd5dd", borderRadius: 9 }} />
             </label>
-            <button disabled={busy || configured === false} type="submit" style={{ gridColumn: "1 / -1", border: 0, borderRadius: 9, padding: "13px 18px", background: "#f47b20", color: "white", fontWeight: 900, cursor: busy ? "wait" : "pointer", opacity: busy || configured === false ? .65 : 1 }}>
+            <button disabled={busy || configured === false} type="submit" style={{ gridColumn: "1 / -1", border: 0, borderRadius: 9, padding: "13px 18px", background: "#2f6f60", color: "white", fontWeight: 900, cursor: busy ? "wait" : "pointer", opacity: busy || configured === false ? .65 : 1 }}>
               {busy ? "Creating administrator…" : "Create administrator"}
             </button>
           </form>
