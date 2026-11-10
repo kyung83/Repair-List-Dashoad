@@ -4,6 +4,7 @@ import {
   archiveEquipmentMasterItem,
   getEquipmentMaster,
   restoreEquipmentMasterItem,
+  reuseEquipmentUnitNumber,
   saveEquipmentMasterItem,
 } from '@/lib/equipment-master-tracking';
 
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
     if (action === 'archive') return Response.json(await archiveEquipmentMasterItem(env.DB, body));
     if (action === 'bulkArchive') return Response.json(await bulkArchiveEquipmentMasterItems(env.DB, body));
     if (action === 'restore') return Response.json(await restoreEquipmentMasterItem(env.DB, body));
+    if (action === 'reuseUnitNumber') return Response.json(await reuseEquipmentUnitNumber(env.DB, body));
     return Response.json({ error: 'Unknown equipment action.' }, { status: 400 });
   } catch (error) {
     console.error(JSON.stringify({ event: 'equipment_master_post_failed', error: String(error) }));
