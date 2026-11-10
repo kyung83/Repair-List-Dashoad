@@ -195,14 +195,22 @@ export default function EquipmentMasterPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = await response.json() as { ok?: boolean; error?: string };
+      const result = await response.json() as {
+        ok?: boolean;
+        error?: string;
+        id?: number;
+        unit?: string;
+        existing?: boolean;
+        archived?: boolean;
+        created?: boolean;
+      };
       if (!response.ok || !result.ok) throw new Error(result.error || "Equipment could not be saved.");
       await load();
-      setMessage(success);
-      return true;
+      if (!result.existing) setMessage(success);
+      return result;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Equipment could not be saved.");
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -211,7 +219,7 @@ export default function EquipmentMasterPage() {
   async function saveDraft() {
     if (!editing) return;
     const current = editing;
-    const ok = await post({
+    const result = await post({
       action: "save",
       id: current.id,
       unit: current.unit,
@@ -233,7 +241,34 @@ export default function EquipmentMasterPage() {
       location: current.location,
       notes: current.notes,
     }, current.id ? `${current.unit} equipment record updated.` : `${current.unit} added as a manual equipment record.`);
-    if (ok) setEditing(null);
+
+    if (!result) return;
+
+    if (current.id == null && result.existing && result.id) {
+      const existing = (data?.equipment ?? []).find((item) => item.id === result.id);
+      const existingUnit = result.unit || existing?.unit || current.unit;
+      if (result.archived) {
+        setEditing(null);
+        setStatusFilter("archived");
+        setQuery(existingUnit);
+        setMessage(`Unit ${existingUnit} already exists in Archived Equipment. Restore that record instead of creating a duplicate so its repair and maintenance history stays attached correctly.`);
+        return;
+      }
+      if (existing) {
+        setStatusFilter("active");
+        setQuery(existing.unit);
+        setEditing(draftFor(existing));
+        setMessage(`Unit ${existing.unit} already exists. I opened the existing equipment record so you can update it instead of creating a duplicate.`);
+        return;
+      }
+      setEditing(null);
+      setStatusFilter("all");
+      setQuery(existingUnit);
+      setMessage(`Unit ${existingUnit} already exists. Open the existing record instead of creating a duplicate.`);
+      return;
+    }
+
+    setEditing(null);
   }
 
   async function archive() {
