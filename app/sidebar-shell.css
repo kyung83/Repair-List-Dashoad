@@ -24,8 +24,8 @@ body:has(.app-sidebar.collapsed) .app-shell-content{margin-left:68px}
 .app-sidebar-unit-search input{min-width:0;height:36px;padding:0 9px;border:1px solid #5d8378;border-radius:8px;background:#12372f;color:#fff;font-size:12px;outline:none}
 .app-sidebar-unit-search input::placeholder{color:#9eb8b0}
 .app-sidebar-unit-search input:focus{border-color:#ffffff;box-shadow:0 0 0 2px #ffffff26}
-.app-sidebar-unit-search button{height:36px;border:1px solid #ffffff;border-radius:8px;background:#ffffff;color:#fff;font-size:11px;font-weight:950;cursor:pointer}
-.app-sidebar-unit-search button:hover{background:#f5f8f7}
+.app-sidebar-unit-search button{height:36px;border:1px solid #ffffff;border-radius:8px;background:#ffffff;color:#173f37;font-size:11px;font-weight:950;cursor:pointer}
+.app-sidebar-unit-search button:hover{background:#f2f5f3;color:#173f37}
 .app-sidebar.collapsed .app-sidebar-unit-search{padding:8px 9px;place-items:center}
 .app-sidebar-unit-search-compact{width:42px!important;height:38px!important;font-size:21px!important;background:#ffffff0b!important;border-color:#ffffff1f!important;color:#e8f1f8!important}
 
