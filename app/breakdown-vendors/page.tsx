@@ -113,7 +113,7 @@ export default function BreakdownVendorsPage() {
           <button className="easy-button orange" disabled={locked}>Search</button><button type="button" className="easy-button" disabled={locked} onClick={() => { setFilters(emptyFilters); void load(emptyFilters); }}>Reset</button>
         </form>
       </div></section>
-      {editor && <section ref={editorPanel} className="easy-card" aria-labelledby="vendor-editor-title" style={{ marginTop: 16, borderColor: '#f47b20' }}><div className="easy-card-body">
+      {editor && <section ref={editorPanel} className="easy-card" aria-labelledby="vendor-editor-title" style={{ marginTop: 16, borderColor: '#2f6f60' }}><div className="easy-card-body">
         <h2 id="vendor-editor-title" style={{ marginTop: 0 }}>{editor.id ? 'Edit Breakdown Vendor' : 'Add Breakdown Vendor'}</h2>
         <p style={copy}>Company name, city, and state/province are required. Phone and ZIP/postal code are optional. Each branch/location is a separate directory entry.</p>
         <form onSubmit={(event) => void save(event)}>
@@ -145,8 +145,8 @@ export default function BreakdownVendorsPage() {
   </div></main>;
 }
 const actions: CSSProperties = { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' };
-const input: CSSProperties = { width: '100%', boxSizing: 'border-box', minHeight: 42, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8, background: 'white', color: '#172033', fontSize: 14 };
+const input: CSSProperties = { width: '100%', boxSizing: 'border-box', minHeight: 42, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8, background: 'white', color: '#1b2421', fontSize: 14 };
 const label: CSSProperties = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 800 };
-const copy: CSSProperties = { fontSize: 13, lineHeight: 1.5, color: '#64748b' };
+const copy: CSSProperties = { fontSize: 13, lineHeight: 1.5, color: '#68746f' };
 const th: CSSProperties = { textAlign: 'left', padding: 10, fontSize: 12, borderBottom: '1px solid #cbd5e1' };
-const td: CSSProperties = { padding: 10, fontSize: 13, verticalAlign: 'top', borderBottom: '1px solid #e2e8f0' };
+const td: CSSProperties = { padding: 10, fontSize: 13, verticalAlign: 'top', borderBottom: '1px solid #dce3df' };
