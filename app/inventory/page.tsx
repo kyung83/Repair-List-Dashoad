@@ -1,9 +1,12 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
 import ReceivingHistoryButton from "./receiving-history-button";
 import InventoryAuditSheet, { type InventoryAuditSnapshot } from "./inventory-audit-sheet";
+import InventoryQuickUpdate from "./inventory-quick-update";
+import InventoryChoicePicker from "./inventory-choice-picker";
+import pageStyles from "./inventory-page.module.css";
 
 type WarehouseStock = {
   id: number;
@@ -129,7 +132,10 @@ export default function InventoryPage() {
   const [vendor, setVendor] = useState<VendorForm>(blankVendor);
   const [showPartForm, setShowPartForm] = useState(false);
   const [showVendorForm, setShowVendorForm] = useState(false);
-  const [equipmentQuery, setEquipmentQuery] = useState("");
+  const [partSaving, setPartSaving] = useState(false);
+  const [quickUpdate, setQuickUpdate] = useState<{ partId: number; warehouseCode: string } | null>(null);
+  const [quickDirty, setQuickDirty] = useState(false);
+  const [quickBusy, setQuickBusy] = useState(false);
   const [printingAudit, setPrintingAudit] = useState(false);
   const [auditSnapshot, setAuditSnapshot] = useState<InventoryAuditSnapshot | null>(null);
 
@@ -137,6 +143,32 @@ export default function InventoryPage() {
     const result = await fetchInventory(partStatus);
     setData(result.inventory);
     setVendorLinks(result.links);
+  }
+
+  function closeQuickUpdate() {
+    if (quickBusy) return false;
+    if (quickDirty && !window.confirm("Discard the unsaved inventory changes? Any recorded count issue remains in Count Issues.")) return false;
+    setQuickUpdate(null);
+    setQuickDirty(false);
+    return true;
+  }
+
+  function changeView(change: () => void) {
+    if (!closeQuickUpdate()) return;
+    change();
+  }
+
+  function toggleQuickUpdate(item: Part) {
+    if (quickUpdate?.partId === item.id) { closeQuickUpdate(); return; }
+    if (!closeQuickUpdate()) return;
+    setMessage("");
+    setQuickUpdate({ partId: item.id, warehouseCode });
+  }
+
+  async function quickUpdateSaved(text: string) {
+    setMessage(text);
+    try { await load(); }
+    catch { setMessage(`${text} The list could not be refreshed; reload Inventory to see the latest values.`); }
   }
 
   useEffect(() => {
@@ -266,7 +298,10 @@ export default function InventoryPage() {
 
   async function savePart(event: FormEvent) {
     event.preventDefault();
+    if (partSaving) return;
+    setPartSaving(true);
     setMessage("");
+    try {
     const preferredVendorId = part.preferredVendorId ? Number(part.preferredVendorId) : null;
     const vendorIds = [...new Set(part.vendorIds.concat(preferredVendorId ? [preferredVendorId] : []))];
     const response = await fetch("/api/inventory", {
@@ -276,6 +311,7 @@ export default function InventoryPage() {
     });
     const result = (await response.json()) as { id?: number; error?: string };
     if (!response.ok || !result.id) return setMessage(result.error || "Part could not be saved");
+    if (!part.id) setPart((current) => ({ ...current, id: result.id! }));
 
     const [vendorResponse, settingsResponse] = await Promise.all([
       fetch("/api/inventory/part-vendors", {
@@ -300,10 +336,12 @@ export default function InventoryPage() {
     if (!settingsResponse.ok) return setMessage(settingsResult.error || "Part saved, but minimums/equipment could not be saved");
 
     setPart(blankPart);
-    setEquipmentQuery("");
     setShowPartForm(false);
     setMessage("Part, vendors, minimums, and equipment saved.");
     await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Part could not be saved. Please try again.");
+    } finally { setPartSaving(false); }
   }
 
   async function saveVendor(event: FormEvent) {
@@ -330,6 +368,7 @@ export default function InventoryPage() {
     const response = await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"archivePart",partId:item.id})});
     const result = await response.json() as {ok?:boolean;error?:string};
     if(!response.ok||!result.ok){setMessage(result.error||"Part could not be archived.");return}
+    if (part.id === item.id) { setShowPartForm(false); setPart(blankPart); }
     setMessage(`${item.partNumber} archived. It is hidden from active inventory and mechanic searches but all history is preserved.`);
     await load();
   }
@@ -339,6 +378,7 @@ export default function InventoryPage() {
     const response = await fetch("/api/inventory",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"restorePart",partId:item.id})});
     const result = await response.json() as {ok?:boolean;error?:string};
     if(!response.ok||!result.ok){setMessage(result.error||"Part could not be restored.");return}
+    if (part.id === item.id) { setShowPartForm(false); setPart(blankPart); }
     setMessage(`${item.partNumber} restored to active inventory.`);
     await load();
   }
@@ -356,7 +396,6 @@ export default function InventoryPage() {
     if(!response.ok||!result.ok){setMessage(result.error||"Part could not be deleted.");return}
     setShowPartForm(false);
     setPart(blankPart);
-    setEquipmentQuery("");
     setMessage(`${item.partNumber} deleted from Inventory. Existing history was preserved.`);
     await load();
   }
@@ -379,6 +418,10 @@ export default function InventoryPage() {
       String(snapshot.expectedQuantity),
     );
     if (entered == null) return;
+    if (entered.trim() === "") {
+      setMessage("Enter the quantity you counted. Use 0 for an empty bin.");
+      return;
+    }
     const countedQuantity = Number(entered);
     if (!Number.isFinite(countedQuantity) || countedQuantity < 0) {
       setMessage("Physical count must be zero or greater.");
@@ -432,6 +475,8 @@ export default function InventoryPage() {
   }
 
   function editPart(item: Part) {
+    if (!closeQuickUpdate()) return;
+    setMessage("");
     const links = vendorsForPart(item);
     const warehouseMinimums: Record<string, string> = {};
     for (const stock of item.warehouseStocks ?? []) {
@@ -450,7 +495,6 @@ export default function InventoryPage() {
       warehouseMinimums,
       equipmentIds: item.compatibleEquipmentIds ?? [],
     });
-    setEquipmentQuery("");
     setShowPartForm(true);
   }
 
@@ -475,11 +519,6 @@ export default function InventoryPage() {
   const editingWarehouseStocks = editingItem?.warehouseStocks ?? [];
   const editingPhysicalTotal = editingWarehouseStocks.reduce((sum, stock) => sum + Number(stock.physicalOnHand ?? stock.quantityOnHand), 0);
   const selectedVendors = (data?.vendors ?? []).filter((itemVendor) => part.vendorIds.includes(itemVendor.id));
-  const selectedEquipment = (data?.equipment ?? []).filter((equipment) => part.equipmentIds.includes(equipment.id));
-  const equipmentMatches = (data?.equipment ?? []).filter((equipment) => {
-    const q = equipmentQuery.trim().toLowerCase();
-    return !q || [equipment.unit, equipment.category, equipment.equipmentType].join(" ").toLowerCase().includes(q);
-  }).slice(0, 120);
   const selectedWarehouseName = warehouseCode === "ALL" ? "All warehouses" : (data?.warehouses ?? []).find((warehouse) => warehouse.code === warehouseCode)?.name ?? warehouseCode;
 
   return (
@@ -489,33 +528,33 @@ export default function InventoryPage() {
         <div>
           <p style={{ margin: 0, color: "#f47b20", fontSize: 12, fontWeight: 800, letterSpacing: ".16em" }}>PARTS OPERATIONS</p>
           <h1 style={{ margin: "8px 0 0", color: "#0d1b2b", fontSize: 34 }}>Inventory</h1>
-          <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Warehouse stock, minimums, vendors, equipment compatibility, repair usage, and controlled physical counts.</p>
+          <p style={{ margin: "8px 0 0", color: "#6c7886" }}>Find a part, update its bins and minimum, or record a physical count.</p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button type="button" onClick={() => void printAudit()} disabled={!data || printingAudit || partStatus !== "active"} title={partStatus === "archived" ? "Select Active Parts to print a stock audit." : "Print the selected warehouse and filters with blank physical-count columns, or save as PDF."} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800, opacity: !data || printingAudit || partStatus !== "active" ? 0.55 : 1 }}>{printingAudit ? "Preparing audit…" : "Print Audit Sheet"}</button>
-          <button onClick={() => { setVendor(blankVendor); setShowVendorForm(true); }} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800 }}>+ Add vendor</button>
-          <button onClick={() => { setPart(blankPart); setEquipmentQuery(""); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ Add part</button>
+          <button onClick={() => { if (!closeQuickUpdate()) return; setMessage(""); setVendor(blankVendor); setShowVendorForm(true); }} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800 }}>+ Add vendor</button>
+          <button onClick={() => { if (!closeQuickUpdate()) return; setMessage(""); setPart(blankPart); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ Add part</button>
         </div>
       </header>
 
-      {message && <div style={{ marginTop: 20, padding: 12, background: "#fff8e6", border: "1px solid #f2c66d", borderRadius: 9 }}>{message}</div>}
+      {message && <div role="status" style={{ marginTop: 20, padding: 12, background: "#fff8e6", border: "1px solid #f2c66d", borderRadius: 9 }}>{message}</div>}
 
       <section style={{ marginTop: 22, padding: 16, background: "white", border: "1px solid #dce2e7", borderRadius: 12, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
         <label style={{ display: "grid", gap: 6, minWidth: 190, fontSize: 12, fontWeight: 800, color: "#657383" }}>WAREHOUSE
-          <select value={warehouseCode} onChange={(event) => setWarehouseCode(event.target.value)} style={{ padding: "10px 12px", border: "1px solid #dce2e7", borderRadius: 8, background: "white" }}>
+          <select value={warehouseCode} onChange={(event) => changeView(() => setWarehouseCode(event.target.value))} disabled={quickBusy} style={{ padding: "10px 12px", border: "1px solid #dce2e7", borderRadius: 8, background: "white" }}>
             <option value="ALL">All warehouses</option>
             {(data?.warehouses ?? []).map((warehouse) => <option key={warehouse.code} value={warehouse.code}>{warehouse.name}</option>)}
           </select>
         </label>
         <label style={{ display: "grid", gap: 6, minWidth: 175, fontSize: 12, fontWeight: 800, color: "#657383" }}>STOCK VIEW
-          <select value={stockFilter} onChange={(event) => setStockFilter(event.target.value as StockFilter)} style={{ padding: "10px 12px", border: "1px solid #dce2e7", borderRadius: 8, background: "white" }}>
+          <select value={stockFilter} onChange={(event) => changeView(() => setStockFilter(event.target.value as StockFilter))} disabled={quickBusy} style={{ padding: "10px 12px", border: "1px solid #dce2e7", borderRadius: 8, background: "white" }}>
             <option value="all">All parts</option>
             <option value="below-minimum">Below minimum only</option>
             <option value="negative">Negative stock only</option>
           </select>
         </label>
         <label style={{ display: "grid", gap: 6, minWidth: 190, fontSize: 12, fontWeight: 800, color: "#657383" }}>SORT
-          <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} style={{ padding: "10px 12px", border: "1px solid #dce2e7", borderRadius: 8, background: "white" }}>
+          <select value={sortMode} onChange={(event) => changeView(() => setSortMode(event.target.value as SortMode))} disabled={quickBusy} style={{ padding: "10px 12px", border: "1px solid #dce2e7", borderRadius: 8, background: "white" }}>
             <option value="description">Description A-Z</option>
             <option value="negative-first">Negative stock first</option>
             <option value="qty-asc">Quantity low to high</option>
@@ -523,11 +562,10 @@ export default function InventoryPage() {
             <option value="part-number">Part number</option>
           </select>
         </label>
-        {(data?.warehouses ?? []).map((warehouse) => <button key={warehouse.code} onClick={() => { setWarehouseCode(warehouse.code); setStockFilter("all"); }} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === warehouse.code ? "#0d1b2b" : "white", color: warehouseCode === warehouse.code ? "white" : "#182331", fontWeight: 800 }}>{warehouse.name}</button>)}
-        <button onClick={() => { setStockFilter("negative"); setSortMode("negative-first"); }} style={{ padding: "10px 14px", border: "1px solid #b42318", borderRadius: 8, background: stockFilter === "negative" ? "#b42318" : "white", color: stockFilter === "negative" ? "white" : "#b42318", fontWeight: 800 }}>Negative only</button>
+        {(data?.warehouses ?? []).map((warehouse) => <button key={warehouse.code} disabled={quickBusy} onClick={() => changeView(() => { setWarehouseCode(warehouse.code); setStockFilter("all"); })} style={{ padding: "10px 14px", border: "1px solid #dce2e7", borderRadius: 8, background: warehouseCode === warehouse.code ? "#0d1b2b" : "white", color: warehouseCode === warehouse.code ? "white" : "#182331", fontWeight: 800 }}>{warehouse.name}</button>)}
         <div style={{ marginLeft: "auto", display: "flex", gap: 7 }}>
-          <button onClick={() => setPartStatus("active")} style={{ padding: "10px 14px", border: "1px solid #0d1b2b", borderRadius: 8, background: partStatus === "active" ? "#0d1b2b" : "white", color: partStatus === "active" ? "white" : "#0d1b2b", fontWeight: 800 }}>Active Parts</button>
-          <button onClick={() => setPartStatus("archived")} style={{ padding: "10px 14px", border: "1px solid #6c7886", borderRadius: 8, background: partStatus === "archived" ? "#6c7886" : "white", color: partStatus === "archived" ? "white" : "#44515e", fontWeight: 800 }}>Archived Parts</button>
+          <button onClick={() => changeView(() => setPartStatus("active"))} disabled={quickBusy} style={{ padding: "10px 14px", border: "1px solid #0d1b2b", borderRadius: 8, background: partStatus === "active" ? "#0d1b2b" : "white", color: partStatus === "active" ? "white" : "#0d1b2b", fontWeight: 800 }}>Active Parts</button>
+          <button onClick={() => changeView(() => setPartStatus("archived"))} disabled={quickBusy} style={{ padding: "10px 14px", border: "1px solid #6c7886", borderRadius: 8, background: partStatus === "archived" ? "#6c7886" : "white", color: partStatus === "archived" ? "white" : "#44515e", fontWeight: 800 }}>Archived Parts</button>
         </div>
       </section>
 
@@ -548,13 +586,13 @@ export default function InventoryPage() {
 
       <section style={{ marginTop: 22, background: "white", border: "1px solid #dce2e7", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: 18, borderBottom: "1px solid #dce2e7", display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search part, cross-reference, vendor, equipment, bin…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
+          <input aria-label="Search inventory" value={query} onChange={(event) => changeView(() => setQuery(event.target.value))} disabled={quickBusy} placeholder="Search part, cross-reference, vendor, equipment, bin…" style={{ width: "min(520px, 100%)", padding: "11px 13px", border: "1px solid #dce2e7", borderRadius: 9 }} />
           <span style={{ color: "#6c7886", fontSize: 13 }}><b>{partStatus === "archived" ? "Archived Parts" : selectedWarehouseName}</b> · {visibleParts.length} visible</span>
           <small style={{ width: "100%", color: "#6c7886" }}>{partStatus === "archived" ? "Select Active Parts to print a stock audit." : "Print Audit Sheet uses the selected warehouse, search, stock view, and sort. For a full audit, choose All parts and clear the search."}</small>
         </div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1280 }}>
-            <thead><tr>{["Part #", "Description", "Available", "Minimum", "On order", "Warehouse", "Bin location", "Vendors", "Used on", "Unit cost", "Actions"].map((heading) => <th key={heading} style={{ padding: 13, textAlign: "left", background: "#f7f9fa", color: "#657383", fontSize: 11 }}>{heading}</th>)}</tr></thead>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 960 }}>
+            <thead><tr>{["Part", "Available", "Bin location", "Minimum", "On order", "Unit cost", "Actions"].map((heading) => <th key={heading} scope="col" style={{ padding: 13, textAlign: "left", background: "#f7f9fa", color: "#657383", fontSize: 11 }}>{heading}</th>)}</tr></thead>
             <tbody>
               {visibleParts.map((item) => {
                 const links = vendorsForPart(item);
@@ -563,33 +601,30 @@ export default function InventoryPage() {
                 const lowStock = stock.quantityOnHand < stock.minimumQuantity;
                 const equipment = item.compatibleEquipment ?? [];
                 return (
-                  <tr key={item.id} style={{ borderTop: "1px solid #edf0f2", background: negative ? "#fff0f0" : lowStock ? "#fff8e6" : "white" }}>
-                    <td style={{ padding: 13, fontWeight: 800 }}>{item.partNumber}</td>
-                    <td style={{ padding: 13 }}>{item.description}</td>
-                    <td style={{ padding: 13 }}><strong style={{ color: negative ? "#b42318" : lowStock ? "#a85b00" : "#182331" }}>{stock.quantityOnHand}</strong></td>
+                  <Fragment key={item.id}>
+                  <tr style={{ borderTop: "1px solid #edf0f2", background: quickUpdate?.partId === item.id ? "#edf4fa" : negative ? "#fff0f0" : lowStock ? "#fff8e6" : "white" }}>
+                    <td style={{ padding: 13, minWidth: 220, maxWidth: 360 }}><strong style={{ display: "block", fontSize: 14, color: "#153b57" }}>{item.partNumber}</strong><span style={{ display: "block", marginTop: 4, lineHeight: 1.5 }}>{item.description}</span>{warehouseCode === "ALL" && <small style={{ display: "block", color: "#6c7886", marginTop: 4 }}>{(item.warehouseStocks ?? []).map((entry) => entry.warehouseName).join(" · ") || "No warehouse assigned"}</small>}</td>
+                    <td style={{ padding: 13 }}><strong style={{ fontSize: 18, color: negative ? "#b42318" : lowStock ? "#a85b00" : "#182331" }}>{stock.quantityOnHand}</strong></td>
+                    <td style={{ padding: 13, whiteSpace: "pre-line", overflowWrap: "anywhere", maxWidth: 290 }}>{stock.binLocation || <span style={{ color: "#7b8793" }}>Not recorded</span>}</td>
                     <td style={{ padding: 13 }}>{stock.minimumQuantity}</td>
                     <td style={{ padding: 13 }}>{stock.onOrder || "—"}</td>
-                    <td style={{ padding: 13 }}>{stock.location || "—"}</td>
-                    <td style={{ padding: 13, whiteSpace: "pre-line", overflowWrap: "anywhere", maxWidth: 280 }}>{stock.binLocation || "—"}</td>
-                    <td style={{ padding: 13 }}>{links.length ? links.map((itemVendor) => `${itemVendor.name}${itemVendor.preferred ? " ★" : ""}`).join(", ") : "—"}</td>
-                    <td style={{ padding: 13, maxWidth: 260 }}>{equipment.length ? `${equipment.slice(0, 5).map((entry) => entry.unit).join(", ")}${equipment.length > 5 ? ` +${equipment.length - 5}` : ""}` : "—"}</td>
                     <td style={{ padding: 13 }}>{stock.unitCost == null ? "—" : stock.unitCost.toLocaleString(undefined, { style: "currency", currency: "USD" })}</td>
-                    <td style={{ padding: 13, whiteSpace: "nowrap" }}>
-                      <ReceivingHistoryButton partId={item.id} partNumber={item.partNumber} description={item.description}/>
-                      <button onClick={() => void physicalCount(item)} style={{ marginRight: 6 }} disabled={warehouseCode === "ALL"}>Physical Count</button>
-                      <button onClick={() => editPart(item)} style={{ marginRight: 6 }}>Edit</button>
-                      {partStatus === "active" ? <>
-                        <button onClick={() => void archivePart(item)} style={{ marginRight: 6, border: "1px solid #8a5a00", color: "#8a5a00", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Archive</button>
-                        {data?.viewerRole === "admin" && <button onClick={() => void deletePart(item)} style={{ border: "1px solid #b42318", color: "#b42318", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 900 }}>Delete</button>}
-                      </> : <>
-                        <button onClick={() => void restorePart(item)} style={{ marginRight: 6, border: "1px solid #176448", color: "#176448", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 800 }}>Restore</button>
-                        {data?.viewerRole === "admin" && <button onClick={() => void deletePart(item)} style={{ border: "1px solid #b42318", color: "#b42318", background: "white", borderRadius: 5, padding: "4px 7px", fontWeight: 900 }}>Delete</button>}
-                      </>}
+                    <td style={{ padding: 13, minWidth: 220 }}>
+                      <div className={pageStyles.rowActions}>
+                        {partStatus === "active" ? <button type="button" className={pageStyles.updateButton} aria-expanded={quickUpdate?.partId === item.id} aria-controls={`inventory-update-${item.id}`} onClick={() => toggleQuickUpdate(item)} disabled={quickBusy}>Update {quickUpdate?.partId === item.id ? "▴" : "▾"}</button> : <button type="button" onClick={() => void restorePart(item)} className={pageStyles.detailsButton}>Restore</button>}
+                        <button type="button" onClick={() => editPart(item)} className={pageStyles.detailsButton} disabled={quickBusy}>Part details</button>
+                      </div>
+                      <div style={{ marginTop: 8 }}><ReceivingHistoryButton partId={item.id} partNumber={item.partNumber} description={item.description}/></div>
                     </td>
                   </tr>
+                  {quickUpdate?.partId === item.id && <tr id={`inventory-update-${item.id}`}><td colSpan={7} style={{ padding: 0 }}>
+                    <InventoryQuickUpdate key={`${item.id}:${quickUpdate.warehouseCode}`} part={item} warehouses={data?.warehouses ?? []} initialWarehouseCode={quickUpdate.warehouseCode} onSaved={quickUpdateSaved} onClose={() => { closeQuickUpdate(); }} onDirtyChange={setQuickDirty} onBusyChange={setQuickBusy} />
+                    <div className={pageStyles.partContext}><div><strong>Suppliers</strong><span>{links.length ? links.map((itemVendor) => `${itemVendor.name}${itemVendor.preferred ? " ★" : ""}`).join(", ") : "No suppliers selected"}</span></div><div><strong>Used on equipment</strong><span>{equipment.length ? equipment.map((entry) => entry.unit).join(", ") : "No equipment linked"}</span></div></div>
+                  </td></tr>}
+                  </Fragment>
                 );
               })}
-              {!visibleParts.length && <tr><td colSpan={11} style={{ padding: 30, textAlign: "center", color: "#6c7886" }}>No inventory records match these filters.</td></tr>}
+              {!visibleParts.length && <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#6c7886" }}>No inventory records match these filters.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -597,12 +632,12 @@ export default function InventoryPage() {
 
       {showVendorForm && (
         <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 60 }}>
-          <form onSubmit={saveVendor} style={{ width: "min(560px,100%)", background: "white", borderRadius: 14, padding: 24, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <form onSubmit={saveVendor} className={pageStyles.partForm} style={{ width: "min(560px,100%)" }}>
             <div style={{ gridColumn: "1 / -1" }}><h2 style={{ margin: 0 }}>Add vendor</h2><p style={{ margin: "7px 0 0", color: "#6c7886", fontSize: 13 }}>New vendors become available immediately in every part&apos;s supplier list.</p></div>
-            <input required placeholder="Vendor name" value={vendor.name} onChange={(event) => setVendor({ ...vendor, name: event.target.value })} style={{ gridColumn: "1 / -1", padding: 11 }} />
-            <input placeholder="Phone" value={vendor.phone} onChange={(event) => setVendor({ ...vendor, phone: event.target.value })} style={{ padding: 11 }} />
-            <input type="email" placeholder="Email" value={vendor.email} onChange={(event) => setVendor({ ...vendor, email: event.target.value })} style={{ padding: 11 }} />
-            <textarea placeholder="Notes" value={vendor.notes} onChange={(event) => setVendor({ ...vendor, notes: event.target.value })} rows={4} style={{ gridColumn: "1 / -1", padding: 11, resize: "vertical" }} />
+            <label className={pageStyles.field} style={{ gridColumn: "1 / -1" }}>Vendor name<input required value={vendor.name} onChange={(event) => setVendor({ ...vendor, name: event.target.value })} /></label>
+            <label className={pageStyles.field}>Phone<input type="tel" value={vendor.phone} onChange={(event) => setVendor({ ...vendor, phone: event.target.value })} /></label>
+            <label className={pageStyles.field}>Email<input type="email" value={vendor.email} onChange={(event) => setVendor({ ...vendor, email: event.target.value })} /></label>
+            <label className={pageStyles.field} style={{ gridColumn: "1 / -1" }}>Notes<textarea value={vendor.notes} onChange={(event) => setVendor({ ...vendor, notes: event.target.value })} rows={4} style={{ resize: "vertical" }} /></label>
             <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 10 }}><button type="button" onClick={() => { setShowVendorForm(false); setVendor(blankVendor); }} style={{ padding: "11px 16px" }}>Cancel</button><button type="submit" style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800 }}>Save vendor</button></div>
           </form>
         </div>
@@ -610,70 +645,58 @@ export default function InventoryPage() {
 
       {showPartForm && (
         <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 50, overflowY: "auto" }}>
-          <form onSubmit={savePart} style={{ width: "min(900px,100%)", background: "white", borderRadius: 14, padding: 24, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, margin: "20px 0" }}>
-            <h2 style={{ gridColumn: "1 / -1", margin: 0 }}>{part.id ? "Edit part" : "Add part"}</h2>
-            <input required placeholder="Part number" value={part.partNumber} onChange={(event) => setPart({ ...part, partNumber: event.target.value })} style={{ padding: 11 }} />
-            <input required placeholder="Description" value={part.description} onChange={(event) => setPart({ ...part, description: event.target.value })} style={{ padding: 11 }} />
+          <form onSubmit={savePart} className={pageStyles.partForm} role="dialog" aria-modal="true" aria-labelledby="inventory-part-form-title" aria-busy={partSaving}>
+            <header className={pageStyles.modalHeader}><div><h2 id="inventory-part-form-title">{part.id ? "Part details" : "Add part"}</h2><p>{part.id ? `${part.partNumber} · ${part.description}` : "Enter the part details, then choose suppliers and equipment."}</p></div><button type="button" className={pageStyles.detailsButton} disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }}>Close</button></header>
+            {message && <p role="alert" style={{ gridColumn: "1 / -1", background: "#fff8e6", padding: 12, borderRadius: 7, margin: 0 }}>{message}</p>}
+            <label className={pageStyles.field}>Part number<input required value={part.partNumber} onChange={(event) => setPart({ ...part, partNumber: event.target.value })} disabled={partSaving} /></label>
+            <label className={pageStyles.field}>Description<input required value={part.description} onChange={(event) => setPart({ ...part, description: event.target.value })} disabled={partSaving} /></label>
             {part.id ? <div style={{ padding: 11, border: "1px solid #dce2e7", borderRadius: 8, background: "#f7f9fa" }}>
               <span style={{ display: "block", color: "#657383", fontSize: 10, fontWeight: 900, letterSpacing: ".08em" }}>TOTAL WAREHOUSE STOCK — READ ONLY</span>
               <strong style={{ display: "block", marginTop: 5, fontSize: 20, color: Number(editingWarehouseStocks.length ? editingPhysicalTotal : (editingItem?.quantityOnHand ?? part.quantityOnHand)) < 0 ? "#b42318" : "#182331" }}>{editingWarehouseStocks.length ? editingPhysicalTotal : (editingItem?.quantityOnHand ?? part.quantityOnHand)}</strong>
               <small style={{ display: "block", marginTop: 4, color: "#6c7886" }}>Use Warehouse physical stock below to correct inventory. Editing the part record does not change warehouse counts.</small>
-            </div> : <input type="number" step="any" placeholder="Initial quantity on hand" value={part.quantityOnHand} onChange={(event) => setPart({ ...part, quantityOnHand: Number(event.target.value) })} style={{ padding: 11 }} />}
-            <input type="number" step="any" placeholder="Fallback reorder level" value={part.reorderLevel} onChange={(event) => setPart({ ...part, reorderLevel: Number(event.target.value) })} style={{ padding: 11 }} />
-            <input type="number" step="0.01" placeholder="Unit cost" value={part.unitCost} onChange={(event) => setPart({ ...part, unitCost: event.target.value })} style={{ padding: 11 }} />
-            <input aria-label="General location / fallback bin" placeholder="General location / fallback bin" title="Used for parts without an assigned warehouse. Warehouse bin locations are listed below." value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} style={{ padding: 11 }} />
+            </div> : <label className={pageStyles.field}>Initial quantity on hand<input type="number" min="0" step="any" value={part.quantityOnHand} onChange={(event) => setPart({ ...part, quantityOnHand: Number(event.target.value) })} disabled={partSaving} /></label>}
+            <label className={pageStyles.field}>Default minimum stock<input type="number" min="0" step="any" value={part.reorderLevel} onChange={(event) => setPart({ ...part, reorderLevel: Number(event.target.value) })} disabled={partSaving} /><small>Used when a warehouse does not have its own minimum.</small></label>
+            <label className={pageStyles.field}>Unit cost ($)<input type="number" min="0" step="0.01" value={part.unitCost} onChange={(event) => setPart({ ...part, unitCost: event.target.value })} disabled={partSaving} /></label>
+            <label className={pageStyles.field}>General location / fallback bin<input value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} disabled={partSaving} /><small>For parts without a warehouse. Use Update on the inventory row to change warehouse bins.</small></label>
 
             {part.id && editingItem && <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Warehouse physical stock</legend>
-              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>These warehouse quantities are what Inventory actually totals. Use <b>Physical Count</b> on the terminal you counted.</p>
+              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Physical stock includes reserved parts. Choose <b>Physical Count</b> for the warehouse you counted.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 9 }}>
                 {editingWarehouseStocks.length ? editingWarehouseStocks.map((stock) => <div key={stock.warehouseCode} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: 10, border: "1px solid #edf0f2", borderRadius: 8, background: Number(stock.quantityOnHand) < 0 ? "#fff0f0" : "white" }}>
                   <span><b>{stock.warehouseName}</b><small style={{ display: "block", color: "#6c7886", marginTop: 3 }}>{stock.warehouseCode}{Number(stock.reserved ?? 0) > 0 ? ` · ${stock.reserved} reserved` : ""}</small><small style={{ display: "block", color: "#44515e", marginTop: 5, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>Bin: {stock.binLocation || "Not recorded"}</small></span>
-                  <span style={{ textAlign: "right" }}><strong style={{ display: "block", color: Number(stock.physicalOnHand ?? stock.quantityOnHand) < 0 ? "#b42318" : "#182331", fontSize: 18 }}>{stock.physicalOnHand ?? stock.quantityOnHand}</strong><small style={{ display: "block", color: "#6c7886" }}>physical</small><button type="button" onClick={() => void physicalCount(editingItem, stock.warehouseCode)} style={{ marginTop: 4, padding: "6px 9px", border: "1px solid #0d1b2b", borderRadius: 7, background: "white", color: "#0d1b2b", fontSize: 10, fontWeight: 900 }}>PHYSICAL COUNT</button></span>
+                  <span style={{ textAlign: "right" }}><strong style={{ display: "block", color: Number(stock.physicalOnHand ?? stock.quantityOnHand) < 0 ? "#b42318" : "#182331", fontSize: 18 }}>{stock.physicalOnHand ?? stock.quantityOnHand}</strong><small style={{ display: "block", color: "#6c7886" }}>physical</small><button type="button" disabled={partSaving} onClick={() => void physicalCount(editingItem, stock.warehouseCode)} style={{ marginTop: 4, padding: "6px 9px", border: "1px solid #0d1b2b", borderRadius: 7, background: "white", color: "#0d1b2b", fontSize: 10, fontWeight: 900 }}>PHYSICAL COUNT</button></span>
                 </div>) : <div style={{ color: "#6c7886", fontSize: 12 }}>No warehouse stock rows exist for this part yet.</div>}
               </div>
             </fieldset>}
 
             <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Minimum stock by warehouse</legend>
-              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Set any minimum you want. Blank uses the fallback reorder level above.</p>
+              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Blank uses the default minimum stock above. Enter 0 to set no minimum.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
                 {(data?.warehouses ?? []).map((warehouse) => (
                   <label key={warehouse.code} style={{ display: "grid", gap: 5, fontSize: 12, fontWeight: 700 }}>{warehouse.name}
-                    <input type="number" min="0" step="any" placeholder={String(part.reorderLevel)} value={part.warehouseMinimums[warehouse.code] ?? ""} onChange={(event) => setPart((current) => ({ ...current, warehouseMinimums: { ...current.warehouseMinimums, [warehouse.code]: event.target.value } }))} style={{ padding: 10 }} />
+                    <input type="number" min="0" step="any" disabled={partSaving} placeholder={`Default: ${part.reorderLevel}`} value={part.warehouseMinimums[warehouse.code] ?? ""} onChange={(event) => setPart((current) => ({ ...current, warehouseMinimums: { ...current.warehouseMinimums, [warehouse.code]: event.target.value } }))} />
                   </label>
                 ))}
               </div>
             </fieldset>
 
-            <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
-              <legend style={{ fontWeight: 800, padding: "0 6px" }}>Suppliers</legend>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 8, maxHeight: 190, overflowY: "auto" }}>
-                {(data?.vendors ?? []).map((itemVendor) => <label key={itemVendor.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: 8, border: "1px solid #edf0f2", borderRadius: 8 }}><input type="checkbox" checked={part.vendorIds.includes(itemVendor.id)} onChange={() => toggleVendor(itemVendor.id)} /><span>{itemVendor.name}</span></label>)}
-              </div>
-            </fieldset>
+            <div style={{ gridColumn: "1 / -1" }}><InventoryChoicePicker label="Suppliers" options={(data?.vendors ?? []).map((itemVendor) => ({ id: itemVendor.id, label: itemVendor.name }))} selectedIds={part.vendorIds} onToggle={toggleVendor} placeholder="Choose suppliers…" emptyText="Add a vendor to make it available here." disabled={partSaving} /></div>
 
-            <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, fontWeight: 700 }}>Preferred vendor
-              <select value={part.preferredVendorId} onChange={(event) => setPart({ ...part, preferredVendorId: event.target.value })} style={{ padding: 11 }}><option value="">No preferred vendor</option>{selectedVendors.map((itemVendor) => <option key={itemVendor.id} value={itemVendor.id}>{itemVendor.name}</option>)}</select>
+            <label className={pageStyles.field} style={{ gridColumn: "1 / -1" }}>Preferred vendor
+              <select value={part.preferredVendorId} onChange={(event) => setPart({ ...part, preferredVendorId: event.target.value })} disabled={partSaving}><option value="">No preferred vendor</option>{selectedVendors.map((itemVendor) => <option key={itemVendor.id} value={itemVendor.id}>{itemVendor.name}</option>)}</select>
             </label>
 
-            <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
-              <legend style={{ fontWeight: 800, padding: "0 6px" }}>Used on equipment</legend>
-              <p style={{ margin: "0 0 10px", color: "#6c7886", fontSize: 13 }}>Link this part to every truck, trailer, forklift, or other active unit that uses it.</p>
-              <input value={equipmentQuery} onChange={(event) => setEquipmentQuery(event.target.value)} placeholder="Search unit, category, or equipment type…" style={{ width: "100%", boxSizing: "border-box", padding: 10, marginBottom: 10 }} />
-              {selectedEquipment.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>{selectedEquipment.map((equipment) => <button key={equipment.id} type="button" onClick={() => toggleEquipment(equipment.id)} style={{ border: "1px solid #b9c3cc", borderRadius: 999, background: "#f7f9fa", padding: "5px 9px" }}>{equipment.unit} ×</button>)}</div>}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 7, maxHeight: 240, overflowY: "auto" }}>
-                {equipmentMatches.map((equipment) => <label key={equipment.id} style={{ display: "flex", gap: 7, alignItems: "center", padding: 7, border: "1px solid #edf0f2", borderRadius: 8 }}><input type="checkbox" checked={part.equipmentIds.includes(equipment.id)} onChange={() => toggleEquipment(equipment.id)} /><span><b>{equipment.unit}</b><small style={{ display: "block", color: "#7a8793" }}>{equipment.category} · {equipment.equipmentType}</small></span></label>)}
-              </div>
-            </fieldset>
+            <div style={{ gridColumn: "1 / -1" }}><InventoryChoicePicker label="Used on equipment" options={(data?.equipment ?? []).map((equipment) => ({ id: equipment.id, label: equipment.unit, description: `${equipment.category} · ${equipment.equipmentType}` }))} selectedIds={part.equipmentIds} onToggle={toggleEquipment} placeholder="Choose trucks, trailers, or other equipment…" emptyText="No active equipment is available." disabled={partSaving} /></div>
 
-            <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div className={pageStyles.modalFooter}>
               <div style={{ display: "flex", gap: 8 }}>
-                {part.id && editingItem && partStatus === "active" && <button type="button" onClick={() => void archivePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #8a5a00", borderRadius: 8, background: "white", color: "#8a5a00", fontWeight: 900 }}>Archive Part</button>}
-                {part.id && editingItem && partStatus === "archived" && <button type="button" onClick={() => void restorePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #176448", borderRadius: 8, background: "white", color: "#176448", fontWeight: 900 }}>Restore Part</button>}
-                {part.id && editingItem && data?.viewerRole === "admin" && <button type="button" onClick={() => void deletePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #b42318", borderRadius: 8, background: "#fff5f5", color: "#b42318", fontWeight: 950 }}>Delete Part</button>}
+                {part.id && editingItem && partStatus === "active" && <button type="button" disabled={partSaving} onClick={() => void archivePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #8a5a00", borderRadius: 8, background: "white", color: "#8a5a00", fontWeight: 900 }}>Archive Part</button>}
+                {part.id && editingItem && partStatus === "archived" && <button type="button" disabled={partSaving} onClick={() => void restorePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #176448", borderRadius: 8, background: "white", color: "#176448", fontWeight: 900 }}>Restore Part</button>}
+                {part.id && editingItem && data?.viewerRole === "admin" && <button type="button" disabled={partSaving} onClick={() => void deletePart(editingItem)} style={{ padding: "11px 16px", border: "1px solid #b42318", borderRadius: 8, background: "#fff5f5", color: "#b42318", fontWeight: 950 }}>Delete Part</button>}
               </div>
-              <div style={{ display: "flex", gap: 10 }}><button type="button" onClick={() => { setShowPartForm(false); setPart(blankPart); setEquipmentQuery(""); }} style={{ padding: "11px 16px" }}>Cancel</button><button type="submit" style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800 }}>Save part</button></div>
+              <div style={{ display: "flex", gap: 10 }}><button type="button" disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }} className={pageStyles.detailsButton}>Cancel</button><button type="submit" disabled={partSaving} style={{ border: 0, borderRadius: 8, padding: "11px 18px", background: "#f47b20", color: "white", fontWeight: 800, opacity: partSaving ? 0.6 : 1 }}>{partSaving ? "Saving…" : "Save part"}</button></div>
             </div>
           </form>
         </div>
