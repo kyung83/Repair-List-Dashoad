@@ -22,8 +22,8 @@ export default function YardScopeBanner(){
   </section>;
 
   const label=yardLabel(yard);
-  return <section style={{margin:"18px 34px 0",padding:14,border:"1px solid #cfd8df",borderRadius:12,background:"#f7f9fa",color:"#182331"}}>
+  return <section style={{margin:"18px 34px 0",padding:14,border:"1px solid #cfd8df",borderRadius:12,background:"#f7f9fa",color:"#1b2421"}}>
     <strong style={{display:"block"}}>WORK YARD · {label.toUpperCase()}</strong>
-    <span style={{display:"block",marginTop:4,fontSize:13,color:"#667482"}}>Available Units and All Open Units are scoped to repairs currently in the {label} yard. Repairs assigned to another tech are visible but stay assigned. Unassigned repairs can be opened and claimed.</span>
+    <span style={{display:"block",marginTop:4,fontSize:13,color:"#68746f"}}>Available Units and All Open Units are scoped to repairs currently in the {label} yard. Repairs assigned to another tech are visible but stay assigned. Unassigned repairs can be opened and claimed.</span>
   </section>;
 }
