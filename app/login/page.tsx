@@ -29,7 +29,7 @@ export default function LoginPage() {
     <section style={{width:"min(460px, 100%)",background:"white",border:"1px solid #d7ded9",borderRadius:18,padding:32,boxShadow:"0 24px 70px #173f3718"}}>
       <div style={{marginBottom:22}}>
         <img src="/northern-logistics-logo.webp" alt="Northern Logistics — Employee Owned" style={{display:"block",width:230,maxWidth:"100%",height:"auto"}}/>
-        <span style={{display:"block",marginTop:8,color:"#68746f",fontSize:12}}>Repair, PM, inventory and shop labor</span>
+        <span style={{display:"block",marginTop:8,color:"#68746f",fontSize:12}}>Maintenance Software</span>
       </div>
       <h1 style={{margin:0,fontSize:30,color:"#173f37"}}>Sign in</h1>
       <p style={{margin:"8px 0 24px",color:"#68746f",lineHeight:1.5}}>Use the username and password created for you by an administrator.</p>
