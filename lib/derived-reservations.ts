@@ -27,9 +27,11 @@ export async function getDerivedPartAvailability(db: D1Database): Promise<Derive
     FROM keys k
     JOIN parts p ON p.id=k.part_id AND p.active=1
     JOIN warehouses w ON w.id=k.warehouse_id AND w.active=1
+    LEFT JOIN part_warehouse_catalog_status cs ON cs.part_id=k.part_id AND cs.warehouse_id=k.warehouse_id
     LEFT JOIN stock s ON s.part_id=k.part_id AND s.warehouse_id=k.warehouse_id
     LEFT JOIN reserved r ON r.part_id=k.part_id AND r.warehouse_id=k.warehouse_id
     LEFT JOIN part_warehouse_minimums m ON m.part_id=k.part_id AND m.warehouse_id=k.warehouse_id
+    WHERE COALESCE(cs.status,'active')='active'
     ORDER BY p.description,p.part_number,w.name
   `).all<{
     part_id:number;part_number:string;description:string;warehouse_id:number;warehouse_code:string;warehouse_name:string;
