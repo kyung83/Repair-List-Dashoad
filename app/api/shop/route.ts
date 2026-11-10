@@ -3,6 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { applyPartToRepair } from '@/lib/inventory-operations';
 import { getDerivedPartAvailability, requestPartDerived } from '@/lib/derived-reservations';
 import { getRepairPartRequests } from '@/lib/parts-lifecycle';
+import { getActiveShopDutyForUser } from '@/lib/shop-duties';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { normalizeYard } from '@/lib/yards';
 import { completeRepairTypeChecklist, validateRepairTypeChecklistBeforeClose } from '@/lib/repair-types';
@@ -272,8 +273,17 @@ async function restoreWorkingManagerAssignments(request:Request,response:Respons
   return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
 }
 
+async function attachActiveShopDuty(request:Request,response:Response) {
+  if (!response.ok) return response;
+  const user = await getSessionUser(env.DB,request);
+  if (!user) return response;
+  const payload = await response.json() as Record<string,unknown>;
+  payload.activeShopDuty = await getActiveShopDutyForUser(env.DB,user.id);
+  return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
+}
+
 export async function GET(request: Request) {
-  return restoreWorkingManagerAssignments(request,await legacyGET(request));
+  return attachActiveShopDuty(request,await restoreWorkingManagerAssignments(request,await legacyGET(request)));
 }
 
 export async function POST(request: Request) {
