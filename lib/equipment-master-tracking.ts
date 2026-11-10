@@ -311,11 +311,17 @@ export async function reuseEquipmentUnitNumber(db: D1Database, body: Record<stri
   const transferCurrentGeotab = body.transferCurrentGeotab === true;
 
   const prior = await db.prepare(`
-    SELECT id, unit, category, equipment_type, trailer_type, trailer_subtype,
-           current_mileage, mileage_updated_at, geotab_device_id, geotab_trailer_id,
-           merged_into_equipment_id
-    FROM equipment
-    WHERE id = ?
+    SELECT e.id, e.unit, e.category, e.equipment_type, e.trailer_type, e.trailer_subtype,
+           e.current_mileage, e.mileage_updated_at, e.geotab_device_id, e.geotab_trailer_id,
+           e.merged_into_equipment_id,
+           (
+             SELECT d.geotab_device_id
+             FROM equipment_geotab_devices d
+             WHERE d.equipment_id = e.id AND d.current = 1
+             ORDER BY d.id DESC LIMIT 1
+           ) AS current_geotab_device_id
+    FROM equipment e
+    WHERE e.id = ?
   `).bind(priorId).first<{
     id:number;
     unit:string;
@@ -328,6 +334,7 @@ export async function reuseEquipmentUnitNumber(db: D1Database, body: Record<stri
     geotab_device_id:string|null;
     geotab_trailer_id:string|null;
     merged_into_equipment_id:number|null;
+    current_geotab_device_id:string|null;
   }>();
 
   if (!prior) throw new Error('Equipment was not found.');
@@ -344,7 +351,11 @@ export async function reuseEquipmentUnitNumber(db: D1Database, body: Record<stri
   if (duplicate) throw new Error(`Unit ${unit} already has another equipment record. Resolve that duplicate before reusing the number.`);
 
   const retiredUnit = `HIST-${unit}-${priorId}`;
-  const geotabDeviceId = transferCurrentGeotab ? prior.geotab_device_id : null;
+  if (transferCurrentGeotab && !prior.current_geotab_device_id) {
+    throw new Error('This equipment does not have a current Geotab assignment to transfer. Reuse the unit number without transferring Geotab, then assign the correct device to the replacement asset.');
+  }
+
+  const geotabDeviceId = transferCurrentGeotab ? prior.current_geotab_device_id : null;
   const geotabTrailerId = transferCurrentGeotab ? prior.geotab_trailer_id : null;
 
   const statements = [
