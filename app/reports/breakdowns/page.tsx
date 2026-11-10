@@ -69,13 +69,13 @@ type Data = {
 type Filters = { start: string; end: string; unit: string; equipmentType: string; tirePosition: string; category: string; provider: string; status: string; location: string; q: string };
 type SortKey = "createdAt" | "unit" | "equipmentType" | "tirePositions" | "category" | "serviceProvider" | "location" | "status" | "arrivalMinutes" | "downtimeMinutes" | "totalCost";
 
-const panel = { background: "white", border: "1px solid #dce2e7", borderRadius: 14, padding: 18 } as const;
+const panel = { background: "white", border: "1px solid #d7ded9", borderRadius: 14, padding: 18 } as const;
 const input = { width: "100%", boxSizing: "border-box", padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white" } as const;
-const button = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#0d1b2b", color: "white", fontWeight: 850, cursor: "pointer" } as const;
-const lightButton = { ...button, background: "#e8edf2", color: "#172033" } as const;
+const button = { padding: "10px 14px", border: 0, borderRadius: 8, background: "#173f37", color: "white", fontWeight: 850, cursor: "pointer" } as const;
+const lightButton = { ...button, background: "#e8edf2", color: "#1b2421" } as const;
 const deleteButton = { padding: "8px 10px", border: "1px solid #dc2626", borderRadius: 7, background: "#fff1f2", color: "#b91c1c", fontWeight: 850, cursor: "pointer", whiteSpace: "nowrap" } as const;
 const label = { display: "grid", gap: 5, fontWeight: 750, fontSize: 13 } as const;
-const th = { textAlign: "left", padding: 8, borderBottom: "1px solid #dce2e7", whiteSpace: "nowrap", fontSize: 12 } as const;
+const th = { textAlign: "left", padding: 8, borderBottom: "1px solid #d7ded9", whiteSpace: "nowrap", fontSize: 12 } as const;
 const td = { padding: 8, borderBottom: "1px solid #eef2f5", verticalAlign: "top", fontSize: 13 } as const;
 
 function ymd(date: Date) {
@@ -219,8 +219,8 @@ export default function BreakdownReportsPage() {
     } finally { setDeletingId(null); }
   }
 
-  if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>Loading breakdown reports…</main>;
-  if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f3f5f7" }}>{message || "Breakdown reports are unavailable."}</main>;
+  if (!data && loading) return <main style={{ minHeight: "100vh", padding: 36, background: "#f4f6f4" }}>Loading breakdown reports…</main>;
+  if (!data) return <main style={{ minHeight: "100vh", padding: 36, background: "#f4f6f4" }}>{message || "Breakdown reports are unavailable."}</main>;
 
   const tireOptions = breakdownTirePositionOptions(filters.equipmentType);
   const unitOptions = data.filterOptions.equipment.filter((row) => !filters.equipmentType || String(row.equipmentType).trim().toLowerCase() === filters.equipmentType);
@@ -234,13 +234,13 @@ export default function BreakdownReportsPage() {
   }));
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "34px 34px 110px" }}>
+    <main style={{ minHeight: "100vh", background: "#f4f6f4", color: "#1b2421", padding: "34px 34px 110px" }}>
       <ModuleTabs module="reports" />
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
         <div>
           <p style={{ margin: 0, color: "#b45309", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>BREAKDOWN REPORTS</p>
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Roadside Breakdown Cost & Performance</h1>
-          <p style={{ margin: "8px 0 0", color: "#64748b", maxWidth: 960 }}>Breakdowns stay tied to the same repair and unit cost records used by the main Reports screens. This view isolates roadside activity for cost, frequency, provider, location and downtime analysis.</p>
+          <p style={{ margin: "8px 0 0", color: "#68746f", maxWidth: 960 }}>Breakdowns stay tied to the same repair and unit cost records used by the main Reports screens. This view isolates roadside activity for cost, frequency, provider, location and downtime analysis.</p>
         </div>
         <button style={button} onClick={() => downloadCsv(`breakdowns-${data.range.startDate}-to-${data.range.endDate}.csv`, csvRows)}>Export Breakdown CSV</button>
       </header>
@@ -268,8 +268,8 @@ export default function BreakdownReportsPage() {
           <button style={lightButton} onClick={() => { const next = { ...blank, ...rangeFor("ytd") }; setPreset("ytd"); setFilters(next); setShowTireDetails(false); void load(next); }} disabled={loading}>Reset</button>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, fontWeight: 750 }}><input type="checkbox" checked={showTireDetails} onChange={(event) => setShowTireDetails(event.target.checked)} />Show tire positions / sizes</label>
         </div>
-        <p style={{ margin: "12px 0 0", fontSize: 12, color: "#64748b" }}>Showing report for: <strong>{appliedType ? `${breakdownEquipmentLabel(appliedType)}s` : "All equipment"}</strong>{appliedPosition ? ` · ${appliedPosition.label}` : " · No tire-position filter"}. Change filters, then select Run Breakdown Report.</p>
-        {(showTireDetails || appliedPosition) && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>Tire positions and sizes are the saved breakdown details. Missing details show as Not recorded. Each matching breakdown is counted once; costs are full breakdown totals, not per-tire prices. CSV includes the equipment type and recorded tire details.</p>}
+        <p style={{ margin: "12px 0 0", fontSize: 12, color: "#68746f" }}>Showing report for: <strong>{appliedType ? `${breakdownEquipmentLabel(appliedType)}s` : "All equipment"}</strong>{appliedPosition ? ` · ${appliedPosition.label}` : " · No tire-position filter"}. Change filters, then select Run Breakdown Report.</p>
+        {(showTireDetails || appliedPosition) && <p style={{ margin: "8px 0 0", fontSize: 12, color: "#68746f" }}>Tire positions and sizes are the saved breakdown details. Missing details show as Not recorded. Each matching breakdown is counted once; costs are full breakdown totals, not per-tire prices. CSV includes the equipment type and recorded tire details.</p>}
       </section>
 
       <section style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(165px,1fr))", gap: 12 }}>
@@ -277,14 +277,14 @@ export default function BreakdownReportsPage() {
           ["BREAKDOWNS", num(data.summary.breakdownCount)], ["UNITS AFFECTED", num(data.summary.unitsAffected)], ["OPEN", num(data.summary.openCount)], ["COMPLETED", num(data.summary.completedCount)],
           ["BREAKDOWN COST", money(data.summary.totalCost)], ["AVG COST", money(data.summary.averageCost)], ["AVG ARRIVAL", hoursFromMinutes(data.summary.averageArrivalMinutes)],
           ["AVG DOWNTIME", hoursFromMinutes(data.summary.averageDowntimeMinutes)], ["TOTAL DOWNTIME", `${num(data.summary.totalDowntimeHours, 1)} hr`],
-        ].map(([name, value]) => <article key={String(name)} style={panel}><small style={{ color: "#64748b", fontWeight: 850 }}>{name}</small><strong style={{ display: "block", marginTop: 7, fontSize: 22 }}>{value}</strong></article>)}
+        ].map(([name, value]) => <article key={String(name)} style={panel}><small style={{ color: "#68746f", fontWeight: 850 }}>{name}</small><strong style={{ display: "block", marginTop: 7, fontSize: 22 }}>{value}</strong></article>)}
       </section>
 
       {data.truncated && <div style={{ ...panel, marginTop: 18, borderColor: "#f2c66d", background: "#fff8e6" }}>More than 5,000 breakdowns match. Summary totals and analysis tables cover the full match; narrow the filters to inspect every individual breakdown row.</div>}
 
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#64748b" }}>Click a column heading to sort this breakdown data on its own.</small></div>
+          <div><h2 style={{ margin: 0 }}>Breakdown Detail</h2><small style={{ color: "#68746f" }}>Click a column heading to sort this breakdown data on its own.</small></div>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <strong>{num(data.summary.breakdownCount)} breakdowns</strong>
             <div className="breakdown-summary-section-actions breakdown-detail-actions" role="group" aria-label="Breakdown Detail exports" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -294,7 +294,7 @@ export default function BreakdownReportsPage() {
             </div>
           </div>
         </div>
-        <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: 12 }}>These buttons export the loaded detail rows in the displayed sort order. Tire positions / sizes are included when shown. Run the report after changing filters.</p>
+        <p style={{ margin: "8px 0 0", color: "#68746f", fontSize: 12 }}>These buttons export the loaded detail rows in the displayed sort order. Tire positions / sizes are included when shown. Run the report after changing filters.</p>
         {exportMessage && <div role="status" style={{ marginTop: 8, padding: 10, background: "#fff8e6", border: "1px solid #f2c66d", borderRadius: 8, fontSize: 13 }}>{exportMessage}</div>}
         <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: (data.permissions.canDeleteRecords ? 1960 : 1700) + (showTireDetails ? 340 : 100) }}><thead><tr>
           <th style={th}>{sortHead("Date", "createdAt")}</th>
