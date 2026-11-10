@@ -13,9 +13,9 @@ type HistoricalRo = {
   history: Change[];
 };
 const amount = (value: number) => value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-const frame = { border: '1px solid #dce2e7', borderRadius: 12, padding: 16, background: '#fff' } as const;
+const frame = { border: '1px solid #d7ded9', borderRadius: 12, padding: 16, background: '#fff' } as const;
 const control = { padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', width: '100%', boxSizing: 'border-box' } as const;
-const action = { padding: '10px 16px', border: 0, borderRadius: 8, background: '#0d1b2b', color: '#fff', cursor: 'pointer', fontWeight: 800 } as const;
+const action = { padding: '10px 16px', border: 0, borderRadius: 8, background: '#173f37', color: '#fff', cursor: 'pointer', fontWeight: 800 } as const;
 
 export default function HistoricalRoCostEditor({ canEdit, onSaved }: { canEdit: boolean; onSaved: () => void }) {
   const [search, setSearch] = useState('');
@@ -115,11 +115,11 @@ export default function HistoricalRoCostEditor({ canEdit, onSaved }: { canEdit: 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 21 }}>Correct a Historical RO Cost</h2>
-          <p style={{ margin: '5px 0 0', color: '#64748b', fontSize: 13 }}>
+          <p style={{ margin: '5px 0 0', color: '#68746f', fontSize: 13 }}>
             Managers can fix an imported repair order without changing other work. Every correction is recorded.
           </p>
         </div>
-        <span style={{ color: '#475569', fontSize: 12 }}>Managers & administrators only</span>
+        <span style={{ color: '#53645d', fontSize: 12 }}>Managers & administrators only</span>
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void lookup(); }} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14, alignItems: 'flex-end' }}>
         <label style={{ minWidth: 180, flex: '1 1 260px', display: 'grid', gap: 5, fontWeight: 700 }}>
@@ -142,8 +142,8 @@ export default function HistoricalRoCostEditor({ canEdit, onSaved }: { canEdit: 
               ['Current parts', record.partsCost], ['Labor (unchanged)', record.laborCost],
               ['Outside (unchanged)', record.outsideCost], ['Current total', record.totalCost],
             ].map(([label, value]) => (
-              <div key={String(label)} style={{ padding: 12, border: '1px solid #e2e8f0', borderRadius: 8 }}>
-                <small style={{ color: '#64748b' }}>{label}</small>
+              <div key={String(label)} style={{ padding: 12, border: '1px solid #dce3df', borderRadius: 8 }}>
+                <small style={{ color: '#68746f' }}>{label}</small>
                 <strong style={{ display: 'block', marginTop: 4 }}>{amount(Number(value))}</strong>
               </div>
             ))}
@@ -188,7 +188,7 @@ export default function HistoricalRoCostEditor({ canEdit, onSaved }: { canEdit: 
           )}
           <details>
             <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Correction history ({record.history.length})</summary>
-            {record.history.length === 0 ? <p style={{ color: '#64748b' }}>No previous corrections.</p> : (
+            {record.history.length === 0 ? <p style={{ color: '#68746f' }}>No previous corrections.</p> : (
               <div style={{ overflowX: 'auto', marginTop: 9 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700, fontSize: 13 }}>
                   <thead><tr>{['When','Changed by','Previous total','New total','Reason'].map((h) => <th key={h} style={{ textAlign: 'left', padding: 7, borderBottom: '1px solid #cbd5e1' }}>{h}</th>)}</tr></thead>
