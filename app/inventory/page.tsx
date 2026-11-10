@@ -71,6 +71,7 @@ type PartForm = {
   vendorIds: number[];
   warehouseMinimums: Record<string, string>;
   equipmentIds: number[];
+  crossReferences: string[];
 };
 
 type VendorForm = { id: number; name: string; phone: string; email: string; notes: string };
@@ -101,6 +102,7 @@ const blankPart: PartForm = {
   vendorIds: [],
   warehouseMinimums: {},
   equipmentIds: [],
+  crossReferences: [],
 };
 
 const blankVendor: VendorForm = { id: 0, name: "", phone: "", email: "", notes: "" };
@@ -313,7 +315,7 @@ export default function InventoryPage() {
     if (!response.ok || !result.id) return setMessage(result.error || "Part could not be saved");
     if (!part.id) setPart((current) => ({ ...current, id: result.id! }));
 
-    const [vendorResponse, settingsResponse] = await Promise.all([
+    const [vendorResponse, settingsResponse, crossReferenceResponse] = await Promise.all([
       fetch("/api/inventory/part-vendors", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -329,15 +331,22 @@ export default function InventoryPage() {
           equipmentIds: part.equipmentIds,
         }),
       }),
+      fetch("/api/inventory/cross-references", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ partId: result.id, crossReferences: part.crossReferences }),
+      }),
     ]);
     const vendorResult = (await vendorResponse.json()) as { error?: string };
     const settingsResult = (await settingsResponse.json()) as { error?: string };
+    const crossReferenceResult = (await crossReferenceResponse.json()) as { error?: string };
     if (!vendorResponse.ok) return setMessage(vendorResult.error || "Part saved, but vendors could not be saved");
     if (!settingsResponse.ok) return setMessage(settingsResult.error || "Part saved, but minimums/equipment could not be saved");
+    if (!crossReferenceResponse.ok) return setMessage(crossReferenceResult.error || "Part saved, but cross-reference numbers could not be saved");
 
     setPart(blankPart);
     setShowPartForm(false);
-    setMessage("Part, vendors, minimums, and equipment saved.");
+    setMessage("Part, cross-reference numbers, vendors, minimums, and equipment saved.");
     await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Part could not be saved. Please try again.");
@@ -494,6 +503,7 @@ export default function InventoryPage() {
       vendorIds: links.map((itemVendor) => itemVendor.id).filter((id) => id > 0),
       warehouseMinimums,
       equipmentIds: item.compatibleEquipmentIds ?? [],
+      crossReferences: item.crossReferences ?? [],
     });
     setShowPartForm(true);
   }
@@ -658,6 +668,18 @@ export default function InventoryPage() {
             <label className={pageStyles.field}>Default minimum stock<input type="number" min="0" step="any" value={part.reorderLevel} onChange={(event) => setPart({ ...part, reorderLevel: Number(event.target.value) })} disabled={partSaving} /><small>Used when a warehouse does not have its own minimum.</small></label>
             <label className={pageStyles.field}>Unit cost ($)<input type="number" min="0" step="0.01" value={part.unitCost} onChange={(event) => setPart({ ...part, unitCost: event.target.value })} disabled={partSaving} /></label>
             <label className={pageStyles.field}>General location / fallback bin<input value={part.location} onChange={(event) => setPart({ ...part, location: event.target.value })} disabled={partSaving} /><small>For parts without a warehouse. Use Update on the inventory row to change warehouse bins.</small></label>
+
+            <label className={pageStyles.field} style={{ gridColumn: "1 / -1" }}>Cross Reference Part Numbers
+              <textarea
+                rows={4}
+                value={part.crossReferences.join("\n")}
+                onChange={(event) => setPart({ ...part, crossReferences: event.target.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) })}
+                disabled={partSaving || partStatus === "archived"}
+                placeholder={"Enter one cross-reference per line\nExample: LF14000NN\nExample: P551005"}
+                style={{ resize: "vertical" }}
+              />
+              <small>Enter alternate, interchange, vendor, or manufacturer part numbers one per line. These numbers will find this same inventory part in Inventory, Receiving, Transfers, and technician part search.</small>
+            </label>
 
             {part.id && editingItem && <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #dce2e7", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Warehouse physical stock</legend>
