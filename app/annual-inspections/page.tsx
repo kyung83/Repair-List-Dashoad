@@ -82,13 +82,13 @@ export default function AnnualInspectionsPage() {
   }, [forms, query]);
 
   return (
-    <main style={{ minHeight: "100vh", background: "#f3f5f7", color: "#172033", padding: "34px 34px 110px" }}>
+    <main style={{ minHeight: "100vh", background: "#f4f6f4", color: "#1b2421", padding: "34px 34px 110px" }}>
       <MaintenanceTabs />
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 18, flexWrap: "wrap" }}>
         <div>
-          <p style={{ margin: 0, color: "#f47b20", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>PERIODIC INSPECTION RECORDS</p>
+          <p style={{ margin: 0, color: "#2f6f60", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>PERIODIC INSPECTION RECORDS</p>
           <h1 style={{ margin: "7px 0 4px", fontSize: 34 }}>Completed Annual Forms</h1>
-          <p style={{ margin: 0, maxWidth: 850, color: "#64748b", lineHeight: 1.5 }}>
+          <p style={{ margin: 0, maxWidth: 850, color: "#68746f", lineHeight: 1.5 }}>
             Completed Annual inspection forms are kept here for the truck copy and later reprints. Print the newest form after the Annual closes; if the paper copy is lost, search the unit and print the same stored inspection again.
           </p>
         </div>
@@ -107,7 +107,7 @@ export default function AnnualInspectionsPage() {
             style={inputStyle}
           />
         </label>
-        <div style={{ color: "#64748b", fontSize: 12 }}>{visible.length} completed form{visible.length === 1 ? "" : "s"}</div>
+        <div style={{ color: "#68746f", fontSize: 12 }}>{visible.length} completed form{visible.length === 1 ? "" : "s"}</div>
       </section>
 
       <section style={{ marginTop: 16, display: "grid", gap: 10 }}>
@@ -115,7 +115,7 @@ export default function AnnualInspectionsPage() {
           <article key={form.runId} style={formCard}>
             <div style={{ minWidth: 0 }}>
               <div style={{ display: "flex", gap: 9, alignItems: "baseline", flexWrap: "wrap" }}>
-                <strong style={{ fontSize: 20, color: "#0d1b2b" }}>Unit {form.unit || "—"}</strong>
+                <strong style={{ fontSize: 20, color: "#173f37" }}>Unit {form.unit || "—"}</strong>
                 <span style={reportBadge}>{form.reportNumber}</span>
               </div>
               <div style={{ marginTop: 5, color: "#52616c", lineHeight: 1.55 }}>
@@ -141,11 +141,11 @@ export default function AnnualInspectionsPage() {
   );
 }
 
-const buttonStyle = { border: 0, borderRadius: 8, padding: "10px 14px", background: "#0d1b2b", color: "white", fontWeight: 900, cursor: "pointer" } as const;
-const printButton = { display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none", borderRadius: 8, padding: "10px 13px", background: "#f47b20", color: "white", fontWeight: 900, whiteSpace: "nowrap" as const } as const;
-const inputStyle = { width: "100%", boxSizing: "border-box" as const, padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white", color: "#172033" } as const;
-const searchCard = { marginTop: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 14, flexWrap: "wrap" as const, background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 15 } as const;
-const formCard = { background: "white", border: "1px solid #dce2e7", borderRadius: 12, padding: 15, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" as const, boxShadow: "0 4px 18px #12202f0a" } as const;
+const buttonStyle = { border: 0, borderRadius: 8, padding: "10px 14px", background: "#173f37", color: "white", fontWeight: 900, cursor: "pointer" } as const;
+const printButton = { display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none", borderRadius: 8, padding: "10px 13px", background: "#2f6f60", color: "white", fontWeight: 900, whiteSpace: "nowrap" as const } as const;
+const inputStyle = { width: "100%", boxSizing: "border-box" as const, padding: "10px 11px", border: "1px solid #cbd5e1", borderRadius: 8, background: "white", color: "#1b2421" } as const;
+const searchCard = { marginTop: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 14, flexWrap: "wrap" as const, background: "white", border: "1px solid #d7ded9", borderRadius: 12, padding: 15 } as const;
+const formCard = { background: "white", border: "1px solid #d7ded9", borderRadius: 12, padding: 15, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" as const, boxShadow: "0 4px 18px #12202f0a" } as const;
 const reportBadge = { display: "inline-flex", padding: "4px 7px", borderRadius: 999, background: "#eef2f5", color: "#52616c", fontSize: 10, fontWeight: 900 } as const;
 const noticeStyle = { marginTop: 16, padding: 12, borderRadius: 9, border: "1px solid #f2c66d", background: "#fff8e6" } as const;
 const emptyStyle = { padding: 28, border: "1px dashed #cbd5dc", borderRadius: 10, textAlign: "center" as const, color: "#75828d", background: "white" } as const;
