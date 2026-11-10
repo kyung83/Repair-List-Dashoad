@@ -82,15 +82,15 @@ export default function CurrentRepairTypeControl({repairId}:Props){
   </section>;
 }
 
-const box={padding:14,border:"1px solid #b8c9d8",borderRadius:14,background:"white",display:"grid",gap:10,boxShadow:"0 4px 14px #13283d0a"} as const;
+const box={padding:14,border:"1px solid #b8c9d8",borderRadius:14,background:"white",display:"grid",gap:10,boxShadow:"0 4px 14px #173f370a"} as const;
 const requiredBox={...box,border:"2px solid #ef7a22",background:"#fff9f4"} as const;
 const fixedBox={...box,gridTemplateColumns:"minmax(0,1fr) auto",alignItems:"center"} as const;
 const label={fontSize:11,fontWeight:950,letterSpacing:".08em",color:"#6b7782"} as const;
-const headline={fontSize:17,color:"#173a5d"} as const;
-const fixedValue={display:"block",marginTop:3,fontSize:18,color:"#173a5d"} as const;
+const headline={fontSize:17,color:"#2f6f60"} as const;
+const fixedValue={display:"block",marginTop:3,fontSize:18,color:"#2f6f60"} as const;
 const help={fontSize:11,color:"#687783",fontWeight:700} as const;
-const select={width:"100%",boxSizing:"border-box" as const,padding:"11px 12px",border:"1px solid #aebfce",borderRadius:9,background:"white",color:"#17283a",fontWeight:850,fontSize:14} as const;
-const lockedSelect={background:"#f1f4f6",color:"#667482",cursor:"not-allowed"} as const;
+const select={width:"100%",boxSizing:"border-box" as const,padding:"11px 12px",border:"1px solid #aebfce",borderRadius:9,background:"white",color:"#24312c",fontWeight:850,fontSize:14} as const;
+const lockedSelect={background:"#f1f4f6",color:"#68746f",cursor:"not-allowed"} as const;
 const checklistNote={padding:"8px 10px",borderRadius:8,background:"#edf6ff",color:"#244b6d",fontSize:12,fontWeight:800} as const;
 const loadingBox={padding:11,border:"1px solid #d6dfe6",borderRadius:10,background:"white",fontSize:12,fontWeight:800,color:"#657480"} as const;
 const successBox={padding:"8px 10px",borderRadius:8,background:"#eaf7ef",color:"#176440",fontSize:12,fontWeight:850} as const;
