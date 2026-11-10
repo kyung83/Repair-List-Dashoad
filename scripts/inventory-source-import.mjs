@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { inventoryImportHash, normalizeInventoryImport, planInventoryImport, buildInventoryImportSql, verifyInventoryImportPlan, inventoryImportAuditVerificationSql } from '../lib/inventory-import.js';
+import { inventoryImportHash, normalizeInventoryImport, planInventoryImport, buildInventoryImportSql, verifyInventoryImportPlan, inventoryImportAuditVerificationSql, inventoryWarehouseZeroVerificationSql } from '../lib/inventory-import.js';
 
 function argumentsFor(argv) {
   const [mode, ...rest] = argv;
@@ -140,8 +140,14 @@ async function main() {
     const verification=await query(context,inventoryImportAuditVerificationSql,[plan.importKey]);
     const match=verification[0];
     if(Number(match?.audited_rows)!==plan.summary.sourceRows||Number(match?.audited_matching_balances)!==plan.summary.sourceRows||Number(match?.audited_matching_bins)!==plan.summary.sourceRows) throw new Error('Post-import audit verification failed; inspect the retained import audit before retrying.');
-    await privateJson(receiptPath,{ok:true,idempotent:false,...receipt,verification:match});
-    console.log(JSON.stringify({ok:true,mode,idempotent:false,sourceRows:receipt.source_row_count,parts:receipt.part_count,auditedMatchingBalances:match.audited_matching_balances,auditedMatchingBins:match.audited_matching_bins,currentMatchingBalances:match.current_matching_balances,currentMatchingBins:match.current_matching_bins}));
+    const warehouseZeroVerification=[];
+    for (const action of plan.zeroWarehousePlans || []) {
+      const current=(await query(context,inventoryWarehouseZeroVerificationSql,[action.warehouse.id]))[0];
+      if(!current||Number(current.warehouse_active)!==0||Number(current.stock_rows)!==action.stockIds.length||Number(current.zero_stock_rows)!==action.stockIds.length) throw new Error('The zeroed warehouse changed or failed verification; inspect the retained audit before retrying.');
+      warehouseZeroVerification.push({warehouseCode:action.warehouseCode,...current});
+    }
+    await privateJson(receiptPath,{ok:true,idempotent:false,...receipt,verification:match,positiveSourceRows:plan.summary.positiveSourceRows,warehouseZeroRows:plan.summary.warehouseZeroRows,warehouseZeroVerification});
+    console.log(JSON.stringify({ok:true,mode,idempotent:false,sourceRows:receipt.source_row_count,positiveSourceRows:plan.summary.positiveSourceRows,warehouseZeroRows:plan.summary.warehouseZeroRows,parts:receipt.part_count,auditedMatchingBalances:match.audited_matching_balances,auditedMatchingBins:match.audited_matching_bins,currentMatchingBalances:match.current_matching_balances,currentMatchingBins:match.current_matching_bins}));
     return;
   }
   throw new Error('Choose export, preview, or apply.');
