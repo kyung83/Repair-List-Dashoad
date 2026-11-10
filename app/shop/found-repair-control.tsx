@@ -59,7 +59,7 @@ export default function FoundRepairControl({repairId,unit,onAdded}:Props){
   </>;
 }
 
-const tireBox={gridColumn:"1 / -1",gridRow:"1",border:"3px solid #f47b20",borderRadius:13,padding:15,background:"#fff7ef",display:"grid",gap:12} as const;
+const tireBox={gridColumn:"1 / -1",gridRow:"1",border:"3px solid #2f6f60",borderRadius:13,padding:15,background:"#fff7ef",display:"grid",gap:12} as const;
 const tireHelp={marginTop:4,fontSize:13,color:"#5f4b3c",fontWeight:750} as const;
 const legend={marginTop:5,fontSize:11,color:"#806b5d"} as const;
 const axleBox={border:"1px solid #e9c6a8",borderRadius:10,padding:10,background:"white",display:"grid",gap:7} as const;
@@ -67,9 +67,9 @@ const positionGrid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(1
 const positionButton={border:"2px solid #c9d1d8",borderRadius:9,padding:"10px 8px",background:"#f7f9fa",color:"#243441",display:"grid",gap:2,textAlign:"center" as const,cursor:"pointer"} as const;
 const selectedPositionButton={borderColor:"#16784c",background:"#eaf7ef",color:"#0d5c39",boxShadow:"inset 0 0 0 1px #16784c"} as const;
 const saveTireButton={border:0,borderRadius:9,padding:"11px 15px",background:"#16784c",color:"white",fontWeight:950,cursor:"pointer"} as const;
-const foundButton={border:0,borderRadius:12,padding:16,fontWeight:900,fontSize:16,cursor:"pointer",textAlign:"left" as const,background:"#dfeaf5",color:"#173a5d"} as const;
+const foundButton={border:0,borderRadius:12,padding:16,fontWeight:900,fontSize:16,cursor:"pointer",textAlign:"left" as const,background:"#dfeaf5",color:"#2f6f60"} as const;
 const foundHelp={display:"block",marginTop:3,fontSize:11,fontWeight:700,opacity:.82} as const;
 const formBox={padding:10,border:"1px solid #a8bfd6",borderRadius:10,background:"#f4f8fc",display:"grid",gap:8} as const;
-const inputStyle={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #b8c8d7",borderRadius:8,background:"white",color:"#182331"} as const;
+const inputStyle={width:"100%",boxSizing:"border-box" as const,padding:"10px 11px",border:"1px solid #b8c8d7",borderRadius:8,background:"white",color:"#1b2421"} as const;
 const cancelButton={border:"1px solid #c3cdd6",borderRadius:8,padding:"8px 10px",background:"white",fontWeight:800,cursor:"pointer"} as const;
-const saveButton={border:0,borderRadius:8,padding:"8px 10px",background:"#173a5d",color:"white",fontWeight:900,cursor:"pointer"} as const;
+const saveButton={border:0,borderRadius:8,padding:"8px 10px",background:"#2f6f60",color:"white",fontWeight:900,cursor:"pointer"} as const;
