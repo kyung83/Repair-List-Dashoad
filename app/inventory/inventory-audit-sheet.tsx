@@ -100,7 +100,7 @@ export default function InventoryAuditSheet({ snapshot }: { snapshot: InventoryA
 
 const auditCss = `
 .inventory-audit-sheet { display: none; }
-@page inventory-audit { size: letter landscape; margin: .35in; }
+@page inventory-audit { size: letter portrait; margin: .35in; }
 @media print {
   body:has(.inventory-audit-sheet) { margin: 0 !important; padding: 0 !important; background: white !important; }
   body:has(.inventory-audit-sheet) .app-sidebar,
@@ -111,28 +111,28 @@ const auditCss = `
   body:has(.inventory-audit-sheet) .app-shell-content { margin: 0 !important; padding: 0 !important; overflow: visible !important; }
   .inventory-page:has(.inventory-audit-sheet) { margin: 0 !important; padding: 0 !important; min-height: 0 !important; background: white !important; }
   .inventory-page:has(.inventory-audit-sheet) > :not(.inventory-audit-sheet) { display: none !important; }
-  .inventory-audit-sheet { display: block !important; page: inventory-audit; color: #111 !important; font: 10pt/1.25 Arial, Helvetica, sans-serif; }
+  .inventory-audit-sheet { display: block !important; page: inventory-audit; color: #111 !important; font: 8.5pt/1.2 Arial, Helvetica, sans-serif; }
   .inventory-audit-sheet * { box-sizing: border-box; }
   .inventory-audit-warehouse + .inventory-audit-warehouse { break-before: page; }
   .inventory-audit-sheet table { width: 100% !important; min-width: 0 !important; table-layout: fixed; border-collapse: collapse; }
   .inventory-audit-sheet thead { display: table-header-group; }
   .inventory-audit-sheet tfoot { display: table-footer-group; }
   .inventory-audit-sheet tr { break-inside: avoid; page-break-inside: avoid; }
-  .inventory-audit-sheet th, .inventory-audit-sheet td { border: 1px solid #777; padding: 7px 6px; overflow-wrap: anywhere; vertical-align: middle; color: #111; }
-  .inventory-audit-sheet th { font-size: 9pt; text-align: left; white-space: normal; text-transform: none; letter-spacing: normal; background: #eee !important; color: #111 !important; }
-  .inventory-audit-sheet tbody td { height: .38in; }
+  .inventory-audit-sheet th, .inventory-audit-sheet td { border: 1px solid #777; padding: 5px 4px; overflow-wrap: anywhere; vertical-align: middle; color: #111; }
+  .inventory-audit-sheet th { font-size: 7.5pt; text-align: left; white-space: normal; text-transform: none; letter-spacing: normal; background: #eee !important; color: #111 !important; }
+  .inventory-audit-sheet tbody td { height: .34in; }
   .inventory-audit-sheet .inventory-audit-heading { border: 0; padding: 0 0 10px; }
   .inventory-audit-title { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
   .inventory-audit-title strong { font-size: 9pt; letter-spacing: .08em; }
-  .inventory-audit-title h1 { margin: 3px 0 8px; font-size: 19pt; line-height: 1.15; white-space: nowrap; }
-  .inventory-audit-title h2 { margin: 0 0 3px; font-size: 15pt; }
+  .inventory-audit-title h1 { margin: 3px 0 8px; font-size: 16pt; line-height: 1.15; white-space: nowrap; }
+  .inventory-audit-title h2 { margin: 0 0 3px; font-size: 12pt; }
   .inventory-audit-title > div:last-child { text-align: right; }
-  .inventory-audit-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 18px; font-size: 9pt; }
-  .inventory-audit-filters { margin: 7px 0; font-size: 9pt; }
-  .inventory-audit-counted { display: flex; justify-content: space-between; gap: 18px; margin: 13px 0 8px; }
-  .inventory-audit-instructions { margin: 4px 0 0; font-size: 8pt; }
+  .inventory-audit-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 18px; font-size: 8pt; }
+  .inventory-audit-filters { margin: 5px 0; font-size: 8pt; }
+  .inventory-audit-counted { display: flex; justify-content: space-between; gap: 18px; margin: 9px 0 6px; }
+  .inventory-audit-instructions { margin: 4px 0 0; font-size: 7pt; }
   .inventory-audit-sheet .inventory-audit-number { text-align: center; }
-  .inventory-audit-sheet .inventory-audit-bin { white-space: pre-line; font-size: 8pt; }
+  .inventory-audit-sheet .inventory-audit-bin { white-space: pre-line; font-size: 7pt; }
   .inventory-audit-sheet small { display: block; font-size: 8pt; margin-top: 4px; }
   .inventory-audit-sheet .inventory-audit-footer { border: 0; padding: 8px 0 0; font-size: 8pt; }
 }
