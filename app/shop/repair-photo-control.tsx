@@ -58,11 +58,11 @@ export default function RepairPhotoControl({repairId,canWork}:Props){
 
 const card={marginTop:12,border:"2px solid #b8cde0",borderRadius:13,background:"#f8fbfe",padding:14,display:"grid",gap:10} as const;
 const head={display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"} as const;
-const title={display:"block",fontSize:15,color:"#173a5d"} as const;
+const title={display:"block",fontSize:15,color:"#2f6f60"} as const;
 const help={marginTop:3,fontSize:11,color:"#687783",maxWidth:610} as const;
 const count={whiteSpace:"nowrap" as const,borderRadius:999,padding:"6px 9px",background:"#eaf1f7",fontSize:11,fontWeight:900,color:"#45617a"} as const;
-const input={width:"100%",boxSizing:"border-box" as const,padding:"11px 12px",border:"1px solid #adbdca",borderRadius:9,background:"white",fontSize:14,color:"#182331"} as const;
-const cameraButton={minHeight:52,border:0,borderRadius:10,background:"#173a5d",color:"white",fontWeight:950,display:"grid",placeItems:"center",cursor:"pointer",fontSize:15} as const;
+const input={width:"100%",boxSizing:"border-box" as const,padding:"11px 12px",border:"1px solid #adbdca",borderRadius:9,background:"white",fontSize:14,color:"#1b2421"} as const;
+const cameraButton={minHeight:52,border:0,borderRadius:10,background:"#2f6f60",color:"white",fontWeight:950,display:"grid",placeItems:"center",cursor:"pointer",fontSize:15} as const;
 const messageStyle={padding:"8px 10px",borderRadius:8,background:"#fff8e6",border:"1px solid #f0d18e",fontSize:12,fontWeight:800,color:"#5b6670"} as const;
 const grid={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8} as const;
 const thumb={border:"1px solid #d3dde5",borderRadius:10,overflow:"hidden",background:"white",textDecoration:"none",color:"#22384b",display:"grid"} as const;
