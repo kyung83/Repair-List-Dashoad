@@ -19,9 +19,9 @@ type CreatedKey = {
   tokenPrefix:string;
 };
 
-const panel = { background:'#fff', border:'1px solid #dce2e7', borderRadius:14, padding:18 } as const;
-const button = { border:0, borderRadius:8, padding:'10px 14px', background:'#0d1b2b', color:'#fff', fontWeight:850, cursor:'pointer' } as const;
-const lightButton = { ...button, background:'#e8edf2', color:'#172033' } as const;
+const panel = { background:'#fff', border:'1px solid #d7ded9', borderRadius:14, padding:18 } as const;
+const button = { border:0, borderRadius:8, padding:'10px 14px', background:'#173f37', color:'#fff', fontWeight:850, cursor:'pointer' } as const;
+const lightButton = { ...button, background:'#e8edf2', color:'#1b2421' } as const;
 
 function when(value:string|null) {
   if (!value) return 'Never';
@@ -113,11 +113,11 @@ export default function YardCheckApiPage() {
     } finally { setBusy(false); }
   }
 
-  return <main style={{ minHeight:'100vh', background:'#f3f5f7', color:'#172033', padding:'34px 34px 110px' }}>
+  return <main style={{ minHeight:'100vh', background:'#f4f6f4', color:'#1b2421', padding:'34px 34px 110px' }}>
     <div style={{ maxWidth:1100, margin:'0 auto' }}>
       <p style={{ margin:0, color:'#b45309', fontWeight:900, letterSpacing:'.14em', fontSize:12 }}>SETUP</p>
       <h1 style={{ margin:'7px 0 0', fontSize:34 }}>Yard Check API</h1>
-      <p style={{ color:'#64748b', maxWidth:900, lineHeight:1.55 }}>
+      <p style={{ color:'#68746f', maxWidth:900, lineHeight:1.55 }}>
         Give a Google Yard Check spreadsheet read-only access to the current Repair Board. The connection can see unit, yard, repair type, issue, status, technician, OOS and working status. It cannot assign, edit, complete, or delete repairs.
       </p>
 
@@ -125,7 +125,7 @@ export default function YardCheckApiPage() {
 
       <section style={{ ...panel, marginTop:18 }}>
         <h2 style={{ marginTop:0 }}>1. Create a connection key</h2>
-        <p style={{ color:'#64748b' }}>Use a different key for each coworker or spreadsheet. You can revoke one later without affecting the others.</p>
+        <p style={{ color:'#68746f' }}>Use a different key for each coworker or spreadsheet. You can revoke one later without affecting the others.</p>
         <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
           <input
             value={label}
@@ -148,14 +148,14 @@ export default function YardCheckApiPage() {
 
       <section style={{ ...panel, marginTop:18 }}>
         <h2 style={{ marginTop:0 }}>2. Put the connection in the Google Sheet</h2>
-        <p style={{ color:'#64748b', lineHeight:1.55 }}>
+        <p style={{ color:'#68746f', lineHeight:1.55 }}>
           In the coworker&apos;s Yard Check spreadsheet open <b>Extensions → Apps Script</b>, replace the code with the Northern script, save it, then reload the spreadsheet. The new <b>Northern Yard Check</b> menu will walk them through the API key and Yard Check tab setup.
         </p>
         <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
           <button type="button" style={button} onClick={loadScript} disabled={busy}>Copy Full Google Apps Script</button>
           <button type="button" style={lightButton} onClick={() => copy(apiUrl, 'Read-only API URL copied.')}>Copy API URL</button>
         </div>
-        <div style={{ marginTop:12, color:'#64748b', fontSize:13 }}><b>Read-only URL:</b> {apiUrl}</div>
+        <div style={{ marginTop:12, color:'#68746f', fontSize:13 }}><b>Read-only URL:</b> {apiUrl}</div>
         {script && <details style={{ marginTop:14 }}>
           <summary style={{ cursor:'pointer', fontWeight:850 }}>Show paste-ready Apps Script</summary>
           <textarea readOnly value={script} style={{ width:'100%', minHeight:360, marginTop:10, fontFamily:'monospace', fontSize:12, border:'1px solid #cbd5e1', borderRadius:8, padding:12 }} />
@@ -164,10 +164,10 @@ export default function YardCheckApiPage() {
 
       <section style={{ ...panel, marginTop:18 }}>
         <h2 style={{ marginTop:0 }}>3. Active connections</h2>
-        {!keys.length ? <p style={{ color:'#64748b' }}>No Yard Check connections have been created yet.</p> :
+        {!keys.length ? <p style={{ color:'#68746f' }}>No Yard Check connections have been created yet.</p> :
           <div style={{ overflowX:'auto' }}><table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead><tr>
-              {['Name','Key','Created','Last Used','Status',''].map((heading) => <th key={heading} style={{ textAlign:'left', padding:'9px 8px', borderBottom:'1px solid #dce2e7', whiteSpace:'nowrap' }}>{heading}</th>)}
+              {['Name','Key','Created','Last Used','Status',''].map((heading) => <th key={heading} style={{ textAlign:'left', padding:'9px 8px', borderBottom:'1px solid #d7ded9', whiteSpace:'nowrap' }}>{heading}</th>)}
             </tr></thead>
             <tbody>{keys.map((row) => <tr key={row.id}>
               <td style={{ padding:8, borderBottom:'1px solid #eef2f5', fontWeight:800 }}>{row.label}</td>
