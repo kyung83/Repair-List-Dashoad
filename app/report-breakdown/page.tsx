@@ -61,8 +61,8 @@ const STATES = [
 ];
 
 const fieldStyle: React.CSSProperties = {
-  width: '100%', minHeight: 50, padding: '10px 13px', border: '1px solid #cbd5dd',
-  borderRadius: 10, background: '#fff', color: '#172033', fontSize: 16, boxSizing: 'border-box',
+  width: '100%', minHeight: 50, padding: '10px 13px', border: '1px solid #c9d4cf',
+  borderRadius: 10, background: '#fff', color: '#1b2421', fontSize: 16, boxSizing: 'border-box',
 };
 const labelStyle: React.CSSProperties = { display: 'grid', gap: 7, color: '#334155', fontSize: 13, fontWeight: 850 };
 
@@ -254,7 +254,7 @@ export default function ReportBreakdownPage() {
           <input type="hidden" name="snapshotVerification" value={snapshotChoice}/>
           {manualFallback&&<input type="hidden" name="driverNotListed" value="1"/>}
 
-          <section style={{padding:22,borderBottom:'1px solid #e2e8f0'}}>
+          <section style={{padding:22,borderBottom:'1px solid #dce3df'}}>
             <p className="easy-eyebrow">1 · WHICH UNIT BROKE DOWN?</p>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}>
               {(['truck','trailer'] as const).map((type)=><button key={type} type="button" className={`easy-button ${unitType===type?'orange':''}`} aria-pressed={unitType===type} onClick={()=>chooseType(type)} style={{minHeight:58,fontSize:16}}>{type==='truck'?'Truck':'Trailer'}</button>)}
@@ -269,23 +269,23 @@ export default function ReportBreakdownPage() {
               {!searching&&!searchError&&unitQuery&&units.length===0&&<div className="easy-notice">No active {unitType}s match “{unitQuery}”. Check the number and try again.</div>}
               {hasMore&&<p className="easy-section-copy">More matches exist — keep typing to narrow the list.</p>}
             </div>}
-            {selectedUnit&&<div style={{marginTop:16,padding:14,borderRadius:12,background:'#0d1b2b',color:'#fff',display:'flex',justifyContent:'space-between',gap:12,alignItems:'center'}}>
+            {selectedUnit&&<div style={{marginTop:16,padding:14,borderRadius:12,background:'#173f37',color:'#fff',display:'flex',justifyContent:'space-between',gap:12,alignItems:'center'}}>
               <div><small style={{color:'#9fb0bf',fontWeight:900,textTransform:'uppercase'}}>Selected {unitType}</small><strong style={{display:'block',marginTop:3,fontSize:24}}>{selectedUnit}</strong></div>
               <button type="button" className="easy-button" onClick={changeUnit}>Change</button>
             </div>}
           </section>
 
-          <section style={{padding:22,borderBottom:'1px solid #e2e8f0'}}>
+          <section style={{padding:22,borderBottom:'1px solid #dce3df'}}>
             <p className="easy-eyebrow">2 · VERIFY DRIVER & LOCATION</p>
             {!selectedUnit&&<div className="easy-notice" style={{marginTop:14}}>Select the broken-down unit first.</div>}
             {selectedUnit&&geotabPreview.status==='loading'&&<div className="easy-notice" style={{marginTop:14}}>Checking Geotab for the current driver and location...</div>}
             {selectedUnit&&geotabPreview.status==='available'&&<div style={{marginTop:14,padding:18,borderRadius:14,border:'1px solid #b7d9c4',background:'#f1fbf5'}}>
               <p style={{margin:0,fontSize:12,fontWeight:900,color:'#27623f',textTransform:'uppercase'}}>Geotab found</p>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:14,marginTop:12}}>
-                <div><small style={{color:'#64748b',fontWeight:800}}>DRIVER</small><strong style={{display:'block',marginTop:3,fontSize:20}}>{geotabPreview.driverName}</strong></div>
-                <div><small style={{color:'#64748b',fontWeight:800}}>LOCATION</small><strong style={{display:'block',marginTop:3,fontSize:20}}>{geotabPreview.city}, {geotabPreview.state}</strong></div>
+                <div><small style={{color:'#68746f',fontWeight:800}}>DRIVER</small><strong style={{display:'block',marginTop:3,fontSize:20}}>{geotabPreview.driverName}</strong></div>
+                <div><small style={{color:'#68746f',fontWeight:800}}>LOCATION</small><strong style={{display:'block',marginTop:3,fontSize:20}}>{geotabPreview.city}, {geotabPreview.state}</strong></div>
               </div>
-              {observedLabel(geotabPreview.observedAt)&&<p style={{margin:'10px 0 0',color:'#64748b',fontSize:12}}>Location observed {observedLabel(geotabPreview.observedAt)}</p>}
+              {observedLabel(geotabPreview.observedAt)&&<p style={{margin:'10px 0 0',color:'#68746f',fontSize:12}}>Location observed {observedLabel(geotabPreview.observedAt)}</p>}
               <p style={{margin:'16px 0 8px',fontWeight:900,color:'#334155'}}>Is this driver and location correct?</p>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
                 <button type="button" className={`easy-button ${snapshotChoice==='verified'?'orange':''}`} onClick={()=>chooseSnapshot('verified')}>Yes, correct</button>
@@ -319,22 +319,22 @@ export default function ReportBreakdownPage() {
             </div>
 
             {selectedCategory?.requiresPosition&&unitType&&selectedCategory.requiresTireSize&&<div style={{marginTop:18,padding:16,borderRadius:14,border:'1px solid #cbd5e1',background:'#f8fafc'}}>
-              <p style={{margin:0,fontSize:16,fontWeight:900,color:'#172033'}}>Tire position and size *</p>
-              <p style={{margin:'6px 0 0',color:'#64748b',fontSize:13}}>Choose every affected tire. Enter the tire size for each selected position.</p>
+              <p style={{margin:0,fontSize:16,fontWeight:900,color:'#1b2421'}}>Tire position and size *</p>
+              <p style={{margin:'6px 0 0',color:'#68746f',fontSize:13}}>Choose every affected tire. Enter the tire size for each selected position.</p>
               {tireAxles.map((axle)=><div key={axle.label} style={{marginTop:16}}><strong style={{display:'block',color:'#334155',marginBottom:8}}>{axle.label}</strong><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(165px,1fr))',gap:10}}>
                 {axle.positions.map((position)=>{const selected=selectedPositions.includes(position.code);return <div key={position.code} style={{padding:12,border:selected?'2px solid #ea7b22':'1px solid #cbd5e1',borderRadius:12,background:'#fff'}}>
-                  <label style={{display:'flex',gap:9,alignItems:'center',cursor:'pointer',color:'#172033',fontWeight:850}}><input type="checkbox" name="tirePosition" value={position.code} checked={selected} onChange={()=>togglePosition(position.code)}/><span>{position.label}</span></label>
-                  <small style={{display:'block',marginTop:4,color:'#64748b'}}>{position.code}</small>
+                  <label style={{display:'flex',gap:9,alignItems:'center',cursor:'pointer',color:'#1b2421',fontWeight:850}}><input type="checkbox" name="tirePosition" value={position.code} checked={selected} onChange={()=>togglePosition(position.code)}/><span>{position.label}</span></label>
+                  <small style={{display:'block',marginTop:4,color:'#68746f'}}>{position.code}</small>
                   {selected&&<label style={{...labelStyle,marginTop:10}}>Tire size *<input name={`tireSize_${position.code}`} required value={tireSizes[position.code]||''} onChange={(event)=>setTireSizes((current)=>({...current,[position.code]:event.target.value.slice(0,40)}))} placeholder="Example: 11R22.5" style={{...fieldStyle,minHeight:44}}/></label>}
                 </div>;})}
               </div></div>)}
             </div>}
 
             {selectedCategory?.requiresPosition&&unitType&&!selectedCategory.requiresTireSize&&<div style={{marginTop:18,padding:16,borderRadius:14,border:'1px solid #cbd5e1',background:'#f8fafc'}}>
-              <p style={{margin:0,fontSize:16,fontWeight:900,color:'#172033'}}>{selectedCategory.name} position *</p>
-              <p style={{margin:'6px 0 0',color:'#64748b',fontSize:13}}>Choose the axle position that needs repair. Select more than one if needed.</p>
+              <p style={{margin:0,fontSize:16,fontWeight:900,color:'#1b2421'}}>{selectedCategory.name} position *</p>
+              <p style={{margin:'6px 0 0',color:'#68746f',fontSize:13}}>Choose the axle position that needs repair. Select more than one if needed.</p>
               {positionAxles.map((axle)=><div key={axle.label} style={{marginTop:16}}><strong style={{display:'block',color:'#334155',marginBottom:8}}>{axle.label}</strong><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:10}}>
-                {axle.positions.map((position)=>{const selected=selectedPositions.includes(position.code);return <label key={position.code} style={{display:'flex',gap:9,alignItems:'center',cursor:'pointer',padding:13,border:selected?'2px solid #ea7b22':'1px solid #cbd5e1',borderRadius:12,background:'#fff',color:'#172033',fontWeight:850}}><input type="checkbox" name="positionCode" value={position.code} checked={selected} onChange={()=>togglePosition(position.code)}/><span>{position.label} <small style={{display:'block',color:'#64748b',fontWeight:700}}>{position.code}</small></span></label>;})}
+                {axle.positions.map((position)=>{const selected=selectedPositions.includes(position.code);return <label key={position.code} style={{display:'flex',gap:9,alignItems:'center',cursor:'pointer',padding:13,border:selected?'2px solid #ea7b22':'1px solid #cbd5e1',borderRadius:12,background:'#fff',color:'#1b2421',fontWeight:850}}><input type="checkbox" name="positionCode" value={position.code} checked={selected} onChange={()=>togglePosition(position.code)}/><span>{position.label} <small style={{display:'block',color:'#68746f',fontWeight:700}}>{position.code}</small></span></label>;})}
               </div></div>)}
             </div>}
 
