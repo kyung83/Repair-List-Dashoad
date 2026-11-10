@@ -123,20 +123,20 @@ export default function SetupCenterPage(){
   </main>;
 }
 
-const page={minHeight:"100vh",background:"#f3f5f7",padding:"38px 34px 100px",color:"#182331"} as const;
+const page={minHeight:"100vh",background:"#f3f7f5",padding:"38px 34px 100px",color:"#20312d"} as const;
 const header={display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:18,flexWrap:"wrap" as const} as const;
-const eyebrow={margin:0,color:"#f47b20",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
-const h1={margin:"7px 0 5px",fontSize:34,color:"#0d1b2b"} as const;
-const subtitle={margin:0,maxWidth:760,color:"#667482",fontSize:13,lineHeight:1.5} as const;
-const rolePill={padding:"7px 11px",borderRadius:999,background:"#e8eef5",color:"#29435d",fontSize:11,fontWeight:900,textTransform:"uppercase" as const,letterSpacing:".05em"} as const;
+const eyebrow={margin:0,color:"#2f7c6b",fontSize:11,fontWeight:950,letterSpacing:".14em"} as const;
+const h1={margin:"7px 0 5px",fontSize:34,color:"#153f37"} as const;
+const subtitle={margin:0,maxWidth:760,color:"#6b7c77",fontSize:13,lineHeight:1.5} as const;
+const rolePill={padding:"7px 11px",borderRadius:999,background:"#e8f2ef",color:"#2e6558",fontSize:11,fontWeight:900,textTransform:"uppercase" as const,letterSpacing:".05em"} as const;
 const notice={marginTop:16,padding:12,border:"1px solid #efc16c",borderRadius:9,background:"#fff8e6",fontWeight:750} as const;
-const loading={marginTop:18,padding:22,border:"1px solid #dce2e7",borderRadius:12,background:"white",color:"#667482"} as const;
+const loading={marginTop:18,padding:22,border:"1px solid #d7e2de",borderRadius:12,background:"white",color:"#6b7c77"} as const;
 const grid={marginTop:20,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(330px,1fr))",gap:16,alignItems:"start"} as const;
-const card={background:"white",border:"1px solid #dce2e7",borderRadius:13,padding:18,boxShadow:"0 5px 22px rgba(19,37,55,.05)",display:"grid",gap:14} as const;
-const title={margin:0,fontSize:20,color:"#0d1b2b"} as const;
+const card={background:"white",border:"1px solid #d7e2de",borderRadius:13,padding:18,boxShadow:"0 5px 22px rgba(19,37,55,.05)",display:"grid",gap:14} as const;
+const title={margin:0,fontSize:20,color:"#153f37"} as const;
 const description={margin:"5px 0 0",color:"#6a7784",fontSize:12,lineHeight:1.45} as const;
 const linkList={display:"grid",gap:7} as const;
-const linkRow={display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 11px",border:"1px solid #e3e8ec",borderRadius:9,background:"#fbfcfd",textDecoration:"none",color:"#1f3142"} as const;
+const linkRow={display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"10px 11px",border:"1px solid #e3e8ec",borderRadius:9,background:"#f9fcfb",textDecoration:"none",color:"#29443d"} as const;
 const linkTitle={display:"block",fontSize:13} as const;
-const linkDescription={display:"block",marginTop:3,color:"#75818d",fontSize:10,lineHeight:1.35} as const;
-const arrow={fontSize:22,color:"#7b8792",lineHeight:1} as const;
+const linkDescription={display:"block",marginTop:3,color:"#72847f",fontSize:10,lineHeight:1.35} as const;
+const arrow={fontSize:22,color:"#6f8b83",lineHeight:1} as const;
