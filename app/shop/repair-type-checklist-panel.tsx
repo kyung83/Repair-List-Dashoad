@@ -38,14 +38,14 @@ export default function RepairTypeChecklistPanel({repairId,canWork}:Props){
  </section>
 }
 
-const panel={border:"1px solid #cfd9e2",borderRadius:14,background:"white",overflow:"hidden",boxShadow:"0 4px 14px #13283d0a"} as const;
+const panel={border:"1px solid #cfd9e2",borderRadius:14,background:"white",overflow:"hidden",boxShadow:"0 4px 14px #173f370a"} as const;
 const launcher={width:"100%",border:0,background:"transparent",padding:14,display:"grid",gridTemplateColumns:"38px minmax(0,1fr) auto",alignItems:"center",gap:10,cursor:"pointer",color:"#17324a"} as const;
 const icon={width:38,height:38,borderRadius:10,display:"grid",placeItems:"center",background:"#fff0e5",color:"#e96313",fontSize:20,fontWeight:950} as const;
 const openButton={padding:"8px 10px",borderRadius:8,background:"#e96313",color:"white",fontSize:11} as const;
 const body={borderTop:"1px solid #e0e6eb",padding:14,display:"grid",gap:12} as const;
 const notice={padding:10,borderRadius:8,background:"#fff8e6",border:"1px solid #f2c66d",fontSize:12,fontWeight:800} as const;
 const startBox={display:"grid",gap:8,padding:12,borderRadius:10,background:"#f7f9fb"} as const;
-const primary={border:0,borderRadius:8,padding:"10px 13px",background:"#173a5d",color:"white",fontWeight:950,cursor:"pointer",width:"fit-content"} as const;
+const primary={border:0,borderRadius:8,padding:"10px 13px",background:"#2f6f60",color:"white",fontWeight:950,cursor:"pointer",width:"fit-content"} as const;
 const progress={display:"flex",justifyContent:"space-between",gap:10,fontSize:12,color:"#5c6d7a"} as const;
 const items={display:"grid",gap:10} as const;
 const itemCard={border:"1px solid #d8e0e7",borderRadius:10,padding:11,display:"grid",gap:8} as const;
