@@ -3,7 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getInventoryData, savePart, savePartSettings } from '@/lib/inventory-db';
 import { decorateInventoryDataDerived } from '@/lib/derived-reservations';
 import { recordPhysicalCount, resolvePhysicalCountIssue, saveNormalizedVendor } from '@/lib/inventory-operations';
-import { deletePartPreservingHistory, setPartArchived } from '@/lib/inventory-part-management';
+import { deletePartPreservingHistory, setPartArchived, setPartWarehouseStatus } from '@/lib/inventory-part-management';
 
 export async function GET(request: Request) {
   try {
@@ -34,6 +34,20 @@ export async function POST(request: Request) {
       if (!user) throw new Error('Authentication required.');
       if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required to archive or restore a part.');
       return Response.json(await setPartArchived(env.DB,{partId:body.partId,archived:action === 'archivePart'}));
+    }
+
+    if (action === 'setWarehousePartStatus') {
+      const user = await getSessionUser(env.DB,request);
+      if (!user) throw new Error('Authentication required.');
+      if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required to change warehouse part status.');
+      const status = String(body.status ?? '');
+      if (!['active','archived','removed'].includes(status)) throw new Error('Warehouse part status is invalid.');
+      return Response.json(await setPartWarehouseStatus(env.DB,{
+        partId:body.partId,
+        warehouseCode:body.warehouseCode,
+        status:status as 'active'|'archived'|'removed',
+        userId:user.id,
+      }));
     }
 
     if (action === 'deletePart') {
