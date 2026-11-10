@@ -132,20 +132,20 @@ export default function ShopDutyWorkHome({timer,duty,onRefresh}:Props){
   </main>;
 }
 
-const page={minHeight:"100vh",background:"#f4f6f8",padding:"18px clamp(10px,2vw,20px) 70px",color:"#13283d"} as const;
+const page={minHeight:"100vh",background:"#f4f6f4",padding:"18px clamp(10px,2vw,20px) 70px",color:"#1b2421"} as const;
 const shell={maxWidth:900,margin:"0 auto",display:"grid",gap:12} as const;
 const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
-const hero={display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",padding:19,borderRadius:16,background:"linear-gradient(135deg,#102a43,#0d1b2b)",color:"white",boxShadow:"0 9px 26px #102a432b"} as const;
-const eyebrow={margin:"0 0 5px",fontSize:11,fontWeight:950,letterSpacing:".14em",color:"#ff8b32"} as const;
+const hero={display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",padding:19,borderRadius:16,background:"linear-gradient(135deg,#173f37,#173f37)",color:"white",boxShadow:"0 9px 26px #173f372b"} as const;
+const eyebrow={margin:"0 0 5px",fontSize:11,fontWeight:950,letterSpacing:".14em",color:"#c9ded6"} as const;
 const title={margin:0,fontSize:29,lineHeight:1.08} as const;
-const description={margin:"7px 0 0",maxWidth:620,fontSize:13,lineHeight:1.45,color:"#d5e0ea"} as const;
-const due={marginTop:10,fontSize:11,fontWeight:850,color:"#f7c99f"} as const;
+const description={margin:"7px 0 0",maxWidth:620,fontSize:13,lineHeight:1.45,color:"#e0ebe7"} as const;
+const due={marginTop:10,fontSize:11,fontWeight:850,color:"#dcebe5"} as const;
 const timerStyle={fontFamily:"ui-monospace,SFMono-Regular,Menlo,monospace",fontSize:24,fontWeight:950,whiteSpace:"nowrap" as const} as const;
 const summary={display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8} as const;
 const summaryCell={padding:11,border:"1px solid #d8e0e7",borderRadius:11,background:"white"} as const;
 const summaryLabel={display:"block",fontSize:9,fontWeight:950,letterSpacing:".08em",color:"#74818d"} as const;
-const summaryValue={display:"block",marginTop:4,fontSize:13,color:"#102a43"} as const;
-const card={padding:15,borderRadius:14,background:"white",border:"1px solid #d8e0e7",boxShadow:"0 4px 15px #13283d09"} as const;
+const summaryValue={display:"block",marginTop:4,fontSize:13,color:"#173f37"} as const;
+const card={padding:15,borderRadius:14,background:"white",border:"1px solid #d8e0e7",boxShadow:"0 4px 15px #1b242109"} as const;
 const sectionTitle={margin:"0 0 10px",fontSize:16,color:"#102a53"} as const;
 const checkList={display:"grid",gap:8} as const;
 const checkRow={display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:12,alignItems:"center",padding:"10px 0",borderTop:"1px solid #edf0f2"} as const;
@@ -157,7 +157,7 @@ const doneActive={...choice,background:"#e9f7ef",borderColor:"#79bd96",color:"#1
 const attentionActive={...choice,background:"#fff2df",borderColor:"#efb461",color:"#9a5205"} as const;
 const naActive={...choice,background:"#edf2f6",borderColor:"#9dacb8",color:"#40505d"} as const;
 const notesCard={...card,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10} as const;
-const label={display:"grid",gap:5,fontSize:10,fontWeight:950,color:"#506271",letterSpacing:".04em"} as const;
+const label={display:"grid",gap:5,fontSize:10,fontWeight:950,color:"#53645d",letterSpacing:".04em"} as const;
 const textarea={width:"100%",boxSizing:"border-box" as const,padding:"10px",border:"1px solid #bdc9d4",borderRadius:8,resize:"vertical" as const,fontSize:13,color:"#182331"} as const;
 const saveButton={gridColumn:"1 / -1",justifySelf:"end",border:"1px solid #8ea1b1",borderRadius:8,padding:"9px 12px",background:"white",color:"#253440",fontWeight:900,cursor:"pointer"} as const;
 const actions={display:"grid",gridTemplateColumns:"1fr 2fr",gap:10} as const;
