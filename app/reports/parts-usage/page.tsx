@@ -140,19 +140,19 @@ export default function PartsUsageReportPage(){
 
 function Metric({label,value,help}:{label:string;value:string;help:string}){return <article style={metric}><span style={metricLabel}>{label}</span><strong style={metricValue}>{value}</strong><span style={metricHelp}>{help}</span></article>}
 
-const page={minHeight:"100vh",background:"#f3f5f7",padding:"30px clamp(12px,3vw,34px) 90px",color:"#182331"} as const;
+const page={minHeight:"100vh",background:"#f4f6f4",padding:"30px clamp(12px,3vw,34px) 90px",color:"#1b2421"} as const;
 const header={maxWidth:1300,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:18,flexWrap:"wrap" as const} as const;
 const eyebrow={margin:0,color:"#6d28d9",fontSize:11,fontWeight:950,letterSpacing:".15em"} as const;
-const title={margin:"6px 0 0",fontSize:"clamp(30px,5vw,40px)",color:"#0d1b2b"} as const;
-const subtitle={margin:"7px 0 0",maxWidth:760,color:"#64748b",fontSize:14,lineHeight:1.45} as const;
+const title={margin:"6px 0 0",fontSize:"clamp(30px,5vw,40px)",color:"#173f37"} as const;
+const subtitle={margin:"7px 0 0",maxWidth:760,color:"#68746f",fontSize:14,lineHeight:1.45} as const;
 const headerActions={display:"flex",gap:8,flexWrap:"wrap" as const} as const;
-const darkButton={border:0,borderRadius:9,padding:"10px 14px",background:"#0d1b2b",color:"white",fontWeight:900,cursor:"pointer",textDecoration:"none"} as const;
+const darkButton={border:0,borderRadius:9,padding:"10px 14px",background:"#173f37",color:"white",fontWeight:900,cursor:"pointer",textDecoration:"none"} as const;
 const secondaryButton={border:"1px solid #cbd5df",borderRadius:9,padding:"9px 13px",background:"white",color:"#233548",fontWeight:850,cursor:"pointer",textDecoration:"none"} as const;
 const smallButton={border:"1px solid #b8c8d8",borderRadius:7,padding:"7px 9px",background:"#f7fafc",color:"#173a5d",fontWeight:850,cursor:"pointer",whiteSpace:"nowrap" as const} as const;
 const notice={maxWidth:1300,margin:"15px auto 0",padding:"11px 13px",border:"1px solid #f2c66d",borderRadius:9,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
 const filterPanel={maxWidth:1300,margin:"18px auto 0",padding:15,border:"1px solid #d9e1e7",borderRadius:13,background:"white",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(175px,1fr))",gap:10,alignItems:"end"} as const;
 const label={display:"grid",gap:5,fontSize:10,fontWeight:950,letterSpacing:".06em",color:"#5f6f7d"} as const;
-const input={width:"100%",boxSizing:"border-box" as const,border:"1px solid #c8d3dc",borderRadius:8,padding:"10px 11px",fontSize:13,background:"white",color:"#182331"} as const;
+const input={width:"100%",boxSizing:"border-box" as const,border:"1px solid #c8d3dc",borderRadius:8,padding:"10px 11px",fontSize:13,background:"white",color:"#1b2421"} as const;
 const filterActions={display:"flex",gap:7,alignItems:"center",flexWrap:"wrap" as const} as const;
 const summaryGrid={maxWidth:1300,margin:"14px auto 0",display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10} as const;
 const metric={border:"1px solid #d9e1e7",borderRadius:12,background:"white",padding:14,display:"grid",gap:4} as const;
