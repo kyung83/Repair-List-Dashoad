@@ -5,29 +5,29 @@ import test from 'node:test';
 const root=new URL('../',import.meta.url);
 async function read(path){return readFile(new URL(path,root),'utf8')}
 
-test('Inventory managers can archive and restore parts while delete stays admin-only',async()=>{
+test('Inventory uses warehouse-specific archive/restore while warehouse removal stays admin-only',async()=>{
   const [route,page,service]=await Promise.all([
     read('app/api/inventory/route.ts'),
     read('app/inventory/page.tsx'),
     read('lib/inventory-part-management.ts'),
   ]);
 
-  assert.match(route,/action === 'archivePart' \|\| action === 'restorePart'/);
+  assert.match(route,/action === 'setWarehousePartStatus'/);
   assert.match(route,/user\.role !== 'manager' && user\.role !== 'admin'/);
+  assert.match(route,/status === 'removed' && user\.role !== 'admin'/);
   assert.match(route,/action === 'deletePart'/);
   assert.match(route,/user\.role !== 'admin'/);
 
   assert.match(page,/Active Parts/);
-  assert.match(page,/Archived Parts/);
+  assert.match(page,/Warehouse availability/);
   const details=page.slice(page.indexOf('{showPartForm &&'));
-  assert.match(details,/partStatus === "active" && <button[^>]*onClick=\{\(\) => void archivePart\(editingItem\)\}/);
-  assert.match(page,/restorePart\(item\)/);
-  assert.match(details,/partStatus === "archived" && <button[^>]*onClick=\{\(\) => void restorePart\(editingItem\)\}/);
-  assert.match(details,/data\?\.viewerRole === "admin" && <button[^>]*onClick=\{\(\) => void deletePart\(editingItem\)\}/);
-  assert.match(page,/Delete Part/);
-  assert.match(page,/Existing repair, receiving, transfer, count, and inventory history stays intact/);
-
-  assert.match(service,/UPDATE parts SET active=\?,updated_at=CURRENT_TIMESTAMP/);
+  assert.match(details,/setWarehousePartStatus\(editingItem, warehouse\.code, "archived"\)/);
+  assert.match(details,/setWarehousePartStatus\(editingItem, warehouse\.code, "active"\)/);
+  assert.match(details,/data\?\.viewerRole === "admin"[\s\S]*setWarehousePartStatus\(editingItem, warehouse\.code, "removed"\)/);
+  assert.doesNotMatch(details,/>Archive Part</);
+  assert.doesNotMatch(details,/>Delete Part</);
+  assert.match(service,/part_warehouse_catalog_status/);
+  assert.doesNotMatch(service,/still has stock or on-order quantity at/);
 });
 
 test('Admin delete removes a part operationally while preserving historical foreign keys',async()=>{
