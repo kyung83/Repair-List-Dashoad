@@ -89,8 +89,8 @@ export default function InventoryAuditSheet({ snapshot }: { snapshot: InventoryA
           <td className="inventory-audit-number">{Number.isFinite(row.systemQuantity) ? row.systemQuantity.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "Check stock"}</td>
           <td></td><td></td><td></td>
         </tr>)}</tbody>
+        <tfoot><tr><td colSpan={8} className="inventory-audit-footer">{group.name} · {group.rows.length} count lines total. Enter reviewed corrections using Physical Count in Inventory.</td></tr></tfoot>
       </table>
-      <p className="inventory-audit-footer">End of {group.name} · {group.rows.length} count lines. Enter reviewed corrections using Physical Count in Inventory.</p>
     </section>)}
   </section>;
 }
@@ -113,14 +113,15 @@ const auditCss = `
   .inventory-audit-warehouse + .inventory-audit-warehouse { break-before: page; }
   .inventory-audit-sheet table { width: 100% !important; min-width: 0 !important; table-layout: fixed; border-collapse: collapse; }
   .inventory-audit-sheet thead { display: table-header-group; }
+  .inventory-audit-sheet tfoot { display: table-footer-group; }
   .inventory-audit-sheet tr { break-inside: avoid; page-break-inside: avoid; }
-  .inventory-audit-sheet th, .inventory-audit-sheet td { border: 1px solid #777; padding: 7px 6px; overflow-wrap: anywhere; vertical-align: middle; }
+  .inventory-audit-sheet th, .inventory-audit-sheet td { border: 1px solid #777; padding: 7px 6px; overflow-wrap: anywhere; vertical-align: middle; color: #111; }
   .inventory-audit-sheet th { font-size: 9pt; text-align: left; white-space: normal; text-transform: none; letter-spacing: normal; background: #eee !important; color: #111 !important; }
   .inventory-audit-sheet tbody td { height: .38in; }
   .inventory-audit-sheet .inventory-audit-heading { border: 0; padding: 0 0 10px; }
   .inventory-audit-title { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
   .inventory-audit-title strong { font-size: 9pt; letter-spacing: .08em; }
-  .inventory-audit-title h1 { margin: 3px 0 8px; font-size: 19pt; line-height: 1.15; }
+  .inventory-audit-title h1 { margin: 3px 0 8px; font-size: 19pt; line-height: 1.15; white-space: nowrap; }
   .inventory-audit-title h2 { margin: 0 0 3px; font-size: 15pt; }
   .inventory-audit-title > div:last-child { text-align: right; }
   .inventory-audit-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 18px; font-size: 9pt; }
@@ -129,6 +130,6 @@ const auditCss = `
   .inventory-audit-instructions { margin: 4px 0 0; font-size: 8pt; }
   .inventory-audit-sheet .inventory-audit-number { text-align: center; }
   .inventory-audit-sheet small { display: block; font-size: 8pt; margin-top: 4px; }
-  .inventory-audit-footer { margin: 8px 0 0; font-size: 8pt; break-inside: avoid; }
+  .inventory-audit-sheet .inventory-audit-footer { border: 0; padding: 8px 0 0; font-size: 8pt; }
 }
 `;
