@@ -41,9 +41,9 @@ export default function OutsideWorkIntakeSwitcher(){
 
 const chooserBar:CSSProperties={background:'#e9eef2',borderBottom:'1px solid #cfd8df',padding:'12px clamp(16px,4vw,46px)'};
 const chooserShell:CSSProperties={maxWidth:1500,margin:'0 auto',display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,flexWrap:'wrap'};
-const chooserTitle:CSSProperties={display:'block',fontSize:13,color:'#172536'};
+const chooserTitle:CSSProperties={display:'block',fontSize:13,color:'#1b2421'};
 const chooserCopy:CSSProperties={fontSize:11,color:'#667581',marginTop:2};
 const chooserActions:CSSProperties={display:'flex',gap:8,flexWrap:'wrap'};
 const baseButton:CSSProperties={borderRadius:8,padding:'9px 12px',fontWeight:900,fontSize:11,cursor:'pointer'};
-const activeButton:CSSProperties={...baseButton,border:'1px solid #0d1b2b',background:'#0d1b2b',color:'white'};
+const activeButton:CSSProperties={...baseButton,border:'1px solid #173f37',background:'#173f37',color:'white'};
 const inactiveButton:CSSProperties={...baseButton,border:'1px solid #b9c5ce',background:'white',color:'#17324a'};
