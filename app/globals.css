@@ -273,6 +273,13 @@ td.unit { color:var(--navy); font-weight:800; white-space:nowrap; }
   border-color:#ffffff !important;
 }
 
+.app-shell-content button:not(.danger):not(.complete):not(.pass):not(.fail) strong,
+.app-shell-content button:not(.danger):not(.complete):not(.pass):not(.fail) span,
+.app-shell-content .easy-button:not(.danger) strong,
+.app-shell-content .easy-button:not(.danger) span {
+  color:#111111 !important;
+}
+
 .app-shell-content button:disabled {
   opacity:.48 !important;
 }
