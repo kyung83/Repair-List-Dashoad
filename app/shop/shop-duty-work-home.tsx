@@ -93,9 +93,9 @@ export default function ShopDutyWorkHome({timer,duty,onRefresh}:Props){
       </section>
 
       <section style={summary}>
-        <div><span>LABOR TYPE</span><strong>INDIRECT LABOR</strong></div>
-        <div><span>CHECKLIST</span><strong>{requiredMissing===0?"READY TO COMPLETE":requiredMissing+" LEFT"}</strong></div>
-        <div><span>WORK ORDER</span><strong>SHOP / NO UNIT</strong></div>
+        <div style={summaryCell}><span style={summaryLabel}>LABOR TYPE</span><strong style={summaryValue}>INDIRECT LABOR</strong></div>
+        <div style={summaryCell}><span style={summaryLabel}>CHECKLIST</span><strong style={summaryValue}>{requiredMissing===0?"READY TO COMPLETE":requiredMissing+" LEFT"}</strong></div>
+        <div style={summaryCell}><span style={summaryLabel}>WORK ORDER</span><strong style={summaryValue}>SHOP / NO UNIT</strong></div>
       </section>
 
       {sections.map(([section,sectionItems])=><section key={section} style={card}>
@@ -124,7 +124,7 @@ export default function ShopDutyWorkHome({timer,duty,onRefresh}:Props){
 
       <section style={actions}>
         <button type="button" onClick={()=>void pause()} disabled={busy} style={pauseButton}>PAUSE DUTY</button>
-        <button type="button" onClick={()=>void complete()} disabled={busy||requiredMissing>0} style={{...completeButton,opacity:busy||requiredMissing>0?.55:1}}>
+        <button type="button" onClick={()=>void complete()} disabled={busy||requiredMissing>0} style={{...completeButton,opacity:(busy||requiredMissing>0)?.55:1}}>
           {requiredMissing>0?`COMPLETE ${requiredMissing} MORE CHECKS`:"COMPLETE DUTY"}
         </button>
       </section>
@@ -143,8 +143,8 @@ const due={marginTop:10,fontSize:11,fontWeight:850,color:"#f7c99f"} as const;
 const timerStyle={fontFamily:"ui-monospace,SFMono-Regular,Menlo,monospace",fontSize:24,fontWeight:950,whiteSpace:"nowrap" as const} as const;
 const summary={display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8} as const;
 const summaryCell={padding:11,border:"1px solid #d8e0e7",borderRadius:11,background:"white"} as const;
-// TS style object reuse without helper component.
-Object.assign(summary,{});
+const summaryLabel={display:"block",fontSize:9,fontWeight:950,letterSpacing:".08em",color:"#74818d"} as const;
+const summaryValue={display:"block",marginTop:4,fontSize:13,color:"#102a43"} as const;
 const card={padding:15,borderRadius:14,background:"white",border:"1px solid #d8e0e7",boxShadow:"0 4px 15px #13283d09"} as const;
 const sectionTitle={margin:"0 0 10px",fontSize:16,color:"#102a53"} as const;
 const checkList={display:"grid",gap:8} as const;
