@@ -47,7 +47,7 @@ export default function GeotabDeviceReleasePanel({ onReleased }: { onReleased?: 
     finally { setBusy(false); }
   }
 
-  return <section style={{ padding: "20px clamp(16px,4vw,46px)", background: "#f3f5f7", color: "#182331" }}>
+  return <section style={{ padding: "20px clamp(16px,4vw,46px)", background: "#f4f6f4", color: "#1b2421" }}>
     <div style={{ background: "white", border: "1px solid #cfd9e1", borderRadius: 14, padding: 18 }}>
       <h2 style={{ marginTop: 0 }}>Release a removed GPS for reuse</h2>
       <p>Search the old truck here, including sold and archived units. This also finds leftover device links that no longer have a current assignment. You do not need to reactivate the truck or edit its other details.</p>
