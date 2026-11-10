@@ -2,6 +2,7 @@
 
 import {useEffect,useMemo,useState} from "react";
 import CurrentWorkHome from "./current-work-home";
+import ShopDutyWorkHome, {type ActiveShopDuty} from "./shop-duty-work-home";
 
 type User={id:number;username:string;displayName:string;role:"viewer"|"mechanic"|"manager"|"admin";technicianId:number|null;yard?:string};
 type TechnicianOption={id:number;name:string};
@@ -12,7 +13,7 @@ type Repair={id:string;equipmentId:number|null;unit:string;issue:string;status:s
 type Part={id:number;partNumber:string;description:string;quantityOnHand:number};
 type PartRequest={id:number;repairId:string;repairNumericId:number;partId:number;partNumber:string;description:string;warehouseCode:string;warehouseName:string;unit:string;technicianId:number|null;assignedTo:string;priority:string;outOfService:boolean;requestedQuantity:number;reservedQuantity:number;usedQuantity:number;remainingQuantity:number;shortageQuantity:number;state:string;createdAt:string;updatedAt:string};
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
-type ShopData={user:User;activeTimer:Timer|null;repairs:Repair[];parts:Part[];technicians?:TechnicianOption[];partRequests?:PartRequest[];updatedAt:string};
+type ShopData={user:User;activeTimer:Timer|null;activeShopDuty?:ActiveShopDuty|null;repairs:Repair[];parts:Part[];technicians?:TechnicianOption[];partRequests?:PartRequest[];updatedAt:string};
 type View="mine"|"available"|"all";
 type ActionResult={ok?:boolean;error?:string;repairId?:string;hours?:number;laborStarted?:boolean;completed?:boolean;nextRepairId?:string|null;waitingOnPart?:boolean;unitDone?:boolean;partAvailable?:boolean;switched?:boolean;handoff?:boolean;handedOffCount?:number;handoffTarget?:string;awaitingParts?:boolean;partNumber?:string;quantity?:number;warehouseCode?:string};
 type UnitGroup={key:string;unit:string;equipmentId:number|null;repairs:Repair[]};
@@ -91,6 +92,10 @@ export default function ShopPage(){
   const allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
   const canAssignHandoff=data?.user.role==="manager"||data?.user.role==="admin";
   const techOptions=useMemo(()=>canAssignHandoff?(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId):[],[data,canAssignHandoff]);
+
+  if(data?.activeTimer&&data.activeShopDuty){
+    return <ShopDutyWorkHome timer={data.activeTimer} duty={data.activeShopDuty} onRefresh={load}/>;
+  }
 
   if(data?.activeTimer&&activeRepair){
     const handoffPanel=handoffOpen?<section style={handoffPanelStyle}>
