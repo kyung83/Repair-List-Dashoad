@@ -37,10 +37,11 @@ test('Repair Board can mark Pull Thru and queues tablet alerts on assignment',as
 });
 
 test('Pull Thru alert is in-app tablet audio only, not SMS',async()=>{
-  const [component,endpoint,layout]=await Promise.all([
+  const [component,endpoint,layout,worker]=await Promise.all([
     read('app/pull-thru-tablet-alert.tsx'),
     read('app/api/shop/pull-thru-alert/route.ts'),
     read('app/layout.tsx'),
+    read('worker/index.ts'),
   ]);
   assert.match(component,/createOscillator/);
   assert.match(component,/frequency\.setValueAtTime/);
@@ -50,6 +51,10 @@ test('Pull Thru alert is in-app tablet audio only, not SMS',async()=>{
   assert.match(endpoint,/technician_alerts/);
   assert.match(endpoint,/acknowledged_at IS NULL/);
   assert.match(endpoint,/acknowledged_at=CURRENT_TIMESTAMP/);
+  assert.match(endpoint,/alreadyAcknowledged:true/);
+  assert.match(worker,/TECHNICIAN_SHOP_WRITE_PATHS[\s\S]*'\/api\/shop\/pull-thru-alert'/);
+  assert.match(component,/if\(!response\.ok\|\|!payload\.ok\|\|!payload\.acknowledged\)/);
+  assert.match(component,/setAckError/);
   assert.match(layout,/PullThruTabletAlert/);
   assert.doesNotMatch(component,/Twilio|SMS/i);
   assert.doesNotMatch(endpoint,/Twilio|SMS/i);
