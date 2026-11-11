@@ -62,7 +62,7 @@ export async function getWorkOrderData(db:D1Database){
     LEFT JOIN equipment e ON e.id=r.equipment_id
     LEFT JOIN technicians t ON t.id=r.technician_id
     LEFT JOIN app_users au ON au.id=r.reviewed_by_user_id
-    WHERE COALESCE(r.source,'') NOT IN ('outside-work','roadside-breakdown','shop-duty')
+    WHERE COALESCE(r.source,'') NOT IN ('outside-work','roadside-breakdown','shop-duty','cutover-archive')
       AND (
         lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
         OR EXISTS (

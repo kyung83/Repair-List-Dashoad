@@ -8,6 +8,12 @@ const page = readFileSync(new URL('../app/admin/go-live-cutover/page.tsx', impor
 const nav = readFileSync(new URL('../app/navigation-config.ts', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0136_go_live_cutover_center.sql', import.meta.url), 'utf8');
 const protectionMigration = readFileSync(new URL('../migrations/0164_go_live_cutover_protection_audit.sql', import.meta.url), 'utf8');
+const archiveMigration = readFileSync(new URL('../migrations/0165_cutover_archive_inventory_linked_repairs.sql', import.meta.url), 'utf8');
+const workOrders = readFileSync(new URL('../lib/work-orders.ts', import.meta.url), 'utf8');
+const reports = readFileSync(new URL('../lib/reports.ts', import.meta.url), 'utf8');
+const reportSearch = readFileSync(new URL('../lib/report-search.ts', import.meta.url), 'utf8');
+const unitHistory = readFileSync(new URL('../app/api/shop/unit-history/route.ts', import.meta.url), 'utf8');
+const productivity = readFileSync(new URL('../lib/technician-productivity-sql.js', import.meta.url), 'utf8');
 const geotab = readFileSync(new URL('../lib/geotab.ts', import.meta.url), 'utf8');
 
 test('cutover center exposes an admin-only, typed-confirmation one-time action', () => {
@@ -37,17 +43,22 @@ test('cutover hard-protects live breakdowns and active equipment', () => {
   assert.match(page, /no equipment is deleted/);
 });
 
-test('cutover protects inventory quantities and inventory audit links', () => {
+test('cutover archives inventory-linked sandbox repairs instead of deleting or unlinking them', () => {
   assert.match(service, /protectionSnapshot/);
-  assert.match(service, /inventoryLinkBlockers/);
+  assert.match(service, /inventoryLinkSummary/);
+  assert.match(service, /INVENTORY_AUDIT_LINK_WHERE/);
   assert.match(service, /inventory_operation_lines/);
   assert.match(service, /part_lifecycle_events/);
   assert.match(service, /part_core_obligations/);
   assert.match(service, /recovered_used_tires/);
-  assert.match(service, /Cutover blocked:/);
+  assert.match(service, /repairsToArchive:inventoryLinks\.linkedRepairs/);
+  assert.match(service, /source='cutover-archive'/);
+  assert.match(service, /go_live_archived_at=\?/);
+  assert.match(service, /AND NOT \$\{INVENTORY_AUDIT_LINK_WHERE\}/);
   assert.match(service, /protectionMismatch/);
   assert.match(page, /Inventory protected/);
-  assert.match(page, /CUTOVER BLOCKED/);
+  assert.match(page, /SAFE ARCHIVE/);
+  assert.doesNotMatch(page, /CUTOVER BLOCKED/);
 });
 
 test('cutover writes a one-time audit and DVIR cutoff is consumed by Geotab sync', () => {
@@ -57,6 +68,8 @@ test('cutover writes a one-time audit and DVIR cutoff is consumed by Geotab sync
   assert.match(protectionMigration, /inventory_quantity_before/);
   assert.match(protectionMigration, /breakdown_rows_before/);
   assert.match(protectionMigration, /active_equipment_before/);
+  assert.match(archiveMigration, /go_live_archived_at/);
+  assert.match(archiveMigration, /sandbox_repairs_archived/);
   assert.match(service, /INSERT INTO go_live_cutover_runs/);
   assert.match(service, /shop_go_live_completed_at/);
   assert.match(geotab, /dvir_go_live_cutoff_at/);
@@ -67,4 +80,13 @@ test('only admins get the Go-Live Cutover setup link', () => {
   assert.match(nav, /\/admin\/go-live-cutover/);
   assert.match(nav, /Go-Live Cutover/);
   assert.match(route, /user\.role !== 'admin'/);
+});
+
+
+test('cutover archives are hidden from normal production work and reporting surfaces', () => {
+  assert.match(workOrders, /cutover-archive/);
+  assert.match(reports, /cutover-archive/);
+  assert.match(reportSearch, /cutover-archive/);
+  assert.match(unitHistory, /cutover-archive/);
+  assert.match(productivity, /cutover-archive/);
 });

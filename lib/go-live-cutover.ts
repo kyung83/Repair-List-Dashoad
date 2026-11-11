@@ -3,6 +3,23 @@ const HISTORY_IMPORT_KEY = 'ro-history-9309499-v1';
 const SANDBOX_REPAIR_WHERE = `
   lower(COALESCE(r.source, '')) <> 'roadside-breakdown'
   AND r.id NOT IN (SELECT repair_id FROM roadside_breakdowns)
+  AND r.go_live_archived_at IS NULL
+`;
+
+const INVENTORY_AUDIT_LINK_WHERE = `
+  (
+    EXISTS (SELECT 1 FROM inventory_operations io WHERE io.repair_id=r.id)
+    OR EXISTS (
+      SELECT 1
+      FROM inventory_operation_lines iol
+      JOIN repair_parts rp ON rp.id=iol.repair_part_id
+      WHERE rp.repair_id=r.id
+    )
+    OR EXISTS (SELECT 1 FROM part_lifecycle_events ple WHERE ple.repair_id=r.id)
+    OR EXISTS (SELECT 1 FROM part_core_obligations pco WHERE pco.repair_id=r.id)
+    OR EXISTS (SELECT 1 FROM recovered_used_tires rut WHERE rut.repair_id=r.id)
+    OR EXISTS (SELECT 1 FROM recovered_used_tires rut WHERE rut.disposition_repair_id=r.id)
+  )
 `;
 
 type CountRow = { count:number };
@@ -92,8 +109,9 @@ async function protectionSnapshot(db:D1Database):Promise<ProtectionSnapshot> {
   };
 }
 
-async function inventoryLinkBlockers(db:D1Database) {
+async function inventoryLinkSummary(db:D1Database) {
   const [
+    linkedRepairs,
     operationHeaders,
     operationLines,
     lifecycleEvents,
@@ -101,6 +119,7 @@ async function inventoryLinkBlockers(db:D1Database) {
     recoveredTireSources,
     recoveredTireDispositions,
   ] = await Promise.all([
+    scalar(db, `SELECT COUNT(*) count FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE} AND ${INVENTORY_AUDIT_LINK_WHERE}`),
     scalar(db, `SELECT COUNT(*) count FROM inventory_operations io JOIN repairs r ON r.id=io.repair_id WHERE ${SANDBOX_REPAIR_WHERE}`),
     scalar(db, `SELECT COUNT(*) count
       FROM inventory_operation_lines iol
@@ -113,7 +132,7 @@ async function inventoryLinkBlockers(db:D1Database) {
     scalar(db, `SELECT COUNT(*) count FROM recovered_used_tires rut JOIN repairs r ON r.id=rut.disposition_repair_id WHERE ${SANDBOX_REPAIR_WHERE}`),
   ]);
   const total=operationHeaders+operationLines+lifecycleEvents+coreObligations+recoveredTireSources+recoveredTireDispositions;
-  return {total,operationHeaders,operationLines,lifecycleEvents,coreObligations,recoveredTireSources,recoveredTireDispositions};
+  return {linkedRepairs,total,operationHeaders,operationLines,lifecycleEvents,coreObligations,recoveredTireSources,recoveredTireDispositions};
 }
 
 function protectionMismatch(before:ProtectionSnapshot,after:ProtectionSnapshot) {
@@ -138,7 +157,8 @@ export async function getGoLiveCutoverPreview(db:D1Database) {
     dvirCutoffAt,
     goLiveCompletedAt,
     protectedSnapshot,
-    blockers,
+    inventoryLinks,
+    deletableSandboxRepairs,
   ] = await Promise.all([
     scalar(db, `SELECT COUNT(*) count FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE}`),
     scalar(db, `SELECT COUNT(*) count FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE} AND r.completed_at IS NULL AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'`),
@@ -162,7 +182,8 @@ export async function getGoLiveCutoverPreview(db:D1Database) {
     setting(db, 'dvir_go_live_cutoff_at'),
     setting(db, 'shop_go_live_completed_at'),
     protectionSnapshot(db),
-    inventoryLinkBlockers(db),
+    inventoryLinkSummary(db),
+    scalar(db, `SELECT COUNT(*) count FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE} AND NOT ${INVENTORY_AUDIT_LINK_WHERE}`),
   ]);
 
   return {
@@ -171,14 +192,18 @@ export async function getGoLiveCutoverPreview(db:D1Database) {
     goLiveCompletedAt,
     dvirCutoffAt,
     confirmationPhrase:'GO LIVE',
-    canExecute:!goLiveCompletedAt && blockers.total===0,
+    canExecute:!goLiveCompletedAt,
     blockers:{
-      inventoryLinkedSandboxRows:blockers.total,
-      detail:blockers,
+      inventoryLinkedSandboxRows:0,
+      inventoryLinkedSandboxRepairs:inventoryLinks.linkedRepairs,
+      inventoryAuditLinksPreserved:inventoryLinks.total,
+      detail:inventoryLinks,
       alreadyCompleted:Boolean(goLiveCompletedAt),
     },
     willClear:{
       repairs:sandboxRepairs,
+      repairsToDelete:deletableSandboxRepairs,
+      repairsToArchive:inventoryLinks.linkedRepairs,
       openRepairs:openSandboxRepairs,
       completedRepairs:completedSandboxRepairs,
       laborEntries:sandboxLaborEntries,
@@ -213,7 +238,7 @@ export async function getGoLiveCutoverPreview(db:D1Database) {
       'Import the final cumulative EMDECS repair-history export and verify totals.',
       'Import the final EMDECS inventory snapshot as the production opening balance.',
       'Protect every roadside-breakdown repair and all Breakdown-specific records.',
-      'Clear sandbox non-Breakdown shop repairs and their attached shop activity.',
+      'Delete sandbox non-Breakdown repairs that never touched inventory; archive inventory-linked sandbox repairs so audit history stays intact.',
       'Set the DVIR go-live cutoff and clear the local DVIR staging rows.',
       'Clear sandbox OOS flags only when the unit has no active Breakdown.',
       'Allow Geotab DVIR synchronization to repopulate only fresh DVIRs after the cutoff.',
@@ -226,11 +251,6 @@ export async function executeGoLiveCutover(db:D1Database,input:{userId:number;us
   if(String(input.confirmation??'').trim()!=='GO LIVE')throw new Error('Type GO LIVE exactly to run the one-time cutover.');
   const completed=await setting(db,'shop_go_live_completed_at');
   if(completed)throw new Error(`The one-time shop cutover already completed at ${completed}.`);
-
-  const blockers=await inventoryLinkBlockers(db);
-  if(blockers.total>0){
-    throw new Error(`Cutover blocked: ${blockers.total} sandbox repair link(s) are still part of inventory audit history. Resolve those test links before go-live so inventory history stays untouched.`);
-  }
 
   const preview=await getGoLiveCutoverPreview(db);
   const before=await protectionSnapshot(db);
@@ -247,7 +267,17 @@ export async function executeGoLiveCutover(db:D1Database,input:{userId:number;us
     FROM repairs r
     LEFT JOIN equipment e ON e.id=r.equipment_id
     WHERE ${SANDBOX_REPAIR_WHERE}
+      AND NOT ${INVENTORY_AUDIT_LINK_WHERE}
   `).bind(input.userId,input.userName);
+
+  const archiveEvent=db.prepare(`
+    INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+    SELECT r.id,?,r.technician_id,'go_live_archived',
+           'Go-live cutover archived this sandbox repair because inventory audit history is linked to it.'
+    FROM repairs r
+    WHERE ${SANDBOX_REPAIR_WHERE}
+      AND ${INVENTORY_AUDIT_LINK_WHERE}
+  `).bind(input.userId);
 
   await db.batch([
     db.prepare(`
@@ -255,8 +285,33 @@ export async function executeGoLiveCutover(db:D1Database,input:{userId:number;us
       ON CONFLICT(key) DO UPDATE SET value=excluded.value
     `).bind(cutoffAt),
     auditInsert,
+    archiveEvent,
     db.prepare(`DELETE FROM technician_alerts WHERE repair_id IN (SELECT r.id FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE})`),
-    db.prepare(`DELETE FROM repairs WHERE id IN (SELECT r.id FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE})`),
+    db.prepare(`DELETE FROM repair_labor_timers WHERE repair_id IN (SELECT r.id FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE})`),
+    db.prepare(`
+      UPDATE repairs
+      SET status='Completed - Cutover Archive',
+          source='cutover-archive',
+          completed_at=COALESCE(completed_at,?),
+          go_live_archived_at=?,
+          go_live_archived_by_user_id=?,
+          updated_at=CURRENT_TIMESTAMP
+      WHERE id IN (
+        SELECT r.id
+        FROM repairs r
+        WHERE ${SANDBOX_REPAIR_WHERE}
+          AND ${INVENTORY_AUDIT_LINK_WHERE}
+      )
+    `).bind(cutoffAt,cutoffAt,input.userId),
+    db.prepare(`
+      DELETE FROM repairs
+      WHERE id IN (
+        SELECT r.id
+        FROM repairs r
+        WHERE ${SANDBOX_REPAIR_WHERE}
+          AND NOT ${INVENTORY_AUDIT_LINK_WHERE}
+      )
+    `),
     db.prepare(`DELETE FROM dvir_defects`),
     db.prepare(`
       UPDATE equipment
@@ -283,17 +338,17 @@ export async function executeGoLiveCutover(db:D1Database,input:{userId:number;us
   await db.batch([
     db.prepare(`
       INSERT INTO go_live_cutover_runs(
-        executed_by_user_id,dvir_cutoff_at,non_breakdown_repairs_deleted,dvir_defects_deleted,oos_units_cleared,
+        executed_by_user_id,dvir_cutoff_at,non_breakdown_repairs_deleted,sandbox_repairs_archived,dvir_defects_deleted,oos_units_cleared,
         breakdown_repairs_protected,historical_ros_protected,inventory_parts_protected,inventory_stock_rows_protected,
         inventory_quantity_before,inventory_quantity_after,inventory_operations_before,inventory_operations_after,
         breakdown_rows_before,breakdown_rows_after,active_equipment_before,active_equipment_after,inventory_link_blockers,note
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).bind(
-      input.userId,cutoffAt,preview.willClear.repairs,preview.willClear.dvirDefects,preview.willClear.oosUnitsWithoutActiveBreakdown,
+      input.userId,cutoffAt,preview.willClear.repairsToDelete,preview.willClear.repairsToArchive,preview.willClear.dvirDefects,preview.willClear.oosUnitsWithoutActiveBreakdown,
       before.breakdownRepairRows,preview.protected.historicalRos,before.inventoryParts,before.inventoryStockRows,
       before.inventoryQuantity,after.inventoryQuantity,before.inventoryOperations,after.inventoryOperations,
-      before.breakdownRows,after.breakdownRows,before.activeEquipment,after.activeEquipment,blockers.total,
-      'One-time shop go-live cutover completed. Breakdowns, active equipment identity, maintenance history, and inventory were protected.'
+      before.breakdownRows,after.breakdownRows,before.activeEquipment,after.activeEquipment,preview.blockers.inventoryAuditLinksPreserved,
+      'One-time shop go-live cutover completed. Inventory-linked sandbox repairs were archived rather than deleted. Breakdowns, active equipment identity, maintenance history, and inventory were protected.'
     ),
     db.prepare(`
       INSERT INTO app_settings(key,value) VALUES('shop_go_live_completed_at',?)
@@ -305,9 +360,13 @@ export async function executeGoLiveCutover(db:D1Database,input:{userId:number;us
     ok:true,
     completedAt:cutoffAt,
     deleted:{
-      repairs:preview.willClear.repairs,
+      repairs:preview.willClear.repairsToDelete,
       dvirDefects:preview.willClear.dvirDefects,
       oosUnitsCleared:preview.willClear.oosUnitsWithoutActiveBreakdown,
+    },
+    archived:{
+      repairs:preview.willClear.repairsToArchive,
+      inventoryAuditLinksPreserved:preview.blockers.inventoryAuditLinksPreserved,
     },
     protected:{
       breakdowns:after.breakdownRows,

@@ -9,6 +9,8 @@ type Preview = {
   dvirCutoffAt:string;
   willClear:{
     repairs:number;
+    repairsToDelete:number;
+    repairsToArchive:number;
     openRepairs:number;
     completedRepairs:number;
     laborEntries:number;
@@ -42,8 +44,11 @@ type Preview = {
   canExecute:boolean;
   blockers:{
     inventoryLinkedSandboxRows:number;
+    inventoryLinkedSandboxRepairs:number;
+    inventoryAuditLinksPreserved:number;
     alreadyCompleted:boolean;
     detail:{
+      linkedRepairs:number;
       total:number;
       operationHeaders:number;
       operationLines:number;
@@ -89,7 +94,7 @@ export default function Page(){
 
   async function runCutover(){
     if(!data?.canExecute||confirmation!==data.confirmationPhrase)return;
-    const finalOkay=window.confirm("FINAL WARNING: This will permanently clear sandbox/test shop repairs and local DVIR staging rows. Breakdowns, active equipment master records, maintenance history, and inventory are protected. Continue?");
+    const finalOkay=window.confirm("FINAL WARNING: This will delete sandbox repairs with no inventory audit history, archive inventory-linked sandbox repairs, and clear local DVIR staging rows. Breakdowns, active equipment master records, maintenance history, and inventory are protected. Continue?");
     if(!finalOkay)return;
     setBusy(true);setMessage("");
     try{
@@ -131,9 +136,9 @@ export default function Page(){
       <section style={{marginTop:24}}>
         <h2 style={{marginBottom:10}}>Would be cleared on go-live</h2>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-          <Metric label="Sandbox Repairs" value={data.willClear.repairs} note={`${number(data.willClear.openRepairs)} open · ${number(data.willClear.completedRepairs)} completed/test`} />
+          <Metric label="Sandbox Repairs" value={data.willClear.repairs} note={`${number(data.willClear.repairsToDelete)} delete · ${number(data.willClear.repairsToArchive)} archive`} />
           <Metric label="Labor Entries" value={data.willClear.laborEntries} note={`${number(data.willClear.activeLaborTimers)} active timer(s) right now`} />
-          <Metric label="Repair Part Lines" value={data.willClear.repairPartLines} note="Links to sandbox shop repairs; inventory opening balance is separate." />
+          <Metric label="Repair Part Lines" value={data.willClear.repairPartLines} note="Inventory-linked sandbox repairs are archived instead of deleting their audit relationships." />
           <Metric label="DVIR Rows" value={data.willClear.dvirDefects} note={`${number(data.willClear.unrepairedDvirDefects)} currently unrepaired`} />
           <Metric label="OOS Flags" value={data.willClear.oosUnitsWithoutActiveBreakdown} note="Only units with no active live Breakdown would be reset." />
         </div>
@@ -165,14 +170,15 @@ export default function Page(){
 
       {!data.goLiveCompletedAt&&<section style={{...panel,marginTop:18,border:"2px solid #b45309",background:"#fffaf0"}}>
         <h2 style={{marginTop:0,color:"#92400e"}}>Run one-time production cutover</h2>
-        <p style={{lineHeight:1.5,marginBottom:10}}>This permanently removes sandbox/test non-Breakdown shop repairs, clears local DVIR staging, and resets OOS flags only where there is no active Breakdown.</p>
+        <p style={{lineHeight:1.5,marginBottom:10}}>This deletes sandbox/test non-Breakdown repairs that never touched inventory, archives inventory-linked sandbox repairs so their audit relationships remain intact, clears local DVIR staging, and resets OOS flags only where there is no active Breakdown.</p>
         <div style={{display:"grid",gap:6,fontSize:13,marginBottom:14}}>
           <div>✅ <b>Breakdowns protected:</b> {number(data.protected.breakdownRows)} Breakdown record(s) and {number(data.protected.breakdownRepairRows)} Breakdown repair(s).</div>
           <div>✅ <b>Active equipment protected:</b> {number(data.protected.equipmentRows)} active master equipment record(s); no equipment is deleted.</div>
           <div>✅ <b>Inventory protected:</b> {number(data.protected.inventoryParts)} parts · {number(data.protected.inventoryStockRows)} stock rows · {number(data.protected.inventoryQuantity)} total on-hand · {number(data.protected.inventoryOperations)} operations.</div>
+          {data.blockers.inventoryLinkedSandboxRepairs>0&&<div>✅ <b>Inventory-linked sandbox repairs:</b> {number(data.blockers.inventoryLinkedSandboxRepairs)} repair(s) will be hidden as cutover archives, preserving {number(data.blockers.inventoryAuditLinksPreserved)} inventory audit link(s).</div>}
         </div>
-        {data.blockers.inventoryLinkedSandboxRows>0&&<div style={{padding:12,border:"1px solid #ef4444",background:"#fff1f2",color:"#991b1b",fontWeight:800,marginBottom:12}}>
-          CUTOVER BLOCKED: {number(data.blockers.inventoryLinkedSandboxRows)} sandbox repair link(s) are part of inventory audit history. These must be resolved before the cutover can run so inventory history is not altered.
+        {data.blockers.inventoryLinkedSandboxRepairs>0&&<div style={{padding:12,border:"1px solid #86b99b",background:"#f2fbf5",color:"#176440",fontWeight:800,marginBottom:12}}>
+          SAFE ARCHIVE: These repairs will not be deleted or shown in normal production history. Their inventory audit links stay intact.
         </div>}
         <label style={{display:"grid",gap:6,maxWidth:420,fontWeight:850}}>
           Type <code>{data.confirmationPhrase}</code> to unlock the cutover
