@@ -43,6 +43,7 @@ function fixture(){
   addRepair(114,"Old job","repair","Completed","2026-09-15","2026-10-04",1);
   addRepair(115,"Shop cleanup","indirect-labor","Completed","2026-10-04","2026-10-04",3);
   addRepair(116,"Other year","repair","Completed","2026-09-04","2026-09-05",1);
+  addRepair(117,"Sandbox archived job","cutover-archive","Completed","2026-10-04","2026-10-04",1);
   db.exec("INSERT INTO maintenance_checklist_runs VALUES(1,107,7,'pm'),(2,108,7,'pm'),(3,109,8,'pm'),(4,113,NULL,'annual');"+
     "INSERT INTO maintenance_events VALUES(1,1,'pm','20A','checklist-wo-107'),"+
     "(2,1,'pm','20A','checklist-wo-108'),(3,1,'pm','40','checklist-wo-109');");
@@ -63,6 +64,7 @@ function fixture(){
   addLabor(114,1,7);
   addLabor(115,1,10); // Indirect omitted from job comparison, stays in base report.
   addLabor(116,1,5,"2026-09-05");
+  addLabor(117,1,99);
   return db;
 }
 
@@ -82,6 +84,7 @@ test("job comparison uses per-technician and per-WO aggregation, not labor-entry
   assert.equal(result.summary.uniqueWorkOrders,14);
   assert.equal(sourceRows.filter(r=>r.repair_id===115).length,0);
   assert.equal(sourceRows.filter(r=>r.repair_id===116).length,0);
+  assert.equal(sourceRows.filter(r=>r.repair_id===117).length,0);
 });
 
 test("same repair type compares SOLO completed timer-confirmed full-period jobs to other techs, excluding self",()=>{
@@ -167,5 +170,6 @@ test("peer job reporting has manager access, separate browsing, CSV and transpar
   assert.match(original,/Compare Same Jobs/);
   assert.match(nav,/href: "\/reports\/technician-productivity\/comparisons".*roles: managerRoles/);
   assert.match(technicianJobWorkSql(),/GROUP BY t.id,l.repair_id/);
+  assert.match(technicianJobWorkSql(),/cutover-archive/);
   assert.match(technicianJobWorkSql(),/JOIN repair_labor_entries l ON l.technician_id=t.id AND l.labor_date>=\? AND l.labor_date<=\?/);
 });
