@@ -35,7 +35,8 @@ function fixture() {
   sqlite.exec(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE parts(id INTEGER PRIMARY KEY, part_number TEXT, description TEXT, quantity_on_hand REAL,
-      reorder_level REAL, unit_cost REAL, location TEXT, preferred_vendor_id INTEGER, active INTEGER, deleted_at TEXT, updated_at TEXT);
+      reorder_level REAL, unit_cost REAL, location TEXT, preferred_vendor_id INTEGER, active INTEGER, deleted_at TEXT, updated_at TEXT,
+      inventory_class TEXT NOT NULL DEFAULT 'stock');
     CREATE TABLE vendors(id INTEGER PRIMARY KEY, name TEXT, phone TEXT, email TEXT, notes TEXT, active INTEGER);
     CREATE TABLE warehouses(id INTEGER PRIMARY KEY, code TEXT, name TEXT, active INTEGER);
     CREATE TABLE part_warehouse_stock(id INTEGER PRIMARY KEY, part_id INTEGER, warehouse_id INTEGER, variant_key TEXT,
@@ -47,9 +48,9 @@ function fixture() {
     CREATE TABLE repair_part_requests(part_id INTEGER, warehouse_id INTEGER, status TEXT);
     CREATE TABLE derived_repair_part_reservations(part_id INTEGER, warehouse_id INTEGER, reserved_quantity REAL);
     INSERT INTO parts VALUES
-      (1, 'PART-1', 'Test part', 12, 0, 10, 'General cabinet note', NULL, 1, NULL, NULL),
-      (2, 'PART-2', 'Unassigned part', 3, 0, 4, 'Legacy shelf', NULL, 1, NULL, NULL),
-      (3, 'PART-3', 'Part without a bin', 1, 0, 5, '', NULL, 1, NULL, NULL);
+      (1, 'PART-1', 'Test part', 12, 0, 10, 'General cabinet note', NULL, 1, NULL, NULL, 'stock'),
+      (2, 'PART-2', 'Unassigned part', 3, 0, 4, 'Legacy shelf', NULL, 1, NULL, NULL, 'stock'),
+      (3, 'PART-3', 'Part without a bin', 1, 0, 5, '', NULL, 1, NULL, NULL, 'stock');
     INSERT INTO warehouses VALUES (1, 'CLARE', 'Clare', 1), (2, 'CADILLAC', 'Cadillac', 1);
     INSERT INTO part_warehouse_stock VALUES
       (1, 1, 1, '', 2, 'EA', 10, 0),
