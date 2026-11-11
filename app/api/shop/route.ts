@@ -336,10 +336,10 @@ export async function POST(request: Request) {
     const availability = await getDerivedPartAvailability(env.DB);
     const stock = availability.find((row)=>row.partId === partId && row.warehouseCode === warehouseCode);
     const part = stock
-      ? {partNumber:stock.partNumber}
-      : await env.DB.prepare('SELECT part_number AS partNumber FROM parts WHERE id=? AND active=1')
+      ? {partNumber:stock.partNumber,inventoryClass:stock.inventoryClass}
+      : await env.DB.prepare("SELECT part_number AS partNumber,COALESCE(inventory_class,'stock') AS inventoryClass FROM parts WHERE id=? AND active=1 AND deleted_at IS NULL")
           .bind(partId)
-          .first<{partNumber:string}>();
+          .first<{partNumber:string;inventoryClass:'stock'|'one_time'}>();
     if (!part) throw new Error('Part was not found.');
 
     if (stock && stock.available + 0.000001 >= quantity) {
@@ -356,6 +356,10 @@ export async function POST(request: Request) {
       });
       await repairJobEvent(repairId,user.id,repair.technician_id,'part_used',`${quantity} x ${part.partNumber} applied from ${warehouseCode} (inventory operation ${result.operationId}).`);
       return Response.json({...result,partNumber:part.partNumber,warehouseCode,usedImmediately:quantity,awaitingParts:false});
+    }
+
+    if (part.inventoryClass === 'one_time') {
+      throw new Error(`${part.partNumber} is a one-time part and only ${stock?.available ?? 0} is available in ${warehouseCode}. Parts Desk must receive/create another one-time purchase before it can be applied.`);
     }
 
     const requestResult = await requestPartDerived(env.DB,{
