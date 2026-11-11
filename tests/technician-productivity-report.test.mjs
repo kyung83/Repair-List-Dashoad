@@ -15,7 +15,7 @@ function dbFixture(){
     "CREATE INDEX idx_repair_labor_technician_date ON repair_labor_entries(technician_id,labor_date);"+
     "INSERT INTO technicians VALUES(10,'Alex Mechanic',1),(20,'Pat Mechanic',1),(30,'Former Mechanic',0);"+
     "INSERT INTO repair_types VALUES(1,'INDIRECT LABOR-OTHER'),(2,'ENGINE');"+
-    "INSERT INTO repairs VALUES(101,'shop',2),(102,'indirect-labor',1),(103,'shop',1),(104,'shop',2),(105,'shop',2);"+
+    "INSERT INTO repairs VALUES(101,'shop',2),(102,'indirect-labor',1),(103,'shop',1),(104,'shop',2),(105,'shop',2),(106,'cutover-archive',2);"+
     "INSERT INTO repair_labor_entries VALUES"+
     "(1,101,10,'2026-10-12',2,'2026-10-12 10:00:00','2026-10-12 12:00:00'),"+
     "(2,101,10,'2026-10-12',1,'2026-10-12 12:00:00','2026-10-12 13:00:00'),"+
@@ -23,7 +23,8 @@ function dbFixture(){
     "(4,103,10,'2026-10-12',1,NULL,NULL),"+
     "(5,105,30,'2026-10-12',1,'2026-10-12 10:00:00','2026-10-12 11:00:00'),"+
     "(6,104,10,'2026-10-09',4,'2026-10-09 10:00:00','2026-10-09 14:00:00'),"+
-    "(7,101,NULL,'2026-10-12',2,NULL,NULL);"+
+    "(7,101,NULL,'2026-10-12',2,NULL,NULL),"+
+    "(8,106,10,'2026-10-12',99,'2026-10-12 08:00:00','2026-10-12 18:00:00');"+
     "INSERT INTO repair_labor_timers VALUES(999,101,10,'2026-10-12 14:00:00');");
   return db;
 }
@@ -74,6 +75,7 @@ test("summary aggregates actual direct and INDIRECT LABOR-OTHER sessions by tech
   const totalIndirect=summary.reduce((value,row)=>value+row.indirect_hours,0);
   assert.equal(trackedProductivity(totalDirect,totalIndirect).productivityPercent,66.7);
   assert.match(technicianSummarySql(),/l.technician_id=t.id AND l.labor_date>=\? AND l.labor_date<=\?/);
+  assert.match(technicianSummarySql(),/cutover-archive/);
   db.close();
 });
 
