@@ -131,7 +131,12 @@ async function assignExisting(repair:ExistingRepair,technician:Technician,user:{
     FROM repairs r
     LEFT JOIN equipment e ON e.id=r.equipment_id
     WHERE r.id=? AND COALESCE(r.pull_thru,0)=1
-   `).bind(technician.id,repair.id),
+      AND NOT EXISTS (
+       SELECT 1 FROM technician_alerts a
+       WHERE a.repair_id=r.id AND a.technician_id=?
+         AND a.alert_type='pull_thru' AND a.acknowledged_at IS NULL
+      )
+   `).bind(technician.id,repair.id,technician.id),
    env.DB.prepare(`
     INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
     SELECT ?,?,?, 'pull_thru_alert_queued', ?
