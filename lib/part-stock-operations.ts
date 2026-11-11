@@ -110,7 +110,7 @@ export async function applyPartToRepair(
   const source = input.source ?? 'technician';
   if (source !== 'work_order_review' && repair.status.toLowerCase().includes('complete')) throw new Error('Completed repairs cannot issue additional parts outside Work Order Review.');
 
-  const part = await db.prepare('SELECT id,part_number,unit_cost FROM parts WHERE id = ? AND active = 1').bind(partId).first<{id:number;part_number:string;unit_cost:number|null}>();
+  const part = await db.prepare("SELECT id,part_number,unit_cost,COALESCE(inventory_class,'stock') AS inventory_class FROM parts WHERE id = ? AND active = 1 AND deleted_at IS NULL").bind(partId).first<{id:number;part_number:string;unit_cost:number|null;inventory_class:'stock'|'one_time'}>();
   if (!part) throw new Error('Part was not found.');
   const stock = await warehouseStock(db,partId,String(input.warehouseCode ?? '').trim().toUpperCase());
   if (!stock) throw new Error('That part is not stocked in the selected warehouse.');
@@ -129,10 +129,10 @@ export async function applyPartToRepair(
         WHERE id = ? AND part_id = ? AND quantity_on_hand >= ?
       `).bind(quantity,stock.id,partId,quantity),
       db.prepare(`
-        INSERT INTO repair_parts (repair_id,part_id,quantity,unit_cost,warehouse_stock_id,inventory_operation_id)
-        SELECT ?,?,?,?, ?,(SELECT id FROM inventory_operations WHERE operation_key = ?)
+        INSERT INTO repair_parts (repair_id,part_id,quantity,unit_cost,warehouse_stock_id,inventory_operation_id,source_type)
+        SELECT ?,?,?,?, ?,(SELECT id FROM inventory_operations WHERE operation_key = ?),?
         WHERE changes() = 1
-      `).bind(repairId,partId,quantity,unitCost,stock.id,operationKey),
+      `).bind(repairId,partId,quantity,unitCost,stock.id,operationKey,part.inventory_class==='one_time'?'one_time':'stock'),
       db.prepare(`
         INSERT INTO inventory_operation_lines
           (operation_id,part_id,warehouse_stock_id,warehouse_id,repair_part_id,quantity_delta,unit_cost,line_type)
@@ -182,7 +182,7 @@ export async function applyPartToRepair(
   await refreshRepairPartsText(db,repairId);
   const applied = await operationByKey(db,operationKey);
   if (!applied?.repair_part_id) throw new Error('Part operation committed without a usage record.');
-  return {ok:true,idempotent:false,operationId:applied.id,usageId:applied.repair_part_id,repairId:`repair-${repairId}`,partId,quantity,unitCost,warehouseCode:stock.warehouse_code};
+  return {ok:true,idempotent:false,operationId:applied.id,usageId:applied.repair_part_id,repairId:`repair-${repairId}`,partId,quantity,unitCost,warehouseCode:stock.warehouse_code,inventoryClass:part.inventory_class==='one_time'?'one_time':'stock'};
 }
 
 export async function undoInventoryOperation(
