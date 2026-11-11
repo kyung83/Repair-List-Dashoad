@@ -14,14 +14,19 @@ test('Pull Thru has a persistent repair flag and technician alert queue',async()
 });
 
 test('Repair Board can mark Pull Thru and queues tablet alerts on assignment',async()=>{
-  const [api,board,bulk]=await Promise.all([
+  const [api,board,planning,bulk]=await Promise.all([
     read('app/api/repair-board/original.ts'),
     read('app/repair-board/dashboard-v2.tsx'),
+    read('app/repair-board/planning-center.tsx'),
     read('app/api/repair-board/bulk-assign/route.ts'),
   ]);
   assert.match(board,/setPullThru/);
   assert.match(board,/PULL THRU/);
   assert.match(board,/pullThruActive/);
+  assert.match(planning,/setPullThru/);
+  assert.match(planning,/pullThruButton/);
+  assert.match(planning,/PULL THRU/);
+  assert.match(planning,/row\.pullThru/);
   assert.match(api,/action === 'setPullThru'/);
   assert.match(api,/INSERT INTO technician_alerts/);
   assert.match(api,/pull_thru_alert_queued/);
