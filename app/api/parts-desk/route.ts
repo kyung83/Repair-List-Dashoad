@@ -6,6 +6,7 @@ import {
   receivePartForWarehouse,
 } from '@/lib/parts-lifecycle';
 import { getUnmatchedPartRequests, handleUnmatchedPartRequest } from '@/lib/unmatched-parts';
+import { createOneTimePart, convertOneTimePartToStock, listOneTimeParts } from '@/lib/one-time-parts';
 
 async function requirePartsDeskUser(request: Request) {
   const user = await getSessionUser(env.DB, request);
@@ -17,17 +18,22 @@ async function requirePartsDeskUser(request: Request) {
 export async function GET(request: Request) {
   try {
     await requirePartsDeskUser(request);
-    const [data, unmatchedPartRequests, warehouses] = await Promise.all([
+    const [data, unmatchedPartRequests, oneTimeParts, warehouses, vendors] = await Promise.all([
       getPartsDeskData(env.DB),
       getUnmatchedPartRequests(env.DB),
+      listOneTimeParts(env.DB),
       env.DB.prepare('SELECT id,code,name FROM warehouses WHERE active=1 ORDER BY name COLLATE NOCASE')
         .all<{id:number;code:string;name:string}>(),
+      env.DB.prepare('SELECT id,name FROM vendors WHERE COALESCE(active,1)=1 ORDER BY name COLLATE NOCASE')
+        .all<{id:number;name:string}>(),
     ]);
     return Response.json({
       ...data,
       unmatchedPartRequests,
+      oneTimeParts,
       warehouses:warehouses.results.map(row=>({id:Number(row.id),code:row.code,name:row.name})),
-      summary:{...data.summary,unmatchedParts:unmatchedPartRequests.length},
+      vendors:vendors.results.map(row=>({id:Number(row.id),name:row.name})),
+      summary:{...data.summary,unmatchedParts:unmatchedPartRequests.length,oneTimeParts:oneTimeParts.length},
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : 'Parts Desk could not be loaded.' }, { status: 403 });
@@ -41,6 +47,22 @@ export async function POST(request: Request) {
     const action = String(body.action ?? '');
     if (action === 'handleUnmatched') {
       return Response.json(await handleUnmatchedPartRequest(env.DB, Number(body.requestId ?? 0)));
+    }
+    if (action === 'createOneTimePart') {
+      return Response.json(await createOneTimePart(env.DB,{
+        partNumber:body.partNumber,
+        description:body.description,
+        warehouseCode:body.warehouseCode,
+        quantity:body.quantity,
+        unitCost:body.unitCost,
+        vendorId:body.vendorId,
+        reference:body.reference,
+        notes:body.notes,
+        userId:user.id,
+      }));
+    }
+    if (action === 'convertOneTimePart') {
+      return Response.json(await convertOneTimePartToStock(env.DB,{partId:body.partId,userId:user.id}));
     }
     const partId = Number(body.partId ?? 0);
     const warehouseCode = String(body.warehouseCode ?? '');
