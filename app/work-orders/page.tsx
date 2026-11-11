@@ -12,6 +12,7 @@ type RepairPhoto = {repairId:string;repairIssue:string;id:number;fileName:string
 type Repair = {
   id:string;numericId:number;equipmentId:number|null;unit:string;issue:string;status:string;assignedTo:string;technicianId:number|null;
   repairType:string;location:string;laborHours:number;laborRate:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;completedAt:string;reviewedAt:string;
+  geotabReviewStatus:string;geotabResolutionType:string;geotabResolutionNote:string;geotabFailureReason:string;
 };
 type ReviewPackage = {
   id:string;repairIds:string[];unit:string;equipmentId:number|null;technician:string;technicianId:number|null;completionDate:string;completedAt:string;
