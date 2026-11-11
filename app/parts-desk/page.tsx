@@ -98,6 +98,12 @@ export default function PartsDeskPage(){
     }catch(e){setMessage(e instanceof Error?e.message:"Part could not be converted.")}finally{setBusy("")}
   }
 
+  function newInventoryHref(item:UnmatchedPart){
+    const params=new URLSearchParams({new:'1',requestId:String(item.id),description:item.requestedText,requestedQuantity:String(item.requestedQuantity)});
+    if(item.warehouseCode)params.set('warehouse',item.warehouseCode);
+    return `/inventory?${params.toString()}`;
+  }
+
   const groups=useMemo(()=>data?.jobShortages.filter(g=>yard==='ALL'||g.warehouseCode===yard)??[],[data,yard]);
   const lows=useMemo(()=>data?.lowStock.filter(g=>yard==='ALL'||g.warehouseCode===yard)??[],[data,yard]);
   const ready=useMemo(()=>data?.requests.filter(r=>(yard==='ALL'||r.warehouseCode===yard)&&r.reservedQuantity>0)??[],[data,yard]);
@@ -107,10 +113,7 @@ export default function PartsDeskPage(){
   return <main style={{minHeight:'100vh',background:'#f4f6f4',padding:'36px 34px 100px',color:'#1b2421'}}>
     <ModuleTabs module="parts" />
     <header style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'end',flexWrap:'wrap'}}>
-      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#173f37'}}>Parts Desk</h1><p style={{margin:0,color:'#68746f'}}>Decide what gets stocked. Techs only search for a part and apply it to the repair.</p></div>
-      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-        <a href="/inventory?new=1" style={secondaryButton}>+ New Inventory Item</a>
-      </div>
+      <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#173f37'}}>Parts Desk</h1><p style={{margin:0,color:'#68746f'}}>Decide what gets stocked when a technician requests a part that is not yet identified.</p></div>
     </header>
     <div style={{display:'flex',gap:7,flexWrap:'wrap',marginTop:16}}><button onClick={()=>setYard('ALL')} style={yard==='ALL'?activeTab:tab}>All Warehouses</button>{(data?.warehouses??[]).map(warehouse=><button key={warehouse.code} onClick={()=>setYard(warehouse.code)} style={yard===warehouse.code?activeTab:tab}>{warehouse.name}</button>)}</div>
     {message&&<div style={notice}>{message}</div>}
@@ -136,6 +139,7 @@ export default function PartsDeskPage(){
         <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
           <button disabled={Boolean(busy)} onClick={()=>{setOneTime({...blankOneTime,description:item.requestedText,warehouseCode:item.warehouseCode||'',quantity:String(item.requestedQuantity),sourceRequestId:item.id});setShowOneTime(true)}} style={primarySmall}>+ One-Time Part</button>
+          <a href={newInventoryHref(item)} style={secondaryAction}>+ New Inventory Item</a>
           <button disabled={Boolean(busy)} onClick={()=>void markUnmatchedHandled(item.id)} style={darkButton}>{busy===`unmatched:${item.id}`?'Saving…':'Mark handled'}</button>
         </div>
       </article>)}</div>}
