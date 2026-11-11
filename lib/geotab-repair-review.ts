@@ -50,19 +50,26 @@ export async function queueGeotabRepairReview(db:D1Database,input:{
   repairId:number;defectId:string;logId?:string|null;failureReason?:unknown;userId?:number|null;
 }){
   const failureReason=clean(input.failureReason,1000)||'Geotab writeback did not complete.';
-  await db.prepare(`
-    INSERT INTO geotab_repair_review(
-      repair_id,geotab_defect_id,geotab_log_id,status,failure_reason,attempt_count,last_attempt_at,created_by_user_id
-    ) VALUES(?,?,?,'open',?,1,CURRENT_TIMESTAMP,?)
-    ON CONFLICT(repair_id) DO UPDATE SET
-      geotab_defect_id=excluded.geotab_defect_id,
-      geotab_log_id=excluded.geotab_log_id,
-      status='open',
-      failure_reason=excluded.failure_reason,
-      attempt_count=geotab_repair_review.attempt_count+1,
-      last_attempt_at=CURRENT_TIMESTAMP,
-      resolved_at=NULL,resolved_by_user_id=NULL,resolution_type=NULL,resolution_note=''
-  `).bind(input.repairId,input.defectId,clean(input.logId,120)||null,failureReason,input.userId??null).run();
+  await db.batch([
+    db.prepare(`
+      INSERT INTO geotab_repair_review(
+        repair_id,geotab_defect_id,geotab_log_id,status,failure_reason,attempt_count,last_attempt_at,created_by_user_id
+      ) VALUES(?,?,?,'open',?,1,CURRENT_TIMESTAMP,?)
+      ON CONFLICT(repair_id) DO UPDATE SET
+        geotab_defect_id=excluded.geotab_defect_id,
+        geotab_log_id=excluded.geotab_log_id,
+        status='open',
+        failure_reason=excluded.failure_reason,
+        attempt_count=geotab_repair_review.attempt_count+1,
+        last_attempt_at=CURRENT_TIMESTAMP,
+        resolved_at=NULL,resolved_by_user_id=NULL,resolution_type=NULL,resolution_note=''
+    `).bind(input.repairId,input.defectId,clean(input.logId,120)||null,failureReason,input.userId??null),
+    db.prepare(`
+      UPDATE dvir_defects
+      SET repaired=1,local_repaired=1,repair_date=COALESCE(repair_date,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
+      WHERE geotab_defect_id=?
+    `).bind(input.defectId),
+  ]);
 }
 
 async function requireOpenReview(db:D1Database,reviewId:number){
@@ -150,6 +157,11 @@ export async function reopenRepairFromGeotabReview(db:D1Database,input:{reviewId
           resolution_type='reopened',resolution_note=?,last_attempt_at=CURRENT_TIMESTAMP
       WHERE id=? AND status='open'
     `).bind(input.userId,note,input.reviewId),
+    db.prepare(`
+      UPDATE dvir_defects
+      SET repaired=0,local_repaired=0,repair_date=NULL,updated_at=CURRENT_TIMESTAMP
+      WHERE geotab_defect_id=?
+    `).bind(review.geotab_defect_id),
     db.prepare(`
       INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
       VALUES (?,?,?,'geotab_review_reopened',?)
