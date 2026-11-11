@@ -131,7 +131,8 @@ export async function GET(request: Request) {
       env.DB.prepare(`
         SELECT r.id, r.equipment_id, COALESCE(e.unit, '') AS unit, r.title, r.status,
                COALESCE(r.location, '') AS location, r.technician_id,
-               COALESCE(t.name, '') AS technician_name, COALESCE(r.labor_hours, 0) AS labor_hours
+               COALESCE(t.name, '') AS technician_name, COALESCE(r.labor_hours, 0) AS labor_hours,
+               COALESCE(r.pull_thru,0) AS pull_thru
         FROM repairs r
         LEFT JOIN equipment e ON e.id = r.equipment_id
         LEFT JOIN technicians t ON t.id = r.technician_id
@@ -149,6 +150,7 @@ export async function GET(request: Request) {
         technician_id: number | null;
         technician_name: string;
         labor_hours: number;
+        pull_thru: number;
       }>(),
       env.DB.prepare(`
         SELECT rt.repair_id, rt.started_at, COALESCE(r.title, '') AS title, COALESCE(e.unit, '') AS unit
@@ -257,6 +259,7 @@ export async function GET(request: Request) {
         technicianId: row.technician_id === null ? null : Number(row.technician_id),
         assignedTo: row.technician_name,
         laborHours: Number(row.labor_hours ?? 0),
+        pullThru: Boolean(row.pull_thru),
         plannedParts: plannedByRepair.get(row.id) ?? [],
         usedParts: usedByRepair.get(row.id) ?? [],
         laborEntries: laborByRepair.get(row.id) ?? [],
