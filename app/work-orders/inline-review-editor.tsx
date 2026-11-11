@@ -5,7 +5,7 @@ import {useEffect,useMemo,useState} from "react";
 type PartOption={id:number;partNumber:string;description:string;quantityOnHand:number;unitCost:number|null;location:string};
 type LaborEntry={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;notes:string;startedAt?:string;endedAt?:string};
 type LaborSummary={key:string;repairId:string;repairIssue:string;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;segments:number;timeRanges:string[]};
-type UsedPart={usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean};
+type UsedPart={usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean;sourceType:'stock'|'one_time'};
 type TechnicianNote={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;detail:string;createdAt:string};
 type Repair={id:string;issue:string;status:string;technicianId:number|null;outsideCost:number;laborRate:number;reviewedAt:string};
 type ReviewPackage={id:string;repairIds:string[];unit:string;technician:string;reviewed:boolean;reviewedAt:string;reviewedBy:string;reviewNote:string;repairs:Repair[];technicianNotes:TechnicianNote[];laborEntries:LaborEntry[];usedParts:UsedPart[];missingPartCostLines:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number};
@@ -163,7 +163,7 @@ export default function InlineWorkOrderReviewEditor({item,canManage,defaultLabor
           const lineCost=Number(draft.quantity||0)*Number(draft.unitCost||0);
           const changed=Number(draft.quantity)!==Number(part.quantity)||Number(draft.unitCost||0)!==Number(part.unitCost||0)||(!part.costRecorded&&draft.unitCost!=="");
           return <div key={part.usageId} style={{display:"grid",gridTemplateColumns:editable?"105px minmax(190px,1fr) 76px 105px 100px 126px":"105px 1fr 60px 120px 100px",gap:8,padding:"7px 9px",borderTop:"1px solid #edf0f2",fontSize:11,alignItems:"center"}}>
-            <strong>{part.partNumber}</strong><span>{part.description}<small style={{display:"block",color:"#7a858d"}}>{part.repairIssue}</small></span>
+            <strong>{part.partNumber}</strong><span>{part.description}{part.sourceType==="one_time"&&<small style={{display:"block",fontWeight:950,color:"#2f6f60"}}>ONE-TIME / NON-STOCK</small>}<small style={{display:"block",color:"#7a858d"}}>{part.repairIssue}</small></span>
             {editable?<input type="number" min="0.01" step="0.01" value={draft.quantity} onChange={event=>setPartDrafts(current=>({...current,[part.usageId]:{...draft,quantity:event.target.value}}))} style={compactInputStyle}/>:<span>× {part.quantity}</span>}
             {editable?<input type="number" min="0" step="0.01" value={draft.unitCost} onChange={event=>setPartDrafts(current=>({...current,[part.usageId]:{...draft,unitCost:event.target.value}}))} placeholder="Unit cost" style={compactInputStyle}/>:<span>{part.costRecorded?`${money(part.unitCost)} ea.`:"Cost not recorded"}</span>}
             <strong>{part.costRecorded||draft.unitCost!==""?money(lineCost):"—"}</strong>

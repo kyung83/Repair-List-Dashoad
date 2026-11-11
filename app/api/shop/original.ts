@@ -158,11 +158,12 @@ export async function GET(request: Request) {
         WHERE rt.user_id = ?
       `).bind(user.id).first<{ repair_id: number; started_at: string; title: string; unit: string }>(),
       env.DB.prepare(`
-        SELECT id, part_number, description, quantity_on_hand, COALESCE(location, '') AS location
+        SELECT id, part_number, description, quantity_on_hand, COALESCE(location, '') AS location,
+               COALESCE(inventory_class,'stock') AS inventory_class
         FROM parts
-        WHERE active = 1
+        WHERE active = 1 AND deleted_at IS NULL
         ORDER BY description, part_number
-      `).all<{ id: number; part_number: string; description: string; quantity_on_hand: number; location: string }>(),
+      `).all<{ id: number; part_number: string; description: string; quantity_on_hand: number; location: string; inventory_class:'stock'|'one_time' }>(),
       env.DB.prepare(`
         SELECT rp.repair_id, rp.part_id, p.part_number, p.description, SUM(rp.quantity) AS quantity
         FROM repair_parts rp
@@ -266,6 +267,7 @@ export async function GET(request: Request) {
         description: row.description,
         quantityOnHand: Number(row.quantity_on_hand),
         location: row.location,
+        inventoryClass: row.inventory_class === 'one_time' ? 'one_time' : 'stock',
       })),
       updatedAt: new Date().toISOString(),
     }, { headers: { 'cache-control': 'no-store' } });
