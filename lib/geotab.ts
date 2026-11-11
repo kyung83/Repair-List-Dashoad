@@ -302,6 +302,18 @@ export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, de
   const log = record(logs[0]);
   if (!objectId(log)) throw new Error('Geotab DVIR log not found');
 
+  const defects = dvirDefects(log);
+  const target = defects.find((candidate) => objectId(candidate) === defectId);
+  if (!target) throw new Error('Geotab DVIR defect not found');
+
+  // A repair may have already been certified directly in Geotab before this
+  // app attempts its writeback. Treat that state as success instead of trying
+  // to overwrite an already-resolved DVIR.
+  if (isRepaired(target)) {
+    await markDvirRepairedLocal(env.DB, defectId);
+    return { ok: true, logId, defectId, alreadyRepaired: true };
+  }
+
   const users = await client.call<JsonRecord[]>('Get', {
     typeName: 'User',
     search: { name: client.userName },
@@ -312,9 +324,6 @@ export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, de
   const repairUserId = objectId(repairUser);
   if (!repairUserId) throw new Error('Geotab repair user could not be resolved');
 
-  const defects = dvirDefects(log);
-  const target = defects.find((candidate) => objectId(candidate) === defectId);
-  if (!target) throw new Error('Geotab DVIR defect not found');
   target.repairStatus = 'Repaired';
   target.repairDateTime = new Date().toISOString();
   target.repairUser = { id: repairUserId };
@@ -322,5 +331,5 @@ export async function markGeotabDefectRepaired(env: GeotabEnv, logId: string, de
 
   await client.call('Set', { typeName: 'DVIRLog', entity: log });
   await markDvirRepairedLocal(env.DB, defectId);
-  return { ok: true, logId, defectId };
+  return { ok: true, logId, defectId, alreadyRepaired: false };
 }
