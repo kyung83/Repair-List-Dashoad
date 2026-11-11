@@ -14,7 +14,7 @@ type Row={
  id:string;source:Src;priority:number;location:string;unit:string;driver:string;issue:string;parts:string;status:string;
  technicianId:number|null;assignedTo:string;laborHours:number;equipmentType:string;equipmentId:number|null;outOfService:boolean;
  oosReason:string;oosAt:string|null;activeTimer:{startedAt:string;technician:string}|null;dvirDefectId:string;dvirLogId:string;
- dvirComments:string;dvirPhotos:string;maintenanceId:string;
+ dvirComments:string;dvirPhotos:string;maintenanceId:string;pullThru:boolean;
 };
 type Group={key:string;unit:string;equipmentId:number|null;equipmentType:string;location:string;driver:string;rows:Row[]};
 type FutureRepair={
@@ -389,7 +389,7 @@ export default function PlanningCenter(){
       <div className={s.issue}><strong>{groupIssue(group)||'Open work'}</strong><small>{groupParts(group)}</small></div>
       <div className={`${s.meta} ${s.hideMobile}`}><strong>{yard?`${yardLabel(yard)} Yard`:group.location||'No location'}</strong><small>{group.driver||'No driver'}</small></div>
       <div className={`${s.meta} ${s.hideTablet}`}><strong>{groupAssignee(group)}</strong><small>{etaValue?`ETA ${etaValue}`:'No ETA / depart'}</small></div>
-      <div className={s.meta}><span className={`${s.status} ${statusClass(top)}`}>{nextStep(top)}</span><small>{group.rows.length>1?`${group.rows.length} open items`:sourceLabel(top.source)}</small>
+      <div className={s.meta}><span className={`${s.status} ${statusClass(top)}`}>{nextStep(top)}</span>{group.rows.some(row=>row.pullThru)&&<small className={s.pullThruChip}>PULL THRU</small>}<small>{group.rows.length>1?`${group.rows.length} open items`:sourceLabel(top.source)}</small>
        {futureCount>0&&<small className={s.futureCount}>{futureCount} FUTURE REPAIR{futureCount===1?'':'S'}</small>}
       </div>
       <button className={s.chev} type="button" aria-label={`Open Unit ${group.unit}`} onClick={event=>{event.stopPropagation();setDetailKey(group.key)}}>›</button>
@@ -421,6 +421,7 @@ export default function PlanningCenter(){
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'completeMaintenance',maintenanceId:row.maintenanceId||row.id})}>Complete Due Item</button>
   </>;
   return <>
+   {row.id.startsWith('repair-')&&<button className={row.pullThru?s.pullThruActive:s.pullThruButton} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'setPullThru',pullThru:!row.pullThru})}>{row.pullThru?'✓ PULL THRU':'PULL THRU'}</button>}
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void openOutside([row.id])}>Send Outside</button>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'setStatus',status:'Completed'})}>Complete Repair</button>
    <a className={s.link} href="/shop">Open Shop Jobs</a>
@@ -511,7 +512,7 @@ export default function PlanningCenter(){
        :<p className={s.futureEmpty}>No future repairs currently waiting for this unit.</p>}
      </section>}
      <div>{detail.rows.map(row=><article className={s.job} key={row.id}>
-      <div className={s.jobHead}><div><div className={s.chips}><span className={s.source}>{sourceLabel(row.source)}</span><span className={`${s.status} ${statusClass(row)}`}>{nextStep(row)}</span></div><h3>{row.issue}</h3></div><span>{row.laborHours.toFixed(2)} hr</span></div>
+      <div className={s.jobHead}><div><div className={s.chips}><span className={s.source}>{sourceLabel(row.source)}</span><span className={`${s.status} ${statusClass(row)}`}>{nextStep(row)}</span>{row.pullThru&&<span className={s.pullThruChip}>PULL THRU</span>}</div><h3>{row.issue}</h3></div><span>{row.laborHours.toFixed(2)} hr</span></div>
       {row.dvirComments&&<p><strong>DVIR:</strong> {row.dvirComments}</p>}
       <div className={s.jobGrid}><div><b>Parts needed</b><span>{row.parts||'No parts listed'}</span></div><div><b>Technician</b><span>{row.assignedTo||'Unassigned'}</span></div></div>
       <div className={s.jobControls}>
