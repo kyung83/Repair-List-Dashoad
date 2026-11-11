@@ -41,6 +41,10 @@ export async function POST(request:Request){
     const mechanicTechnician=mechanic?await linkedTechnician(user):null;
 
     const body=await request.json() as Record<string,unknown>;
+    const pullThru=Boolean(body.pullThru);
+    if(pullThru&&!['manager','admin'].includes(user.role)){
+      return Response.json({error:'Only managers and administrators can mark a repair Pull Thru.'},{status:403});
+    }
     const issue=String(body.issue??'').trim().slice(0,500);
     const parts=String(body.parts??'').trim().slice(0,1000);
     const priority=Number(body.priority??2);
@@ -101,27 +105,54 @@ export async function POST(request:Request){
 
     const status=technician?'Assigned':'New';
     const source=repairType?.name==='INDIRECT LABOR-OTHER'?'indirect-labor':'manual';
+    const pullThruFlag=pullThru?1:0;
     const result=await env.DB.prepare(`
       INSERT INTO repairs(
         equipment_id,title,parts_text,status,priority,source,location,
-        technician_id,repair_type_id,updated_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+        technician_id,repair_type_id,pull_thru,pull_thru_marked_at,pull_thru_marked_by_user_id,updated_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE NULL END,?,CURRENT_TIMESTAMP)
     `).bind(
       equipmentId,issue,parts,status,String(priority),source,
-      equipmentId===null?'':location,technician?.id??null,repairType?.id??null
+      equipmentId===null?'':location,technician?.id??null,repairType?.id??null,
+      pullThruFlag,pullThruFlag,pullThru?user.id:null
     ).run();
 
     const repairId=Number(result.meta.last_row_id);
     if(!repairId)throw new Error('Repair could not be added.');
 
     const typeDetail=repairType?`${repairType.name}: `:'';
-    await env.DB.prepare(`
-      INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
-      VALUES(?,?,?,'repair_created',?)
-    `).bind(
-      repairId,user.id,technician?.id??null,
-      `${user.displayName} created ${typeDetail}${issue}${equipmentId===null?' (SHOP / NO UNIT)':` for Unit ${unit}`}${technician?` and assigned it to ${technician.name}`:''}.${repairType?'':' Repair Type will be selected when the repair is worked.'}`.slice(0,500)
-    ).run();
+    const statements=[
+      env.DB.prepare(`
+        INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+        VALUES(?,?,?,'repair_created',?)
+      `).bind(
+        repairId,user.id,technician?.id??null,
+        `${user.displayName} created ${typeDetail}${issue}${equipmentId===null?' (SHOP / NO UNIT)':` for Unit ${unit}`}${technician?` and assigned it to ${technician.name}`:''}${pullThru?' as PULL THRU':''}.${repairType?'':' Repair Type will be selected when the repair is worked.'}`.slice(0,500)
+      ),
+    ];
+    if(pullThru&&technician){
+      statements.push(
+        env.DB.prepare(`
+          INSERT INTO technician_alerts(technician_id,repair_id,alert_type,title,body)
+          VALUES(?,?,'pull_thru',?,?)
+        `).bind(
+          technician.id,
+          repairId,
+          `PULL THRU · Unit ${unit||'—'}`,
+          `${issue} — this unit is being sent through to you.`,
+        ),
+        env.DB.prepare(`
+          INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+          VALUES(?,?,?,'pull_thru_alert_queued',?)
+        `).bind(
+          repairId,
+          user.id,
+          technician.id,
+          `${user.displayName} created this repair as Pull Thru and assigned it to ${technician.name}; tablet alert queued.`,
+        ),
+      );
+    }
+    await env.DB.batch(statements);
 
     return Response.json({
       ok:true,
@@ -131,6 +162,7 @@ export async function POST(request:Request){
       repairTypeId:repairType?.id??null,
       repairType:repairType?.name??'',
       technicianId:technician?.id??null,
+      pullThru,
     });
   }catch(error){
     console.error(JSON.stringify({event:'repair_create_failed',error:String(error)}));
