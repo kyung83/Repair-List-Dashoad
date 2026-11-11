@@ -100,9 +100,9 @@ export default function Page(){
       });
       const payload=await response.json();
       if(!response.ok||!payload.ok)throw new Error(payload.error||"Cutover could not be completed.");
-      setMessage(`GO-LIVE CUTOVER COMPLETED at ${payload.completedAt}. Inventory, Breakdowns, and active equipment passed protection checks.`);
       setConfirmation("");
       await load();
+      setMessage(`GO-LIVE CUTOVER COMPLETED at ${payload.completedAt}. Inventory, Breakdowns, and active equipment passed protection checks.`);
     }catch(error){
       setMessage(error instanceof Error?error.message:"Cutover could not be completed.");
     }finally{setBusy(false)}
@@ -181,7 +181,7 @@ export default function Page(){
         </label>
         <button type="button" onClick={()=>void runCutover()}
           disabled={busy||!data.canExecute||confirmation!==data.confirmationPhrase}
-          style={{marginTop:12,padding:"12px 18px",border:0,borderRadius:9,background:"#b42318",color:"white",fontWeight:950,cursor:"pointer",opacity:(busy||!data.canExecute||confirmation!==data.confirmationPhrase)?.45:1}}>
+          style={{marginTop:12,padding:"12px 18px",border:0,borderRadius:9,background:"#b42318",color:"white",fontWeight:950,cursor:"pointer",opacity:(busy||!data.canExecute||confirmation!==data.confirmationPhrase)?0.45:1}}>
           {busy?"Running Cutover…":"RUN GO-LIVE CUTOVER"}
         </button>
       </section>}
