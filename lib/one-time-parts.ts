@@ -224,13 +224,13 @@ export async function receiveExistingOneTimePart(db:D1Database,input:{
     `).bind(quantity,blendedCost,stock.id),
     db.prepare(`
       UPDATE parts
-      SET quantity_on_hand=COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id=?),0)+?,
+      SET quantity_on_hand=COALESCE((SELECT SUM(quantity_on_hand) FROM part_warehouse_stock WHERE part_id=?),0),
           unit_cost=COALESCE(?,unit_cost),
           preferred_vendor_id=COALESCE(?,preferred_vendor_id),
           location='ONE-TIME',
           updated_at=CURRENT_TIMESTAMP
       WHERE id=? AND inventory_class='one_time'
-    `).bind(partId,quantity,blendedCost,vendorId,partId),
+    `).bind(partId,blendedCost,vendorId,partId),
     db.prepare(`
       INSERT INTO one_time_part_receipts(part_id,warehouse_id,vendor_id,quantity_received,unit_cost,reference,notes,created_by_user_id)
       VALUES(?,?,?,?,?,?,?,?)
