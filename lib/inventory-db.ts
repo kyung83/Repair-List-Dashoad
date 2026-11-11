@@ -215,6 +215,19 @@ export async function savePart(db: D1Database, body: Record<string, unknown>) {
     const warehouse = await db.prepare('SELECT id FROM warehouses WHERE code = ? AND active = 1').bind(initialWarehouseCode).first<{id:number}>();
     if (!warehouse) throw new Error('Initial inventory warehouse was not found.');
   }
+  if (!id) {
+    const existing = await db.prepare(`
+      SELECT id,COALESCE(inventory_class,'stock') AS inventory_class
+      FROM parts
+      WHERE part_number=? AND deleted_at IS NULL
+    `).bind(partNumber).first<{id:number;inventory_class:string}>();
+    if (existing) {
+      if (existing.inventory_class === 'one_time') {
+        throw new Error('That part number already exists as a one-time part. Search Previous One-Time Parts on Parts Desk and use Convert to Inventory so its repair history stays together.');
+      }
+      throw new Error('That part number already exists in inventory.');
+    }
+  }
 
   const values = [
     partNumber,
