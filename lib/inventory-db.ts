@@ -47,10 +47,10 @@ function finiteNumber(value: unknown, fallback = 0) {
 
 export async function getInventoryData(db: D1Database, status: 'active'|'archived'|'all' = 'active') {
   const partWhere = status === 'archived'
-    ? 'WHERE p.active = 0 AND p.deleted_at IS NULL'
+    ? "WHERE p.active = 0 AND p.deleted_at IS NULL AND COALESCE(p.inventory_class,'stock')='stock'"
     : status === 'all'
-      ? 'WHERE p.deleted_at IS NULL'
-      : 'WHERE p.active = 1 AND p.deleted_at IS NULL';
+      ? "WHERE p.deleted_at IS NULL AND COALESCE(p.inventory_class,'stock')='stock'"
+      : "WHERE p.active = 1 AND p.deleted_at IS NULL AND COALESCE(p.inventory_class,'stock')='stock'";
   const [partsResult, vendorsResult, stockResult, warehousesResult, warehouseStatusesResult, minimumsResult, equipmentResult, partEquipmentResult] = await Promise.all([
     db.prepare(`
       SELECT p.id, p.part_number, p.description, p.quantity_on_hand, p.reorder_level,
@@ -206,13 +206,23 @@ export async function savePart(db: D1Database, body: Record<string, unknown>) {
   if (!partNumber || !description) throw new Error('Part number and description are required');
   const id = finiteNumber(body.id, 0);
   const vendorId = finiteNumber(body.preferredVendorId, 0) || null;
+  const quantityOnHand = finiteNumber(body.quantityOnHand);
+  const unitCost = body.unitCost === '' || body.unitCost == null ? null : finiteNumber(body.unitCost);
+  const initialWarehouseCode = String(body.initialWarehouseCode ?? '').trim().toUpperCase();
+  if (!id && quantityOnHand < 0) throw new Error('Initial inventory quantity cannot be negative.');
+  if (!id && quantityOnHand > 0 && !initialWarehouseCode) throw new Error('Choose the warehouse holding the initial inventory quantity.');
+  if (!id && initialWarehouseCode) {
+    const warehouse = await db.prepare('SELECT id FROM warehouses WHERE code = ? AND active = 1').bind(initialWarehouseCode).first<{id:number}>();
+    if (!warehouse) throw new Error('Initial inventory warehouse was not found.');
+  }
+
   const values = [
     partNumber,
     description,
-    finiteNumber(body.quantityOnHand),
+    id > 0 ? quantityOnHand : 0,
     finiteNumber(body.reorderLevel),
     vendorId,
-    body.unitCost === '' || body.unitCost == null ? null : finiteNumber(body.unitCost),
+    unitCost,
     String(body.location ?? '').trim(),
   ] as const;
 
@@ -222,7 +232,7 @@ export async function savePart(db: D1Database, body: Record<string, unknown>) {
         UPDATE parts
         SET part_number = ?, description = ?, quantity_on_hand = ?, reorder_level = ?,
             preferred_vendor_id = ?, unit_cost = ?, location = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = ? AND COALESCE(inventory_class,'stock')='stock'
       `).bind(...values, id),
       db.prepare(`
         UPDATE parts
@@ -235,12 +245,33 @@ export async function savePart(db: D1Database, body: Record<string, unknown>) {
     return { ok: true, id };
   }
 
-  const result = await db.prepare(`
-    INSERT INTO parts (part_number, description, quantity_on_hand, reorder_level,
-                       preferred_vendor_id, unit_cost, location)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).bind(...values).run();
-  return { ok: true, id: result.meta.last_row_id };
+  const statements = [
+    db.prepare(`
+      INSERT INTO parts (part_number, description, quantity_on_hand, reorder_level,
+                         preferred_vendor_id, unit_cost, location, inventory_class)
+      VALUES (?, ?, 0, ?, ?, ?, ?, 'stock')
+    `).bind(partNumber,description,finiteNumber(body.reorderLevel),vendorId,unitCost,String(body.location ?? '').trim()),
+  ];
+  if (initialWarehouseCode) {
+    statements.push(
+      db.prepare(`
+        INSERT INTO part_warehouse_stock(part_id,warehouse_id,variant_key,quantity_on_hand,unit_of_measure,unit_cost,on_order)
+        SELECT p.id,w.id,'',?,'EA',?,0
+        FROM parts p JOIN warehouses w ON w.code=? AND w.active=1
+        WHERE p.part_number=? AND COALESCE(p.inventory_class,'stock')='stock'
+      `).bind(quantityOnHand,unitCost,initialWarehouseCode,partNumber),
+      db.prepare(`
+        UPDATE parts
+        SET quantity_on_hand=COALESCE((SELECT SUM(s.quantity_on_hand) FROM part_warehouse_stock s WHERE s.part_id=parts.id),0),
+            updated_at=CURRENT_TIMESTAMP
+        WHERE part_number=?
+      `).bind(partNumber),
+    );
+  }
+  await db.batch(statements);
+  const created = await db.prepare("SELECT id FROM parts WHERE part_number=? AND COALESCE(inventory_class,'stock')='stock' AND deleted_at IS NULL").bind(partNumber).first<{id:number}>();
+  if (!created?.id) throw new Error('Inventory item could not be created.');
+  return { ok: true, id: Number(created.id) };
 }
 
 export async function savePartSettings(db: D1Database, body: Record<string, unknown>) {
