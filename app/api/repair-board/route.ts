@@ -6,6 +6,12 @@ import { GET as originalGET, POST as originalPOST } from './original';
 import { assignToMeFromBoard } from './self-assign';
 import { createRepairForTechnician, setUnitOosByTechnician } from './technician-actions';
 import { REPAIR_BOARD_FUTURE_REPAIRS_SQL } from '@/lib/repair-board-future-repairs-sql';
+import {
+  confirmGeotabAlreadyResolved,
+  listOpenGeotabRepairReviews,
+  reopenRepairFromGeotabReview,
+  retryGeotabRepairReview,
+} from '@/lib/geotab-repair-review';
 
 type BoardRepair = {
   id:string; source:string; issue:string; status:string; technicianId:number|null; activeTimer:unknown;
@@ -347,8 +353,13 @@ export async function GET(request: Request) {
         : unit.openWork,
     }));
   }
+  const geotabReview = sessionUser && (sessionUser.role === 'manager' || sessionUser.role === 'admin')
+    ? await listOpenGeotabRepairReviews(env.DB)
+    : [];
+  payload.geotabReview = geotabReview;
   payload.summary = {
     ...(payload.summary ?? {}),
+    geotabReview: geotabReview.length,
     total: repairs.length,
     trucks: repairs.filter((row) => !row.outOfService && /truck|tractor|vehicle/i.test(row.equipmentType)).length,
     trailers: repairs.filter((row) => !row.outOfService && /trailer/i.test(row.equipmentType)).length,
@@ -424,6 +435,53 @@ export async function POST(request: Request) {
 
   if (body && await isDeferredRepair(body.repairId ?? body.id)) {
     return Response.json({ error: 'This repair is intentionally saved for its next PM/Annual.' }, { status:400 });
+  }
+
+  if (body && String(body.action ?? '') === 'retryGeotabRepair') {
+    try {
+      const user=await managerUser(request);
+      const result=await retryGeotabRepairReview(env,{
+        reviewId:Number(body.reviewId??0),
+        userId:user.id,
+        userName:user.displayName,
+      });
+      return Response.json(result,{headers:{'cache-control':'no-store'}});
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_geotab_retry_failed', error:String(error) }));
+      return Response.json({ error:error instanceof Error ? error.message : 'Geotab retry failed.' }, { status:400 });
+    }
+  }
+
+  if (body && String(body.action ?? '') === 'confirmGeotabResolved') {
+    try {
+      const user=await managerUser(request);
+      const result=await confirmGeotabAlreadyResolved(env.DB,{
+        reviewId:Number(body.reviewId??0),
+        userId:user.id,
+        userName:user.displayName,
+        note:body.note,
+      });
+      return Response.json(result,{headers:{'cache-control':'no-store'}});
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_geotab_confirm_failed', error:String(error) }));
+      return Response.json({ error:error instanceof Error ? error.message : 'Geotab review could not be resolved.' }, { status:400 });
+    }
+  }
+
+  if (body && String(body.action ?? '') === 'reopenGeotabRepair') {
+    try {
+      const user=await managerUser(request);
+      const result=await reopenRepairFromGeotabReview(env.DB,{
+        reviewId:Number(body.reviewId??0),
+        userId:user.id,
+        userName:user.displayName,
+        note:body.note,
+      });
+      return Response.json(result,{headers:{'cache-control':'no-store'}});
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_geotab_reopen_failed', error:String(error) }));
+      return Response.json({ error:error instanceof Error ? error.message : 'Repair could not be reopened.' }, { status:400 });
+    }
   }
 
   if (body && String(body.action ?? '') === 'markDvirRepaired') {
