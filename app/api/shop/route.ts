@@ -27,6 +27,7 @@ type DvirRepairLink = {
   geotab_defect_id:string|null;
   geotab_log_id:string|null;
   dvir_repaired:number|null;
+  dvir_local_repaired:number|null;
 };
 
 function numericRepairId(value: unknown) {
@@ -141,7 +142,7 @@ async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repair
 
   const repair = await env.DB.prepare(`
     SELECT r.id,r.technician_id,COALESCE(r.status,'') AS status,r.geotab_defect_id,
-           d.geotab_log_id,d.repaired AS dvir_repaired
+           d.geotab_log_id,d.repaired AS dvir_repaired,d.local_repaired AS dvir_local_repaired
     FROM repairs r
     LEFT JOIN dvir_defects d ON d.geotab_defect_id = r.geotab_defect_id
     WHERE r.id = ?
@@ -157,7 +158,7 @@ async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repair
 
   const defectId = String(repair.geotab_defect_id ?? '').trim();
   if (!defectId) return { linked:false, geotabRepaired:false, needsReview:false, defectId:'', logId:'', failureReason:'', alreadyRepaired:false };
-  if (Number(repair.dvir_repaired ?? 0) === 1) {
+  if (Number(repair.dvir_repaired ?? 0) === 1 && Number(repair.dvir_local_repaired ?? 0) === 0) {
     return { linked:true, geotabRepaired:true, needsReview:false, defectId, logId:String(repair.geotab_log_id ?? '').trim(), failureReason:'', alreadyRepaired:true };
   }
 
