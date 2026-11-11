@@ -289,15 +289,19 @@ export async function executeGoLiveCutover(db:D1Database,input:{userId:number;us
     db.prepare(`DELETE FROM technician_alerts WHERE repair_id IN (SELECT r.id FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE})`),
     db.prepare(`DELETE FROM repair_labor_timers WHERE repair_id IN (SELECT r.id FROM repairs r WHERE ${SANDBOX_REPAIR_WHERE})`),
     db.prepare(`
-      UPDATE repairs AS r
+      UPDATE repairs
       SET status='Completed - Cutover Archive',
           source='cutover-archive',
           completed_at=COALESCE(completed_at,?),
           go_live_archived_at=?,
           go_live_archived_by_user_id=?,
           updated_at=CURRENT_TIMESTAMP
-      WHERE ${SANDBOX_REPAIR_WHERE}
-        AND ${INVENTORY_AUDIT_LINK_WHERE}
+      WHERE id IN (
+        SELECT r.id
+        FROM repairs r
+        WHERE ${SANDBOX_REPAIR_WHERE}
+          AND ${INVENTORY_AUDIT_LINK_WHERE}
+      )
     `).bind(cutoffAt,cutoffAt,input.userId),
     db.prepare(`
       DELETE FROM repairs
