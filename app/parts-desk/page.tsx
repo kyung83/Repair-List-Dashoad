@@ -30,9 +30,9 @@ type DeskData = {
   warehouses?:Warehouse[];vendors?:Vendor[];
   summary:{shortageLines:number;waitingJobs:number;readyJobs:number;lowStockLines:number;unmatchedParts?:number;oneTimeParts?:number}; updatedAt:string;
 };
-type OneTimeForm={partNumber:string;description:string;warehouseCode:string;quantity:string;unitCost:string;vendorId:string;reference:string;notes:string};
+type OneTimeForm={partNumber:string;description:string;warehouseCode:string;quantity:string;unitCost:string;vendorId:string;reference:string;notes:string;sourceRequestId:number|null};
 
-const blankOneTime:OneTimeForm={partNumber:"",description:"",warehouseCode:"",quantity:"1",unitCost:"",vendorId:"",reference:"",notes:""};
+const blankOneTime:OneTimeForm={partNumber:"",description:"",warehouseCode:"",quantity:"1",unitCost:"",vendorId:"",reference:"",notes:"",sourceRequestId:null};
 const n=(value:number)=>Number.isInteger(value)?String(value):value.toFixed(2).replace(/0+$/,"").replace(/\.$/,"");
 const money=(value:number|null)=>value==null?"—":value.toLocaleString(undefined,{style:"currency",currency:"USD"});
 
@@ -78,7 +78,7 @@ export default function PartsDeskPage(){
     setBusy("one-time-create");setMessage("");
     try{
       const r=await fetch('/api/parts-desk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
-        action:'createOneTimePart',...oneTime,quantity,unitCost,vendorId:oneTime.vendorId?Number(oneTime.vendorId):null
+        action:'createOneTimePart',...oneTime,quantity,unitCost,vendorId:oneTime.vendorId?Number(oneTime.vendorId):null,sourceRequestId:oneTime.sourceRequestId
       })});
       const p=await r.json() as{ok?:boolean;error?:string;partNumber?:string;warehouseName?:string;quantity?:number};
       if(!r.ok||!p.ok)throw new Error(p.error||'One-time part could not be created.');
@@ -136,7 +136,7 @@ export default function PartsDeskPage(){
         <div style={{textAlign:'center'}}><span style={smallLabel}>QTY</span><strong style={{display:'block',fontSize:22}}>{n(item.requestedQuantity)}</strong></div>
         <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
-          <button disabled={Boolean(busy)} onClick={()=>{setOneTime({...blankOneTime,description:item.requestedText,warehouseCode:item.warehouseCode||'',quantity:String(item.requestedQuantity)});setShowOneTime(true)}} style={primarySmall}>Create One-Time</button>
+          <button disabled={Boolean(busy)} onClick={()=>{setOneTime({...blankOneTime,description:item.requestedText,warehouseCode:item.warehouseCode||'',quantity:String(item.requestedQuantity),sourceRequestId:item.id});setShowOneTime(true)}} style={primarySmall}>Create One-Time</button>
           <button disabled={Boolean(busy)} onClick={()=>void markUnmatchedHandled(item.id)} style={darkButton}>{busy===`unmatched:${item.id}`?'Saving…':'Mark handled'}</button>
         </div>
       </article>)}</div>}
@@ -159,7 +159,7 @@ export default function PartsDeskPage(){
     <section style={panel}><div style={panelHead}><div><p style={eyebrow}>STOCK MINIMUMS</p><h2 style={title}>Low-stock replenishment</h2></div><span style={muted}>One-time parts are excluded</span></div>{!lows.length?<div style={empty}>No stocked inventory is at or below its minimum in this warehouse.</div>:<div style={{display:'grid',gap:8}}>{lows.slice(0,80).map(item=>{const key=`${item.partId}:${item.warehouseCode}`;return <div key={key} style={lowRow}><div><b>{item.partNumber}</b><span>{item.description} · {item.warehouseName}</span></div><div><span>Available</span><b>{n(item.available)}</b></div><div><span>Minimum</span><b>{n(item.minimumQuantity)}</b></div><div><span>On order</span><b>{n(item.onOrder)}</b></div><button disabled={item.reorderSuggested<=0||Boolean(busy)} onClick={()=>void action(item,'order',item.reorderSuggested)} style={darkButton}>{item.reorderSuggested>0?`Order ${n(item.reorderSuggested)}`:'Covered'}</button></div>})}</div>}</section>
 
     {showOneTime&&<div style={modalBackdrop}><form onSubmit={createOneTime} style={modal}>
-      <div style={{gridColumn:'1 / -1'}}><p style={eyebrow}>NON-STOCK PURCHASE</p><h2 style={{margin:'5px 0'}}>Create One-Time Part</h2><p style={muted}>This part will be available to techs in normal Part Lookup, but it will not count as stocked inventory or create reorder activity.</p></div>
+      <div style={{gridColumn:'1 / -1'}}><p style={eyebrow}>NON-STOCK PURCHASE</p><h2 style={{margin:'5px 0'}}>Create One-Time Part</h2><p style={muted}>This part will be available to techs in normal Part Lookup, but it will not count as stocked inventory or create reorder activity.{oneTime.sourceRequestId?" The technician request will be closed automatically when this is saved.":""}</p></div>
       <label style={field}>Part number <small>Optional — one will be generated if blank.</small><input value={oneTime.partNumber} onChange={e=>setOneTime(v=>({...v,partNumber:e.target.value}))} style={input}/></label>
       <label style={field}>Description<input required value={oneTime.description} onChange={e=>setOneTime(v=>({...v,description:e.target.value}))} style={input}/></label>
       <label style={field}>Warehouse<select required value={oneTime.warehouseCode} onChange={e=>setOneTime(v=>({...v,warehouseCode:e.target.value}))} style={input}><option value="">Choose warehouse…</option>{(data?.warehouses??[]).map(w=><option key={w.code} value={w.code}>{w.name}</option>)}</select></label>
