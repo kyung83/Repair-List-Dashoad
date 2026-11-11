@@ -68,3 +68,23 @@ test('technician shop data and screens preserve Pull Thru visibility',async()=>{
   assert.match(current,/pullThru:boolean/);
   assert.match(current,/This unit is coming through the shop/);
 });
+
+
+test('manager/admin can mark Pull Thru while creating a repair and mechanics cannot',async()=>{
+  const [form,planning,route]=await Promise.all([
+    read('app/repair-board/add-repair-form.tsx'),
+    read('app/repair-board/planning-center.tsx'),
+    read('app/api/repair-types/create-repair/route.ts'),
+  ]);
+  assert.match(form,/allowPullThru\?:boolean/);
+  assert.match(form,/allowPullThru=false/);
+  assert.match(form,/pullThru:allowPullThru&&!noUnit&&pullThru/);
+  assert.match(form,/PULL THRU/);
+  assert.match(form,/allowPullThru&&!noUnit/);
+  assert.match(planning,/allowPullThru=\{data\.user\.role==='manager'\|\|data\.user\.role==='admin'\}/);
+  assert.match(route,/Only managers and administrators can mark a repair Pull Thru/);
+  assert.match(route,/pull_thru,pull_thru_marked_at,pull_thru_marked_by_user_id/);
+  assert.match(route,/if\(pullThru&&technician\)/);
+  assert.match(route,/INSERT INTO technician_alerts/);
+  assert.match(route,/pull_thru_alert_queued/);
+});
