@@ -20,7 +20,7 @@ type ShopRepair = {
   status?: string;
   [key: string]: unknown;
 };
-type ShopPart = { id:number; partNumber:string; description:string; quantityOnHand:number; location:string; [key:string]:unknown };
+type ShopPart = { id:number; partNumber:string; description:string; quantityOnHand:number; location:string; inventoryClass?:'stock'|'one_time'; [key:string]:unknown };
 type SessionUser = {
   id:number;
   role:string;
@@ -109,7 +109,7 @@ function scopePartsToWarehouse(parts:ShopPart[],warehouse:AssignedWarehouse) {
       onOrder,
       warehouseStocks:[warehouseStock],
     };
-  });
+  }).filter((part)=>part.inventoryClass!=='one_time'||Number(part.available)>0.000001);
 }
 
 async function isDeferredRepair(value: unknown) {
