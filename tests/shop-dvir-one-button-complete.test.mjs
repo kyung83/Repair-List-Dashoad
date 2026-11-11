@@ -19,19 +19,24 @@ test('mechanic REPAIRED action closes linked DVIR in Geotab before shop completi
 });
 
 test('Geotab DVIR repair sends required repaired fields', () => {
+  assert.match(geotab, /if \(isRepaired\(target\)\)/);
+  assert.match(geotab, /alreadyRepaired: true/);
   assert.match(geotab, /target\.repairStatus = 'Repaired'/);
   assert.match(geotab, /target\.repairDateTime = new Date\(\)\.toISOString\(\)/);
   assert.match(geotab, /target\.repairUser = \{ id: repairUserId \}/);
   assert.match(geotab, /markDvirRepairedLocal/);
 });
 
-test('Geotab failure leaves mechanic repair open with labor timer running', () => {
-  assert.match(shopRoute, /Geotab could not mark this DVIR repaired/);
-  assert.match(shopRoute, /shop repair is still open and your labor timer is still running/);
-  assert.match(shopRoute, /geotab_dvir_repair_failed/);
+test('Geotab failure no longer blocks mechanic completion and is handed to management review', () => {
+  assert.match(shopRoute, /queueGeotabRepairReview/);
+  assert.match(shopRoute, /geotab_dvir_review_needed/);
+  assert.match(shopRoute, /Repair completion was allowed and management review is required/);
+  assert.match(shopRoute, /geotabReviewRequired:dvir\.needsReview/);
+  assert.match(shopRoute, /you may continue to your next repair/);
+  assert.doesNotMatch(shopRoute, /shop repair is still open and your labor timer is still running/);
 });
 
 test('ordinary non-DVIR repairs continue through the existing shop completion flow', () => {
-  assert.match(shopRoute, /if \(!defectId\) return \{ linked:false, geotabRepaired:false \}/);
+  assert.match(shopRoute, /if \(!defectId\) return \{ linked:false, geotabRepaired:false, needsReview:false/);
   assert.match(shopRoute, /if \(!response\.ok \|\| !dvir\.linked\) return response/);
 });
