@@ -109,7 +109,6 @@ export default function PartsDeskPage(){
     <header style={{display:'flex',justifyContent:'space-between',gap:20,alignItems:'end',flexWrap:'wrap'}}>
       <div><p style={eyebrow}>PARTS OPERATIONS</p><h1 style={{margin:'6px 0 5px',fontSize:34,color:'#173f37'}}>Parts Desk</h1><p style={{margin:0,color:'#68746f'}}>Decide what gets stocked. Techs only search for a part and apply it to the repair.</p></div>
       <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-        <button onClick={()=>{setOneTime({...blankOneTime,warehouseCode:yard==='ALL'?'':yard});setShowOneTime(true)}} style={primaryButton}>+ One-Time Part</button>
         <a href="/inventory?new=1" style={secondaryButton}>+ New Inventory Item</a>
       </div>
     </header>
@@ -136,7 +135,7 @@ export default function PartsDeskPage(){
         <div style={{textAlign:'center'}}><span style={smallLabel}>QTY</span><strong style={{display:'block',fontSize:22}}>{n(item.requestedQuantity)}</strong></div>
         <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
-          <button disabled={Boolean(busy)} onClick={()=>{setOneTime({...blankOneTime,description:item.requestedText,warehouseCode:item.warehouseCode||'',quantity:String(item.requestedQuantity),sourceRequestId:item.id});setShowOneTime(true)}} style={primarySmall}>Create One-Time</button>
+          <button disabled={Boolean(busy)} onClick={()=>{setOneTime({...blankOneTime,description:item.requestedText,warehouseCode:item.warehouseCode||'',quantity:String(item.requestedQuantity),sourceRequestId:item.id});setShowOneTime(true)}} style={primarySmall}>+ One-Time Part</button>
           <button disabled={Boolean(busy)} onClick={()=>void markUnmatchedHandled(item.id)} style={darkButton}>{busy===`unmatched:${item.id}`?'Saving…':'Mark handled'}</button>
         </div>
       </article>)}</div>}
