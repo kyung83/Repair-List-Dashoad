@@ -5,7 +5,7 @@ import {
   orderPartForWarehouse,
   receivePartForWarehouse,
 } from '@/lib/parts-lifecycle';
-import { getUnmatchedPartRequests, handleUnmatchedPartRequest } from '@/lib/unmatched-parts';
+import { getUnmatchedPartRequests, handleUnmatchedPartRequest, matchUnmatchedPartRequestToCatalog } from '@/lib/unmatched-parts';
 import { createOneTimePart, convertOneTimePartToStock, listOneTimeParts } from '@/lib/one-time-parts';
 
 async function requirePartsDeskUser(request: Request) {
@@ -47,6 +47,14 @@ export async function POST(request: Request) {
     const action = String(body.action ?? '');
     if (action === 'handleUnmatched') {
       return Response.json(await handleUnmatchedPartRequest(env.DB, Number(body.requestId ?? 0)));
+    }
+    if (action === 'matchUnmatchedToCatalog') {
+      return Response.json(await matchUnmatchedPartRequestToCatalog(env.DB,{
+        requestId:Number(body.requestId??0),
+        partId:Number(body.partId??0),
+        warehouseCode:String(body.warehouseCode??''),
+        userId:user.id,
+      }));
     }
     if (action === 'createOneTimePart') {
       const created = await createOneTimePart(env.DB,{
