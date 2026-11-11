@@ -185,6 +185,7 @@ export async function GET(request:Request) {
         LEFT JOIN repair_types rt ON rt.id=r.repair_type_id
         LEFT JOIN maintenance_checklist_runs m ON m.repair_id=r.id
         WHERE r.equipment_id=? AND r.id<>?
+          AND COALESCE(r.source,'') <> 'cutover-archive'
           AND lower(COALESCE(r.status,'')) LIKE '%complete%'
         ORDER BY COALESCE(r.completed_at,r.updated_at,r.opened_at) DESC,r.id DESC
         LIMIT 120
