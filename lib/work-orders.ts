@@ -1,5 +1,6 @@
 import { completeRepair, savePart, saveRepair, usePartOnRepair } from './dashboard-db';
 import { addRepairLabor, getShopLaborRate } from './billing';
+import { geotabReviewStatusByRepair } from './geotab-repair-review';
 
 type RepairRow = {
   id:number;
@@ -118,6 +119,8 @@ export async function getWorkOrderData(db:D1Database){
   getShopLaborRate(db),
  ]);
 
+ const geotabReviewByRepair=await geotabReviewStatusByRepair(db,repairsResult.results.map(row=>row.id));
+
  const usageByRepair=new Map<number,UsageRow[]>();
  for(const row of usageResult.results){const list=usageByRepair.get(row.repair_id)??[];list.push(row);usageByRepair.set(row.repair_id,list);}
  const laborByRepair=new Map<number,LaborRow[]>();
@@ -196,6 +199,10 @@ export async function getWorkOrderData(db:D1Database){
     location:row.location??'',relatedGeotabDefectId:row.geotab_defect_id??'',laborHours,laborRate:fallbackLaborRate,laborCost,
     outsideCost,partCost,missingPartCostLines,totalCost:laborCost+partCost+outsideCost,usedParts,laborEntries,technicianNotes,repairPhotos,
     completedAt:timestamp(row.completed_at),reviewedAt:timestamp(row.reviewed_at),reviewedBy:row.reviewer_name??'',reviewNote:row.review_note??'',updatedAt:row.updated_at,
+    geotabReviewStatus:geotabReviewByRepair.get(row.id)?.status??'',
+    geotabResolutionType:geotabReviewByRepair.get(row.id)?.resolutionType??'',
+    geotabResolutionNote:geotabReviewByRepair.get(row.id)?.resolutionNote??'',
+    geotabFailureReason:geotabReviewByRepair.get(row.id)?.failureReason??'',
   };
  });
 

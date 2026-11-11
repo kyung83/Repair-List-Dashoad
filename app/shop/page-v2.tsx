@@ -15,7 +15,7 @@ type PartRequest={id:number;repairId:string;repairNumericId:number;partId:number
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
 type ShopData={user:User;activeTimer:Timer|null;activeShopDuty?:ActiveShopDuty|null;repairs:Repair[];parts:Part[];technicians?:TechnicianOption[];partRequests?:PartRequest[];updatedAt:string};
 type View="mine"|"available"|"all";
-type ActionResult={ok?:boolean;error?:string;repairId?:string;hours?:number;laborStarted?:boolean;completed?:boolean;nextRepairId?:string|null;waitingOnPart?:boolean;unitDone?:boolean;partAvailable?:boolean;switched?:boolean;handoff?:boolean;handedOffCount?:number;handoffTarget?:string;awaitingParts?:boolean;partNumber?:string;quantity?:number;warehouseCode?:string};
+type ActionResult={ok?:boolean;error?:string;repairId?:string;hours?:number;laborStarted?:boolean;completed?:boolean;nextRepairId?:string|null;waitingOnPart?:boolean;unitDone?:boolean;partAvailable?:boolean;switched?:boolean;handoff?:boolean;handedOffCount?:number;handoffTarget?:string;awaitingParts?:boolean;partNumber?:string;quantity?:number;warehouseCode?:string;geotabRepaired?:boolean;geotabAlreadyRepaired?:boolean;geotabReviewRequired?:boolean;geotabMessage?:string};
 type UnitGroup={key:string;unit:string;equipmentId:number|null;repairs:Repair[]};
 
 function keyFor(repair:Repair){return repair.equipmentId!=null?`equipment-${repair.equipmentId}`:`unit-${repair.unit.trim().toLowerCase()||repair.id}`}
@@ -54,6 +54,8 @@ export default function ShopPage(){
       if(!response.ok||!result.ok)throw new Error(result.error||"Shop action failed.");
       if(result.handoff)setMessage(`Shift handoff saved. ${result.handedOffCount||1} open repair${result.handedOffCount===1?"":"s"} moved to ${result.handoffTarget||"the next shift"}. Your labor was saved and all recorded work stayed with the repair.`);
       else if(result.unitDone)setMessage(typeof result.hours==="number"?`Done working. ${result.hours.toFixed(2)} hours were saved.`:"Done working. Open repairs remain open.");
+      else if(result.completed&&result.geotabReviewRequired)setMessage(result.geotabMessage||"Repair completed. Geotab needs management review. You may continue to your next repair.");
+      else if(result.completed&&result.geotabAlreadyRepaired)setMessage(result.nextRepairId?"Repair completed. Geotab was already resolved. Labor moved to the next repair.":"Repair completed. The linked DVIR was already resolved in Geotab.");
       else if(result.completed)setMessage(result.nextRepairId?"Repair completed. Labor moved to the next repair.":"Repair completed.");
       else if(result.switched)setMessage("Labor saved to the previous repair and started on this repair.");
       else if(result.laborStarted)setMessage("Unit workspace opened. Labor started automatically.");

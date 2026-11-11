@@ -7,7 +7,7 @@ type LaborEntry={repairId:string;repairIssue:string;id:number;technicianId:numbe
 type LaborSummary={key:string;repairId:string;repairIssue:string;technicianId:number|null;technician:string;laborDate:string;hours:number;rate:number;amount:number;segments:number;timeRanges:string[]};
 type UsedPart={usageId:number;repairId:string;repairIssue:string;partId:number;partNumber:string;description:string;quantity:number;unitCost:number;lineCost:number;costRecorded:boolean;sourceType:'stock'|'one_time'};
 type TechnicianNote={repairId:string;repairIssue:string;id:number;technicianId:number|null;technician:string;detail:string;createdAt:string};
-type Repair={id:string;issue:string;status:string;technicianId:number|null;outsideCost:number;laborRate:number;reviewedAt:string};
+type Repair={id:string;issue:string;status:string;technicianId:number|null;outsideCost:number;laborRate:number;reviewedAt:string;geotabReviewStatus:string;geotabResolutionType:string;geotabResolutionNote:string;geotabFailureReason:string};
 type ReviewPackage={id:string;repairIds:string[];unit:string;technician:string;reviewed:boolean;reviewedAt:string;reviewedBy:string;reviewNote:string;repairs:Repair[];technicianNotes:TechnicianNote[];laborEntries:LaborEntry[];usedParts:UsedPart[];missingPartCostLines:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number};
 
 type Props={
@@ -192,6 +192,20 @@ export default function InlineWorkOrderReviewEditor({item,canManage,defaultLabor
         {item.missingPartCostLines>0&&<div style={{padding:10,borderTop:"1px solid #f2c66d",background:"#fff8e6",fontSize:10,color:"#8a5a00"}}>{item.missingPartCostLines} legacy part line{item.missingPartCostLines===1?" has":"s have"} no captured historical unit cost and are excluded from the recorded total.</div>}
       </div>
     </div>
+
+    {item.repairs.some(repair=>repair.geotabReviewStatus)&&<div style={{marginTop:12,display:"grid",gap:6}}>
+      {item.repairs.filter(repair=>repair.geotabReviewStatus).map(repair=>{
+        const open=repair.geotabReviewStatus==="open";
+        const label=open?"GEOTAB REVIEW REQUIRED":repair.geotabResolutionType==="already_resolved"?"GEOTAB MANUALLY RECONCILED":"GEOTAB RECONCILED";
+        const detail=open
+          ?repair.geotabFailureReason||"Geotab writeback still needs manager review."
+          :repair.geotabResolutionNote||"The linked DVIR reconciliation was closed.";
+        return <div key={repair.id} style={{padding:"9px 10px",border:`1px solid ${open?"#e4b35c":"#b9d8c8"}`,background:open?"#fff8e8":"#f1faf5",fontSize:11}}>
+          <strong style={{color:open?"#8a5600":"#176440"}}>{label} · {repair.id}</strong>
+          <div style={{marginTop:3,color:"#59656e"}}>{detail}</div>
+        </div>;
+      })}
+    </div>}
 
     {item.reviewed&&<div style={reviewedStyle}>
       <div><strong>Reviewed by {item.reviewedBy||"manager"}</strong> · {dateTime(item.reviewedAt)}{item.reviewNote&&<div style={{marginTop:4}}>{item.reviewNote}</div>}</div>

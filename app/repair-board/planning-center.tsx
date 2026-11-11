@@ -9,7 +9,7 @@ import s from './planning-center.module.css';
 
 type Src='repair'|'dvir'|'dvir-repair'|'pm'|'annual'|'pm-repair'|'annual-repair';
 type Shop='all'|YardKey;
-type Attention='all'|'unassigned'|'critical'|'waiting'|'maintenance'|'working';
+type Attention='all'|'unassigned'|'critical'|'waiting'|'maintenance'|'working'|'geotab';
 type Row={
  id:string;source:Src;priority:number;location:string;unit:string;driver:string;issue:string;parts:string;status:string;
  technicianId:number|null;assignedTo:string;laborHours:number;equipmentType:string;equipmentId:number|null;outOfService:boolean;
@@ -25,7 +25,11 @@ type Tech={id:number;name:string};
 type Equip={id:number;unit:string;equipmentType:string;driver:string;location:string};
 type Oos={equipmentId:number;unit:string;equipmentType:string;driver:string;location:string;reason:string;since:string|null;openWork:{id:string;source:Src;issue:string;assignedTo:string;status:string}[]};
 type BoardUser={id:number;username:string;displayName:string;role:'viewer'|'mechanic'|'dispatch'|'manager'|'admin';technicianId:number|null};
-type Data={user:BoardUser;canManage:boolean;technicians:Tech[];equipment:Equip[];repairs:Row[];futureRepairs:FutureRepair[];oosUnits:Oos[];updatedAt:string};
+type GeotabReviewItem={
+ id:number;repairId:string;repairNumericId:number;unit:string;issue:string;technician:string;defectId:string;logId:string;
+ status:string;failureReason:string;attemptCount:number;createdAt:string;lastAttemptAt:string;resolvedAt:string;resolutionType:string;resolutionNote:string;
+};
+type Data={user:BoardUser;canManage:boolean;technicians:Tech[];equipment:Equip[];repairs:Row[];futureRepairs:FutureRepair[];oosUnits:Oos[];geotabReview?:GeotabReviewItem[];updatedAt:string};
 type YardInfo={currentYard:YardSelection;zoneName:string;positionAt:string;yardUpdatedAt:string};
 type Sync={status:string;message:string;positions:number;clare:number;cadillac:number;gr:number;taylor:number;boyne:number;outside:number;updatedAt:string};
 type Review={
@@ -46,6 +50,7 @@ const ATTENTION_OPTIONS:Array<{value:Attention;label:string}>=[
  {value:'waiting',label:'Waiting on Parts'},
  {value:'maintenance',label:'PM / Annual Due'},
  {value:'working',label:'Working Now'},
+ {value:'geotab',label:'Geotab Review'},
 ];
 const pm=(source:Src)=>source==='pm'||source==='pm-repair';
 const annual=(source:Src)=>source==='annual'||source==='annual-repair';
@@ -69,6 +74,7 @@ function matchesAttention(row:Row,attention:Attention){
  if(attention==='waiting')return isRepairWaitingForParts(row.status);
  if(attention==='maintenance')return pm(row.source)||annual(row.source);
  if(attention==='working')return Boolean(row.activeTimer)||isRepairInProgress(row.status);
+ if(attention==='geotab')return false;
  return true;
 }
 function groups(rows:Row[]){
@@ -170,6 +176,10 @@ export default function PlanningCenter(){
   setSync(yardResponse.ok?yard.sync||null:null);
  },[]);
  useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:'Planning Center could not be loaded.'));},[load]);
+ useEffect(()=>{
+  const requested=new URLSearchParams(window.location.search).get('attention');
+  if(requested==='geotab')setAttention('geotab');
+ },[]);
  useEffect(()=>{setSelected(new Set());setBulkAction('');},[shop,attention,assignee]);
 
  const yardFor=useCallback((row:Row):YardKey|''=>{
@@ -192,11 +202,14 @@ export default function PlanningCenter(){
   for(const row of allRows){const yard=yardFor(row);if(yard)result[yard]+=1;}
   return result;
  },[allRows,yardFor]);
+ const geotabReviews=data?.geotabReview??[];
  const focusCounts=useMemo(()=>{
   const result={} as Record<Attention,number>;
-  for(const option of ATTENTION_OPTIONS)result[option.value]=yardRows.filter(row=>matchesAttention(row,option.value)).length;
+  for(const option of ATTENTION_OPTIONS){
+   result[option.value]=option.value==='geotab'?geotabReviews.length:yardRows.filter(row=>matchesAttention(row,option.value)).length;
+  }
   return result;
- },[yardRows]);
+ },[yardRows,geotabReviews.length]);
 
  const filtered=useMemo(()=>{
   const needle=q.trim().toLowerCase();
@@ -232,6 +245,32 @@ export default function PlanningCenter(){
  const detailFuture=detail?.equipmentId?futureByEquipment.get(detail.equipmentId)??[]:[];
  const selectedRows=useMemo(()=>allRows.filter(row=>selected.has(row.id)),[allRows,selected]);
  const hasFilters=attention!=='all'||assignee!=='all'||Boolean(q.trim());
+
+ async function geotabReviewAction(item:GeotabReviewItem,action:'retryGeotabRepair'|'confirmGeotabResolved'|'reopenGeotabRepair'){
+  let note='';
+  if(action==='confirmGeotabResolved'){
+   if(!window.confirm(`Confirm Unit ${item.unit||'—'} is already resolved in Geotab? This closes only the Geotab review; the completed repair stays completed.`))return;
+   note='Manager confirmed the linked DVIR was already resolved in Geotab.';
+  }
+  if(action==='reopenGeotabRepair'){
+   note=window.prompt(`Why should Unit ${item.unit||'—'} repair be reopened?`,'Repair needs additional shop work.')?.trim()||'';
+   if(!note)return;
+  }
+  const key=`geotab-review:${item.id}:${action}`;
+  setBusy(key);setMessage('');
+  try{
+   const response=await fetch('/api/repair-board',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,reviewId:item.id,note})});
+   const result=await response.json() as {ok?:boolean;error?:string;alreadyRepaired?:boolean;reopened?:boolean};
+   if(!response.ok||!result.ok)throw new Error(result.error||'Geotab review action failed.');
+   setMessage(action==='retryGeotabRepair'
+    ?(result.alreadyRepaired?'Geotab already showed this DVIR repaired. Review closed.':'Geotab writeback succeeded. Review closed.')
+    :action==='confirmGeotabResolved'
+      ?'Geotab review marked already resolved.'
+      :'Repair reopened and returned to active shop work.');
+   await load();
+  }catch(error){setMessage(error instanceof Error?error.message:'Geotab review action failed.');}
+  finally{setBusy('');}
+ }
 
  async function req(id:string,body:Record<string,unknown>){
   const response=await fetch('/api/repair-board',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({repairId:id,...body})});
@@ -443,7 +482,7 @@ export default function PlanningCenter(){
   <nav className={s.yardBar} aria-label="Yard filter">{(['all',...YARD_KEYS] as Shop[]).map(value=><button type="button" key={value} className={shop===value?s.active:''} onClick={()=>setShop(value)}>{value==='all'?'All Yards':yardLabel(value)} <b>{counts[value]}</b></button>)}</nav>
   <nav className={s.yardBar} aria-label="Work needing attention">
    <strong style={{fontSize:10,color:'#526576',marginRight:3}}>SHOW</strong>
-   {ATTENTION_OPTIONS.map(({value,label})=><button type="button" key={value} className={attention===value?s.active:''} onClick={()=>setAttention(value)}>{label} <b>{focusCounts[value]}</b></button>)}
+   {ATTENTION_OPTIONS.filter(({value})=>value!=='geotab'||Boolean(data?.canManage)).map(({value,label})=><button type="button" key={value} className={attention===value?s.active:''} onClick={()=>setAttention(value)}>{label} <b>{focusCounts[value]}</b></button>)}
   </nav>
   <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}>{data?.canManage&&<button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button>}<a className={s.link} href="/work-orders">Completed Work</a></div></div>
   {message&&<div className={s.notice}>{message}</div>}
@@ -468,14 +507,33 @@ export default function PlanningCenter(){
 
   <div className={s.layout}>
    <div className={s.mainGrid}>
-    <Panel name="truck-repairs" title="Truck Repairs / DVIR" items={panels.truckRepairs}/>
-    <Panel name="trailer-repairs" title="Trailer Repairs / DVIR" items={panels.trailerRepairs}/>
-    {showPanel(panels.otherRepairs)&&panels.otherRepairs.length>0&&<Panel name="other-repairs" title="Other Equipment Repairs / DVIR" items={panels.otherRepairs} wide/>}
-    <Panel name="pms" title="Truck PMs" items={panels.pms}/>
-    <Panel name="truck-annuals" title="Truck Annuals" items={panels.truckAnnuals}/>
-    <Panel name="trailer-annuals" title="Trailer Annuals" items={panels.trailerAnnuals}/>
-    <Panel name="trailer-services" title="Trailer Services" items={panels.trailerServices}/>
-    <Panel name="glass" title="Glass" items={panels.glass} wide/>
+    {attention==='geotab'&&data?.canManage
+     ?<section style={{gridColumn:'1 / -1',background:'#fff',border:'2px solid #e0a53c',borderRadius:12,padding:16}}>
+       <div style={{display:'flex',justifyContent:'space-between',gap:12,alignItems:'end',flexWrap:'wrap',marginBottom:12}}>
+        <div><div style={{fontSize:10,fontWeight:950,letterSpacing:'.12em',color:'#9a5a05'}}>MANAGER / ADMIN REVIEW</div><h2 style={{margin:'4px 0 3px',fontSize:22,color:'#173f37'}}>Geotab Review</h2><p style={{margin:0,fontSize:12,color:'#68746f'}}>These shop repairs are completed. Only the Geotab DVIR reconciliation still needs attention.</p></div>
+        <strong style={{fontSize:13,color:'#9a5a05'}}>{geotabReviews.length} open</strong>
+       </div>
+       {!geotabReviews.length?<div style={{padding:20,textAlign:'center',border:'1px dashed #d6dce0',borderRadius:9,color:'#68746f'}}>No Geotab repair reviews are waiting.</div>
+       :<div style={{display:'grid',gap:9}}>{geotabReviews.map(item=><article key={item.id} style={{display:'grid',gridTemplateColumns:'minmax(260px,1fr) minmax(180px,.7fr) minmax(280px,auto)',gap:14,alignItems:'center',padding:14,border:'1px solid #e7c67e',borderRadius:10,background:'#fffaf0'}}>
+        <div><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><strong style={{fontSize:18,color:'#173f37'}}>Unit {item.unit||'—'}</strong><span style={{padding:'4px 7px',borderRadius:999,background:'#ffe4b8',color:'#8a4c00',fontSize:9,fontWeight:950}}>GEOTAB REVIEW REQUIRED</span></div><div style={{marginTop:3,fontSize:13,fontWeight:850}}>{item.issue}</div><div style={{marginTop:3,fontSize:11,color:'#68746f'}}>Repair complete · {item.technician||'Technician not listed'} · {when(item.createdAt)}</div></div>
+        <div><div style={{fontSize:9,fontWeight:950,letterSpacing:'.08em',color:'#7a8790'}}>WHY IT IS HERE</div><div style={{marginTop:4,fontSize:12,color:'#4d5b65'}}>{item.failureReason||'Geotab writeback did not complete.'}</div><div style={{marginTop:4,fontSize:10,color:'#7a8790'}}>Attempt {item.attemptCount} · Last {when(item.lastAttemptAt)}</div></div>
+        <div style={{display:'flex',gap:6,justifyContent:'flex-end',flexWrap:'wrap'}}>
+         <button className={s.primary} type="button" disabled={Boolean(busy)} onClick={()=>void geotabReviewAction(item,'retryGeotabRepair')}>{busy===`geotab-review:${item.id}:retryGeotabRepair`?'Retrying…':'Retry Geotab'}</button>
+         <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void geotabReviewAction(item,'confirmGeotabResolved')}>Already Resolved</button>
+         <button className={s.danger} type="button" disabled={Boolean(busy)} onClick={()=>void geotabReviewAction(item,'reopenGeotabRepair')}>Reopen Repair</button>
+        </div>
+       </article>)}</div>}
+      </section>
+     :<>
+      <Panel name="truck-repairs" title="Truck Repairs / DVIR" items={panels.truckRepairs}/>
+      <Panel name="trailer-repairs" title="Trailer Repairs / DVIR" items={panels.trailerRepairs}/>
+      {showPanel(panels.otherRepairs)&&panels.otherRepairs.length>0&&<Panel name="other-repairs" title="Other Equipment Repairs / DVIR" items={panels.otherRepairs} wide/>}
+      <Panel name="pms" title="Truck PMs" items={panels.pms}/>
+      <Panel name="truck-annuals" title="Truck Annuals" items={panels.truckAnnuals}/>
+      <Panel name="trailer-annuals" title="Trailer Annuals" items={panels.trailerAnnuals}/>
+      <Panel name="trailer-services" title="Trailer Services" items={panels.trailerServices}/>
+      <Panel name="glass" title="Glass" items={panels.glass} wide/>
+     </>}
    </div>
 
    <aside className={s.aside}>

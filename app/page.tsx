@@ -6,7 +6,8 @@ type User = { displayName:string; role:"viewer"|"mechanic"|"manager"|"admin"; te
 type Work = { id:string; source:string; unit:string; issue:string; status:string; assignedTo:string; technicianId:number|null; equipmentId:number|null; outOfService:boolean; activeTimer:{startedAt:string;technician:string}|null };
 type Equipment = { id:number; unit:string; equipmentType:string; driver:string; location:string };
 type Oos = { equipmentId:number; unit:string; reason:string; since:string|null; openWork:{id:string;issue:string;status:string}[] };
-type Board = { user:User; repairs:Work[]; equipment:Equipment[]; oosUnits:Oos[]; summary:{total:number;oos:number;dvirOpen:number;maintenanceDue:number;unassigned:number;activeLabor:number}; updatedAt:string };
+type GeotabReviewItem = { id:number;repairId:string;unit:string;issue:string;technician:string;failureReason:string;createdAt:string;attemptCount:number };
+type Board = { user:User; repairs:Work[]; equipment:Equipment[]; oosUnits:Oos[]; geotabReview?:GeotabReviewItem[]; summary:{total:number;oos:number;dvirOpen:number;maintenanceDue:number;unassigned:number;activeLabor:number;geotabReview?:number}; updatedAt:string };
 type DutyAlert = { id:number; templateName:string; dueDate:string; status:string; assignedName:string };
 type DutySetup = { overdueAssignments?:DutyAlert[]; dueTodayAssignments?:DutyAlert[] };
 
@@ -50,16 +51,18 @@ export default function TodayPage(){
       active:rows.filter(row=>row.activeTimer!==null).length,
       dutyOverdue:dutyAlerts.overdueAssignments?.length??0,
       dutyDueToday:dutyAlerts.dueTodayAssignments?.length??0,
+      geotabReview:data?.geotabReview?.length??0,
     };
   },[data,dutyAlerts]);
 
   const attention=useMemo(()=>{
-    if(!data)return [] as {key:string;unit:string;title:string;detail:string;tone:'red'|'orange'}[];
-    const rows:{key:string;unit:string;title:string;detail:string;tone:'red'|'orange'}[]=[];
-    for(const item of data.oosUnits)rows.push({key:`oos-${item.equipmentId}`,unit:item.unit,title:'OUT OF SERVICE',detail:item.reason||'Unit is marked out of service.',tone:'red'});
-    for(const item of data.repairs.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('overdue')))rows.push({key:`due-${item.id}`,unit:item.unit,title:'MAINTENANCE OVERDUE',detail:item.issue,tone:'red'});
-    for(const item of data.repairs.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('stale')))rows.push({key:`stale-${item.id}`,unit:item.unit,title:'MILEAGE STALE',detail:item.issue,tone:'orange'});
-    for(const item of data.repairs.filter(row=>row.technicianId===null&&!maintenance(row.source)).slice(0,8))rows.push({key:`un-${item.id}`,unit:item.unit,title:'NEEDS ASSIGNMENT',detail:item.issue,tone:'orange'});
+    if(!data)return [] as {key:string;unit:string;title:string;detail:string;tone:'red'|'orange';href:string}[];
+    const rows:{key:string;unit:string;title:string;detail:string;tone:'red'|'orange';href:string}[]=[];
+    for(const item of data.geotabReview??[])rows.push({key:`geotab-${item.id}`,unit:item.unit,title:'GEOTAB REVIEW',detail:`${item.issue} — ${item.failureReason||'Geotab writeback needs management review.'}`,tone:'orange',href:'/repair-board?attention=geotab'});
+    for(const item of data.oosUnits)rows.push({key:`oos-${item.equipmentId}`,unit:item.unit,title:'OUT OF SERVICE',detail:item.reason||'Unit is marked out of service.',tone:'red',href:`/unit?unit=${encodeURIComponent(item.unit)}`});
+    for(const item of data.repairs.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('overdue')))rows.push({key:`due-${item.id}`,unit:item.unit,title:'MAINTENANCE OVERDUE',detail:item.issue,tone:'red',href:`/unit?unit=${encodeURIComponent(item.unit)}`});
+    for(const item of data.repairs.filter(row=>maintenance(row.source)&&row.status.toLowerCase().includes('stale')))rows.push({key:`stale-${item.id}`,unit:item.unit,title:'MILEAGE STALE',detail:item.issue,tone:'orange',href:`/unit?unit=${encodeURIComponent(item.unit)}`});
+    for(const item of data.repairs.filter(row=>row.technicianId===null&&!maintenance(row.source)).slice(0,8))rows.push({key:`un-${item.id}`,unit:item.unit,title:'NEEDS ASSIGNMENT',detail:item.issue,tone:'orange',href:`/unit?unit=${encodeURIComponent(item.unit)}`});
     return rows.slice(0,12);
   },[data]);
 
@@ -94,6 +97,7 @@ export default function TodayPage(){
       <a className="easy-card easy-metric" href="/repair-board"><span>Out of service</span><strong>{data?.oosUnits.length??0}</strong><small>Units that should not be dispatched</small></a>
       <a className="easy-card easy-metric" href="/repair-board"><span>Being worked now</span><strong>{counts.active}</strong><small>{counts.unassigned} open items still unassigned</small></a>
       <a className="easy-card easy-metric" href="/shop-duties"><span>Shop duties overdue</span><strong>{counts.dutyOverdue}</strong><small>{counts.dutyOverdue ? counts.dutyOverdue+" overdue" : counts.dutyDueToday ? counts.dutyDueToday+" due today" : "No missed shop duties"}</small></a>
+      {counts.geotabReview>0&&<a className="easy-card easy-metric" href="/repair-board?attention=geotab"><span>Geotab review required</span><strong>{counts.geotabReview}</strong><small>Completed repairs waiting on DVIR reconciliation</small></a>}
     </section>
 
     {!!dutyAlerts.overdueAssignments?.length&&<section className="easy-card easy-card-body" style={{marginTop:16,border:"2px solid #d9665d",background:"#fff0ef"}}>
@@ -120,7 +124,7 @@ export default function TodayPage(){
         <h2 className="easy-section-title">Needs attention</h2>
         <p className="easy-section-copy">Out-of-service, overdue, stale mileage, and unassigned work is brought here automatically.</p>
         <div className="easy-list">
-          {attention.map(item=><a key={item.key} className="easy-row" href={`/unit?unit=${encodeURIComponent(item.unit)}`} style={{textDecoration:'none'}}>
+          {attention.map(item=><a key={item.key} className="easy-row" href={item.href} style={{textDecoration:'none'}}>
             <div className="easy-row-main"><strong>Unit {item.unit} — {item.detail}</strong><span>Open the unit to see everything tied to it.</span></div>
             <span className={`easy-badge ${item.tone}`}>{item.title}</span>
           </a>)}
