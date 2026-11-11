@@ -216,7 +216,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
     ORDER BY unit COLLATE NOCASE
   `).all<EquipmentRow>();
 
-  const repairClauses = [`substr(r.opened_at,1,10) BETWEEN ? AND ?`];
+  const repairClauses = [`substr(r.opened_at,1,10) BETWEEN ? AND ?`, `COALESCE(r.source,'') <> 'cutover-archive'`];
   const repairBinds: unknown[] = [input.startDate, input.endDate];
   addEquipmentFilters('e', input, repairClauses, repairBinds);
   if (input.repairType) { repairClauses.push(`lower(trim(COALESCE(NULLIF(rt.name,''),'Uncategorized'))) = lower(trim(?))`); repairBinds.push(input.repairType); }
@@ -332,11 +332,11 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   `).bind(...partBinds).all<PartRow>();
 
   const optionPromises = Promise.all([
-    distinctValues(db, `SELECT value FROM (SELECT name AS value FROM repair_types WHERE active=1 UNION SELECT 'Uncategorized' AS value WHERE EXISTS(SELECT 1 FROM repairs WHERE repair_type_id IS NULL)) ORDER BY value COLLATE NOCASE`),
-    distinctValues(db, `SELECT DISTINCT COALESCE(status,'') AS value FROM repairs UNION SELECT DISTINCT COALESCE(source_status,'') FROM historical_repairs ORDER BY value COLLATE NOCASE`),
-    distinctValues(db, `SELECT DISTINCT COALESCE(t.name,r.driver,'') AS value FROM repairs r LEFT JOIN technicians t ON t.id=r.technician_id UNION SELECT 'Historical import' ORDER BY value COLLATE NOCASE`),
-    distinctValues(db, `SELECT DISTINCT COALESCE(source,'') AS value FROM repairs UNION SELECT 'Historical RO import' ORDER BY value COLLATE NOCASE`),
-    distinctValues(db, `SELECT DISTINCT COALESCE(location,'') AS value FROM repairs UNION SELECT DISTINCT COALESCE(location,'') FROM historical_repairs ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, `SELECT value FROM (SELECT name AS value FROM repair_types WHERE active=1 UNION SELECT 'Uncategorized' AS value WHERE EXISTS(SELECT 1 FROM repairs WHERE repair_type_id IS NULL AND COALESCE(source,'') <> 'cutover-archive')) ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, `SELECT DISTINCT COALESCE(status,'') AS value FROM repairs WHERE COALESCE(source,'') <> 'cutover-archive' UNION SELECT DISTINCT COALESCE(source_status,'') FROM historical_repairs ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, `SELECT DISTINCT COALESCE(t.name,r.driver,'') AS value FROM repairs r LEFT JOIN technicians t ON t.id=r.technician_id WHERE COALESCE(r.source,'') <> 'cutover-archive' UNION SELECT 'Historical import' ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, `SELECT DISTINCT COALESCE(source,'') AS value FROM repairs WHERE COALESCE(source,'') <> 'cutover-archive' UNION SELECT 'Historical RO import' ORDER BY value COLLATE NOCASE`),
+    distinctValues(db, `SELECT DISTINCT COALESCE(location,'') AS value FROM repairs WHERE COALESCE(source,'') <> 'cutover-archive' UNION SELECT DISTINCT COALESCE(location,'') FROM historical_repairs ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT COALESCE(event_type,'') AS value FROM maintenance_events ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT COALESCE(pm_type,'') AS value FROM maintenance_events ORDER BY value COLLATE NOCASE`),
     distinctValues(db, `SELECT DISTINCT COALESCE(source,'') AS value FROM maintenance_events ORDER BY value COLLATE NOCASE`),
