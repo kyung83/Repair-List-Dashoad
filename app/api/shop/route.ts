@@ -5,6 +5,7 @@ import { getDerivedPartAvailability, requestPartDerived } from '@/lib/derived-re
 import { getRepairPartRequests } from '@/lib/parts-lifecycle';
 import { getActiveShopDutyForUser } from '@/lib/shop-duties';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
+import { queueGeotabRepairReview } from '@/lib/geotab-repair-review';
 import { normalizeYard } from '@/lib/yards';
 import { completeRepairTypeChecklist, validateRepairTypeChecklistBeforeClose } from '@/lib/repair-types';
 import { GET as originalGET } from './original';
@@ -155,22 +156,33 @@ async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repair
   if (!timer || Number(timer.repair_id) !== repairId) throw new Error('That repair is not WORKING NOW.');
 
   const defectId = String(repair.geotab_defect_id ?? '').trim();
-  if (!defectId) return { linked:false, geotabRepaired:false };
-  if (Number(repair.dvir_repaired ?? 0) === 1) return { linked:true, geotabRepaired:true };
+  if (!defectId) return { linked:false, geotabRepaired:false, needsReview:false, defectId:'', logId:'', failureReason:'', alreadyRepaired:false };
+  if (Number(repair.dvir_repaired ?? 0) === 1) {
+    return { linked:true, geotabRepaired:true, needsReview:false, defectId, logId:String(repair.geotab_log_id ?? '').trim(), failureReason:'', alreadyRepaired:true };
+  }
 
   const logId = String(repair.geotab_log_id ?? '').trim();
   if (!logId) {
-    throw new Error('This DVIR is missing its Geotab log link. The repair is still open and your labor timer is still running. Tell a manager.');
+    const failureReason='The linked DVIR is missing its Geotab log ID.';
+    await repairJobEvent(repairId,user.id,user.technicianId,'geotab_dvir_review_needed',`${failureReason} Repair completion was allowed and management review is required.`);
+    return { linked:true, geotabRepaired:false, needsReview:true, defectId, logId:'', failureReason, alreadyRepaired:false };
   }
 
   try {
-    await markGeotabDefectRepaired(env,logId,defectId);
-    await repairJobEvent(repairId,user.id,user.technicianId,'geotab_dvir_repaired','Mechanic REPAIRED action marked the linked DVIR defect repaired in Geotab.');
-    return { linked:true, geotabRepaired:true };
+    const result=await markGeotabDefectRepaired(env,logId,defectId);
+    await repairJobEvent(
+      repairId,user.id,user.technicianId,
+      (result as any).alreadyRepaired?'geotab_dvir_already_repaired':'geotab_dvir_repaired',
+      (result as any).alreadyRepaired
+        ?'Mechanic REPAIRED action found the linked DVIR already repaired in Geotab.'
+        :'Mechanic REPAIRED action marked the linked DVIR defect repaired in Geotab.',
+    );
+    return { linked:true, geotabRepaired:true, needsReview:false, defectId, logId, failureReason:'', alreadyRepaired:Boolean((result as any).alreadyRepaired) };
   } catch (error) {
-    console.error(JSON.stringify({event:'shop_geotab_dvir_repair_failed',repairId,defectId,error:String(error)}));
-    await repairJobEvent(repairId,user.id,user.technicianId,'geotab_dvir_repair_failed','Geotab rejected or failed the linked DVIR repair update. Shop repair remained open.');
-    throw new Error('Geotab could not mark this DVIR repaired. The shop repair is still open and your labor timer is still running. Try again or tell a manager.');
+    const failureReason=error instanceof Error?error.message:String(error);
+    console.error(JSON.stringify({event:'shop_geotab_dvir_repair_failed',repairId,defectId,error:failureReason}));
+    await repairJobEvent(repairId,user.id,user.technicianId,'geotab_dvir_review_needed',`Geotab writeback failed: ${failureReason}. Repair completion was allowed and management review is required.`);
+    return { linked:true, geotabRepaired:false, needsReview:true, defectId, logId, failureReason, alreadyRepaired:false };
   }
 }
 
@@ -305,8 +317,28 @@ export async function POST(request: Request) {
       const response = await legacyPOST(request);
       if (response.ok) await completeRepairTypeChecklist(env.DB,repairId);
       if (!response.ok || !dvir.linked) return response;
+      if (dvir.needsReview) {
+        const user=await getSessionUser(env.DB,request.clone());
+        await queueGeotabRepairReview(env.DB,{
+          repairId,
+          defectId:dvir.defectId,
+          logId:dvir.logId,
+          failureReason:dvir.failureReason,
+          userId:user?.id??null,
+        });
+      }
       const payload = await response.json() as Record<string,unknown>;
-      return Response.json({...payload,geotabRepaired:dvir.geotabRepaired},{status:response.status,headers:{'cache-control':'no-store'}});
+      return Response.json({
+        ...payload,
+        geotabRepaired:dvir.geotabRepaired,
+        geotabAlreadyRepaired:dvir.alreadyRepaired,
+        geotabReviewRequired:dvir.needsReview,
+        geotabMessage:dvir.needsReview
+          ?'Repair completed. Geotab could not be reconciled automatically. Management has been notified; you may continue to your next repair.'
+          :dvir.alreadyRepaired
+            ?'Repair completed. The linked DVIR was already resolved in Geotab.'
+            :undefined,
+      },{status:response.status,headers:{'cache-control':'no-store'}});
     } catch (error) {
       return Response.json({error:error instanceof Error?error.message:'Repair could not be completed.'},{status:409});
     }
