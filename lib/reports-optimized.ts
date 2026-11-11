@@ -85,7 +85,7 @@ export async function getReportingDataOptimized(db:D1Database,requestedYear?:unk
              COALESCE(r.labor_hours,0) AS labor_hours,COALESCE(r.labor_rate,0) AS labor_rate,
              COALESCE(r.outside_cost,0) AS outside_cost,
              COALESCE((SELECT SUM(rp.quantity*COALESCE(rp.unit_cost,p.unit_cost,0)) FROM repair_parts rp LEFT JOIN parts p ON p.id=rp.part_id WHERE rp.repair_id=r.id),0) AS parts_cost
-      FROM repairs r WHERE r.equipment_id IS NOT NULL
+      FROM repairs r WHERE r.equipment_id IS NOT NULL AND COALESCE(r.source,'') <> 'cutover-archive'
     )
     SELECT equipment_id,
            SUM(CASE WHEN substr(opened_at,1,4)=? THEN 1 ELSE 0 END) AS repair_count_year,
@@ -126,7 +126,8 @@ export async function getReportingDataOptimized(db:D1Database,requestedYear?:unk
            COALESCE(SUM(CASE WHEN rp.id IS NOT NULL AND (rp.unit_cost IS NOT NULL OR p.unit_cost IS NOT NULL) THEN 1 ELSE 0 END),0) AS priced_part_lines
     FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id LEFT JOIN technicians t ON t.id=r.technician_id
     LEFT JOIN repair_parts rp ON rp.repair_id=r.id LEFT JOIN parts p ON p.id=rp.part_id
-    WHERE (substr(r.opened_at,1,4)=?${detailUnitClause})
+    WHERE COALESCE(r.source,'') <> 'cutover-archive'
+      AND (substr(r.opened_at,1,4)=?${detailUnitClause})
     GROUP BY r.id,r.equipment_id,e.unit,e.category,e.equipment_type,r.title,r.status,r.source,r.opened_at,r.completed_at,
              t.name,r.driver,r.location,r.labor_hours,r.labor_rate,r.outside_cost
     ORDER BY r.opened_at DESC,r.id DESC
@@ -156,7 +157,8 @@ export async function getReportingDataOptimized(db:D1Database,requestedYear?:unk
     SELECT rp.repair_id,r.equipment_id,COALESCE(e.unit,'') AS unit,r.opened_at,p.part_number,p.description,rp.quantity,
            rp.unit_cost AS snapshot_unit_cost,p.unit_cost AS current_unit_cost
     FROM repair_parts rp JOIN repairs r ON r.id=rp.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id JOIN parts p ON p.id=rp.part_id
-    WHERE substr(r.opened_at,1,4)=?
+    WHERE COALESCE(r.source,'') <> 'cutover-archive'
+      AND substr(r.opened_at,1,4)=?
     ORDER BY r.opened_at DESC,rp.id DESC
   `).bind(yearText).all<PartUsageRow>();
 
@@ -166,6 +168,7 @@ export async function getReportingDataOptimized(db:D1Database,requestedYear?:unk
              COALESCE(r.outside_cost,0) AS outside_cost,
              COALESCE((SELECT SUM(rp.quantity*COALESCE(rp.unit_cost,p.unit_cost,0)) FROM repair_parts rp LEFT JOIN parts p ON p.id=rp.part_id WHERE rp.repair_id=r.id),0) AS parts_cost
       FROM repairs r
+      WHERE COALESCE(r.source,'') <> 'cutover-archive'
     )
     SELECT CAST(substr(opened_at,1,4) AS INTEGER) AS year,COUNT(*) AS repair_count,
            COALESCE(SUM(parts_cost+labor_hours*labor_rate+outside_cost),0) AS repair_cost
@@ -182,18 +185,22 @@ export async function getReportingDataOptimized(db:D1Database,requestedYear?:unk
            SUM(CASE WHEN COALESCE(labor_hours,0)>0 OR COALESCE(labor_rate,0)>0 THEN 1 ELSE 0 END) AS labor_entered,
            SUM(CASE WHEN lower(COALESCE(status,'')) NOT LIKE '%complete%' THEN 1 ELSE 0 END) AS open_repairs
     FROM repairs
+    WHERE COALESCE(source,'') <> 'cutover-archive'
   `).first<QualityRow>();
 
   const partQualityPromise=db.prepare(`
     SELECT COUNT(rp.id) AS total_part_lines,
            COALESCE(SUM(CASE WHEN rp.unit_cost IS NOT NULL THEN 1 ELSE 0 END),0) AS snapshot_part_lines,
            COALESCE(SUM(CASE WHEN rp.unit_cost IS NOT NULL OR p.unit_cost IS NOT NULL THEN 1 ELSE 0 END),0) AS priced_part_lines
-    FROM repair_parts rp LEFT JOIN parts p ON p.id=rp.part_id
+    FROM repair_parts rp
+    JOIN repairs r ON r.id=rp.repair_id
+    LEFT JOIN parts p ON p.id=rp.part_id
+    WHERE COALESCE(r.source,'') <> 'cutover-archive'
   `).first<PartQualityRow>();
 
   const yearsPromise=db.prepare(`
     SELECT year FROM (
-      SELECT substr(opened_at,1,4) AS year FROM repairs
+      SELECT substr(opened_at,1,4) AS year FROM repairs WHERE COALESCE(source,'') <> 'cutover-archive'
       UNION SELECT substr(expense_date,1,4) FROM unit_expenses
       UNION SELECT substr(purchase_date,1,4) FROM equipment WHERE active=1 AND purchase_date IS NOT NULL
       UNION SELECT substr(event_date,1,4) FROM maintenance_events
