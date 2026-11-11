@@ -64,7 +64,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
 
   function chooseEquipment(item:Equipment){setSelected(item);setSearch(item.unit);setNewLocation(item.location);setNewType(kind(item.equipmentType));setAddNew(false);setNoUnit(false);setLastSavedUnit("");setMessage("")}
   function changeUnit(){if(lockEquipment)return;setSelected(null);setSearch("");setAddNew(false);setNewType("other");setNewLocation("");setNoUnit(false);setLastSavedUnit("");setMessage("")}
-  function chooseNoUnit(){if(!indirectType){setMessage("Indirect labor setup is not available.");return}setSelected(null);setSearch("");setAddNew(false);setNoUnit(true);setLastSavedUnit("");setMessage("")}
+  function chooseNoUnit(){if(!indirectType){setMessage("Indirect labor setup is not available.");return}setSelected(null);setSearch("");setAddNew(false);setNoUnit(true);setPullThru(false);setLastSavedUnit("");setMessage("")}
 
   async function createRepair(){
     const repair=issue.trim();
@@ -84,7 +84,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
           location:selected?.location??newLocation.trim(),
           issue:repair,parts:parts.trim(),priority,
           technicianId:allowTechnicianAssignment&&technicianId?Number(technicianId):0,
-          pullThru:allowPullThru&&pullThru,
+          pullThru:allowPullThru&&!noUnit&&pullThru,
         }),
       });
       const result=await response.json() as CreateResult;
@@ -117,7 +117,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
       <label>Parts<input className={s.fieldSelect} value={parts} onChange={event=>setParts(event.target.value)} placeholder="Optional"/></label>
       <label>Priority<select className={s.fieldSelect} value={priority} onChange={event=>setPriority(Number(event.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select></label>
       {allowTechnicianAssignment&&<label>Tech<select className={s.fieldSelect} value={technicianId} onChange={event=>setTechnicianId(event.target.value)}><option value="">Unassigned</option>{technicians.map(technician=><option key={technician.id} value={technician.id}>{technician.name}</option>)}</select></label>}
-      {allowPullThru&&<label style={{gridColumn:"1 / -1",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",border:"1px solid #e1a34a",borderRadius:9,background:pullThru?"#fff0d7":"#fffaf1",cursor:"pointer"}}>
+      {allowPullThru&&!noUnit&&<label style={{gridColumn:"1 / -1",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",border:"1px solid #e1a34a",borderRadius:9,background:pullThru?"#fff0d7":"#fffaf1",cursor:"pointer"}}>
         <input type="checkbox" checked={pullThru} onChange={event=>setPullThru(event.target.checked)} style={{width:18,height:18}}/>
         <span><strong style={{display:"block",color:"#9a5a05"}}>PULL THRU</strong><small style={{display:"block",marginTop:2,color:"#6d6254"}}>Flag this repair as Pull Thru. If a tech is assigned now, their tablet alerts immediately; otherwise it alerts when the repair is assigned.</small></span>
       </label>}
