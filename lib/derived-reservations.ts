@@ -4,7 +4,7 @@ const EPSILON = 0.000001;
 const finite = (value: unknown, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 
 export type DerivedAvailability = {
-  partId:number; partNumber:string; description:string; warehouseId:number; warehouseCode:string; warehouseName:string;
+  partId:number; partNumber:string; description:string; inventoryClass:'stock'|'one_time'; warehouseId:number; warehouseCode:string; warehouseName:string;
   physicalOnHand:number; reserved:number; available:number; onOrder:number; minimumQuantity:number;
 };
 
@@ -21,7 +21,7 @@ export async function getDerivedPartAvailability(db: D1Database): Promise<Derive
       SELECT part_id,warehouse_id,SUM(reserved_quantity) AS reserved
       FROM derived_repair_part_reservations GROUP BY part_id,warehouse_id
     )
-    SELECT k.part_id,p.part_number,p.description,w.id AS warehouse_id,w.code AS warehouse_code,w.name AS warehouse_name,
+    SELECT k.part_id,p.part_number,p.description,COALESCE(p.inventory_class,'stock') AS inventory_class,w.id AS warehouse_id,w.code AS warehouse_code,w.name AS warehouse_name,
            COALESCE(s.physical_on_hand,0) AS physical_on_hand,COALESCE(s.on_order,0) AS on_order,
            COALESCE(r.reserved,0) AS reserved,COALESCE(m.minimum_quantity,p.reorder_level,0) AS minimum_quantity
     FROM keys k
@@ -34,12 +34,12 @@ export async function getDerivedPartAvailability(db: D1Database): Promise<Derive
     WHERE COALESCE(cs.status,'active')='active'
     ORDER BY p.description,p.part_number,w.name
   `).all<{
-    part_id:number;part_number:string;description:string;warehouse_id:number;warehouse_code:string;warehouse_name:string;
+    part_id:number;part_number:string;description:string;inventory_class:'stock'|'one_time';warehouse_id:number;warehouse_code:string;warehouse_name:string;
     physical_on_hand:number;on_order:number;reserved:number;minimum_quantity:number;
   }>();
   return rows.results.map((row)=>{
     const physicalOnHand=finite(row.physical_on_hand); const reserved=finite(row.reserved);
-    return {partId:Number(row.part_id),partNumber:row.part_number,description:row.description,warehouseId:Number(row.warehouse_id),warehouseCode:row.warehouse_code,warehouseName:row.warehouse_name,physicalOnHand,reserved,available:physicalOnHand-reserved,onOrder:finite(row.on_order),minimumQuantity:finite(row.minimum_quantity)};
+    return {partId:Number(row.part_id),partNumber:row.part_number,description:row.description,inventoryClass:row.inventory_class==='one_time'?'one_time':'stock',warehouseId:Number(row.warehouse_id),warehouseCode:row.warehouse_code,warehouseName:row.warehouse_name,physicalOnHand,reserved,available:physicalOnHand-reserved,onOrder:finite(row.on_order),minimumQuantity:finite(row.minimum_quantity)};
   });
 }
 
@@ -99,14 +99,14 @@ export async function getPartsDeskDataDerived(db:D1Database) {
   const groups=new Map<string,any>();
   for(const request of requests){const key=`${request.partId}:${request.warehouseId}`;const group=groups.get(key)??{partId:request.partId,partNumber:request.partNumber,description:request.description,warehouseId:request.warehouseId,warehouseCode:request.warehouseCode,warehouseName:request.warehouseName,requested:0,reserved:0,used:0,shortage:0,waitingJobs:[]};group.requested+=request.requestedQuantity;group.reserved+=request.reservedQuantity;group.used+=request.usedQuantity;group.shortage+=request.shortageQuantity;group.waitingJobs.push(request);groups.set(key,group);}
   const jobShortages=[...groups.values()].filter((g)=>g.shortage>EPSILON).map((g)=>({...g,stock:byKey.get(`${g.partId}:${g.warehouseId}`)??null}));
-  const lowStock=availability.filter((row)=>row.minimumQuantity>0&&row.available<=row.minimumQuantity).map((row)=>({...row,reorderSuggested:Math.max(0,row.minimumQuantity-row.available-row.onOrder)}));
+  const lowStock=availability.filter((row)=>row.inventoryClass==='stock'&&row.minimumQuantity>0&&row.available<=row.minimumQuantity).map((row)=>({...row,reorderSuggested:Math.max(0,row.minimumQuantity-row.available-row.onOrder)}));
   return {jobShortages,requests,lowStock,availability,summary:{shortageLines:jobShortages.length,waitingJobs:requests.filter((r:any)=>r.shortageQuantity>EPSILON).length,readyJobs:requests.filter((r:any)=>r.reservedQuantity>EPSILON).length,lowStockLines:lowStock.length},updatedAt:new Date().toISOString()};
 }
 
 export async function decorateShopPartsDerived(db:D1Database,parts:any[]) {
   const [availability,crossReferences]=await Promise.all([getDerivedPartAvailability(db),getPartCrossReferencesByPart(db)]); const byPart=new Map<number,DerivedAvailability[]>();
   for(const row of availability){const list=byPart.get(row.partId)??[];list.push(row);byPart.set(row.partId,list);}
-  return parts.map((part)=>{const rows=byPart.get(Number(part.id))??[];const physicalOnHand=rows.reduce((s,r)=>s+r.physicalOnHand,0);const reserved=rows.reduce((s,r)=>s+r.reserved,0);const available=physicalOnHand-reserved;return {...part,crossReferences:crossReferences.get(Number(part.id))??[],quantityOnHand:rows.length?available:part.quantityOnHand,physicalOnHand,reserved,available,onOrder:rows.reduce((s,r)=>s+r.onOrder,0),warehouseStocks:rows.map((r)=>({warehouseId:r.warehouseId,warehouseCode:r.warehouseCode,warehouseName:r.warehouseName,quantityOnHand:r.available,physicalOnHand:r.physicalOnHand,reserved:r.reserved,available:r.available,onOrder:r.onOrder,minimumQuantity:r.minimumQuantity}))};});
+  return parts.map((part)=>{const rows=byPart.get(Number(part.id))??[];const physicalOnHand=rows.reduce((s,r)=>s+r.physicalOnHand,0);const reserved=rows.reduce((s,r)=>s+r.reserved,0);const available=physicalOnHand-reserved;const inventoryClass=part.inventoryClass==='one_time'||rows.some((r)=>r.inventoryClass==='one_time')?'one_time':'stock';return {...part,inventoryClass,crossReferences:crossReferences.get(Number(part.id))??[],quantityOnHand:rows.length?available:part.quantityOnHand,physicalOnHand,reserved,available,onOrder:rows.reduce((s,r)=>s+r.onOrder,0),warehouseStocks:rows.map((r)=>({warehouseId:r.warehouseId,warehouseCode:r.warehouseCode,warehouseName:r.warehouseName,quantityOnHand:r.available,physicalOnHand:r.physicalOnHand,reserved:r.reserved,available:r.available,onOrder:r.onOrder,minimumQuantity:r.minimumQuantity,inventoryClass:r.inventoryClass}))};}).filter((part)=>part.inventoryClass!=='one_time'||Number(part.available)>EPSILON);
 }
 
 export async function decorateInventoryDataDerived(db:D1Database,data:any) {
