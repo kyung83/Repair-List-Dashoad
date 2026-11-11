@@ -29,7 +29,17 @@ test('Parts Desk creates and converts one-time parts and closes matched technici
   assert.match(route,/action === 'createOneTimePart'/);
   assert.match(route,/handleUnmatchedPartRequest\(env\.DB,sourceRequestId\)/);
   assert.match(route,/action === 'convertOneTimePart'/);
+  assert.match(route,/action === 'receiveExistingOneTimePart'/);
   assert.match(route,/action === 'matchUnmatchedToCatalog'/);
+  assert.match(page,/PREVIOUS ONE-TIME PARTS/);
+  assert.match(page,/Buy Again as One-Time/);
+  assert.match(page,/Convert to Inventory/);
+  assert.match(page,/historySearch/);
+  assert.match(service,/listOneTimePartHistory/);
+  assert.match(service,/purchase_count/);
+  assert.match(service,/repair_count/);
+  assert.match(service,/receiveExistingOneTimePart/);
+  assert.match(service,/quantity_on_hand=quantity_on_hand\+\?/);
   assert.match(service,/inventory_class='one_time'/);
   assert.match(service,/UPDATE parts[\s\S]*inventory_class='stock'/);
 });
@@ -57,6 +67,8 @@ test('normal inventory excludes one-time parts and new stocked parts are warehou
   assert.match(db,/COALESCE\(p\.inventory_class,'stock'\)='stock'/);
   assert.match(db,/initialWarehouseCode/);
   assert.match(db,/INSERT INTO part_warehouse_stock/);
+  assert.match(db,/already exists as a one-time part/);
+  assert.match(db,/Previous One-Time Parts/);
   assert.match(page,/\+ New inventory item/);
   assert.match(page,/Initial warehouse/);
   assert.match(page,/const params = new URLSearchParams\(window\.location\.search\)/);
@@ -91,4 +103,26 @@ test('one-time usage keeps cost and source on work orders and printouts',async()
   assert.match(workOrders,/lineCost:quantity\*unitCost/);
   assert.match(review,/ONE-TIME \/ NON-STOCK/);
   assert.match(print,/ONE-TIME \/ NON-STOCK/);
+});
+
+
+test('previous one-time parts keep one permanent part identity through repeat buys and conversion',async()=>{
+  const [service,route,page,inventoryDb]=await Promise.all([
+    read('lib/one-time-parts.ts'),
+    read('app/api/parts-desk/route.ts'),
+    read('app/parts-desk/page.tsx'),
+    read('lib/inventory-db.ts'),
+  ]);
+  assert.match(service,/WHERE p\.active=1 AND p\.deleted_at IS NULL AND p\.inventory_class='one_time'/);
+  assert.match(service,/COUNT\(DISTINCT rp\.repair_id\)/);
+  assert.match(service,/INSERT OR IGNORE INTO part_warehouse_stock/);
+  assert.match(service,/INSERT INTO one_time_part_receipts/);
+  assert.match(service,/preferred_vendor_id=COALESCE/);
+  assert.match(service,/converted_to_stock_at=CURRENT_TIMESTAMP/);
+  assert.match(service,/location=CASE WHEN location LIKE 'ONE-TIME%'/);
+  assert.match(route,/oneTimeHistory/);
+  assert.match(route,/receiveExistingOneTimePart/);
+  assert.match(page,/existingPartId/);
+  assert.match(page,/Same part number and repair history retained/);
+  assert.match(inventoryDb,/Search Previous One-Time Parts on Parts Desk and use Convert to Inventory/);
 });
