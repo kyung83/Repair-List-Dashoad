@@ -21,14 +21,32 @@ test('Parts Desk creates and converts one-time parts and closes matched technici
   ]);
   assert.match(page,/\+ One-Time Part/);
   assert.match(page,/\+ New Inventory Item/);
+  assert.match(page,/newInventoryHref\(item\)/);
   assert.match(page,/Convert to Inventory/);
   assert.match(page,/sourceRequestId:item\.id/);
+  assert.doesNotMatch(page,/href="\/inventory\?new=1"/);
   assert.doesNotMatch(page,/setOneTime\(\{\.\.\.blankOneTime,warehouseCode:yard==='ALL'\?'':yard\}\)/);
   assert.match(route,/action === 'createOneTimePart'/);
   assert.match(route,/handleUnmatchedPartRequest\(env\.DB,sourceRequestId\)/);
   assert.match(route,/action === 'convertOneTimePart'/);
+  assert.match(route,/action === 'matchUnmatchedToCatalog'/);
   assert.match(service,/inventory_class='one_time'/);
   assert.match(service,/UPDATE parts[\s\S]*inventory_class='stock'/);
+});
+
+test('stocked item creation from a technician request carries request context into inventory',async()=>{
+  const [inventoryPage,unmatched]=await Promise.all([
+    read('app/inventory/page.tsx'),
+    read('lib/unmatched-parts.ts'),
+  ]);
+  assert.match(inventoryPage,/requestId/);
+  assert.match(inventoryPage,/requestedQuantity/);
+  assert.match(inventoryPage,/matchUnmatchedToCatalog/);
+  assert.match(inventoryPage,/Initial quantity means physical stock actually on hand, not the quantity requested/);
+  assert.match(unmatched,/matchUnmatchedPartRequestToCatalog/);
+  assert.match(unmatched,/INSERT INTO repair_part_requests/);
+  assert.match(unmatched,/requested_quantity=MAX\(repair_part_requests\.requested_quantity,excluded\.requested_quantity\)/);
+  assert.match(unmatched,/SET status='handled'/);
 });
 
 test('normal inventory excludes one-time parts and new stocked parts are warehouse-scoped',async()=>{
