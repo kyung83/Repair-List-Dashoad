@@ -76,6 +76,8 @@ type PartForm = {
   equipmentIds: number[];
   crossReferences: string[];
   initialWarehouseCode: string;
+  sourceRequestId: number | null;
+  sourceRequestedQuantity: number;
 };
 
 type VendorForm = { id: number; name: string; phone: string; email: string; notes: string };
@@ -109,6 +111,8 @@ const blankPart: PartForm = {
   equipmentIds: [],
   crossReferences: [],
   initialWarehouseCode: "",
+  sourceRequestId: null,
+  sourceRequestedQuantity: 0,
 };
 
 const blankVendor: VendorForm = { id: 0, name: "", phone: "", email: "", notes: "" };
@@ -180,10 +184,19 @@ export default function InventoryPage() {
   }
 
   useEffect(() => {
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") {
-      setPart(blankPart);
-      setShowPartForm(true);
-    }
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new") !== "1") return;
+    const sourceRequestId = Number(params.get("requestId") ?? 0);
+    const sourceRequestedQuantity = Number(params.get("requestedQuantity") ?? 0);
+    setPart({
+      ...blankPart,
+      description: params.get("description") ?? "",
+      initialWarehouseCode: (params.get("warehouse") ?? "").trim().toUpperCase(),
+      sourceRequestId: Number.isInteger(sourceRequestId) && sourceRequestId > 0 ? sourceRequestId : null,
+      sourceRequestedQuantity: Number.isFinite(sourceRequestedQuantity) && sourceRequestedQuantity > 0 ? sourceRequestedQuantity : 0,
+    });
+    setShowPartForm(true);
   }, []);
 
   useEffect(() => {
@@ -352,6 +365,10 @@ export default function InventoryPage() {
   async function savePart(event: FormEvent) {
     event.preventDefault();
     if (partSaving) return;
+    if (part.sourceRequestId && !part.initialWarehouseCode) {
+      setMessage("Choose the parts warehouse that will supply the technician request.");
+      return;
+    }
     setPartSaving(true);
     setMessage("");
     try {
@@ -401,9 +418,29 @@ export default function InventoryPage() {
       }
     }
 
+    if (part.sourceRequestId) {
+      const requestResponse = await fetch("/api/parts-desk", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "matchUnmatchedToCatalog",
+          requestId: part.sourceRequestId,
+          partId: result.id,
+          warehouseCode: part.initialWarehouseCode,
+        }),
+      });
+      const requestResult = await requestResponse.json() as { ok?: boolean; error?: string };
+      if (!requestResponse.ok || !requestResult.ok) {
+        return setMessage(requestResult.error || "Inventory item saved, but the technician request could not be moved into normal Parts Desk demand.");
+      }
+    }
+
+    const fromRequest = Boolean(part.sourceRequestId);
     setPart(blankPart);
     setShowPartForm(false);
-    setMessage("Inventory item saved. Its warehouse quantity is now available to technician Part Lookup.");
+    setMessage(fromRequest
+      ? "Inventory item saved. The technician request is now normal stocked-part demand in Parts Desk."
+      : "Inventory item saved. Its warehouse quantity is now available to technician Part Lookup.");
     await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Part could not be saved. Please try again.");
@@ -587,6 +624,8 @@ export default function InventoryPage() {
       equipmentIds: item.compatibleEquipmentIds ?? [],
       crossReferences: item.crossReferences ?? [],
       initialWarehouseCode: "",
+      sourceRequestId: null,
+      sourceRequestedQuantity: 0,
     });
     setShowPartForm(true);
   }
@@ -739,16 +778,16 @@ export default function InventoryPage() {
       {showPartForm && (
         <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 50, overflowY: "auto" }}>
           <form onSubmit={savePart} className={pageStyles.partForm} role="dialog" aria-modal="true" aria-labelledby="inventory-part-form-title" aria-busy={partSaving}>
-            <header className={pageStyles.modalHeader}><div><h2 id="inventory-part-form-title">{part.id ? "Part details" : "New inventory item"}</h2><p>{part.id ? `${part.partNumber} · ${part.description}` : "Create a normal stocked item. One-time/non-stock purchases are created from Parts Desk."}</p></div><button type="button" className={pageStyles.detailsButton} disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }}>Close</button></header>
+            <header className={pageStyles.modalHeader}><div><h2 id="inventory-part-form-title">{part.id ? "Part details" : "New inventory item"}</h2><p>{part.id ? `${part.partNumber} · ${part.description}` : part.sourceRequestId ? `Create a stocked item for the technician request · Qty requested ${part.sourceRequestedQuantity || "—"}` : "Create a normal stocked item. One-time/non-stock purchases are created from Parts Desk."}</p></div><button type="button" className={pageStyles.detailsButton} disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }}>Close</button></header>
             {message && <p role="alert" style={{ gridColumn: "1 / -1", background: "#fff8e6", padding: 12, borderRadius: 7, margin: 0 }}>{message}</p>}
             <label className={pageStyles.field}>Part number<input required value={part.partNumber} onChange={(event) => setPart({ ...part, partNumber: event.target.value })} disabled={partSaving} /></label>
             <label className={pageStyles.field}>Description<input required value={part.description} onChange={(event) => setPart({ ...part, description: event.target.value })} disabled={partSaving} /></label>
             {!part.id && <label className={pageStyles.field}>Initial warehouse
-              <select required={part.quantityOnHand > 0} value={part.initialWarehouseCode} onChange={(event) => setPart({ ...part, initialWarehouseCode: event.target.value })} disabled={partSaving}>
+              <select required={part.quantityOnHand > 0 || Boolean(part.sourceRequestId)} value={part.initialWarehouseCode} onChange={(event) => setPart({ ...part, initialWarehouseCode: event.target.value })} disabled={partSaving}>
                 <option value="">Choose warehouse…</option>
                 {(data?.warehouses ?? []).map((warehouse) => <option key={warehouse.code} value={warehouse.code}>{warehouse.name}</option>)}
               </select>
-              <small>Required when the new item starts with stock on hand. This makes the quantity usable in technician Part Lookup immediately.</small>
+              <small>{part.sourceRequestId ? "Required so the technician request becomes normal demand for this warehouse. Initial quantity means physical stock actually on hand, not the quantity requested." : "Required when the new item starts with stock on hand. This makes the quantity usable in technician Part Lookup immediately."}</small>
             </label>}
             {part.id ? <div style={{ padding: 11, border: "1px solid #d7ded9", borderRadius: 8, background: "#f7f9fa" }}>
               <span style={{ display: "block", color: "#657383", fontSize: 10, fontWeight: 900, letterSpacing: ".08em" }}>TOTAL WAREHOUSE STOCK — READ ONLY</span>
