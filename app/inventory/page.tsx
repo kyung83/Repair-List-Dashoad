@@ -436,6 +436,7 @@ export default function InventoryPage() {
     }
 
     const fromRequest = Boolean(part.sourceRequestId);
+    if (fromRequest && typeof window !== "undefined") window.history.replaceState(null, "", window.location.pathname);
     setPart(blankPart);
     setShowPartForm(false);
     setMessage(fromRequest
