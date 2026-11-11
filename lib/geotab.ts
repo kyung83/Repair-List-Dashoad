@@ -182,7 +182,11 @@ export async function syncGeotabDvir(env: GeotabEnv) {
 
   try {
     const toDate = new Date().toISOString();
-    const fromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const normalFromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const cutoffRow = await env.DB.prepare("SELECT value FROM app_settings WHERE key='dvir_go_live_cutoff_at'").first<{value:string}>();
+    const cutoffAt = String(cutoffRow?.value ?? '').trim();
+    const cutoffValid = cutoffAt && Number.isFinite(Date.parse(cutoffAt)) ? new Date(cutoffAt).toISOString() : '';
+    const fromDate = cutoffValid && cutoffValid > normalFromDate ? cutoffValid : normalFromDate;
 
     const logs = await client.call<JsonRecord[]>('Get', {
       typeName: 'DVIRLog',
