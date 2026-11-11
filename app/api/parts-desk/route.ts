@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       return Response.json(await handleUnmatchedPartRequest(env.DB, Number(body.requestId ?? 0)));
     }
     if (action === 'createOneTimePart') {
-      return Response.json(await createOneTimePart(env.DB,{
+      const created = await createOneTimePart(env.DB,{
         partNumber:body.partNumber,
         description:body.description,
         warehouseCode:body.warehouseCode,
@@ -59,7 +59,10 @@ export async function POST(request: Request) {
         reference:body.reference,
         notes:body.notes,
         userId:user.id,
-      }));
+      });
+      const sourceRequestId=Number(body.sourceRequestId??0);
+      if(sourceRequestId>0) await handleUnmatchedPartRequest(env.DB,sourceRequestId);
+      return Response.json({...created,sourceRequestHandled:sourceRequestId>0});
     }
     if (action === 'convertOneTimePart') {
       return Response.json(await convertOneTimePartToStock(env.DB,{partId:body.partId,userId:user.id}));
