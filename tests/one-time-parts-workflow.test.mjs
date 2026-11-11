@@ -59,7 +59,8 @@ test('normal inventory excludes one-time parts and new stocked parts are warehou
   assert.match(db,/INSERT INTO part_warehouse_stock/);
   assert.match(page,/\+ New inventory item/);
   assert.match(page,/Initial warehouse/);
-  assert.match(page,/new URLSearchParams\(window\.location\.search\)\.get\("new"\) === "1"/);
+  assert.match(page,/const params = new URLSearchParams\(window\.location\.search\)/);
+  assert.match(page,/params\.get\("new"\) !== "1"/);
 });
 
 test('technician lookup exposes available one-time parts without sending them to reorder',async()=>{
