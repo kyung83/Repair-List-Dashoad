@@ -36,6 +36,7 @@ type UsedPart = {
   unitCost:number;
   lineCost:number;
   costRecorded:boolean;
+  sourceType:'stock'|'one_time';
 };
 type TechnicianNote = {
   repairId:string;
