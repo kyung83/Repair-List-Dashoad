@@ -135,6 +135,7 @@ export async function getReportingData(db: D1Database, requestedYear?: unknown) 
       LEFT JOIN technicians t ON t.id = r.technician_id
       LEFT JOIN repair_parts rp ON rp.repair_id = r.id
       LEFT JOIN parts p ON p.id = rp.part_id
+      WHERE COALESCE(r.source,'') <> 'cutover-archive'
       GROUP BY r.id, r.equipment_id, e.unit, e.category, e.equipment_type,
                r.title, r.status, r.source, r.opened_at, r.completed_at,
                t.name, r.driver, r.location, r.labor_hours, r.labor_rate, r.outside_cost
@@ -162,6 +163,7 @@ export async function getReportingData(db: D1Database, requestedYear?: unknown) 
       JOIN repairs r ON r.id = rp.repair_id
       LEFT JOIN equipment e ON e.id = r.equipment_id
       JOIN parts p ON p.id = rp.part_id
+      WHERE COALESCE(r.source,'') <> 'cutover-archive'
       ORDER BY r.opened_at DESC, rp.id DESC
     `).all<PartUsageRow>(),
   ]);
