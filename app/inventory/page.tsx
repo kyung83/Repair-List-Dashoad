@@ -75,6 +75,7 @@ type PartForm = {
   warehouseBins: Record<string, string>;
   equipmentIds: number[];
   crossReferences: string[];
+  initialWarehouseCode: string;
 };
 
 type VendorForm = { id: number; name: string; phone: string; email: string; notes: string };
@@ -107,6 +108,7 @@ const blankPart: PartForm = {
   warehouseBins: {},
   equipmentIds: [],
   crossReferences: [],
+  initialWarehouseCode: "",
 };
 
 const blankVendor: VendorForm = { id: 0, name: "", phone: "", email: "", notes: "" };
@@ -176,6 +178,13 @@ export default function InventoryPage() {
     try { await load(); }
     catch { setMessage(`${text} The list could not be refreshed; reload Inventory to see the latest values.`); }
   }
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1") {
+      setPart(blankPart);
+      setShowPartForm(true);
+    }
+  }, []);
 
   useEffect(() => {
     let current = true;
@@ -351,7 +360,7 @@ export default function InventoryPage() {
     const response = await fetch("/api/inventory", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "savePart", ...part, preferredVendorId }),
+      body: JSON.stringify({ action: "savePart", ...part, preferredVendorId, initialWarehouseCode: part.initialWarehouseCode }),
     });
     const result = (await response.json()) as { id?: number; error?: string };
     if (!response.ok || !result.id) return setMessage(result.error || "Part could not be saved");
@@ -394,7 +403,7 @@ export default function InventoryPage() {
 
     setPart(blankPart);
     setShowPartForm(false);
-    setMessage("Part, warehouse bins, cross-reference numbers, vendors, minimums, and equipment saved.");
+    setMessage("Inventory item saved. Its warehouse quantity is now available to technician Part Lookup.");
     await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Part could not be saved. Please try again.");
@@ -577,6 +586,7 @@ export default function InventoryPage() {
       warehouseBins,
       equipmentIds: item.compatibleEquipmentIds ?? [],
       crossReferences: item.crossReferences ?? [],
+      initialWarehouseCode: "",
     });
     setShowPartForm(true);
   }
@@ -616,7 +626,7 @@ export default function InventoryPage() {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <button type="button" onClick={() => void printAudit()} disabled={!data || printingAudit || partStatus !== "active"} title={partStatus === "archived" ? "Select Active Parts to print a stock audit." : "Print the selected warehouse and filters with blank physical-count columns, or save as PDF."} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800, opacity: !data || printingAudit || partStatus !== "active" ? 0.55 : 1 }}>{printingAudit ? "Preparing audit…" : "Print Audit Sheet"}</button>
           <button onClick={() => { if (!closeQuickUpdate()) return; setMessage(""); setVendor(blankVendor); setShowVendorForm(true); }} style={{ border: "1px solid #0d1b2b", borderRadius: 9, padding: "13px 18px", background: "white", color: "#0d1b2b", fontWeight: 800 }}>+ Add vendor</button>
-          <button onClick={() => { if (!closeQuickUpdate()) return; setMessage(""); setPart(blankPart); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ Add part</button>
+          <button onClick={() => { if (!closeQuickUpdate()) return; setMessage(""); setPart(blankPart); setShowPartForm(true); }} style={{ border: 0, borderRadius: 9, padding: "13px 18px", background: "#0d1b2b", color: "white", fontWeight: 800 }}>+ New inventory item</button>
         </div>
       </header>
 
@@ -729,10 +739,17 @@ export default function InventoryPage() {
       {showPartForm && (
         <div style={{ position: "fixed", inset: 0, background: "#07111db8", display: "grid", placeItems: "center", padding: 20, zIndex: 50, overflowY: "auto" }}>
           <form onSubmit={savePart} className={pageStyles.partForm} role="dialog" aria-modal="true" aria-labelledby="inventory-part-form-title" aria-busy={partSaving}>
-            <header className={pageStyles.modalHeader}><div><h2 id="inventory-part-form-title">{part.id ? "Part details" : "Add part"}</h2><p>{part.id ? `${part.partNumber} · ${part.description}` : "Enter the part details, then choose suppliers and equipment."}</p></div><button type="button" className={pageStyles.detailsButton} disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }}>Close</button></header>
+            <header className={pageStyles.modalHeader}><div><h2 id="inventory-part-form-title">{part.id ? "Part details" : "New inventory item"}</h2><p>{part.id ? `${part.partNumber} · ${part.description}` : "Create a normal stocked item. One-time/non-stock purchases are created from Parts Desk."}</p></div><button type="button" className={pageStyles.detailsButton} disabled={partSaving} onClick={() => { setShowPartForm(false); setPart(blankPart); }}>Close</button></header>
             {message && <p role="alert" style={{ gridColumn: "1 / -1", background: "#fff8e6", padding: 12, borderRadius: 7, margin: 0 }}>{message}</p>}
             <label className={pageStyles.field}>Part number<input required value={part.partNumber} onChange={(event) => setPart({ ...part, partNumber: event.target.value })} disabled={partSaving} /></label>
             <label className={pageStyles.field}>Description<input required value={part.description} onChange={(event) => setPart({ ...part, description: event.target.value })} disabled={partSaving} /></label>
+            {!part.id && <label className={pageStyles.field}>Initial warehouse
+              <select required={part.quantityOnHand > 0} value={part.initialWarehouseCode} onChange={(event) => setPart({ ...part, initialWarehouseCode: event.target.value })} disabled={partSaving}>
+                <option value="">Choose warehouse…</option>
+                {(data?.warehouses ?? []).map((warehouse) => <option key={warehouse.code} value={warehouse.code}>{warehouse.name}</option>)}
+              </select>
+              <small>Required when the new item starts with stock on hand. This makes the quantity usable in technician Part Lookup immediately.</small>
+            </label>}
             {part.id ? <div style={{ padding: 11, border: "1px solid #d7ded9", borderRadius: 8, background: "#f7f9fa" }}>
               <span style={{ display: "block", color: "#657383", fontSize: 10, fontWeight: 900, letterSpacing: ".08em" }}>TOTAL WAREHOUSE STOCK — READ ONLY</span>
               <strong style={{ display: "block", marginTop: 5, fontSize: 20, color: Number(editingWarehouseStocks.length ? editingPhysicalTotal : (editingItem?.quantityOnHand ?? part.quantityOnHand)) < 0 ? "#b42318" : "#182331" }}>{editingWarehouseStocks.length ? editingPhysicalTotal : (editingItem?.quantityOnHand ?? part.quantityOnHand)}</strong>
