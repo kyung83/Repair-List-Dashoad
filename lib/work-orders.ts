@@ -25,7 +25,7 @@ type RepairRow = {
 };
 type TechnicianRow = { id:number; name:string; email:string|null; phone:string|null };
 type PartRow = { id:number; part_number:string; description:string; quantity_on_hand:number; unit_cost:number|null; location:string|null };
-type UsageRow = { id:number; repair_id:number; part_id:number; part_number:string; description:string; quantity:number; unit_cost:number|null };
+type UsageRow = { id:number; repair_id:number; part_id:number; part_number:string; description:string; quantity:number; unit_cost:number|null; source_type:'stock'|'one_time' };
 type DvirRow = { geotab_defect_id:string; asset_unit:string; driver:string|null; defect:string };
 type LaborRow = { id:number; repair_id:number; technician_id:number|null; technician_name:string|null; labor_date:string; hours:number; rate:number; notes:string|null; started_at:string|null; ended_at:string|null };
 type LaborEventRow = { id:number; repair_id:number; user_id:number|null; technician_id:number|null; action:string; detail:string; created_at:string };
@@ -83,7 +83,8 @@ export async function getWorkOrderData(db:D1Database){
   db.prepare(`SELECT id,name,email,phone FROM technicians WHERE active=1 ORDER BY name`).all<TechnicianRow>(),
   db.prepare(`SELECT id,part_number,description,quantity_on_hand,unit_cost,location FROM parts WHERE active=1 ORDER BY description,part_number`).all<PartRow>(),
   db.prepare(`
-    SELECT rp.id,rp.repair_id,rp.part_id,p.part_number,p.description,rp.quantity,rp.unit_cost AS unit_cost
+    SELECT rp.id,rp.repair_id,rp.part_id,p.part_number,p.description,rp.quantity,rp.unit_cost AS unit_cost,
+           COALESCE(rp.source_type,'stock') AS source_type
     FROM repair_parts rp
     JOIN parts p ON p.id=rp.part_id
     ORDER BY rp.created_at,rp.id
@@ -173,7 +174,7 @@ export async function getWorkOrderData(db:D1Database){
     const costRecorded=u.unit_cost!==null&&u.unit_cost!==undefined;
     const unitCost=costRecorded?Number(u.unit_cost):0;
     const quantity=Number(u.quantity);
-    return {usageId:u.id,partId:u.part_id,partNumber:u.part_number,description:u.description,quantity,unitCost,lineCost:quantity*unitCost,costRecorded};
+    return {usageId:u.id,partId:u.part_id,partNumber:u.part_number,description:u.description,quantity,unitCost,lineCost:quantity*unitCost,costRecorded,sourceType:u.source_type==='one_time'?'one_time':'stock'};
   });
   const partCost=usedParts.reduce((sum,item)=>sum+item.lineCost,0);
   const missingPartCostLines=usedParts.filter((item)=>!item.costRecorded).length;
