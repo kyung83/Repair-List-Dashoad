@@ -447,7 +447,7 @@ export default function PlanningCenter(){
   </nav>
   <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}>{data?.canManage&&<button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button>}<a className={s.link} href="/work-orders">Completed Work</a></div></div>
   {message&&<div className={s.notice}>{message}</div>}
-  {add&&canCreateRepair&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={null} allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} onClose={()=>setAdd(false)} onSaved={load}/></div>}
+  {add&&canCreateRepair&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={null} allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} allowPullThru={data.user.role==='manager'||data.user.role==='admin'} onClose={()=>setAdd(false)} onSaved={load}/></div>}
 
   <div className={s.filters}>
    <label>Assigned to <select value={assignee} onChange={event=>setAssignee(event.target.value)}><option value="all">Anyone</option><option value="unassigned">Unassigned</option>{data?.technicians.map(tech=><option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>
@@ -493,7 +493,7 @@ export default function PlanningCenter(){
       {canCreateRepair&&detail.equipmentId&&<button className={s.button} type="button" onClick={()=>{setAdd(false);setUnitAddId(current=>current===detail.equipmentId?null:detail.equipmentId)}}>{unitAddId===detail.equipmentId?'Close Add':'+ Add Repair'}</button>}
       {data?.canManage&&detail.equipmentId&&<button className={s.danger} type="button" onClick={()=>{const reason=window.prompt(`Why is Unit ${detail.unit} out of service?`,detail.rows[0]?.issue||'');if(reason?.trim())void change(`oos-${detail.equipmentId}`,{action:'setUnitOos',equipmentId:detail.equipmentId,unit:detail.unit,outOfService:true,reason:reason.trim()})}}>Mark OOS</button>}
      </div>
-     {canCreateRepair&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
+     {canCreateRepair&&detail.equipmentId&&unitAddId===detail.equipmentId&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={detail.equipmentId} lockEquipment allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} allowPullThru={data.user.role==='manager'||data.user.role==='admin'} onClose={()=>setUnitAddId(null)} onSaved={load}/></div>}
      {detail.equipmentId&&<section className={s.futureSection} aria-label={`Future repairs for Unit ${detail.unit}`}>
       <div className={s.futureHead}>
        <div><strong>Future Repairs <span className={s.futureTotal}>{detailFuture.length}</span></strong>

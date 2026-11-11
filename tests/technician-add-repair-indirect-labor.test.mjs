@@ -14,6 +14,7 @@ test('technicians see Add Repair in the same shared Repair Board view',()=>{
   assert.match(board,/\{add\?'Close Add Repair':'\+ Add Repair'\}/);
   assert.match(board,/allowTechnicianAssignment=\{data\.canManage\}/);
   assert.match(board,/allowNewEquipment=\{data\.canManage\}/);
+  assert.match(board,/allowPullThru=\{data\.user\.role==='manager'\|\|data\.user\.role==='admin'\}/);
 });
 
 test('technician shared Add Repair uses existing units and cannot create equipment by typo',()=>{

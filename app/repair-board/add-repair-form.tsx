@@ -15,6 +15,7 @@ type Props={
   lockEquipment?:boolean;
   allowTechnicianAssignment?:boolean;
   allowNewEquipment?:boolean;
+  allowPullThru?:boolean;
   onClose:()=>void;
   onSaved:()=>Promise<void>|void;
 };
@@ -28,7 +29,7 @@ function kind(value:string):EquipmentKind{
 }
 function searchable(value:string){return value.trim().toLowerCase()}
 
-export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,allowNewEquipment=true,onClose,onSaved}:Props){
+export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,allowNewEquipment=true,allowPullThru=false,onClose,onSaved}:Props){
   const initial=equipment.find(item=>item.id===initialEquipmentId)??null;
   const[selected,setSelected]=useState<Equipment|null>(initial);
   const[search,setSearch]=useState(initial?.unit??"");
@@ -41,6 +42,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   const[parts,setParts]=useState("");
   const[priority,setPriority]=useState(2);
   const[technicianId,setTechnicianId]=useState("");
+  const[pullThru,setPullThru]=useState(false);
   const[lastSavedUnit,setLastSavedUnit]=useState("");
   const[busy,setBusy]=useState(false);
   const[message,setMessage]=useState("");
@@ -62,7 +64,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
 
   function chooseEquipment(item:Equipment){setSelected(item);setSearch(item.unit);setNewLocation(item.location);setNewType(kind(item.equipmentType));setAddNew(false);setNoUnit(false);setLastSavedUnit("");setMessage("")}
   function changeUnit(){if(lockEquipment)return;setSelected(null);setSearch("");setAddNew(false);setNewType("other");setNewLocation("");setNoUnit(false);setLastSavedUnit("");setMessage("")}
-  function chooseNoUnit(){if(!indirectType){setMessage("Indirect labor setup is not available.");return}setSelected(null);setSearch("");setAddNew(false);setNoUnit(true);setLastSavedUnit("");setMessage("")}
+  function chooseNoUnit(){if(!indirectType){setMessage("Indirect labor setup is not available.");return}setSelected(null);setSearch("");setAddNew(false);setNoUnit(true);setPullThru(false);setLastSavedUnit("");setMessage("")}
 
   async function createRepair(){
     const repair=issue.trim();
@@ -82,11 +84,12 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
           location:selected?.location??newLocation.trim(),
           issue:repair,parts:parts.trim(),priority,
           technicianId:allowTechnicianAssignment&&technicianId?Number(technicianId):0,
+          pullThru:allowPullThru&&!noUnit&&pullThru,
         }),
       });
       const result=await response.json() as CreateResult;
       if(!response.ok||!result.ok)throw new Error(result.error||"Repair could not be added.");
-      setIssue("");setParts("");
+      setIssue("");setParts("");setPullThru(false);
       if(result.equipmentId&&result.unit&&result.unit!=="SHOP / NO UNIT"){
         const sticky:Equipment={id:Number(result.equipmentId),unit:result.unit,equipmentType:selected?.equipmentType??newType,driver:selected?.driver??"",location:selected?.location??newLocation.trim()};
         setSelected(sticky);setSearch(result.unit);setAddNew(false);setLastSavedUnit(result.unit);setMessage(`Repair added to Unit ${result.unit}. The tech will choose the Repair Type when the repair is worked.`);
@@ -114,6 +117,10 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
       <label>Parts<input className={s.fieldSelect} value={parts} onChange={event=>setParts(event.target.value)} placeholder="Optional"/></label>
       <label>Priority<select className={s.fieldSelect} value={priority} onChange={event=>setPriority(Number(event.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select></label>
       {allowTechnicianAssignment&&<label>Tech<select className={s.fieldSelect} value={technicianId} onChange={event=>setTechnicianId(event.target.value)}><option value="">Unassigned</option>{technicians.map(technician=><option key={technician.id} value={technician.id}>{technician.name}</option>)}</select></label>}
+      {allowPullThru&&!noUnit&&<label style={{gridColumn:"1 / -1",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",border:"1px solid #e1a34a",borderRadius:9,background:pullThru?"#fff0d7":"#fffaf1",cursor:"pointer"}}>
+        <input type="checkbox" checked={pullThru} onChange={event=>setPullThru(event.target.checked)} style={{width:18,height:18}}/>
+        <span><strong style={{display:"block",color:"#9a5a05"}}>PULL THRU</strong><small style={{display:"block",marginTop:2,color:"#6d6254"}}>Flag this repair as Pull Thru. If a tech is assigned now, their tablet alerts immediately; otherwise it alerts when the repair is assigned.</small></span>
+      </label>}
     </div>
     <footer><button type="button" className={s.darkButton} onClick={onClose}>Close</button><button type="button" className={s.addButton} disabled={busy} onClick={()=>void createRepair()}>{busy?"Saving…":lastSavedUnit?"+ Add another repair":"Add Repair"}</button></footer>
   </section>;
