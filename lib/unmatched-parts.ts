@@ -161,3 +161,61 @@ export async function handleUnmatchedPartRequest(db:D1Database, requestId:number
   if (Number(result.meta.changes ?? 0) === 0) throw new Error('Unmatched part request was not found or is already handled.');
   return {ok:true,requestId};
 }
+
+
+export async function matchUnmatchedPartRequestToCatalog(
+  db:D1Database,
+  input:{requestId:number;partId:number;warehouseCode?:string;userId?:number|null},
+) {
+  const requestId=Number(input.requestId??0);
+  const partId=Number(input.partId??0);
+  if(!Number.isInteger(requestId)||requestId<=0)throw new Error('Technician part request was not found.');
+  if(!Number.isInteger(partId)||partId<=0)throw new Error('Choose the stocked inventory item.');
+
+  const request=await db.prepare(`
+    SELECT id,repair_id,requested_quantity,COALESCE(warehouse_code,'') AS warehouse_code,status
+    FROM unmatched_part_requests
+    WHERE id=?
+  `).bind(requestId).first<{id:number;repair_id:number;requested_quantity:number;warehouse_code:string;status:string}>();
+  if(!request)throw new Error('Technician part request was not found.');
+  if(request.status!=='open')return {ok:true,requestId,alreadyHandled:true};
+
+  const warehouseCode=normalizeWarehouseCode(input.warehouseCode||request.warehouse_code);
+  if(!warehouseCode)throw new Error('Choose the warehouse that will supply this technician request.');
+  const [warehouse,part,repair]=await Promise.all([
+    db.prepare('SELECT id,code FROM warehouses WHERE code=? AND active=1').bind(warehouseCode).first<{id:number;code:string}>(),
+    db.prepare("SELECT id,part_number FROM parts WHERE id=? AND active=1 AND deleted_at IS NULL AND COALESCE(inventory_class,'stock')='stock'").bind(partId).first<{id:number;part_number:string}>(),
+    db.prepare("SELECT id,COALESCE(status,'') AS status FROM repairs WHERE id=?").bind(request.repair_id).first<{id:number;status:string}>(),
+  ]);
+  if(!warehouse)throw new Error('Selected parts warehouse is not active.');
+  if(!part)throw new Error('Stocked inventory item was not found.');
+  if(!repair||repair.status.toLowerCase().includes('complete'))throw new Error('Only open repairs can keep a part request.');
+
+  const quantity=finite(request.requested_quantity);
+  if(quantity<=0)throw new Error('Technician part request quantity is invalid.');
+
+  await db.batch([
+    db.prepare(`
+      INSERT INTO repair_part_requests(repair_id,part_id,warehouse_id,requested_quantity,reserved_quantity,requested_by_user_id)
+      VALUES(?,?,?,?,0,?)
+      ON CONFLICT(repair_id,part_id,warehouse_id) DO UPDATE SET
+        requested_quantity=MAX(repair_part_requests.requested_quantity,excluded.requested_quantity),
+        status='open',closed_at=NULL,updated_at=CURRENT_TIMESTAMP
+    `).bind(request.repair_id,partId,warehouse.id,quantity,input.userId??null),
+    db.prepare(`
+      UPDATE unmatched_part_requests
+      SET status='handled',handled_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='open'
+    `).bind(requestId),
+  ]);
+
+  return {
+    ok:true,
+    requestId,
+    repairId:request.repair_id,
+    partId,
+    partNumber:part.part_number,
+    warehouseCode:warehouse.code,
+    requestedQuantity:quantity,
+  };
+}
