@@ -67,24 +67,30 @@ export async function createOneTimePart(db:D1Database,input:{
     ? 'That one-time part number already exists. Use the existing record or choose a different part number.'
     : 'That part number already exists as a stocked inventory item.');
 
-  const result=await db.prepare(`
-    INSERT INTO parts(part_number,description,quantity_on_hand,reorder_level,preferred_vendor_id,unit_cost,location,active,inventory_class)
-    VALUES(?,?,?,0,?,?,?,1,'one_time')
-  `).bind(partNumber,description,quantity,vendorId,unitCost,`ONE-TIME · ${warehouse.name}`).run();
-  const partId=Number(result.meta.last_row_id);
-  if(!partId)throw new Error('One-time part could not be created.');
-
-  await db.batch([
+  const statements=[
+    db.prepare(`
+      INSERT INTO parts(part_number,description,quantity_on_hand,reorder_level,preferred_vendor_id,unit_cost,location,active,inventory_class)
+      VALUES(?,?,?,0,?,?,?,1,'one_time')
+    `).bind(partNumber,description,quantity,vendorId,unitCost,`ONE-TIME · ${warehouse.name}`),
     db.prepare(`
       INSERT INTO part_warehouse_stock(part_id,warehouse_id,variant_key,quantity_on_hand,unit_of_measure,unit_cost,on_order)
-      VALUES(?,?, '',?,'EA',?,0)
-    `).bind(partId,warehouse.id,quantity,unitCost),
+      SELECT p.id,?, '',?,'EA',?,0
+      FROM parts p WHERE p.part_number=? AND p.inventory_class='one_time'
+    `).bind(warehouse.id,quantity,unitCost,partNumber),
     db.prepare(`
       INSERT INTO one_time_part_receipts(part_id,warehouse_id,vendor_id,quantity_received,unit_cost,reference,notes,created_by_user_id)
-      VALUES(?,?,?,?,?,?,?,?)
-    `).bind(partId,warehouse.id,vendorId,quantity,unitCost,reference,notes,input.userId??null),
-    ...(vendorId?[db.prepare('INSERT OR IGNORE INTO part_vendors(part_id,vendor_id) VALUES(?,?)').bind(partId,vendorId)]:[]),
-  ]);
+      SELECT p.id,?,?,?,?,?,?,?
+      FROM parts p WHERE p.part_number=? AND p.inventory_class='one_time'
+    `).bind(warehouse.id,vendorId,quantity,unitCost,reference,notes,input.userId??null,partNumber),
+    ...(vendorId?[db.prepare(`
+      INSERT OR IGNORE INTO part_vendors(part_id,vendor_id)
+      SELECT id,? FROM parts WHERE part_number=? AND inventory_class='one_time'
+    `).bind(vendorId,partNumber)]:[]),
+  ];
+  await db.batch(statements);
+  const created=await db.prepare("SELECT id FROM parts WHERE part_number=? AND inventory_class='one_time' AND deleted_at IS NULL").bind(partNumber).first<{id:number}>();
+  const partId=Number(created?.id??0);
+  if(!partId)throw new Error('One-time part could not be created.');
 
   return {ok:true,partId,partNumber,description,warehouseCode:warehouse.code,warehouseName:warehouse.name,quantity,unitCost,inventoryClass:'one_time' as const};
 }
