@@ -15,6 +15,7 @@ type PullThruAlert={
 export default function PullThruTabletAlert(){
   const[alert,setAlert]=useState<PullThruAlert|null>(null);
   const[audioReady,setAudioReady]=useState(false);
+  const[ackError,setAckError]=useState("");
   const contextRef=useRef<AudioContext|null>(null);
   const playedRef=useRef<number|null>(null);
 
@@ -75,16 +76,23 @@ export default function PullThruTabletAlert(){
 
   async function acknowledge(){
     if(!alert)return;
+    setAckError("");
     try{
-      await fetch("/api/shop/pull-thru-alert",{
+      const response=await fetch("/api/shop/pull-thru-alert",{
         method:"POST",
         headers:{"content-type":"application/json"},
         body:JSON.stringify({alertId:alert.id}),
       });
-    }catch{}
-    playedRef.current=null;
-    setAlert(null);
-    window.setTimeout(()=>void load(),250);
+      const payload=await response.json() as{ok?:boolean;acknowledged?:boolean;error?:string};
+      if(!response.ok||!payload.ok||!payload.acknowledged){
+        throw new Error(payload.error||"Pull Thru acknowledgement did not save.");
+      }
+      playedRef.current=null;
+      setAlert(null);
+      window.setTimeout(()=>void load(),250);
+    }catch(error){
+      setAckError(error instanceof Error?error.message:"Pull Thru acknowledgement did not save.");
+    }
   }
 
   useEffect(()=>{
@@ -116,6 +124,7 @@ export default function PullThruTabletAlert(){
         <strong style={title}>{alert.unit?"Unit "+alert.unit:alert.title}</strong>
         <div style={body}>{alert.repairTitle||alert.body}</div>
         {!audioReady&&<div style={soundHint}>Tap the tablet once to enable the alert sound.</div>}
+        {ackError&&<div style={errorHint}>{ackError}</div>}
       </div>
       <button type="button" onClick={()=>void acknowledge()} style={button}>GOT IT</button>
     </div>
@@ -129,4 +138,5 @@ const eyebrow={fontSize:12,fontWeight:950,letterSpacing:".15em",color:"#a54d00",
 const title={display:"block",fontSize:27,lineHeight:1.05,color:"#173f37"} as const;
 const body={marginTop:5,fontSize:14,fontWeight:800,color:"#4f5c57"} as const;
 const soundHint={marginTop:8,fontSize:11,fontWeight:900,color:"#9a5a05"} as const;
+const errorHint={marginTop:8,fontSize:11,fontWeight:900,color:"#b42318"} as const;
 const button={minHeight:50,border:0,borderRadius:10,padding:"0 18px",background:"#173f37",color:"white",fontWeight:950,cursor:"pointer"} as const;
