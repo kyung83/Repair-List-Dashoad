@@ -113,14 +113,38 @@ async function assignExisting(repair:ExistingRepair,technician:Technician,user:{
  const currentTech=repair.technician_id===null?null:Number(repair.technician_id);
  const nextStatus=String(repair.status).toLowerCase()==='new'?'Assigned':repair.status;
  if(currentTech===technician.id&&nextStatus===repair.status)return `repair-${repair.id}`;
- await env.DB.batch([
+ const statements=[
   env.DB.prepare('UPDATE repairs SET technician_id=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?')
    .bind(technician.id,nextStatus,repair.id),
   env.DB.prepare(`
    INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
    VALUES(?,?,?,'assigned',?)
   `).bind(repair.id,user.id,technician.id,`${user.displayName} bulk-assigned this repair to ${technician.name}.`),
- ]);
+ ];
+ if(currentTech!==technician.id){
+  statements.push(
+   env.DB.prepare(`
+    INSERT INTO technician_alerts(technician_id,repair_id,alert_type,title,body)
+    SELECT ?,r.id,'pull_thru',
+           'PULL THRU · Unit ' || COALESCE(e.unit,'—'),
+           COALESCE(r.title,'Open repair') || ' — this unit is being sent through to you.'
+    FROM repairs r
+    LEFT JOIN equipment e ON e.id=r.equipment_id
+    WHERE r.id=? AND COALESCE(r.pull_thru,0)=1
+      AND NOT EXISTS (
+       SELECT 1 FROM technician_alerts a
+       WHERE a.repair_id=r.id AND a.technician_id=?
+         AND a.alert_type='pull_thru' AND a.acknowledged_at IS NULL
+      )
+   `).bind(technician.id,repair.id,technician.id),
+   env.DB.prepare(`
+    INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+    SELECT ?,?,?, 'pull_thru_alert_queued', ?
+    WHERE EXISTS (SELECT 1 FROM repairs WHERE id=? AND COALESCE(pull_thru,0)=1)
+   `).bind(repair.id,user.id,technician.id,`${user.displayName} bulk-assigned this Pull Thru repair to ${technician.name}; tablet alert queued.`,repair.id),
+  );
+ }
+ await env.DB.batch(statements);
  return `repair-${repair.id}`;
 }
 

@@ -150,7 +150,7 @@ export async function GET(request: Request) {
                COALESCE(r.status,'New') AS status, COALESCE(r.source,'manual') AS source,
                r.technician_id, COALESCE(t.name,'') AS technician_name,
                COALESCE(r.labor_hours,0) AS labor_hours, COALESCE(e.equipment_type,'other') AS equipment_type,
-               r.equipment_id, r.geotab_defect_id,
+               r.equipment_id, r.geotab_defect_id, COALESCE(r.pull_thru,0) AS pull_thru,
                COALESCE(e.out_of_service,0) AS out_of_service,
                COALESCE(e.out_of_service_reason,'') AS out_of_service_reason,
                e.out_of_service_at,
@@ -166,7 +166,7 @@ export async function GET(request: Request) {
       `).all<{
         id:number; priority:number; location:string; unit:string; driver:string; title:string; parts_text:string;
         status:string; source:string; technician_id:number|null; technician_name:string; labor_hours:number;
-        equipment_type:string; equipment_id:number|null; geotab_defect_id:string|null; out_of_service:number;
+        equipment_type:string; equipment_id:number|null; geotab_defect_id:string|null; pull_thru:number; out_of_service:number;
         out_of_service_reason:string; out_of_service_at:string|null; timer_started_at:string|null; timer_technician:string;
       }>(),
       env.DB.prepare(`
@@ -228,7 +228,7 @@ export async function GET(request: Request) {
         laborHours:Number(row.labor_hours ?? 0), equipmentType:row.equipment_type,
         equipmentId:row.equipment_id === null ? null : Number(row.equipment_id),
         outOfService:Boolean(row.out_of_service), oosReason:row.out_of_service_reason, oosAt:row.out_of_service_at,
-        dvirDefectId:row.geotab_defect_id ?? '', dvirLogId:'', dvirComments:'', dvirPhotos:'',
+        dvirDefectId:row.geotab_defect_id ?? '', dvirLogId:'', dvirComments:'', dvirPhotos:'', pullThru:Boolean(row.pull_thru),
         maintenanceId:source === 'pm-repair' && row.equipment_id ? `pm-${row.equipment_id}` : source === 'annual-repair' && row.equipment_id ? `annual-${row.equipment_id}` : '',
         activeTimer:row.timer_started_at ? { startedAt:row.timer_started_at, technician:row.timer_technician } : null,
       };
@@ -240,7 +240,7 @@ export async function GET(request: Request) {
       equipmentType:row.equipment_type, equipmentId:row.equipment_id === null ? null : Number(row.equipment_id),
       outOfService:Boolean(row.out_of_service), oosReason:row.out_of_service_reason, oosAt:row.out_of_service_at,
       dvirDefectId:row.geotab_defect_id, dvirLogId:row.geotab_log_id, dvirComments:row.comments, dvirPhotos:row.photos_url,
-      maintenanceId:'', activeTimer:null,
+      maintenanceId:'', activeTimer:null, pullThru:false,
     }));
 
     const maintenanceRows = maintenanceItems.filter((item) => !activeMaintenance.has(item.id)).map((item) => {
@@ -251,7 +251,7 @@ export async function GET(request: Request) {
         location:item.location, unit:item.unit, driver:item.driver, issue:item.issue, parts:'', status:item.status,
         technicianId:null, assignedTo:'', laborHours:0, equipmentType:item.equipmentType, equipmentId:parsed.equipmentId,
         outOfService:Boolean(oos), oosReason:oos?.out_of_service_reason ?? '', oosAt:oos?.out_of_service_at ?? null,
-        dvirDefectId:'', dvirLogId:'', dvirComments:'', dvirPhotos:'', maintenanceId:item.id, activeTimer:null,
+        dvirDefectId:'', dvirLogId:'', dvirComments:'', dvirPhotos:'', maintenanceId:item.id, activeTimer:null, pullThru:false,
       };
     });
 
@@ -436,16 +436,98 @@ export async function POST(request: Request) {
       return Response.json({ ok:true, repairId:`repair-${id}`, equipmentId, unit:equipment.unit });
     }
 
+    if (action === 'setPullThru') {
+      const pullThru = Boolean(body.pullThru);
+      const statements = [
+        env.DB.prepare(`
+          UPDATE repairs
+          SET pull_thru = ?,
+              pull_thru_marked_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+              pull_thru_marked_by_user_id = CASE WHEN ? = 1 THEN ? ELSE NULL END,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(pullThru ? 1 : 0, pullThru ? 1 : 0, pullThru ? 1 : 0, user.id, id),
+        env.DB.prepare(`
+          INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail)
+          VALUES (?,?,?,'pull_thru_changed',?)
+        `).bind(
+          id,
+          user.id,
+          repair.technician_id,
+          pullThru
+            ? `${user.displayName} marked this repair PULL THRU.`
+            : `${user.displayName} cleared the PULL THRU flag.`,
+        ),
+      ];
+      if (pullThru && repair.technician_id) {
+        statements.push(
+          env.DB.prepare(`
+            INSERT INTO technician_alerts(technician_id,repair_id,alert_type,title,body)
+            SELECT r.technician_id,r.id,'pull_thru',
+                   'PULL THRU · Unit ' || COALESCE(e.unit,'—'),
+                   COALESCE(r.title,'Open repair') || ' — this unit is being sent through to you.'
+            FROM repairs r
+            LEFT JOIN equipment e ON e.id=r.equipment_id
+            WHERE r.id=? AND r.technician_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM technician_alerts a
+                WHERE a.repair_id=r.id AND a.technician_id=r.technician_id
+                  AND a.alert_type='pull_thru' AND a.acknowledged_at IS NULL
+              )
+          `).bind(id),
+          env.DB.prepare(`
+            INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+            VALUES (?,?,?,'pull_thru_alert_queued',?)
+          `).bind(id,user.id,repair.technician_id,`${user.displayName} marked the assigned repair Pull Thru; tablet alert queued.`),
+        );
+      }
+      if (!pullThru) {
+        statements.push(
+          env.DB.prepare(`
+            UPDATE technician_alerts
+            SET acknowledged_at=CURRENT_TIMESTAMP,acknowledged_by_user_id=?
+            WHERE repair_id=? AND alert_type='pull_thru' AND acknowledged_at IS NULL
+          `).bind(user.id,id),
+        );
+      }
+      await env.DB.batch(statements);
+      return Response.json({ ok:true, repairId:`repair-${id}`, pullThru });
+    }
+
     if (action === 'assignTechnician') {
       const technician = await activeTechnician(body.technicianId);
       if (Number(body.technicianId ?? 0) > 0 && !technician) throw new Error('Technician was not found or is inactive.');
       const activeTimer = await env.DB.prepare('SELECT technician_id FROM repair_labor_timers WHERE repair_id = ?').bind(id).first<{ technician_id:number }>();
       if (activeTimer && Number(activeTimer.technician_id) !== Number(technician?.id ?? 0)) throw new Error('This repair has active labor. Stop the running timer before reassigning it.');
       const nextStatus = technician ? (String(repair.status).toLowerCase() === 'new' ? 'Assigned' : repair.status) : (String(repair.status).toLowerCase() === 'assigned' ? 'New' : repair.status);
-      await env.DB.batch([
+      const statements = [
         env.DB.prepare('UPDATE repairs SET technician_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(technician?.id ?? null, nextStatus, id),
         env.DB.prepare(`INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail) VALUES (?,?,?,?,?)`).bind(id, user.id, technician?.id ?? null, technician ? 'assigned' : 'unassigned', technician ? `${user.displayName} assigned the repair to ${technician.name}.` : `${user.displayName} moved the repair back to the unassigned queue.`),
-      ]);
+      ];
+      if (technician && Number(repair.technician_id ?? 0) !== technician.id) {
+        statements.push(
+          env.DB.prepare(`
+            INSERT INTO technician_alerts(technician_id,repair_id,alert_type,title,body)
+            SELECT ?,r.id,'pull_thru',
+                   'PULL THRU · Unit ' || COALESCE(e.unit,'—'),
+                   COALESCE(r.title,'Open repair') || ' — this unit is being sent through to you.'
+            FROM repairs r
+            LEFT JOIN equipment e ON e.id=r.equipment_id
+            WHERE r.id=? AND COALESCE(r.pull_thru,0)=1
+              AND NOT EXISTS (
+                SELECT 1 FROM technician_alerts a
+                WHERE a.repair_id=r.id AND a.technician_id=?
+                  AND a.alert_type='pull_thru' AND a.acknowledged_at IS NULL
+              )
+          `).bind(technician.id,id,technician.id),
+          env.DB.prepare(`
+            INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+            SELECT ?,?,?, 'pull_thru_alert_queued', ?
+            WHERE EXISTS (SELECT 1 FROM repairs WHERE id=? AND COALESCE(pull_thru,0)=1)
+          `).bind(id,user.id,technician.id,`${user.displayName} assigned this Pull Thru repair to ${technician.name}; tablet alert queued.`,id),
+        );
+      }
+      await env.DB.batch(statements);
       return Response.json({ ok:true, repairId:`repair-${id}`, technicianId:technician?.id ?? null, status:nextStatus });
     }
 

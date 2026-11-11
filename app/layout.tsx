@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import AppNav from "./app-nav";
 import TechnicianMobileDock from "./technician-mobile-dock";
+import PullThruTabletAlert from "./pull-thru-tablet-alert";
 import ShopMobileRouteStyle from "./shop-mobile-route-style";
 import "./globals.css";
 import "./professional-shell.css";
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <AppNav />
         <div className="app-shell-content">{children}</div>
         <TechnicianMobileDock />
+        <PullThruTabletAlert />
         <script src="/breakdown-photo-prep.js" defer />
         <script dangerouslySetInnerHTML={{ __html: `(function(){
           var APP_TIME_ZONE='America/Detroit';

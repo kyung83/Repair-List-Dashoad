@@ -11,7 +11,7 @@ import MechanicUnitHistory from "./mechanic-unit-history";
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
 type LaborEntry={id:number;technician:string;laborDate:string;hours:number;rate:number;notes:string};
-type Repair={id:string;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
+type Repair={id:string;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
 type PartRequest={id:number;repairId:string;partNumber:string;description:string;reservedQuantity:number;shortageQuantity:number};
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
 
@@ -52,6 +52,7 @@ export default function CurrentWorkHome(props:Props){
   return <main style={page}>
     <div style={shell}>
       {props.message&&<div style={notice}>{props.message}</div>}
+      {repair.pullThru&&<div style={pullThruNotice}><strong>PULL THRU</strong><span>This unit is coming through the shop. Be ready for it.</span></div>}
 
       <section style={unitStrip}>
         <div><span style={crumb}>MY WORK · WORKING NOW</span>{noUnit?<strong style={unitLink}>SHOP / NO UNIT</strong>:<a href={unitHref} style={unitLink}>Unit {repair.unit} ↗</a>}</div>
@@ -110,6 +111,7 @@ export default function CurrentWorkHome(props:Props){
 const page={minHeight:"100vh",background:"#f4f6f4",padding:"18px clamp(10px,2vw,20px) 36px",color:"#173f37"} as const;
 const shell={maxWidth:860,margin:"0 auto",display:"grid",gap:12} as const;
 const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
+const pullThruNotice={display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"12px 14px",border:"2px solid #e98216",borderRadius:12,background:"#fff2df",color:"#8b4a08",fontSize:13,fontWeight:850} as const;
 const unitStrip={display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",padding:"14px 16px",borderRadius:14,background:"white",border:"1px solid #dbe2e8",boxShadow:"0 5px 18px #173f370b"} as const;
 const crumb={display:"block",fontSize:11,fontWeight:900,color:"#617181",letterSpacing:".08em",marginBottom:4} as const;
 const unitLink={display:"block",fontSize:27,fontWeight:950,color:"#102a53",textDecoration:"none"} as const;
