@@ -438,7 +438,7 @@ export async function POST(request: Request) {
 
     if (action === 'setPullThru') {
       const pullThru = Boolean(body.pullThru);
-      await env.DB.batch([
+      const statements = [
         env.DB.prepare(`
           UPDATE repairs
           SET pull_thru = ?,
@@ -458,7 +458,39 @@ export async function POST(request: Request) {
             ? `${user.displayName} marked this repair PULL THRU.`
             : `${user.displayName} cleared the PULL THRU flag.`,
         ),
-      ]);
+      ];
+      if (pullThru && repair.technician_id) {
+        statements.push(
+          env.DB.prepare(`
+            INSERT INTO technician_alerts(technician_id,repair_id,alert_type,title,body)
+            SELECT r.technician_id,r.id,'pull_thru',
+                   'PULL THRU · Unit ' || COALESCE(e.unit,'—'),
+                   COALESCE(r.title,'Open repair') || ' — this unit is being sent through to you.'
+            FROM repairs r
+            LEFT JOIN equipment e ON e.id=r.equipment_id
+            WHERE r.id=? AND r.technician_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM technician_alerts a
+                WHERE a.repair_id=r.id AND a.technician_id=r.technician_id
+                  AND a.alert_type='pull_thru' AND a.acknowledged_at IS NULL
+              )
+          `).bind(id),
+          env.DB.prepare(`
+            INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
+            VALUES (?,?,?,'pull_thru_alert_queued',?)
+          `).bind(id,user.id,repair.technician_id,`${user.displayName} marked the assigned repair Pull Thru; tablet alert queued.`),
+        );
+      }
+      if (!pullThru) {
+        statements.push(
+          env.DB.prepare(`
+            UPDATE technician_alerts
+            SET acknowledged_at=CURRENT_TIMESTAMP,acknowledged_by_user_id=?
+            WHERE repair_id=? AND alert_type='pull_thru' AND acknowledged_at IS NULL
+          `).bind(user.id,id),
+        );
+      }
+      await env.DB.batch(statements);
       return Response.json({ ok:true, repairId:`repair-${id}`, pullThru });
     }
 
@@ -482,7 +514,12 @@ export async function POST(request: Request) {
             FROM repairs r
             LEFT JOIN equipment e ON e.id=r.equipment_id
             WHERE r.id=? AND COALESCE(r.pull_thru,0)=1
-          `).bind(technician.id,id),
+              AND NOT EXISTS (
+                SELECT 1 FROM technician_alerts a
+                WHERE a.repair_id=r.id AND a.technician_id=?
+                  AND a.alert_type='pull_thru' AND a.acknowledged_at IS NULL
+              )
+          `).bind(technician.id,id,technician.id),
           env.DB.prepare(`
             INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
             SELECT ?,?,?, 'pull_thru_alert_queued', ?
