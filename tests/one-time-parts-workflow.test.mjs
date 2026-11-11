@@ -23,6 +23,7 @@ test('Parts Desk creates and converts one-time parts and closes matched technici
   assert.match(page,/\+ New Inventory Item/);
   assert.match(page,/Convert to Inventory/);
   assert.match(page,/sourceRequestId:item\.id/);
+  assert.doesNotMatch(page,/setOneTime\(\{\.\.\.blankOneTime,warehouseCode:yard==='ALL'\?'':yard\}\)/);
   assert.match(route,/action === 'createOneTimePart'/);
   assert.match(route,/handleUnmatchedPartRequest\(env\.DB,sourceRequestId\)/);
   assert.match(route,/action === 'convertOneTimePart'/);
