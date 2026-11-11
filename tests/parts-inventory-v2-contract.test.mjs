@@ -40,7 +40,7 @@ check('14 repair part usage links to its inventory operation',compat,/ALTER TABL
 check('15 vendor master stores a normalized key',compat,/ALTER TABLE vendors ADD COLUMN normalized_name/);
 check('16 normalized vendor lookup is indexed',compat,/idx_vendors_normalized_name/);
 check('17 part issue rechecks physical stock inside batch',stockOps,/quantity_on_hand >= \?/);
-check('18 repair part records the operation id',stockOps,/inventory_operation_id\)/);
+check('18 repair part records the operation id',stockOps,/inventory_operation_id,source_type\)/);
 check('19 final guard requires matching part issue line',stockOps,/inventory_operation_commits[\s\S]*line_type = 'part_issue'/);
 check('20 duplicate operation key is checked before mutation',stockOps,/const prior = await operationByKey\(db,operationKey\)/);
 check('21 duplicate race resolves to original result',stockOps,/const duplicate = await operationByKey\(db,operationKey\)/);
