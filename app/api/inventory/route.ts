@@ -3,7 +3,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getInventoryData, savePart, savePartSettings } from '@/lib/inventory-db';
 import { decorateInventoryDataDerived } from '@/lib/derived-reservations';
 import { recordPhysicalCount, resolvePhysicalCountIssue, saveNormalizedVendor } from '@/lib/inventory-operations';
-import { deletePartPreservingHistory, setPartArchived, setPartWarehouseStatus } from '@/lib/inventory-part-management';
+import { deletePartPreservingHistory, initializePartWarehouseStock, setPartArchived, setPartWarehouseStatus } from '@/lib/inventory-part-management';
 
 export async function GET(request: Request) {
   try {
@@ -34,6 +34,15 @@ export async function POST(request: Request) {
       if (!user) throw new Error('Authentication required.');
       if (user.role !== 'manager' && user.role !== 'admin') throw new Error('Manager or administrator access is required to archive or restore a part.');
       return Response.json(await setPartArchived(env.DB,{partId:body.partId,archived:action === 'archivePart'}));
+    }
+
+    if (action === 'initializeWarehouseStock') {
+      const user = await getSessionUser(env.DB, request);
+      if (!user || (user.role !== 'manager' && user.role !== 'admin')) throw new Error('Manager or administrator access is required to initialize warehouse stock.');
+      return Response.json(await initializePartWarehouseStock(env.DB,{
+        partId:body.partId, warehouseCode:body.warehouseCode, userId:user.id,
+        operationKey:String(body.operationKey ?? ''),
+      }));
     }
 
     if (action === 'setWarehousePartStatus') {
