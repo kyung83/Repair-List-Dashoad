@@ -1,3 +1,4 @@
+import { getAnnualLeadPreferences } from './annual-lead-preferences';
 type AnnualRow = {
   id: number;
   unit: string;
@@ -46,6 +47,7 @@ async function runBatches(db: D1Database, statements: D1PreparedStatement[]) {
 }
 
 export async function getAnnualScheduleData(db: D1Database) {
+  const preferences=await getAnnualLeadPreferences(db);
   const result = await db.prepare(`
     SELECT e.id, e.unit, e.equipment_type, e.category,
            a.interval_days, a.active,
@@ -76,6 +78,7 @@ export async function getAnnualScheduleData(db: D1Database) {
       lastAnnualDate: row.annual_date ?? '',
       openAnnualRepairId: row.open_annual_repair_id == null ? null : `repair-${Number(row.open_annual_repair_id)}`,
     })),
+    preferences,
     updatedAt: new Date().toISOString(),
   };
 }
