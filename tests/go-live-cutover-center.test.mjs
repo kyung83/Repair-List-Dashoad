@@ -61,7 +61,7 @@ test('cutover archives inventory-linked sandbox repairs instead of deleting or u
   assert.doesNotMatch(page, /CUTOVER BLOCKED/);
 });
 
-test('cutover writes a one-time audit and DVIR cutoff is consumed by Geotab sync', () => {
+test('cutover writes a one-time audit without hiding DVIRs in the latest 24 hours', () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS go_live_cutover_runs/);
   assert.match(migration, /dvir_go_live_cutoff_at/);
   assert.match(migration, /shop_go_live_completed_at/);
@@ -72,8 +72,9 @@ test('cutover writes a one-time audit and DVIR cutoff is consumed by Geotab sync
   assert.match(archiveMigration, /sandbox_repairs_archived/);
   assert.match(service, /INSERT INTO go_live_cutover_runs/);
   assert.match(service, /shop_go_live_completed_at/);
-  assert.match(geotab, /dvir_go_live_cutoff_at/);
-  assert.match(geotab, /cutoffValid.*normalFromDate/);
+  assert.match(geotab, /const normalFromDate = new Date\(Date\.now\(\) - 24 \* 60 \* 60 \* 1000\)/);
+  assert.match(geotab, /const fromDate = normalFromDate/);
+  assert.doesNotMatch(geotab, /cutoffValid.*normalFromDate/);
 });
 
 test('only admins get the Go-Live Cutover setup link', () => {
