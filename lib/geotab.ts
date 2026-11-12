@@ -186,7 +186,8 @@ export async function syncGeotabDvir(env: GeotabEnv) {
     // The go-live reset clears only local staging data; it must not move the
     // Geotab query start forward. DVIRs written earlier today still require
     // repair after a cutover, even if their inspection predates the cutover.
-    // Keep the requested rolling 24-hour lookback unchanged.
+    // Keep the requested rolling 24-hour lookback unchanged. The separate
+    // go-live audit timestamp must never suppress an unresolved DVIR.
     const fromDate = normalFromDate;
 
     const logs = await client.call<JsonRecord[]>('Get', {
