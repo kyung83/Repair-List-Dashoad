@@ -18,6 +18,7 @@ const groups:SetupGroup[]=[
       {label:"Annual Schedule Setup",href:"/annual-schedules",description:"Annual inspection scheduling rules."},
       {label:"PM Kits",href:"/pm-kits",description:"Standard parts kits for PM work."},
       {label:"Repair Types",href:"/repair-types",description:"Repair categories and repair-specific checklist behavior."},
+      {label:"Indirect Labor Categories",href:"/indirect-labor-categories",description:"Add, rename, reorder, and disable the activity choices technicians use for indirect labor."},
       {label:"Shop Duties",href:"/shop-duties",description:"Bathroom rotation, selected-mechanic Shop Checks, and monthly duty assignment."},
     ],
   },
