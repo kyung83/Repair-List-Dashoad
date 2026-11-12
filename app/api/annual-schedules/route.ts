@@ -1,3 +1,4 @@
+import { saveAnnualLeadPreferences } from '@/lib/annual-lead-preferences';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import {
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
     if (auth.denied || !auth.user) return auth.denied ?? Response.json({ error: 'Not signed in.' }, { status: 401 });
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
+    if (action === 'saveAnnualLeadPreferences') return Response.json(await saveAnnualLeadPreferences(env.DB, body));
     if (action === 'applyAnnual') return Response.json(await applyAnnualSchedule(env.DB, body));
     if (action === 'clearAnnual') return Response.json(await clearAnnualSchedule(env.DB, body));
     if (action === 'completeAnnual') return Response.json(await completeAnnual(env.DB, body));
