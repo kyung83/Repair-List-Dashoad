@@ -138,6 +138,7 @@ export async function setPartWarehouseStatus(
  * Explicitly activate zero-quantity stock tracking for an existing catalog part.
  * Never guess an opening balance or rewrite an existing warehouse stock row.
  * The first physical count (if nonzero) remains an independently audited action.
+ * Warehouse bin and minimum metadata can also be edited before stock exists.
  */
 export async function initializePartWarehouseStock(
   db: D1Database,
