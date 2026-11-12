@@ -111,14 +111,6 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
     let current = true;
     const controller = new AbortController();
     if (!warehouseCode) return () => { current = false; controller.abort(); };
-    if (!hasStock) {
-      setSettings(null);
-      setSnapshot(null);
-      setSettingsError("");
-      setCountError("");
-      setLoading(false);
-      return () => { current = false; controller.abort(); };
-    }
     const query = `partId=${part.id}&warehouseCode=${encodeURIComponent(warehouseCode)}`;
     void Promise.allSettled([
       fetch(`/api/inventory/warehouse-settings?${query}`, { cache: "no-store", signal: controller.signal }).then(readResponse<Settings>),
@@ -173,7 +165,7 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
   }
 
   async function initializeStock() {
-    if (!warehouseCode || hasStock || saving !== null) return;
+    if (!warehouseCode || saving !== null) return;
     if (!window.confirm("Start tracking this part at this warehouse with a recorded opening quantity of ZERO? No existing stock will be changed. Use Physical Count afterward to enter actual shelf quantity.")) return;
     saveLock.current = true;
     setSaving("initialize");
@@ -185,7 +177,12 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
         body:JSON.stringify({action:"initializeWarehouseStock",partId:part.id,warehouseCode,operationKey:`warehouse-stock-init:${crypto.randomUUID()}`}),
       }));
       if(!result.ok) throw new Error("Warehouse tracking could not be confirmed.");
-      await onSaved(`Stock tracking enabled for ${part.partNumber} at ${result.warehouseName}. Opening balance is zero; enter the actual count next.`);
+      const snapshotResponse=await fetch(`/api/inventory/count-snapshot?partId=${part.id}&warehouseCode=${encodeURIComponent(warehouseCode)}`,{cache:"no-store"});
+      const verified=await readResponse<CountSnapshot>(snapshotResponse);
+      if(!verified.ok||verified.partId!==part.id||verified.warehouseCode!==warehouseCode)throw new Error("Warehouse stock tracking was saved, but its physical count could not be verified.");
+      setSnapshot(verified);
+      setCountError("");
+      await onSaved(`Stock tracking ready for ${part.partNumber} at ${result.warehouseName}. Verify actual quantity using Physical Count.`);
       setReload(value=>value+1);
     } catch(error) {
       setCountError(error instanceof Error ? error.message : "Could not start warehouse stock tracking.");
@@ -301,12 +298,12 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
     </div>
     {!allowedWarehouses.length && <p className={styles.hint}>This part does not have stock in an active warehouse yet. Receive the part into a warehouse before updating its stock.</p>}
     {allowedWarehouses.length > 0 && !warehouseCode && <p className={styles.hint}>Choose the warehouse you are updating. Each warehouse keeps its own bins, minimum, and count.</p>}
-    {warehouseCode && !hasStock && <div className={styles.card}>
+    {warehouseCode && !loading && (!hasStock || (countError.includes("not stocked") && !snapshot)) && <div className={styles.card}>
       <h4>No warehouse stock record</h4>
-      <p className={styles.hint}>This active part has no stock record for this warehouse, so bins and counts cannot be edited yet. Start tracking at zero, then use Physical Count to record what is actually on the shelf. Other warehouses and inventory history are not changed.</p>
+      <p className={styles.hint}>The physical-count service does not have a usable stock record for this warehouse. Verify or initialize tracking at zero, then record actual shelf stock with Physical Count. Existing warehouse inventory and history are not changed.</p>
       {countError && <p role="alert" className={styles.error}>{countError}</p>}
       <button type="button" className={styles.primary} onClick={()=>void initializeStock()} disabled={saving!==null}>
-        {saving==="initialize"?"Starting tracking…":"Start stock tracking at zero"}
+        {saving==="initialize"?"Checking tracking…":"Restore warehouse stock tracking"}
       </button>
     </div>}
     {loading && <p role="status" className={styles.hint}>Loading this warehouse…</p>}
