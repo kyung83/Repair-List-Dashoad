@@ -859,7 +859,7 @@ export default function InventoryPage() {
                   <button type="button" disabled={partSaving} onClick={() => void startWarehouseTracking(editingItem,warehouse.code)} style={{border:0,borderRadius:7,padding:"8px 10px",background:"#173f37",color:"white",fontWeight:800}}>Start stock tracking at zero</button>
                 </div>)}
               </div>
-            </fieldset>
+            </fieldset>}
 
             <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #d7ded9", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Minimum stock by warehouse</legend>
