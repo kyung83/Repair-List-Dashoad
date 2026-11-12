@@ -14,8 +14,17 @@ export async function POST(request:Request){
   if(!type||!type.active)throw new Error('INDIRECT LABOR-OTHER is not active in Repair Type Setup.');
   if(type.unit_rule!=='optional')throw new Error('INDIRECT LABOR-OTHER must allow work without a unit.');
   const body=await request.json() as Record<string,unknown>;
-  const activity=String(body.activity??'').trim().replace(/\s+/g,' ').slice(0,250);
+  const categoryId=Number(body.categoryId??0);
+  if(!Number.isSafeInteger(categoryId)||categoryId<=0)throw new Error('Choose a current indirect labor category.');
+  const category=await env.DB.prepare(`SELECT id,name FROM indirect_labor_categories WHERE id=? AND active=1`)
+    .bind(categoryId).first<{id:number;name:string}>();
+  if(!category)throw new Error('That indirect labor category was disabled or removed. Refresh and choose an active one.');
+  const activity=category.name.toLowerCase()==='other'
+    ? String(body.otherDescription??'').trim().replace(/\s+/g,' ').slice(0,250)
+    : category.name;
   if(!activity)throw new Error('Enter what you are doing.');
+  if(String(body.activity??'') && String(body.activity).trim()!==activity)
+    throw new Error('Indirect labor category changed. Refresh and try again.');
   const technician=await env.DB.prepare(`SELECT id,name FROM technicians WHERE id=? AND active=1`).bind(user.technicianId).first<{id:number;name:string}>();
   if(!technician)throw new Error('The linked technician record is not active.');
   const result=await env.DB.prepare(`
