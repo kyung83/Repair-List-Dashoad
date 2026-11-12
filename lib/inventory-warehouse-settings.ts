@@ -76,6 +76,8 @@ const lastSettingsOperation = `(SELECT COALESCE(MAX(l.operation_id),0)
   FROM inventory_operation_lines l
   WHERE l.part_id=p.id AND l.warehouse_id=w.id AND l.line_type='warehouse_settings')`;
 
+// Bin/minimum metadata belongs to the catalog part and warehouse even when
+// physical stock has not yet been initialized; only counting requires stock.
 async function readSettings(db: D1Database, partId: number, warehouseCode: string) {
   return db.prepare(`
     SELECT p.id AS part_id,p.part_number,p.description,p.reorder_level AS default_minimum,
