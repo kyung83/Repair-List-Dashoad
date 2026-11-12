@@ -2,6 +2,7 @@
 
 import {useEffect,useState} from "react";
 
+// Active options come from Setup, never from a compiled-in preset list.
 type Category={id:number;name:string;active:boolean;sortOrder:number};
 type ShopState={activeTimer:{repairId:string}|null;user:{technicianId:number|null;role:string};error?:string};
 
