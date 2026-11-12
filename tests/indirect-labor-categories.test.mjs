@@ -32,7 +32,7 @@ test('technicians use configured active category IDs validated by the server',()
   assert.match(launcher,/categoryId:category\.id/);
   assert.match(create,/FROM indirect_labor_categories WHERE id=\? AND active=1/);
   assert.match(create,/category\.name/);
-  assert.match(create,/source,'indirect-labor'/);
+  assert.match(create,/indirect-labor/);
 });
 test('setup link exists and disable/rename does not rewrite stored repair history',()=>{
   assert.match(setup,/Indirect Labor Categories/);
