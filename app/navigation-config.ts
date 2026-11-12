@@ -118,11 +118,11 @@ const sidebarGroups: SidebarGroup[] = [
     href: "/setup-center",
     roles: managerRoles,
     links: [
-      { href: "/setup-center", label: "Setup Home", exact: true, roles: managerRoles },
-      { href: "/pm-schedules", label: "PM Schedule Setup", roles: managerRoles },
-      { href: "/admin/warehouses", label: "Parts Warehouses", exact: true, roles: adminRoles },
-      { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles },
-      { href: "/admin/users", label: "Users & Access", roles: adminRoles },
+      { href: "/setup-center", label: "Setup Home", exact: true, roles: managerRoles, showInSidebar: false },
+      { href: "/pm-schedules", label: "PM Schedule Setup", roles: managerRoles, showInSidebar: false },
+      { href: "/admin/warehouses", label: "Parts Warehouses", exact: true, roles: adminRoles, showInSidebar: false },
+      { href: "/breakdowns/setup", label: "Breakdown Setup", exact: true, roles: managerRoles, showInSidebar: false },
+      { href: "/admin/users", label: "Users & Access", roles: adminRoles, showInSidebar: false },
 
       { href: "/breakdown-vendors", label: "Breakdown Vendors", exact: true, roles: managerRoles, showInSidebar: false },
       { href: "/repair-types", label: "Repair Types", exact: true, roles: managerRoles, showInSidebar: false },
