@@ -526,6 +526,27 @@ export default function InventoryPage() {
     await load();
   }
 
+  async function startWarehouseTracking(item: Part, code: string) {
+    if (partSaving) return;
+    const warehouse = (data?.warehouses ?? []).find(row => row.code === code);
+    if (!warehouse) return setMessage("Warehouse is not available.");
+    if (!window.confirm(`Start stock tracking for ${item.partNumber} in ${warehouse.name} at ZERO? This does not change any current inventory quantities. Enter actual shelf stock using Physical Count afterward.`)) return;
+    setPartSaving(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/inventory", {
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({action:"initializeWarehouseStock",partId:item.id,warehouseCode:code,operationKey:`warehouse-stock-init:${crypto.randomUUID()}`}),
+      });
+      const result = await response.json() as {ok?:boolean;error?:string};
+      if (!response.ok || !result.ok) throw new Error(result.error || "Could not start warehouse stock tracking.");
+      await load();
+      setMessage(`Stock tracking enabled for ${item.partNumber} in ${warehouse.name} at zero. Use Physical Count for actual shelf quantity.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Warehouse stock tracking could not be enabled.");
+    } finally { setPartSaving(false); }
+  }
+
   async function physicalCount(item: Part, warehouseOverride?: string) {
     setMessage("");
     const countWarehouseCode = warehouseOverride ?? warehouseCode;
@@ -829,8 +850,16 @@ export default function InventoryPage() {
                     />
                   </label>
                 </div>) : <div style={{ color: "#68746f", fontSize: 12 }}>No warehouse stock rows exist for this part yet.</div>}
+                {(data?.warehouses ?? []).filter(warehouse =>
+                  (editingItem.warehouseStatuses?.[warehouse.code] ?? "active") === "active" &&
+                  !editingWarehouseStocks.some(stock => stock.warehouseCode === warehouse.code)
+                ).map(warehouse => <div key={warehouse.code} style={{padding:10,border:"1px solid #f2c66d",background:"#fff8e6",borderRadius:8}}>
+                  <strong style={{display:"block",fontSize:13}}>{warehouse.name}</strong>
+                  <small style={{display:"block",margin:"5px 0 10px",color:"#6b5c37"}}>Active catalog part, but no warehouse stock record. Bins and physical counts are unavailable until tracking starts.</small>
+                  <button type="button" disabled={partSaving} onClick={() => void startWarehouseTracking(editingItem,warehouse.code)} style={{border:0,borderRadius:7,padding:"8px 10px",background:"#173f37",color:"white",fontWeight:800}}>Start stock tracking at zero</button>
+                </div>)}
               </div>
-            </fieldset>}
+            </fieldset>
 
             <fieldset style={{ gridColumn: "1 / -1", border: "1px solid #d7ded9", borderRadius: 10, padding: 14 }}>
               <legend style={{ fontWeight: 800, padding: "0 6px" }}>Minimum stock by warehouse</legend>
