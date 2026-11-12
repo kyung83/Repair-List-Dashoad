@@ -38,12 +38,16 @@ type ShiftUser = {
 };
 type LocalDate = { year:number;month:number;day:number };
 
+type OutstandingPart = { description:string;partNumber:string;requested:number;remaining:number;warehouse:string;source:'catalog'|'unmatched' };
+type UnfinishedJob = { repairId:number;unit:string;title:string;status:string;notes:string[];pendingParts:OutstandingPart[] };
+
 type PersonActivity = {
   user:ShiftUser;
   labor:{repairId:number;unit:string;title:string;hours:number;notes:string}[];
   events:{repairId:number;unit:string;title:string;action:string;detail:string;createdAt:string}[];
   parts:{repairId:number;unit:string;partNumber:string;description:string;quantity:number}[];
   activeTimer:{repairId:number;unit:string;title:string;startedAt:string}|null;
+  unfinishedJobs:UnfinishedJob[];
 };
 
 function parseDbDate(value: string | null | undefined) {
@@ -165,7 +169,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE (e.user_id=? OR e.technician_id=?) AND e.created_at>=? AND e.created_at<=?
-      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested')
+      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','technician_note','unit_session_ended','labor_stopped')
     ORDER BY e.created_at,e.id
   ` : `
     SELECT e.repair_id,COALESCE(eq.unit,'') AS unit,COALESCE(r.title,'Repair') AS title,
@@ -205,10 +209,89 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     WHERE rt.user_id=?
   `).bind(user.id).first<{repair_id:number;unit:string;title:string;started_at:string}>();
 
-  return {
+  const activity:PersonActivity={
     user,labor,events,parts,
     activeTimer:timer?{repairId:Number(timer.repair_id),unit:timer.unit,title:timer.title,startedAt:timer.started_at}:null,
+    unfinishedJobs:[],
   };
+  activity.unfinishedJobs=await unfinishedJobsForActivity(db,activity);
+  return activity;
+}
+
+
+/**
+ * Unfinished repairs are determined by their current state at the shift closeout,
+ * but only for jobs with this person's recorded activity inside the shift.
+ * Outstanding requests include both catalog parts and not-yet-matched requests.
+ * Existing part usage is not represented as demand.
+ */
+async function unfinishedJobsForActivity(db:D1Database,activity:PersonActivity):Promise<UnfinishedJob[]> {
+  const jobIds=[...new Set([
+    ...activity.labor.map(row=>row.repairId),
+    ...activity.events.map(row=>row.repairId),
+    ...activity.parts.map(row=>row.repairId),
+    ...(activity.activeTimer?[activity.activeTimer.repairId]:[]),
+  ].filter(id=>Number.isSafeInteger(id)&&id>0))];
+  if(!jobIds.length)return[];
+  const placeholders=jobIds.map(()=>'?').join(',');
+  const rows=await db.prepare(`
+    SELECT r.id,COALESCE(eq.unit,'') AS unit,COALESCE(r.title,'Repair') AS title,
+           COALESCE(r.status,'Open') AS status
+    FROM repairs r LEFT JOIN equipment eq ON eq.id=r.equipment_id
+    WHERE r.id IN (${placeholders})
+      AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+      AND lower(trim(COALESCE(r.status,''))) NOT IN ('repaired','closed')
+      AND COALESCE(r.source,'') <> 'cutover-archive'
+    ORDER BY eq.unit,r.id
+  `).bind(...jobIds).all<{id:number;unit:string;title:string;status:string}>();
+  if(!rows.results.length)return[];
+  const pending=rows.results.map(row=>Number(row.id));
+  const waitingPlaceholders=pending.map(()=>'?').join(',');
+  const catalog=await db.prepare(`
+    SELECT q.repair_id,p.part_number,p.description,w.name AS warehouse,
+           q.requested_quantity,q.used_quantity
+    FROM repair_part_requests q
+    JOIN parts p ON p.id=q.part_id
+    JOIN warehouses w ON w.id=q.warehouse_id
+    WHERE q.repair_id IN (${waitingPlaceholders}) AND q.status='open'
+      AND q.requested_quantity>q.used_quantity
+    ORDER BY q.repair_id,p.part_number,q.id
+  `).bind(...pending).all<{repair_id:number;part_number:string;description:string;warehouse:string;requested_quantity:number;used_quantity:number}>();
+  const unmatched=await db.prepare(`
+    SELECT q.repair_id,q.requested_text,q.requested_quantity,COALESCE(q.warehouse_code,'') AS warehouse_code
+    FROM unmatched_part_requests q
+    WHERE q.repair_id IN (${waitingPlaceholders}) AND q.status='open'
+    ORDER BY q.repair_id,q.id
+  `).bind(...pending).all<{repair_id:number;requested_text:string;requested_quantity:number;warehouse_code:string}>();
+  const partsByRepair=new Map<number,OutstandingPart[]>();
+  const addPart=(repairId:number,part:OutstandingPart)=>{
+    const list=partsByRepair.get(repairId)??[];
+    list.push(part);partsByRepair.set(repairId,list);
+  };
+  for(const row of catalog.results){
+    const requested=Number(row.requested_quantity||0);
+    const remaining=Math.max(0,requested-Number(row.used_quantity||0));
+    if(remaining>0)addPart(Number(row.repair_id),{
+      partNumber:row.part_number,description:row.description,requested,remaining,warehouse:row.warehouse,source:'catalog',
+    });
+  }
+  for(const row of unmatched.results){
+    const remaining=Number(row.requested_quantity||0);
+    if(remaining>0)addPart(Number(row.repair_id),{
+      partNumber:'Not matched',description:row.requested_text,requested:remaining,remaining,
+      warehouse:row.warehouse_code||'Warehouse not assigned',source:'unmatched',
+    });
+  }
+  return rows.results.map(row=>{
+    const id=Number(row.id);
+    const notes=new Set<string>();
+    for(const labor of activity.labor)if(labor.repairId===id&&labor.notes.trim())notes.add(labor.notes.trim());
+    for(const event of activity.events)if(event.repairId===id&&
+      ['technician_note','shift_handoff','waiting_on_part','unmatched_part_requested'].includes(event.action)&&event.detail.trim()
+    )notes.add(event.detail.trim());
+    return {repairId:id,unit:row.unit,title:row.title,status:row.status,
+      notes:[...notes],pendingParts:partsByRepair.get(id)??[]};
+  });
 }
 
 function uniqueJobs(activity:PersonActivity) {
@@ -228,6 +311,7 @@ function actionLabel(action:string) {
   return ({
     completed:'Completed',waiting_on_part:'Waiting on Part',shift_handoff:'Shift Handoff',found_repair:'Found Repair',
     repair_created:'Repair Added',self_assigned:'Picked Up Work',unmatched_part_requested:'Part Requested',
+    technician_note:'Technician Note',unit_session_ended:'Stopped Working',labor_stopped:'Labor Saved',
   } as Record<string,string>)[action] ?? action;
 }
 
@@ -235,6 +319,8 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
   const totalLabor = activities.reduce((sum,item)=>sum+item.labor.reduce((subtotal,row)=>subtotal+row.hours,0),0);
   const totalCompleted = activities.reduce((sum,item)=>sum+item.events.filter((event)=>event.action==='completed').length,0);
   const totalParts = activities.reduce((sum,item)=>sum+item.parts.reduce((subtotal,row)=>subtotal+row.quantity,0),0);
+  const totalUnfinished = activities.reduce((sum,item)=>sum+item.unfinishedJobs.length,0);
+  const totalOutstandingParts = activities.reduce((sum,item)=>sum+item.unfinishedJobs.reduce((count,job)=>count+job.pendingParts.length,0),0);
   const titleDate = dateDisplayFormatter.format(start);
   const subject = `Maintenance Shift Summary — ${shift.name} — ${titleDate}`;
   const range = `${displayFormatter.format(start)} – ${displayFormatter.format(end)}`;
@@ -246,11 +332,21 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
     const jobList = jobs.length ? `<ul>${jobs.map((job)=>`<li><strong>${htmlEscape(job.unit||'No unit')} — ${htmlEscape(job.title)}</strong>${job.notes.length?`<br><span style="color:#5f6f7f">${job.notes.map(htmlEscape).join(' · ')}</span>`:''}</li>`).join('')}</ul>` : '';
     const eventList = activity.events.length ? `<ul>${activity.events.map((event)=>`<li><strong>${htmlEscape(actionLabel(event.action))}</strong> — ${htmlEscape(event.unit||event.title)}${event.detail?`: ${htmlEscape(event.detail)}`:''}</li>`).join('')}</ul>` : '';
     const partList = activity.parts.length ? `<ul>${activity.parts.map((part)=>`<li>${htmlEscape(part.partNumber)} — ${htmlEscape(part.description)} × ${htmlEscape(part.quantity)}${part.unit?` on ${htmlEscape(part.unit)}`:''}</li>`).join('')}</ul>` : '';
+    const unfinishedList = activity.unfinishedJobs.length ? `<div style="margin:12px 0;padding:12px;background:#fff8e8;border-left:4px solid #bf761c;border-radius:6px">
+      <strong>Worked on — not finished (${activity.unfinishedJobs.length})</strong>
+      ${activity.unfinishedJobs.map(job=>`<div style="margin-top:10px;padding-top:8px;border-top:1px solid #ead9b6">
+        <strong>${htmlEscape(job.unit||'No unit')} — ${htmlEscape(job.title)}</strong>
+        <span style="color:#6b531b"> (${htmlEscape(job.status)})</span>
+        ${job.notes.length?`<p style="margin:5px 0"><strong>Technician notes:</strong> ${job.notes.map(htmlEscape).join(' · ')}</p>`:'<p style="margin:5px 0;color:#6b7280">No technician notes recorded.</p>'}
+        ${job.pendingParts.length?`<p style="margin:6px 0 3px"><strong>Waiting on requested parts:</strong></p><ul style="margin:0 0 0 12px;padding-left:15px">${job.pendingParts.map(part=>`<li>${htmlEscape(part.partNumber)} — ${htmlEscape(part.description)}; ${htmlEscape(hours(part.remaining))} still needed of ${htmlEscape(hours(part.requested))} requested (${htmlEscape(part.warehouse)})</li>`).join('')}</ul>`:''}
+      </div>`).join('')}
+    </div>` : '';
     const timer = activity.activeTimer ? `<p style="margin:8px 0;padding:9px 11px;background:#fff3cd;border-radius:7px"><strong>Still clocked in:</strong> ${htmlEscape(activity.activeTimer.unit||activity.activeTimer.title)} since ${htmlEscape(displayFormatter.format(new Date(parseDbDate(activity.activeTimer.startedAt))))}</p>` : '';
     return `<section style="border-top:1px solid #dfe5ea;padding:16px 0">
       <h3 style="margin:0 0 8px;color:#17324d">${htmlEscape(activity.user.display_name)} <span style="font-size:13px;color:#6c7886">(${roleLabel(activity.user.role)})</span></h3>
       <p style="margin:4px 0"><strong>Saved labor:</strong> ${hours(laborTotal)} hr</p>
       ${timer}
+      ${unfinishedList}
       ${!hasActivity?'<p style="color:#6c7886">No recorded repair activity during this shift.</p>':''}
       ${jobList?`<p style="margin-bottom:4px"><strong>Repairs / units worked:</strong></p>${jobList}`:''}
       ${eventList?`<p style="margin-bottom:4px"><strong>Key outcomes:</strong></p>${eventList}`:''}
@@ -265,7 +361,7 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
       <p style="margin:0;color:#607080">${htmlEscape(range)} · Detroit time</p>
       <p style="margin:4px 0 18px;color:#607080">Sent 30 minutes after shift end to capture closeout, parts requests, and handoffs.</p>
       <div style="display:flex;gap:18px;flex-wrap:wrap;background:#f4f7f9;border-radius:9px;padding:12px 14px">
-        <span><strong>${activities.length}</strong> techs/managers</span><span><strong>${hours(totalLabor)}</strong> labor hr</span><span><strong>${totalCompleted}</strong> repairs completed</span><span><strong>${hours(totalParts)}</strong> parts qty used</span>
+        <span><strong>${activities.length}</strong> techs/managers</span><span><strong>${hours(totalLabor)}</strong> labor hr</span><span><strong>${totalCompleted}</strong> repairs completed</span><span><strong>${totalUnfinished}</strong> unfinished work items</span><span><strong>${totalOutstandingParts}</strong> outstanding part requests</span><span><strong>${hours(totalParts)}</strong> parts qty used</span>
       </div>
       ${htmlPeople || '<p>No active technicians or managers were assigned to this shift.</p>'}
       <p style="font-size:12px;color:#7a8794;border-top:1px solid #dfe5ea;padding-top:12px">Work date ${htmlEscape(workDate)}. Summary window ends ${htmlEscape(displayFormatter.format(due))} and includes the 30-minute closeout period.</p>
@@ -276,13 +372,18 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
     const jobs = uniqueJobs(activity);
     const lines = [`${activity.user.display_name} (${roleLabel(activity.user.role)})`,`Saved labor: ${hours(laborTotal)} hr`];
     if (activity.activeTimer) lines.push(`STILL CLOCKED IN: ${activity.activeTimer.unit||activity.activeTimer.title}`);
+    for(const job of activity.unfinishedJobs) {
+      lines.push(`NOT FINISHED: ${job.unit||'No unit'} - ${job.title} [${job.status}]`);
+      lines.push(`  Technician notes: ${job.notes.length?job.notes.join(' | '):'None recorded'}`);
+      for(const part of job.pendingParts)lines.push(`  WAITING FOR PART: ${part.partNumber} - ${part.description}; ${hours(part.remaining)} still needed of ${hours(part.requested)} requested (${part.warehouse})`);
+    }
     if (jobs.length) lines.push(`Repairs / units: ${jobs.map((job)=>`${job.unit||'No unit'} - ${job.title}`).join('; ')}`);
     if (activity.events.length) lines.push(`Key outcomes: ${activity.events.map((event)=>`${actionLabel(event.action)} - ${event.unit||event.title}${event.detail?` (${event.detail})`:''}`).join('; ')}`);
     if (activity.parts.length) lines.push(`Parts used: ${activity.parts.map((part)=>`${part.partNumber} x${part.quantity}${part.unit?` on ${part.unit}`:''}`).join('; ')}`);
     if (lines.length===2 && laborTotal===0) lines.push('No recorded repair activity during this shift.');
     return lines.join('\n');
   }).join('\n\n');
-  const text = `NORTHERN LOGISTICS MAINTENANCE\n${shift.name} Shift Summary\n${range} · Detroit time\n\n${activities.length} techs/managers · ${hours(totalLabor)} labor hr · ${totalCompleted} repairs completed · ${hours(totalParts)} parts qty used\n\n${textPeople}\n\nSent 30 minutes after shift end. Work date ${workDate}.`;
+  const text = `NORTHERN LOGISTICS MAINTENANCE\n${shift.name} Shift Summary\n${range} · Detroit time\n\n${activities.length} techs/managers · ${hours(totalLabor)} labor hr · ${totalCompleted} repairs completed · ${totalUnfinished} unfinished work items · ${totalOutstandingParts} outstanding part requests · ${hours(totalParts)} parts qty used\n\n${textPeople}\n\nSent 30 minutes after shift end. Work date ${workDate}.`;
   return { subject,html,text };
 }
 
