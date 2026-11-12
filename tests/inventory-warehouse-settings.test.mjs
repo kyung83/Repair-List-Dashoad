@@ -34,7 +34,7 @@ function fixture() {
     CREATE TABLE app_users(id INTEGER PRIMARY KEY);
     INSERT INTO app_users VALUES(1),(2);
     INSERT INTO equipment VALUES(80),(81);
-    INSERT INTO parts VALUES
+    INSERT INTO parts(id,part_number,description,reorder_level,active,deleted_at,quantity_on_hand,unit_cost,location) VALUES
       (1,'PART-1','Test part',4,1,NULL,12,10,'General fallback'),
       (2,'PART-2','Other part',2,1,NULL,8,20,'Other fallback'),
       (3,'ARCHIVED','Archived',1,0,NULL,3,30,''),
