@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
-import { markGeotabDefectRepaired } from '@/lib/geotab';
+import { markGeotabDefectRepaired, syncGeotabDvir } from '@/lib/geotab';
 import { getOpenCustomMaintenanceRepairs, syncCustomMaintenanceRepairs } from '@/lib/custom-maintenance-repairs';
 import { GET as originalGET, POST as originalPOST } from './original';
 import { assignToMeFromBoard } from './self-assign';
@@ -378,6 +378,17 @@ export async function POST(request: Request) {
     body = await clone.json() as Record<string, unknown>;
   } catch {
     // The original handler owns validation for malformed/non-JSON requests.
+  }
+
+  if (body && String(body.action ?? '') === 'syncDvir') {
+    try {
+      await managerUser(request);
+      const dvir = await syncGeotabDvir(env);
+      return Response.json({ ok:true, dvir }, { headers:{ 'cache-control':'no-store' } });
+    } catch (error) {
+      console.error(JSON.stringify({ event:'repair_board_dvir_manual_sync_failed', error:String(error) }));
+      return Response.json({ ok:false, error:error instanceof Error ? error.message : 'DVIR synchronization failed.' }, { status:500 });
+    }
   }
 
   if (body && String(body.action ?? '') === 'assignToMe') {
