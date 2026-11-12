@@ -398,6 +398,17 @@ export default function PlanningCenter(){
   }catch(error){setMessage(error instanceof Error?error.message:'Geotab refresh failed.');}
   finally{setBusy('');}
  }
+ async function syncDvirNow(){
+  setBusy('dvir-sync');setMessage('');
+  try{
+   const response=await fetch('/api/repair-board',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'syncDvir'})});
+   const result=await response.json() as {ok?:boolean;error?:string;dvir?:{logs:number;defects:number}};
+   if(!response.ok||!result.ok)throw new Error(result.error||'DVIR sync failed.');
+   await load();
+   setMessage(`Geotab DVIR sync complete: ${result.dvir?.logs??0} inspections checked, ${result.dvir?.defects??0} defects imported in the last 24 hours.`);
+  }catch(error){setMessage(error instanceof Error?error.message:'DVIR sync failed.');}
+  finally{setBusy('');}
+ }
  function toggleGroup(group:Group){
   const ids=group.rows.map(row=>row.id);
   setSelected(current=>{
@@ -484,7 +495,7 @@ export default function PlanningCenter(){
    <strong style={{fontSize:10,color:'#526576',marginRight:3}}>SHOW</strong>
    {ATTENTION_OPTIONS.filter(({value})=>value!=='geotab'||Boolean(data?.canManage)).map(({value,label})=><button type="button" key={value} className={attention===value?s.active:''} onClick={()=>setAttention(value)}>{label} <b>{focusCounts[value]}</b></button>)}
   </nav>
-  <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}>{data?.canManage&&<button type="button" className={s.quiet} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button>}<a className={s.link} href="/work-orders">Completed Work</a></div></div>
+  <div className={s.sync}><div className={s.syncLeft}><i className={s.dot}></i><span>{syncLabel}</span></div><div className={s.syncRight}>{data?.canManage&&<button type="button" className={s.quiet} disabled={Boolean(busy)} onClick={()=>void syncDvirNow()}>{busy==='dvir-sync'?'Syncing DVIR…':'Sync DVIR'}</button>}{data?.canManage&&<button type="button" className={s.quiet} disabled={Boolean(busy)} onClick={()=>void checkGeotab()}>{busy==='geotab'?'Checking…':'Check Geotab'}</button>}<a className={s.link} href="/work-orders">Completed Work</a></div></div>
   {message&&<div className={s.notice}>{message}</div>}
   {add&&canCreateRepair&&data&&<div className={s.addWrap}><RepairBoardAddRepair equipment={data.equipment} technicians={data.technicians} initialEquipmentId={null} allowTechnicianAssignment={data.canManage} allowNewEquipment={data.canManage} allowPullThru={data.user.role==='manager'||data.user.role==='admin'} onClose={()=>setAdd(false)} onSaved={load}/></div>}
 
