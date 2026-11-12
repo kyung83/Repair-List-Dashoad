@@ -6,7 +6,7 @@ type Category={id:number;name:string;active:boolean;sortOrder:number};
 type ShopState={activeTimer:{repairId:string}|null;user:{technicianId:number|null;role:string};error?:string};
 
 export default function IndirectLaborLauncher(){
- const[show,setShow]=useState(false),[active,setActive]=useState(false),[canUse,setCanUse]=useState(false),[preset,setPreset]=useState("Shop cleanup"),[other,setOther]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+ const[show,setShow]=useState(false),[active,setActive]=useState(false),[canUse,setCanUse]=useState(false),[categories,setCategories]=useState<Category[]>([]),[preset,setPreset]=useState(""),[other,setOther]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
  async function refresh(){try{const response=await fetch("/api/shop",{cache:"no-store"});const payload=await response.json() as ShopState;if(response.ok){setActive(Boolean(payload.activeTimer));setCanUse(Boolean(payload.user?.technicianId)&&["mechanic","manager","admin"].includes(payload.user?.role||""));if(payload.activeTimer)setShow(false)}}catch{}}
  useEffect(()=>{void refresh();const handler=()=>void refresh();window.addEventListener("shop-jobs-refresh",handler);return()=>window.removeEventListener("shop-jobs-refresh",handler)},[]);
  async function loadCategories(){
