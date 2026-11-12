@@ -46,3 +46,13 @@ test('Setup Home groups every existing configuration area into a clean landing p
   assert.match(setup,/href:"\/admin\/geotab-review\/connection"/);
   assert.match(setup,/href:"\/admin\/go-live-cutover"/);
 });
+
+test('Setup sidebar shows only one entry while Setup Home retains every destination',()=>{
+  const setupBlock=nav.slice(nav.indexOf('key: "settings"'),nav.indexOf('function defaultHrefForRole'));
+  assert.match(setupBlock,/href: "\/setup-center", label: "Setup Home".*showInSidebar: false/);
+  for(const label of ['PM Schedule Setup','Parts Warehouses','Breakdown Setup','Users & Access']){
+    const line=setupBlock.split('\n').find(x=>x.includes(`label: "${label}"`));
+    assert.ok(line?.includes('showInSidebar: false'),label);
+  }
+  assert.match(setup,/label:"Indirect Labor Categories"/);
+});
