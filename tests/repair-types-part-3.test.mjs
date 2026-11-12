@@ -12,7 +12,9 @@ test('My Jobs can start no-unit indirect labor for a linked technician',async()=
   ]);
   assert.match(page,/IndirectLaborLauncher/);
   assert.match(launcher,/START INDIRECT LABOR/);
-  for(const preset of ['Shop cleanup','Parts run','Training','Inventory','Meeting','Other'])assert.match(launcher,new RegExp(preset));
+  assert.match(launcher,/api\/indirect-labor-categories/);
+  assert.match(launcher,/categories\.map\(item=>/);
+  assert.match(launcher,/categoryId:category\.id/);
   assert.match(launcher,/action:"startUnit"/);
   assert.match(api,/INDIRECT LABOR-OTHER/);
   assert.match(api,/VALUES\(NULL,/);
