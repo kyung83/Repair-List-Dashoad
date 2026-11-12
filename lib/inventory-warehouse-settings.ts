@@ -88,7 +88,7 @@ async function readSettings(db: D1Database, partId: number, warehouseCode: strin
     LEFT JOIN part_warehouse_locations b ON b.part_id=p.id AND b.warehouse_id=w.id
     LEFT JOIN part_warehouse_minimums m ON m.part_id=p.id AND m.warehouse_id=w.id
     WHERE p.id=? AND p.active=1 AND p.deleted_at IS NULL AND w.code=? AND w.active=1
-      AND EXISTS(SELECT 1 FROM part_warehouse_stock s WHERE s.part_id=p.id AND s.warehouse_id=w.id)
+
   `).bind(partId, warehouseCode).first<SettingsRow>();
 }
 
@@ -103,12 +103,11 @@ async function version(row: SettingsRow) {
 export async function getWarehousePartSettings(db: D1Database, partValue: unknown, warehouseValue: unknown) {
   const { partId, warehouseCode } = scope(partValue, warehouseValue);
   const row = await readSettings(db, partId, warehouseCode);
-  if (!row) throw new WarehouseSettingsError('That active part is not stocked in the selected active warehouse.');
+  if (!row) throw new WarehouseSettingsError('That active part or warehouse could not be found.');
   const options = await db.prepare(`
     SELECT DISTINCT b.bin_location FROM part_warehouse_locations b
     JOIN parts p ON p.id=b.part_id
     WHERE b.warehouse_id=? AND p.active=1 AND p.deleted_at IS NULL AND trim(b.bin_location)<>''
-      AND EXISTS(SELECT 1 FROM part_warehouse_stock s WHERE s.part_id=b.part_id AND s.warehouse_id=b.warehouse_id)
   `).bind(row.warehouse_id).all<{bin_location: string}>();
   const binOptions = [...new Set(options.results.flatMap((item) => splitBins(item.bin_location)))];
   binOptions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -161,7 +160,7 @@ export async function saveWarehousePartSettings(db: D1Database, input: Record<st
   const prior = await savedOperation(db, operationKey);
   if (prior) return replay(prior);
   const before = await readSettings(db, partId, warehouseCode);
-  if (!before) throw new WarehouseSettingsError('That active part is not stocked in the selected active warehouse.');
+  if (!before) throw new WarehouseSettingsError('That active part or warehouse could not be found.');
   if (await version(before) !== settingsVersion) throw new WarehouseSettingsError('Bin locations or minimum stock changed while you were editing. Reload this warehouse before saving.', 409);
 
   // The guard is evaluated inside the same D1 batch as both settings updates.
@@ -176,7 +175,7 @@ export async function saveWarehousePartSettings(db: D1Database, input: Record<st
       AND b.source_updated_at IS ? AND b.updated_at IS ?
       AND m.minimum_quantity IS ? AND m.updated_at IS ?
       AND ${lastSettingsOperation}=?
-      AND EXISTS(SELECT 1 FROM part_warehouse_stock s WHERE s.part_id=p.id AND s.warehouse_id=w.id)
+
   )`;
   const auditExists = `EXISTS(SELECT 1 FROM inventory_operation_lines l JOIN inventory_operations o ON o.id=l.operation_id
     WHERE o.operation_key=? AND l.line_type='warehouse_settings' AND l.part_id=? AND l.warehouse_id=?)`;
