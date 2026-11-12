@@ -15,6 +15,7 @@ type AnnualUnit = {
 
 type Payload = {
   equipment: AnnualUnit[];
+  preferences: {warningDays:number;repairBoardDays:number};
   updatedAt: string;
   error?: string;
 };
@@ -32,7 +33,7 @@ function shortDate(value: string) {
   return parsed ? parsed.toLocaleDateString() : "—";
 }
 
-function dueDetails(item: AnnualUnit): { date: string; label: string; tone: Tone } {
+function dueDetails(item: AnnualUnit, warningDays: number): { date: string; label: string; tone: Tone } {
   if (!item.annualIntervalDays) return { date: "", label: "No schedule", tone: "gray" };
   if (!item.lastAnnualDate) return { date: "", label: "Annual date needed", tone: "orange" };
   const last = dateAtNoon(item.lastAnnualDate);
@@ -45,7 +46,7 @@ function dueDetails(item: AnnualUnit): { date: string; label: string; tone: Tone
   const date = due.toISOString().slice(0, 10);
   if (days < 0) return { date, label: `${Math.abs(days)} days overdue`, tone: "red" };
   if (days === 0) return { date, label: "Due today", tone: "red" };
-  if (days <= 45) return { date, label: `Due in ${days} days`, tone: "orange" };
+  if (days <= warningDays) return { date, label: `Due in ${days} days`, tone: "orange" };
   return { date, label: `${days} days remaining`, tone: "green" };
 }
 
@@ -56,6 +57,8 @@ export default function AnnualSchedulesPage() {
   const [selected, setSelected] = useState<number[]>([]);
   const [dates, setDates] = useState<Record<number, string>>({});
   const [intervalDays, setIntervalDays] = useState("365");
+  const [warningDays,setWarningDays]=useState("45");
+  const [repairBoardDays,setRepairBoardDays]=useState("45");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -64,6 +67,8 @@ export default function AnnualSchedulesPage() {
     const payload = await response.json() as Payload;
     if (!response.ok) throw new Error(payload.error || "Annual schedules could not be loaded.");
     setData(payload);
+    setWarningDays(String(payload.preferences?.warningDays??45));
+    setRepairBoardDays(String(payload.preferences?.repairBoardDays??45));
     setDates(Object.fromEntries(payload.equipment.map((item) => [item.id, item.lastAnnualDate])));
   }
 
@@ -78,6 +83,8 @@ export default function AnnualSchedulesPage() {
       .then((payload) => {
         if (cancelled) return;
         setData(payload);
+        setWarningDays(String(payload.preferences?.warningDays??45));
+        setRepairBoardDays(String(payload.preferences?.repairBoardDays??45));
         setDates(Object.fromEntries(payload.equipment.map((item) => [item.id, item.lastAnnualDate])));
       })
       .catch((error: unknown) => {
@@ -176,6 +183,15 @@ export default function AnnualSchedulesPage() {
     }
   }
 
+  async function saveLeadPreferences(){
+    const warning=Number(warningDays),repair=Number(repairBoardDays);
+    if(!Number.isSafeInteger(warning)||warning<0||warning>365||!Number.isSafeInteger(repair)||repair<0||repair>365){
+      setMessage("Enter whole numbers between 0 and 365 days for both preferences.");return;
+    }
+    await post({action:"saveAnnualLeadPreferences",warningDays:warning,repairBoardDays:repair},
+      `Annual warnings now begin ${warning} days before due and Annuals appear on the Repair Board ${repair} days before due. Inspection dates and completion history are unchanged.`,"lead-preferences");
+  }
+
   async function applySchedule() {
     const interval = Number(intervalDays);
     if (!selected.length) return setMessage("Select at least one unit first.");
@@ -214,6 +230,29 @@ export default function AnnualSchedulesPage() {
       </header>
 
       {message && <div style={noticeStyle}>{message}</div>}
+
+      <section style={{...bulkCardStyle,justifyContent:"flex-start",alignItems:"end"}}>
+        <div style={{flex:"1 1 260px"}}>
+          <strong>Annual warning &amp; Repair Board preferences</strong>
+          <p style={{margin:"5px 0 0",fontSize:12,color:"#68746f"}}>
+            Set how many days ahead to display a warning and when an upcoming annual enters the Repair Board queue.
+            These do not change the required inspection interval, legal due date, or existing work orders.
+          </p>
+        </div>
+        <label style={{display:"grid",gap:4,fontSize:11,fontWeight:900,color:"#52616e"}}>
+          Warn before due (days)
+          <input aria-label="Annual warning lead days" type="number" min="0" max="365" step="1" value={warningDays}
+            onChange={event=>setWarningDays(event.target.value)} style={{...inputStyle,width:120}}/>
+        </label>
+        <label style={{display:"grid",gap:4,fontSize:11,fontWeight:900,color:"#52616e"}}>
+          Show on Repair Board (days)
+          <input aria-label="Annual Repair Board lead days" type="number" min="0" max="365" step="1" value={repairBoardDays}
+            onChange={event=>setRepairBoardDays(event.target.value)} style={{...inputStyle,width:125}}/>
+        </label>
+        <button type="button" disabled={Boolean(busy)} style={orangeButtonStyle} onClick={()=>void saveLeadPreferences()}>
+          {busy==="lead-preferences"?"Saving…":"Save Preferences"}
+        </button>
+      </section>
 
       <section style={toolbarCardStyle}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -254,7 +293,7 @@ export default function AnnualSchedulesPage() {
             </thead>
             <tbody>
               {visible.map((item) => {
-                const due = dueDetails(item);
+                const due = dueDetails(item,data?.preferences?.warningDays??45);
                 return (
                   <tr key={item.id} style={{ borderTop: "1px solid #e5e9ec", background: due.tone === "red" ? "#fff8f7" : "white" }}>
                     <td style={cellStyle}><input type="checkbox" checked={selectedSet.has(item.id)} onChange={() => setSelected((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>
