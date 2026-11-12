@@ -17,6 +17,7 @@ type QuickPart = {
   partNumber: string;
   description: string;
   warehouseStocks?: Stock[];
+  warehouseStatuses?: Record<string, "active" | "archived" | "removed">;
 };
 
 type Settings = {
@@ -65,7 +66,7 @@ async function readResponse<T>(response: Response): Promise<T> {
 export default function InventoryQuickUpdate({ part, warehouses, initialWarehouseCode, onSaved, onClose, onDirtyChange, onBusyChange }: Props) {
   const id = useId();
   const allowedWarehouses = useMemo(() => warehouses.filter((warehouse) =>
-    part.warehouseStocks?.some((stock) => stock.warehouseCode === warehouse.code)), [warehouses, part.warehouseStocks]);
+    (part.warehouseStatuses?.[warehouse.code] ?? "active") === "active"), [warehouses, part.warehouseStatuses]);
   const [warehouseCode, setWarehouseCode] = useState(() =>
     allowedWarehouses.some((warehouse) => warehouse.code === initialWarehouseCode) ? initialWarehouseCode :
       allowedWarehouses.length === 1 ? allowedWarehouses[0].code : "");
@@ -79,7 +80,7 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
   const [settingsNotice, setSettingsNotice] = useState("");
   const [countNotice, setCountNotice] = useState("");
   const [loading, setLoading] = useState(Boolean(warehouseCode));
-  const [saving, setSaving] = useState<"settings" | "count" | null>(null);
+  const [saving, setSaving] = useState<"settings" | "count" | "initialize" | null>(null);
   const [reload, setReload] = useState(0);
   const [pendingCount, setPendingCount] = useState<{ issueId: number; operationKey: string; countedQuantity: number; expectedQuantity: number } | null>(null);
   const settingsAttempt = useRef<{ fingerprint: string; operationKey: string } | null>(null);
@@ -91,6 +92,7 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
   const countDirty = count.trim() !== "" || pendingCount !== null;
   const dirty = settingsDirty || countDirty;
   const stock = part.warehouseStocks?.find((entry) => entry.warehouseCode === warehouseCode);
+  const hasStock = Boolean(stock);
   const physical = snapshot?.expectedQuantity ?? stock?.physicalOnHand;
   const reserved = Number(stock?.reserved ?? 0);
   const unit = stock?.unitOfMeasure || "units";
@@ -109,6 +111,14 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
     let current = true;
     const controller = new AbortController();
     if (!warehouseCode) return () => { current = false; controller.abort(); };
+    if (!hasStock) {
+      setSettings(null);
+      setSnapshot(null);
+      setSettingsError("");
+      setCountError("");
+      setLoading(false);
+      return () => { current = false; controller.abort(); };
+    }
     const query = `partId=${part.id}&warehouseCode=${encodeURIComponent(warehouseCode)}`;
     void Promise.allSettled([
       fetch(`/api/inventory/warehouse-settings?${query}`, { cache: "no-store", signal: controller.signal }).then(readResponse<Settings>),
@@ -131,7 +141,7 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
       setLoading(false);
     });
     return () => { current = false; controller.abort(); };
-  }, [part.id, warehouseCode, reload]);
+  }, [part.id, warehouseCode, reload, hasStock]);
 
   function resetFields(nextWarehouse: string) {
     setSettings(null);
@@ -160,6 +170,29 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
     if (dirty && !window.confirm("Discard the entered values and reload this warehouse? Any recorded count issue remains in Count Issues.")) return;
     resetFields(warehouseCode);
     setReload((value) => value + 1);
+  }
+
+  async function initializeStock() {
+    if (!warehouseCode || hasStock || saving !== null) return;
+    if (!window.confirm("Start tracking this part at this warehouse with a recorded opening quantity of ZERO? No existing stock will be changed. Use Physical Count afterward to enter actual shelf quantity.")) return;
+    saveLock.current = true;
+    setSaving("initialize");
+    setCountError("");
+    setSettingsError("");
+    try {
+      const result = await readResponse<{ ok:boolean; warehouseName:string }>(await fetch("/api/inventory",{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({action:"initializeWarehouseStock",partId:part.id,warehouseCode,operationKey:`warehouse-stock-init:${crypto.randomUUID()}`}),
+      }));
+      if(!result.ok) throw new Error("Warehouse tracking could not be confirmed.");
+      await onSaved(`Stock tracking enabled for ${part.partNumber} at ${result.warehouseName}. Opening balance is zero; enter the actual count next.`);
+      setReload(value=>value+1);
+    } catch(error) {
+      setCountError(error instanceof Error ? error.message : "Could not start warehouse stock tracking.");
+    } finally {
+      saveLock.current=false;
+      setSaving(null);
+    }
   }
 
   async function saveSettings(event: FormEvent) {
@@ -268,6 +301,14 @@ export default function InventoryQuickUpdate({ part, warehouses, initialWarehous
     </div>
     {!allowedWarehouses.length && <p className={styles.hint}>This part does not have stock in an active warehouse yet. Receive the part into a warehouse before updating its stock.</p>}
     {allowedWarehouses.length > 0 && !warehouseCode && <p className={styles.hint}>Choose the warehouse you are updating. Each warehouse keeps its own bins, minimum, and count.</p>}
+    {warehouseCode && !hasStock && <div className={styles.card}>
+      <h4>No warehouse stock record</h4>
+      <p className={styles.hint}>This active part has no stock record for this warehouse, so bins and counts cannot be edited yet. Start tracking at zero, then use Physical Count to record what is actually on the shelf. Other warehouses and inventory history are not changed.</p>
+      {countError && <p role="alert" className={styles.error}>{countError}</p>}
+      <button type="button" className={styles.primary} onClick={()=>void initializeStock()} disabled={saving!==null}>
+        {saving==="initialize"?"Starting tracking…":"Start stock tracking at zero"}
+      </button>
+    </div>}
     {loading && <p role="status" className={styles.hint}>Loading this warehouse…</p>}
     {warehouseCode && !loading && <div className={styles.sections}>
       <form onSubmit={(event) => void saveSettings(event)} className={styles.card}>
