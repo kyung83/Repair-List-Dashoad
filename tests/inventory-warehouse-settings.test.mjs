@@ -18,14 +18,16 @@ function compile(path, modules = {}) {
   return exports;
 }
 const service = compile('lib/inventory-warehouse-settings.ts');
+const stockSetup = compile('lib/inventory-part-management.ts');
 
 function fixture() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`
     PRAGMA foreign_keys=ON;
-    CREATE TABLE parts(id INTEGER PRIMARY KEY,part_number TEXT,description TEXT,reorder_level REAL,active INTEGER,deleted_at TEXT,quantity_on_hand REAL,unit_cost REAL,location TEXT);
+    CREATE TABLE parts(id INTEGER PRIMARY KEY,part_number TEXT,description TEXT,reorder_level REAL,active INTEGER,deleted_at TEXT,quantity_on_hand REAL,unit_cost REAL,location TEXT,inventory_class TEXT DEFAULT 'stock');
     CREATE TABLE warehouses(id INTEGER PRIMARY KEY,code TEXT UNIQUE,name TEXT,active INTEGER);
-    CREATE TABLE part_warehouse_stock(id INTEGER PRIMARY KEY,part_id INTEGER,warehouse_id INTEGER,variant_key TEXT,quantity_on_hand REAL,unit_cost REAL,on_order REAL,updated_at TEXT);
+    CREATE TABLE part_warehouse_stock(id INTEGER PRIMARY KEY,part_id INTEGER,warehouse_id INTEGER,variant_key TEXT,quantity_on_hand REAL,unit_cost REAL,on_order REAL,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,unit_of_measure TEXT,UNIQUE(part_id,warehouse_id,variant_key));
+    CREATE TABLE part_warehouse_catalog_status(part_id INTEGER,warehouse_id INTEGER,status TEXT,PRIMARY KEY(part_id,warehouse_id));
     CREATE TABLE equipment(id INTEGER PRIMARY KEY);
     CREATE TABLE repairs(id INTEGER PRIMARY KEY);
     CREATE TABLE repair_parts(id INTEGER PRIMARY KEY);
@@ -40,7 +42,7 @@ function fixture() {
       (5,'UNSTOCKED','No warehouse stocks',1,1,NULL,0,50,''),
       (6,'INACTIVE-WAREHOUSE','Inactive warehouse only',1,1,NULL,0,60,'');
     INSERT INTO warehouses VALUES(1,'CLARE','Clare shop',1),(2,'CADILLAC','Cadillac shop',1),(3,'BOYNE','Boyne',0);
-    INSERT INTO part_warehouse_stock VALUES
+    INSERT INTO part_warehouse_stock(id,part_id,warehouse_id,variant_key,quantity_on_hand,unit_cost,on_order,updated_at) VALUES
       (10,1,1,'',3,10,2,'2026-11-10'),(11,1,1,'core',4,100,3,'2026-11-10'),
       (12,1,2,'',5,11,4,'2026-11-10'),(13,2,1,'',8,20,1,'2026-11-10'),
       (14,3,1,'',3,30,0,'2026-11-10'),(15,4,1,'',2,40,0,'2026-11-10'),(16,6,3,'',0,60,0,'2026-11-10');
@@ -210,10 +212,10 @@ test('a simultaneous stock movement is preserved while unrelated warehouse setti
   } finally { f.sqlite.close(); }
 });
 
-test('invalid values and inactive, deleted, or unstocked scopes cannot write settings', async () => {
+test('invalid values and inactive or deleted scopes cannot write settings', async () => {
   const f=fixture();
   try {
-    for(const args of [[3,'CLARE'],[4,'CLARE'],[5,'CLARE'],[6,'BOYNE'],[1,'ALL'],[1,'MISSING']]) {
+    for(const args of [[3,'CLARE'],[4,'CLARE'],[6,'BOYNE'],[1,'ALL'],[1,'MISSING']]) {
       await assert.rejects(f.settings(...args));
     }
     const valid=request(await f.settings());
@@ -224,6 +226,33 @@ test('invalid values and inactive, deleted, or unstocked scopes cannot write set
     ]) await assert.rejects(service.saveWarehousePartSettings(f.db,{...valid,...patch},1));
     assert.equal(f.rows('inventory_operations').length,0);
   } finally { f.sqlite.close(); }
+});
+
+test('stockless active parts can save bins without changing counts; zero-stock initialization is explicit and audited', async () => {
+  const f=fixture();
+  try {
+    const before=f.rows('part_warehouse_stock');
+    const initial=await f.settings(5,'CLARE');
+    assert.deepEqual(json(initial.binLocations),[]);
+    const saved=await service.saveWarehousePartSettings(f.db,request(initial,{binLocations:['Shelf D / Bin 4'],minimumQuantity:2}),1);
+    assert.equal(saved.ok,true);
+    assert.deepEqual(f.rows('part_warehouse_stock'),before,'bin editing must never create stock');
+    const initialized=await stockSetup.initializePartWarehouseStock(f.db,{
+      partId:5,warehouseCode:'CLARE',userId:1,operationKey:'warehouse-stock-init:fixture-part5',
+    });
+    assert.equal(initialized.created,true);
+    const row=f.rows('part_warehouse_stock').find(entry=>entry.part_id===5&&entry.warehouse_id===1);
+    assert.equal(row.quantity_on_hand,0);
+    assert.equal(f.rows('parts').find(entry=>entry.id===5).quantity_on_hand,0);
+    assert.equal(f.rows('part_warehouse_locations').find(entry=>entry.part_id===5).bin_location,'Shelf D / Bin 4');
+    const audit=f.rows('inventory_operation_lines').filter(entry=>entry.line_type==='warehouse_stock_initialized');
+    assert.equal(audit.length,1);assert.equal(audit[0].quantity_delta,0);
+    const replay=await stockSetup.initializePartWarehouseStock(f.db,{
+      partId:5,warehouseCode:'CLARE',userId:1,operationKey:'warehouse-stock-init:repeat',
+    });
+    assert.equal(replay.created,false);
+    assert.equal(f.rows('part_warehouse_stock').filter(entry=>entry.part_id===5).length,1);
+  } finally {f.sqlite.close();}
 });
 
 test('route requires manager/admin access for both reads and writes before invoking data functions', async () => {
