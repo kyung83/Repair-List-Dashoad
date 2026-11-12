@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
 const read=path=>readFileSync(new URL(`../${path}`,import.meta.url),'utf8');
-const migration=read('migrations/0157_indirect_labor_categories.sql');
+const migration=read('migrations/0168_indirect_labor_categories.sql');
 const api=read('app/api/indirect-labor-categories/route.ts');
 const launcher=read('app/shop/indirect-labor-launcher.tsx');
 const create=read('app/api/shop/indirect-labor/route.ts');
