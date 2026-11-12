@@ -61,3 +61,19 @@ test('dispatch and admins are excluded from emailed shift membership',()=>{
   assert.match(summary,/COALESCE\(u\.dispatch_access,0\)=0/);
   assert.match(summary,/u\.role IN \('mechanic','manager'\)/);
 });
+
+test('shift summary identifies unfinished worked repairs, technician notes and outstanding requested parts',()=>{
+  assert.match(summary,/unfinishedJobsForActivity/);
+  assert.match(summary,/technician_note/);
+  assert.match(summary,/NOT LIKE '%complete%'/);
+  assert.match(summary,/repair_part_requests/);
+  assert.match(summary,/q\.requested_quantity>q\.used_quantity/);
+  assert.match(summary,/unmatched_part_requests/);
+  assert.match(summary,/q\.status='open'/);
+  assert.match(summary,/Waiting on requested parts:/);
+  assert.match(summary,/Technician notes:/);
+  assert.match(summary,/NOT FINISHED:/);
+  assert.match(summary,/WAITING FOR PART:/);
+  assert.match(summary,/outstanding part requests/);
+  assert.match(summary,/htmlEscape\(part\.description\)/);
+});
