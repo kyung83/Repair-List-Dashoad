@@ -1,4 +1,5 @@
 import { completeAnnual } from './annual-schedules';
+import { getAnnualLeadPreferences } from './annual-lead-preferences';
 
 type MaintenanceRow = {
   id: number;
@@ -119,6 +120,7 @@ async function recordMaintenanceEvent(
 }
 
 export async function getMaintenanceBoardItems(db: D1Database) {
+  const annualPreferences=await getAnnualLeadPreferences(db);
   const result = await db.prepare(`
     SELECT e.id, e.unit, e.equipment_type, e.current_mileage, e.mileage_updated_at,
            EXISTS(
@@ -208,7 +210,7 @@ export async function getMaintenanceBoardItems(db: D1Database) {
     if (row.annual_active !== 0 && row.annual_interval_days != null && row.annual_date) {
       const annualIntervalDays = Number(row.annual_interval_days);
       const annualRemaining = daysUntil(row.annual_date, annualIntervalDays);
-      if (annualRemaining != null && annualRemaining <= 45) {
+      if (annualRemaining != null && annualRemaining <= annualPreferences.repairBoardDays) {
         repairs.push({
           id: `annual-${row.id}`,
           unit: row.unit,
