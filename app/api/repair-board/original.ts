@@ -192,7 +192,14 @@ export async function GET(request: Request) {
           LIMIT 1
         )
         WHERE d.repaired = 0
-          AND NOT EXISTS (SELECT 1 FROM repairs r WHERE r.geotab_defect_id = d.geotab_defect_id)
+          AND NOT EXISTS (
+            SELECT 1 FROM repairs r
+            WHERE r.geotab_defect_id = d.geotab_defect_id
+              AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+              AND lower(COALESCE(r.status,'')) NOT LIKE 'deferred to next%'
+              AND lower(COALESCE(r.status,'')) NOT LIKE 'outside - waiting on%'
+              AND COALESCE(r.source,'') NOT IN ('roadside-breakdown','shop-duty','cutover-archive')
+          )
         ORDER BY d.asset_unit, d.updated_at DESC
       `).all<DvirRow>(),
       env.DB.prepare('SELECT id, name FROM technicians WHERE active = 1 ORDER BY name').all<Technician>(),
