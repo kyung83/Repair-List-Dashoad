@@ -183,10 +183,11 @@ export async function syncGeotabDvir(env: GeotabEnv) {
   try {
     const toDate = new Date().toISOString();
     const normalFromDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const cutoffRow = await env.DB.prepare("SELECT value FROM app_settings WHERE key='dvir_go_live_cutoff_at'").first<{value:string}>();
-    const cutoffAt = String(cutoffRow?.value ?? '').trim();
-    const cutoffValid = cutoffAt && Number.isFinite(Date.parse(cutoffAt)) ? new Date(cutoffAt).toISOString() : '';
-    const fromDate = cutoffValid && cutoffValid > normalFromDate ? cutoffValid : normalFromDate;
+    // The go-live reset clears only local staging data; it must not move the
+    // Geotab query start forward. DVIRs written earlier today still require
+    // repair after a cutover, even if their inspection predates the cutover.
+    // Keep the requested rolling 24-hour lookback unchanged.
+    const fromDate = normalFromDate;
 
     const logs = await client.call<JsonRecord[]>('Get', {
       typeName: 'DVIRLog',
