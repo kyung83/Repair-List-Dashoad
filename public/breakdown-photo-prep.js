@@ -278,13 +278,21 @@
     setSubmitBusy(input, true);
     renderManager(input, previous, 'Preparing ' + additions.length + ' new photo' + (additions.length === 1 ? '' : 's') + '...');
 
-    void Promise.all(additions.map(function (item) {
-      return preparePhoto(item.file)
-        .then(function (prepared) {
-          if (prepared.size > TARGET_BYTES) throw new Error('Photo could not be resized enough.');
-          return { key: item.key, file: prepared };
-        });
-    })).then(function (preparedAdditions) {
+    // Prepare one photo at a time. Decoding several tablet camera pictures
+    // simultaneously can exhaust the browser process and reload the form.
+    void (async function () {
+      var preparedAdditions = [];
+      for (var index = 0; index < additions.length; index += 1) {
+        var item = additions[index];
+        if (item.file.size > 20 * 1024 * 1024) {
+          throw new Error('Photo exceeds 20 MB. Please choose a smaller photo.');
+        }
+        var prepared = await preparePhoto(item.file);
+        if (prepared.size > TARGET_BYTES) throw new Error('Photo could not be resized enough.');
+        preparedAdditions.push({ key: item.key, file: prepared });
+      }
+      return preparedAdditions;
+    })().then(function (preparedAdditions) {
       if (input.dataset.photoPrepRun !== runId) return;
       var current = photoState.get(input) || previous;
       var currentKeys = new Set(current.map(function (item) { return item.key; }));
@@ -300,11 +308,11 @@
       input.dataset.photoPrep = 'ready';
       var clipped = selected.length > additions.length && nextItems.length >= MAX_PHOTOS;
       renderManager(input, nextItems, clipped ? 'Only the first 6 photos are kept.' : 'Photo' + (preparedAdditions.length === 1 ? '' : 's') + ' added.');
-    }).catch(function () {
+    }).catch(function (error) {
       if (input.dataset.photoPrepRun === runId) {
         input.dataset.photoPrep = 'failed';
         syncInputFiles(input, previous);
-        renderManager(input, previous, 'A selected photo is too large or cannot be converted on this phone. Choose a smaller JPG photo and try again. Your other form details are still here.');
+        renderManager(input, previous, (error instanceof Error ? error.message : 'Photo could not be prepared.') + ' Choose a smaller JPG photo and try again. Your other breakdown details have been preserved.');
       }
     }).finally(function () {
       if (input.dataset.photoPrepRun === runId) {
