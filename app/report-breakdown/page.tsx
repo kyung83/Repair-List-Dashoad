@@ -36,6 +36,23 @@ type BreakdownCategory = {
 type Axle = { label: string; positions: { code: string; label: string }[] };
 
 const ACTIVE_BREAKDOWN_KEY='norlow-active-driver-breakdown';
+const BREAKDOWN_DRAFT_KEY='norlow-driver-breakdown-draft-v1';
+type BreakdownDraft = {
+  savedAt:number; unitType:UnitType; unitQuery:string; selectedUnit:string;
+  repairCategory:string; repairSubcategory:string; selectedPositions:string[];
+  tireSizes:Record<string,string>; fields:Record<string,string>;
+};
+function readBreakdownDraft():BreakdownDraft|null {
+  try {
+    const raw=window.localStorage.getItem(BREAKDOWN_DRAFT_KEY);
+    if(!raw)return null;
+    const draft=JSON.parse(raw) as BreakdownDraft;
+    if(!draft||typeof draft.savedAt!=='number'||Date.now()-draft.savedAt>24*60*60*1000)return null;
+    if(draft.unitType!=='truck'&&draft.unitType!=='trailer')return null;
+    return draft;
+  }catch{return null;}
+}
+
 
 const TRUCK_TIRE_AXLES: Axle[] = [
   { label: 'Axle 1 · Steer', positions: [{ code: 'A1L', label: 'Left' }, { code: 'A1R', label: 'Right' }] },
@@ -93,10 +110,56 @@ export default function ReportBreakdownPage() {
   const [tireSizes, setTireSizes] = useState<Record<string, string>>({});
   const [result, setResult] = useState<SubmitResult>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const [draftReady,setDraftReady]=useState(false);
+  const [recoveredDraft,setRecoveredDraft]=useState<BreakdownDraft|null>(null);
 
   const selectedCategory = categories.find((category) => category.name === repairCategory) || null;
   const tireAxles = unitType === 'trailer' ? TRAILER_TIRE_AXLES : TRUCK_TIRE_AXLES;
   const positionAxles = unitType === 'trailer' ? TRAILER_POSITION_AXLES : TRUCK_POSITION_AXLES;
+
+  useEffect(()=>{
+    const draft=readBreakdownDraft();
+    if(draft){
+      setRecoveredDraft(draft);
+      setUnitType(draft.unitType);
+      setUnitQuery(String(draft.unitQuery||''));
+      setSelectedUnit(String(draft.selectedUnit||''));
+      setRepairCategory(String(draft.repairCategory||''));
+      setRepairSubcategory(String(draft.repairSubcategory||''));
+      setSelectedPositions(Array.isArray(draft.selectedPositions)?draft.selectedPositions:[]);
+      setTireSizes(draft.tireSizes&&typeof draft.tireSizes==='object'?draft.tireSizes:{});
+    }
+    setDraftReady(true);
+  },[]);
+
+  useEffect(()=>{
+    if(!draftReady||(result&&'ok' in result))return;
+    const save=()=>{
+      const fields:Record<string,string>={};
+      formRef.current?.querySelectorAll<HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement>('input[name], textarea[name], select[name]').forEach(input=>{
+        if(input instanceof HTMLInputElement&&(input.type==='file'||input.type==='checkbox'||input.type==='hidden'))return;
+        fields[input.name]=input.value;
+      });
+      for(const [name,value] of Object.entries(recoveredDraft?.fields||{})){
+        if(!(name in fields))fields[name]=value;
+      }
+      try{window.localStorage.setItem(BREAKDOWN_DRAFT_KEY,JSON.stringify({
+        savedAt:Date.now(),unitType,unitQuery,selectedUnit,repairCategory,repairSubcategory,
+        selectedPositions,tireSizes,fields,
+      } satisfies BreakdownDraft));}catch{/* Storage unavailable; form remains usable. */}
+    };
+    const form=formRef.current;
+    form?.addEventListener('input',save);
+    form?.addEventListener('change',save);
+    const photo=form?.querySelector<HTMLInputElement>('input[type="file"][name="photos"]');
+    photo?.addEventListener('click',save);
+    save();
+    return ()=>{
+      form?.removeEventListener('input',save);
+      form?.removeEventListener('change',save);
+      photo?.removeEventListener('click',save);
+    };
+  },[draftReady,result,unitType,unitQuery,selectedUnit,repairCategory,repairSubcategory,selectedPositions,tireSizes,recoveredDraft]);
 
   useEffect(() => {
     void (async () => {
@@ -227,6 +290,8 @@ export default function ReportBreakdownPage() {
       if (!response.ok || !payload.ok || !payload.breakdownId || !payload.driverToken) throw new Error(payload.error||'The breakdown could not be saved.');
       const next={ok:true as const,breakdownId:payload.breakdownId,driverToken:payload.driverToken};
       window.localStorage.setItem(ACTIVE_BREAKDOWN_KEY,JSON.stringify({breakdownId:next.breakdownId,driverToken:next.driverToken}));
+      window.localStorage.removeItem(BREAKDOWN_DRAFT_KEY);
+      setRecoveredDraft(null);
       setResult(next); formRef.current?.reset(); resetBreakdownDetails();
     } catch (error) {
       const message=error instanceof Error?error.message:'The breakdown could not be saved.';
@@ -236,6 +301,8 @@ export default function ReportBreakdownPage() {
 
   function reportAnother() {
     window.localStorage.removeItem(ACTIVE_BREAKDOWN_KEY);
+    window.localStorage.removeItem(BREAKDOWN_DRAFT_KEY);
+    setRecoveredDraft(null);
     setResult(null); setUnitType(''); setUnitQuery(''); setSelectedUnit(''); setUnits([]); setHasMore(false); setSearchError(''); resetBreakdownDetails();
   }
 
@@ -247,6 +314,9 @@ export default function ReportBreakdownPage() {
         <p className="easy-eyebrow">NORTHERN LOGISTICS</p>
         <h1 className="easy-title">Report a Roadside Breakdown</h1>
         <p className="easy-subtitle">Choose only the unit that is actually broken down. We&apos;ll show you the driver and location Geotab finds so you can verify them before submitting.</p>
+        {recoveredDraft&&<div className="easy-notice" role="status" style={{marginTop:12,borderColor:'#75b98a',background:'#edf9f0',color:'#173b24'}}>
+          Your unfinished breakdown details were recovered after the page reopened. Confirm the driver and location again, and reselect any photos before submitting.
+        </div>}
 
         <form ref={formRef} onSubmit={handleSubmit} className="easy-card" style={{marginTop:20,overflow:'hidden'}}>
           <input type="hidden" name="unitType" value={unitType}/>
@@ -294,9 +364,9 @@ export default function ReportBreakdownPage() {
             </div>}
             {selectedUnit&&(geotabPreview.status==='unavailable'||geotabPreview.status==='error')&&<div className="easy-notice" style={{marginTop:14,borderColor:'#efb36c',background:'#fff8ed',color:'#7a4514'}}>Geotab could not safely confirm the current driver/location{geotabPreview.error?`: ${geotabPreview.error}`:'.'} Enter them below. The affected unit stays {unitType==='trailer'?'this trailer only':'this truck only'}.</div>}
             {manualFallback&&selectedUnit&&<div style={{marginTop:14,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))',gap:14}}>
-              <label style={labelStyle}>{snapshotChoice==='corrected'?'Correct Driver Name *':'Driver Name *'}<input name="driverName" required maxLength={120} autoComplete="name" style={fieldStyle}/></label>
-              <label style={labelStyle}>State *<select name="state" required defaultValue="" style={fieldStyle}><option value="" disabled>Select state</option>{STATES.map((state)=><option key={state} value={state}>{state}</option>)}</select></label>
-              <label style={labelStyle}>City *<input name="city" required maxLength={120} autoComplete="address-level2" style={fieldStyle}/></label>
+              <label style={labelStyle}>{snapshotChoice==='corrected'?'Correct Driver Name *':'Driver Name *'}<input name="driverName" required defaultValue={recoveredDraft?.fields?.driverName||""} maxLength={120} autoComplete="name" style={fieldStyle}/></label>
+              <label style={labelStyle}>State *<select name="state" required defaultValue={recoveredDraft?.fields?.state||""} style={fieldStyle}><option value="" disabled>Select state</option>{STATES.map((state)=><option key={state} value={state}>{state}</option>)}</select></label>
+              <label style={labelStyle}>City *<input name="city" required defaultValue={recoveredDraft?.fields?.city||""} maxLength={120} autoComplete="address-level2" style={fieldStyle}/></label>
             </div>}
           </section>
 
@@ -338,7 +408,7 @@ export default function ReportBreakdownPage() {
               </div></div>)}
             </div>}
 
-            <label style={{...labelStyle,marginTop:14}}>What happened / what needs repair? *<textarea name="description" required maxLength={2000} rows={6} style={{...fieldStyle,minHeight:130,resize:'vertical'}}/></label>
+            <label style={{...labelStyle,marginTop:14}}>What happened / what needs repair? *<textarea name="description" required defaultValue={recoveredDraft?.fields?.description||""} maxLength={2000} rows={6} style={{...fieldStyle,minHeight:130,resize:'vertical'}}/></label>
             <label style={{...labelStyle,marginTop:14}}>Photos (optional)<input type="file" name="photos" accept="image/*" multiple style={{...fieldStyle,paddingTop:12}}/></label>
             {result&&'error' in result&&<div className="easy-notice" style={{borderColor:'#e49b95',background:'#fff0ef',color:'#8a2922'}}>{result.error}</div>}
             <button type="submit" className="easy-button orange" disabled={submitting||geotabPreview.status==='loading'||!categories.length} style={{width:'100%',minHeight:58,marginTop:18,fontSize:16}}>{submitting?'Saving breakdown...':'Submit Breakdown'}</button>
