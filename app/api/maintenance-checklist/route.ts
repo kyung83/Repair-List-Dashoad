@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { getAssignedChecklistTemplate } from '@/lib/maintenance-checklist-templates';
@@ -141,10 +142,10 @@ async function loadRepair(id: number) {
   return row;
 }
 
-function requireWorkAccess(user: AppUser, repair: RepairRow) {
+async function requireWorkAccess(user: AppUser, repair: RepairRow) {
   if (canManage(user)) return;
   if (user.role !== 'mechanic' || !user.technicianId) throw new Error('Technician access is required.');
-  if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) {
+  if (!(await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId)))) {
     throw new Error('This maintenance work order is not assigned to you.');
   }
 }
@@ -160,7 +161,7 @@ async function loadRun(id: number) {
 }
 
 async function ensureRun(user: AppUser, repair: RepairRow) {
-  requireWorkAccess(user, repair);
+  await requireWorkAccess(user, repair);
   if (String(repair.status).toLowerCase().includes('complete')) throw new Error('That maintenance work order is already completed.');
 
   // A run that already existed before this deployment is intentionally left alone.
@@ -509,7 +510,7 @@ export async function POST(request: Request) {
     const action = String(body.action ?? '');
     const id = repairId(body.repairId);
     const repair = await loadRepair(id);
-    requireWorkAccess(user, repair);
+    await requireWorkAccess(user, repair);
 
     if (action === 'startChecklist') {
       await ensureRun(user, repair);
