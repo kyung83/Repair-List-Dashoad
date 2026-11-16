@@ -1,4 +1,5 @@
 "use client";
+import { getAssignedYard } from "@/lib/client-assigned-yard";
 
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
@@ -136,6 +137,7 @@ export default function InventoryPage() {
   const [vendorLinks, setVendorLinks] = useState<Record<string, VendorLink[]>>({});
   const [query, setQuery] = useState("");
   const [warehouseCode, setWarehouseCode] = useState("ALL");
+  useEffect(() => { void getAssignedYard().then(({warehouseCode}) => { if (warehouseCode) setWarehouseCode(current => current === "ALL" ? warehouseCode : current); }).catch(() => undefined); }, []);
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("description");
   const [partStatus, setPartStatus] = useState<"active" | "archived">("active");

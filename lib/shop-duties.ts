@@ -104,6 +104,7 @@ async function eligibleUsers(db:D1Database, template:DutyTemplateRow):Promise<El
     const rows = await db.prepare(q(
       'SELECT id,display_name,technician_id FROM app_users',
       "WHERE active=1 AND role='mechanic' AND COALESCE(dispatch_access,0)=0 AND technician_id IS NOT NULL",
+      template.template_key === 'bathroom-weekly' ? "AND lower(trim(COALESCE(yard,'')))='clare'" : '',
       'ORDER BY display_name COLLATE NOCASE,id'
     )).all<EligibleUser>();
     return rows.results;
@@ -115,6 +116,7 @@ async function eligibleUsers(db:D1Database, template:DutyTemplateRow):Promise<El
       'FROM maintenance_shift_assignments a JOIN app_users u ON u.id=a.user_id',
       "WHERE a.shift_id=? AND u.active=1 AND COALESCE(u.dispatch_access,0)=0 AND u.technician_id IS NOT NULL",
       "AND u.role IN ('mechanic','manager','admin')",
+      template.template_key === 'bathroom-weekly' ? "AND lower(trim(COALESCE(u.yard,'')))='clare'" : '',
       'ORDER BY u.display_name COLLATE NOCASE,u.id'
     )).bind(template.shift_id).all<EligibleUser>();
     return rows.results;
@@ -124,6 +126,7 @@ async function eligibleUsers(db:D1Database, template:DutyTemplateRow):Promise<El
     'FROM shop_duty_template_users tu JOIN app_users u ON u.id=tu.user_id',
     "WHERE tu.template_id=? AND u.active=1 AND COALESCE(u.dispatch_access,0)=0 AND u.technician_id IS NOT NULL",
     "AND u.role IN ('mechanic','manager','admin')",
+    template.template_key === 'bathroom-weekly' ? "AND lower(trim(COALESCE(u.yard,'')))='clare'" : '',
     'ORDER BY tu.rotation_order,u.display_name COLLATE NOCASE,u.id'
   )).bind(template.id).all<EligibleUser>();
   return rows.results;
@@ -578,6 +581,16 @@ export async function updateShopDutyTemplate(
     ? [...new Set(body.selectedUserIds.map((value) => integer(value)).filter((value) => value > 0))]
     : [];
 
+  if (template.template_key === 'bathroom-weekly' && selectedUserIds.length) {
+    const eligible = await db.prepare(
+      "SELECT id FROM app_users WHERE active=1 AND technician_id IS NOT NULL AND lower(trim(COALESCE(yard,'')))='clare'"
+    ).all<{id:number}>();
+    const clareIds = new Set(eligible.results.map(row=>Number(row.id)));
+    if (selectedUserIds.some(id=>!clareIds.has(id))) {
+      throw new Error('Bathroom Cleaning & Check can only be assigned to Clare technicians.');
+    }
+  }
+
   if (active && assignmentMode === 'selected_rotation' && !selectedUserIds.length) {
     throw new Error('Choose at least one mechanic before activating this duty.');
   }
@@ -631,6 +644,11 @@ export async function assignCurrentShopDuty(
     "AND role IN ('mechanic','manager','admin')"
   )).bind(assignedUserId).first<EligibleUser>();
   if (!user) throw new Error('Choose an active working mechanic.');
+  if (template.template_key === 'bathroom-weekly') {
+    const assigned = await db.prepare("SELECT lower(trim(COALESCE(yard,''))) AS yard FROM app_users WHERE id=?")
+      .bind(assignedUserId).first<{yard:string}>();
+    if (assigned?.yard !== 'clare') throw new Error('Bathroom Cleaning & Check is for Clare technicians only.');
+  }
 
   const today = dateString(Date.now());
   let spec:{periodKey:string;dueDate:string}|null = null;

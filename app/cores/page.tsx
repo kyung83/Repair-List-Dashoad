@@ -2,6 +2,7 @@
 
 import {type FormEvent,useEffect,useMemo,useState} from "react";
 import ModuleTabs from "../module-tabs";
+import {getAssignedYard} from "@/lib/client-assigned-yard";
 
 type CoreObligation={
   id:number;
@@ -91,7 +92,8 @@ export default function CorePage(){
     const payload=await response.json() as CoreData&{error?:string};
     if(!response.ok)throw new Error(payload.error||"Core controls could not be loaded.");
     setData(payload);
-    setTireWarehouse(current=>current||payload.warehouses[0]?.code||"");
+    const assigned=await getAssignedYard().catch(()=>({warehouseCode:''}));
+    setTireWarehouse(current=>current||payload.warehouses.find(row=>row.code===assigned.warehouseCode)?.code||payload.warehouses[0]?.code||"");
   }
 
   useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:"Core controls could not be loaded."))},[]);

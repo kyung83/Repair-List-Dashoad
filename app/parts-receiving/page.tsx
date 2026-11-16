@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
+import {getAssignedYard} from "@/lib/client-assigned-yard";
 
 type Warehouse={id:number;code:string;name:string};
 type Vendor={id:number;name:string;phone:string;email:string;notes:string};
@@ -89,7 +90,8 @@ export default function PartsReceivingPage(){
     if(!receiptResponse.ok)throw new Error(receiptData.error||"Receiving history could not be loaded.");
     setData(inventory);setReceipts(receiptData.receipts??[]);
     if(!warehouseCode){
-      const preferred=inventory.warehouses.find(row=>row.code==="CLARE")??inventory.warehouses.find(row=>row.code!=="NO_WAREHOUSE");
+      const assigned=await getAssignedYard().catch(()=>({warehouseCode:''}));
+      const preferred=inventory.warehouses.find(row=>row.code===assigned.warehouseCode)??inventory.warehouses.find(row=>row.code==="CLARE")??inventory.warehouses.find(row=>row.code!=="NO_WAREHOUSE");
       if(preferred)setWarehouseCode(preferred.code);
     }
   }

@@ -6,6 +6,7 @@ import RepairPhotoPreview from './repair-photo-preview';
 import {isRepairInProgress,isRepairWaitingForParts} from '@/lib/status';
 import {normalizeYard,YARD_KEYS,yardLabel,type YardKey,type YardSelection} from '@/lib/yards';
 import s from './planning-center.module.css';
+import {getAssignedYard} from '@/lib/client-assigned-yard';
 
 type Src='repair'|'dvir'|'dvir-repair'|'pm'|'annual'|'pm-repair'|'annual-repair';
 type Shop='all'|YardKey;
@@ -176,6 +177,7 @@ export default function PlanningCenter(){
   setSync(yardResponse.ok?yard.sync||null:null);
  },[]);
  useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:'Planning Center could not be loaded.'));},[load]);
+ useEffect(()=>{void getAssignedYard().then(({yard})=>{if(yard)setShop(yard);}).catch(()=>undefined);},[]);
  useEffect(()=>{
   const requested=new URLSearchParams(window.location.search).get('attention');
   if(requested==='geotab')setAttention('geotab');
