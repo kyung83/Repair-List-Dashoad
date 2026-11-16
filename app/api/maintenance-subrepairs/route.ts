@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { releaseRepairPartRequests, requestPartForRepair } from '@/lib/parts-lifecycle';
@@ -59,9 +60,9 @@ async function loadParent(id: number) {
   return row;
 }
 
-function requireParentAccess(user: AppUser, parent: ParentRepair) {
+async function requireParentAccess(user: AppUser, parent: ParentRepair) {
   if (canManage(user)) return;
-  if (user.role !== 'mechanic' || !user.technicianId || Number(parent.technician_id ?? 0) !== Number(user.technicianId)) {
+  if (user.role !== 'mechanic' || !user.technicianId || !(await isRepairTeamMember(env.DB,parent.id,Number(user.technicianId)))) {
     throw new Error('This PM/Annual is not assigned to you.');
   }
 }
@@ -104,7 +105,7 @@ async function ensureChildAssignment(user: AppUser, parent: ParentRepair, child:
     child.technician_id = technicianId;
     return;
   }
-  if (Number(child.technician_id) !== technicianId || Number(parent.technician_id ?? 0) !== technicianId) {
+  if (Number(child.technician_id) !== technicianId && !(await isRepairTeamMember(env.DB,parent.id,technicianId))) {
     throw new Error('That repair is assigned to another technician.');
   }
 }
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
     const user = await requireUser(request);
     const body = await request.json() as Record<string, unknown>;
     const parent = await loadParent(repairId(body.repairId, 'PM/Annual work order'));
-    requireParentAccess(user, parent);
+    await requireParentAccess(user, parent);
     const child = await loadChild(parent, repairId(body.childRepairId, 'Repair'));
     await ensureChildAssignment(user, parent, child);
     const action = String(body.action ?? '');
