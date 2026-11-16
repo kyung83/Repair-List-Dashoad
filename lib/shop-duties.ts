@@ -116,6 +116,7 @@ async function eligibleUsers(db:D1Database, template:DutyTemplateRow):Promise<El
       'FROM maintenance_shift_assignments a JOIN app_users u ON u.id=a.user_id',
       "WHERE a.shift_id=? AND u.active=1 AND COALESCE(u.dispatch_access,0)=0 AND u.technician_id IS NOT NULL",
       "AND u.role IN ('mechanic','manager','admin')",
+      template.template_key === 'bathroom-weekly' ? "AND lower(trim(COALESCE(u.yard,'')))='clare'" : '',
       'ORDER BY u.display_name COLLATE NOCASE,u.id'
     )).bind(template.shift_id).all<EligibleUser>();
     return rows.results;
@@ -125,6 +126,7 @@ async function eligibleUsers(db:D1Database, template:DutyTemplateRow):Promise<El
     'FROM shop_duty_template_users tu JOIN app_users u ON u.id=tu.user_id',
     "WHERE tu.template_id=? AND u.active=1 AND COALESCE(u.dispatch_access,0)=0 AND u.technician_id IS NOT NULL",
     "AND u.role IN ('mechanic','manager','admin')",
+    template.template_key === 'bathroom-weekly' ? "AND lower(trim(COALESCE(u.yard,'')))='clare'" : '',
     'ORDER BY tu.rotation_order,u.display_name COLLATE NOCASE,u.id'
   )).bind(template.id).all<EligibleUser>();
   return rows.results;
