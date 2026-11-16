@@ -512,6 +512,12 @@ async function handleRepairOutcome(request:Request, body:Record<string,unknown>)
   }
 
   const stopped = await stopLaborSession(user,technician,id,true,body.notes);
+  if (outcome !== 'repaired' && await activeRepairTeammates(env.DB,id,user.id)) {
+    await repairJobEvent(id,user.id,technician.id,'team_member_stopped',
+      `${technician.name} stopped their own labor; another team member remains working.`);
+    return {ok:true,repairId:`repair-${id}`,hours:stopped!.hours,
+      waitingOnPart:false,completed:false,nextRepairId:null,laborStarted:false,teamStillWorking:true};
+  }
   if (outcome === 'repaired') {
     const result = await env.DB.prepare(`
       UPDATE repairs
