@@ -385,7 +385,7 @@ export async function POST(request: Request) {
   // flag. This keeps the normal checklist, Geotab, assignment and tablet alert flows.
   if (body && String(body.action ?? '') === 'setPullThru') {
     const sourceId = String(body.repairId ?? '');
-    const due = /^(pm|annual)-(\\d+)$/.exec(sourceId);
+    const due = /^(pm|annual)-(\d+)$/.exec(sourceId);
     const rawDvir = sourceId.startsWith('dvir-') && !sourceId.startsWith('repair-');
     if (due || rawDvir) {
       try {
