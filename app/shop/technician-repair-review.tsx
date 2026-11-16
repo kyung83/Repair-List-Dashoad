@@ -8,7 +8,8 @@ type ReviewNote={id:number;detail:string;technician:string;createdAt:string;canE
 type ReviewPart={partId:number;partNumber:string;description:string;quantity:number;lastAppliedAt:string};
 type ReviewLabor={id:number;technician:string;laborDate:string;hours:number;rate:number;notes:string;startedAt:string|null;endedAt:string|null};
 type ReviewRequest={id:number;partId:number;partNumber:string;description:string;requestedQuantity:number;reservedQuantity:number;usedQuantity:number;remainingQuantity:number;shortageQuantity:number;status:string;createdAt:string;updatedAt:string};
-type ReviewData={ok?:boolean;error?:string;canCorrect:boolean;repair:{id:string;unit:string;title:string;status:string};notes:ReviewNote[];parts:ReviewPart[];labor:ReviewLabor[];requests:ReviewRequest[];updatedAt:string};
+type UnmatchedReviewRequest={id:number;requestedText:string;requestedQuantity:number;warehouseCode:string;status:string;createdAt:string;updatedAt:string};
+type ReviewData={ok?:boolean;error?:string;canCorrect:boolean;repair:{id:string;unit:string;title:string;status:string};notes:ReviewNote[];parts:ReviewPart[];labor:ReviewLabor[];requests:ReviewRequest[];unmatchedRequests?:UnmatchedReviewRequest[];updatedAt:string};
 type RemoveResult={ok?:boolean;error?:string;partNumber?:string;quantity?:number};
 type EditResult={ok?:boolean;error?:string;note?:{id:number;detail:string}};
 type Props={repairId:string;canWork:boolean;checklist:ChecklistData|null};
@@ -76,6 +77,7 @@ export default function TechnicianRepairReview({repairId,canWork,checklist}:Prop
   }),[data]);
 
   const openRequests=useMemo(()=>(data?.requests??[]).filter(item=>item.status==="open"&&item.remainingQuantity>0.000001),[data]);
+  const unmatchedRequests=useMemo(()=>(data?.unmatchedRequests??[]),[data]);
   const checklistCounts=useMemo(()=>{
     const items=checklist?.items??[];
     return {
@@ -148,6 +150,7 @@ export default function TechnicianRepairReview({repairId,canWork,checklist}:Prop
           <div style={hint}>This is the live database list. Tap ✕ only if a part was entered by mistake.</div>
           {data?.parts.length?<div style={list}>{data.parts.map(part=><div key={part.partId} style={partRow}><div><strong>{part.partNumber}</strong><div style={description}>{part.description}</div>{part.lastAppliedAt&&<div style={meta}>Applied {dateTime(part.lastAppliedAt)}</div>}</div><div style={partActions}><strong style={partQty}>× {qty(part.quantity)}</strong><button type="button" aria-label={`Remove ${part.partNumber}`} title={data.canCorrect?"Remove mistaken part":"Part corrections are not available on this repair"} onClick={()=>void removePart(part)} style={removeButton} disabled={!data.canCorrect||removingPartId!==null}>{removingPartId===part.partId?"…":"✕"}</button></div></div>)}</div>:<div style={empty}>No parts applied to this repair.</div>}
           {openRequests.length>0&&<div style={requestBox}><strong style={{fontSize:12}}>STILL NEEDED / RESERVED</strong>{openRequests.map(request=><div key={request.id} style={requestRow}><span><strong>{request.partNumber}</strong> · {request.description}</span><span>{qty(request.reservedQuantity)} reserved · {qty(request.shortageQuantity)} awaiting</span></div>)}</div>}
+          {unmatchedRequests.length>0&&<div style={requestBox}><strong style={{fontSize:12}}>PARTS REQUESTED FROM PARTS DESK</strong>{unmatchedRequests.map(request=><div key={request.id} style={requestRow}><span><strong>{request.requestedText}</strong> · Qty {qty(request.requestedQuantity)} · {request.warehouseCode||"Warehouse not set"}</span><span style={{fontWeight:900,color:request.status==="open"?"#9c4d16":"#53616d"}}>{request.status==="open"?"OPEN — AWAITING PARTS DESK":request.status.toUpperCase()}</span></div>)}</div>}
         </div>
 
         <div style={sectionCard}>

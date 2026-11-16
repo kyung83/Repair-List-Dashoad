@@ -47,6 +47,7 @@ export type UnmatchedPartRequestView = {
   outOfService:boolean;
   createdAt:string;
   updatedAt:string;
+  repairStatus:string;
 };
 
 export async function requestUnmatchedPart(
@@ -118,21 +119,21 @@ export async function getUnmatchedPartRequests(db:D1Database):Promise<UnmatchedP
   const rows = await db.prepare(`
     SELECT q.id, q.repair_id, q.requested_text, q.requested_quantity, q.warehouse_code,
            q.created_at, q.updated_at,
-           COALESCE(e.unit, '') AS unit, r.technician_id,
+           COALESCE(e.unit, '') AS unit, r.technician_id, COALESCE(r.status,'') AS repair_status,
            COALESCE(t.name, '') AS technician_name, COALESCE(r.priority, '2') AS priority,
            COALESCE(e.out_of_service, 0) AS out_of_service
     FROM unmatched_part_requests q
     JOIN repairs r ON r.id = q.repair_id
     LEFT JOIN equipment e ON e.id = r.equipment_id
     LEFT JOIN technicians t ON t.id = r.technician_id
-    WHERE q.status = 'open' AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
+    WHERE q.status = 'open'
     ORDER BY COALESCE(e.out_of_service,0) DESC,
              CASE trim(COALESCE(r.priority,'2')) WHEN '1' THEN 0 WHEN '2' THEN 1 WHEN '3' THEN 2 ELSE 1 END,
              q.created_at ASC, q.id ASC
   `).all<{
     id:number;repair_id:number;requested_text:string;requested_quantity:number;warehouse_code:string;
     created_at:string;updated_at:string;unit:string;technician_id:number|null;technician_name:string;
-    priority:string;out_of_service:number;
+    priority:string;out_of_service:number;repair_status:string;
   }>();
 
   return rows.results.map(row=>({
@@ -149,6 +150,7 @@ export async function getUnmatchedPartRequests(db:D1Database):Promise<UnmatchedP
     outOfService:Boolean(row.out_of_service),
     createdAt:row.created_at,
     updatedAt:row.updated_at,
+    repairStatus:row.repair_status,
   }));
 }
 
