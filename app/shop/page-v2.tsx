@@ -100,13 +100,14 @@ export default function ShopPage(){
   }
 
   if(data?.activeTimer&&activeRepair){
+    const isHelping=activeRepair.technicianId!==data.user.technicianId;
     const handoffPanel=handoffOpen?<section style={handoffPanelStyle}>
-      <div><strong style={{fontSize:16,color:"#17324a"}}>Done working on this unit</strong><div style={helper}>Keep it assigned to yourself, or hand the unfinished work to the next shift.</div></div>
-      <button type="button" disabled={busy} onClick={()=>void doneForNow()} style={keepButton}>DONE FOR NOW — KEEP ASSIGNED TO ME</button>
-      <div style={orLine}>OR HAND OFF</div>
+      <div><strong style={{fontSize:16,color:"#17324a"}}>Done working on this unit</strong><div style={helper}>{isHelping?"Your labor will be saved. The primary technician and other helpers can continue working.":"Keep it assigned to yourself, or hand the unfinished work to the next shift."}</div></div>
+      <button type="button" disabled={busy} onClick={()=>void doneForNow()} style={keepButton}>{isHelping?"DONE FOR NOW — SAVE MY LABOR":"DONE FOR NOW — KEEP ASSIGNED TO ME"}</button>
+      {!isHelping&&<><div style={orLine}>OR HAND OFF</div>
       {canAssignHandoff?<label style={label}>Hand off to<select value={handoffTechId} onChange={event=>setHandoffTechId(event.target.value)} style={input} disabled={busy}><option value="">Leave Unassigned — next shift can pick it up</option>{techOptions.map(tech=><option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>:<div style={helper}>Leave Unassigned — the next shift can pick up the unfinished work.</div>}
       <label style={label}>What is left to do? *<textarea aria-label="Shift handoff note" value={handoffNote} onChange={event=>setHandoffNote(event.target.value)} maxLength={500} rows={3} placeholder="What still needs to be completed?" style={{...input,resize:"vertical"}} disabled={busy}/></label>
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>{canAssignHandoff?"HAND OFF TO NEXT SHIFT":"LEAVE UNASSIGNED"}</button></div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>{canAssignHandoff?"HAND OFF TO NEXT SHIFT":"LEAVE UNASSIGNED"}</button></div></>}
     </section>:null;
 
     return <CurrentWorkHome
