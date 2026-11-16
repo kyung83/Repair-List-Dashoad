@@ -113,6 +113,12 @@ async function reconcileDoneUnitWaiting(request:Request,response:Response) {
     return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
   }
 
+  const anotherWorker=await env.DB.prepare(
+    'SELECT 1 AS active FROM repair_labor_timers WHERE repair_id=? LIMIT 1'
+  ).bind(repairId).first<{active:number}>();
+  if(anotherWorker)return Response.json({...payload,teamStillWorking:true},
+    {status:response.status,headers:{'cache-control':'no-store'}});
+
   const wasWaiting = alreadyWaitingForParts(repair.status);
   await env.DB.prepare(`
     UPDATE repairs
