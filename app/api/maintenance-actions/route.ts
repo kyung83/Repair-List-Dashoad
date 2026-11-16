@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 
@@ -75,10 +76,10 @@ async function loadMaintenanceRepair(id: number) {
   return row;
 }
 
-function requireWorkAccess(user: AppUser, repair: MaintenanceRepair) {
+async function requireWorkAccess(user: AppUser, repair: MaintenanceRepair) {
   if (canManage(user)) return;
   if (user.role !== 'mechanic' || !user.technicianId) throw new Error('Technician access is required.');
-  if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) {
+  if (!(await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId)))) {
     throw new Error('This maintenance work order is not assigned to you.');
   }
 }
@@ -241,7 +242,7 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const action = String(body.action ?? '');
     const repair = await loadMaintenanceRepair(maintenanceRepairId(body.repairId));
-    requireWorkAccess(user, repair);
+    await requireWorkAccess(user, repair);
 
     if (String(repair.status).toLowerCase().includes('complete')) {
       throw new Error('This maintenance work order is already completed.');
