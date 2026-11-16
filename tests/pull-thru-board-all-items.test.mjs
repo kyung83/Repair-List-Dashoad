@@ -13,7 +13,7 @@ test('raw PM, annual and DVIR Pull Thru is authorized and materialized',()=>{
 test('both board layouts display Pull Thru on raw DVIR, PM and annual rows',()=>{
  for (const path of ['app/repair-board/planning-center.tsx','app/repair-board/dashboard-v2.tsx']) {
   const ui=read(path);
-  const d=ui.indexOf("source==='dvir'")>=0?ui.indexOf("if(row.source==='dvir')return"):ui.indexOf('if(r.source==="dvir"&&data?.canManage)return');
+  const d=ui.indexOf("source==='dvir'")>=0?ui.lastIndexOf("if(row.source==='dvir')return"):ui.indexOf('if(r.source==="dvir"&&data?.canManage)return');
   const m=ui.indexOf("if(raw(row.source))return")>=0?ui.indexOf("if(raw(row.source))return"):ui.indexOf('if(raw(r.source)&&data?.canManage)return');
   assert.ok(d>=0&&m>=0);
   assert.match(ui.slice(d,d+550),/setPullThru/);
