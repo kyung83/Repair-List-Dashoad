@@ -17,7 +17,7 @@ type Group = {
 type LowStock = Stock & { partId:number; partNumber:string; description:string; warehouseCode:string; warehouseName:string; reorderSuggested:number };
 type UnmatchedPart = {
   id:number;repairId:string;requestedText:string;requestedQuantity:number;warehouseCode:string;
-  unit:string;assignedTo:string;priority:string;outOfService:boolean;createdAt:string;updatedAt:string;
+  unit:string;assignedTo:string;priority:string;outOfService:boolean;createdAt:string;updatedAt:string;repairStatus?:string;
 };
 type OneTimePart = {
   id:number;partNumber:string;description:string;unitCost:number|null;preferredVendorId:number|null;vendorName:string;
@@ -193,7 +193,7 @@ export default function PartsDeskPage(){
 
     <section style={panel}><div style={panelHead}><div><p style={eyebrow}>NEEDS IDENTIFICATION</p><h2 style={title}>Technician requested parts not in the catalog</h2><p style={muted}>Use One-Time Part when this is a one-off purchase. Use New Inventory Item when it should become stocked.</p></div><span style={muted}>{unmatched.length} open request{unmatched.length===1?'':'s'}</span></div>
       {!unmatched.length?<div style={empty}>No unmatched technician part requests in this warehouse.</div>:<div style={{display:'grid',gap:9}}>{unmatched.map(item=><article key={item.id} style={unmatchedCard}>
-        <div style={{minWidth:0}}><strong style={{fontSize:18,color:'#173f37'}}>{item.requestedText}</strong><div style={muted}>Unit {item.unit||'—'} · {item.assignedTo||'Unassigned'} · {item.warehouseCode||'Unknown yard'}</div></div>
+        <div style={{minWidth:0}}><strong style={{fontSize:18,color:'#173f37'}}>{item.requestedText}</strong><div style={muted}>Unit {item.unit||'—'} · {item.assignedTo||'Unassigned'} · {item.warehouseCode||'Unknown yard'}</div>{item.repairStatus?.toLowerCase().includes('complete')&&<div style={{fontSize:12,fontWeight:800,color:'#a64712',marginTop:5}}>Work order completed — request still OPEN. Review before marking handled; reopen the repair if parts must be attached to that work order.</div>}</div>
         <div style={{textAlign:'center'}}><span style={smallLabel}>QTY</span><strong style={{display:'block',fontSize:22}}>{n(item.requestedQuantity)}</strong></div>
         <div style={{fontSize:12,fontWeight:900,color:item.outOfService?'#a64712':'#52616d'}}>{item.outOfService?'OOS · ':''}{item.priority==='1'?'CRITICAL':item.priority==='3'?'LOW':'NORMAL'}</div>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
