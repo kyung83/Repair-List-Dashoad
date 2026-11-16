@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 
@@ -26,10 +27,10 @@ async function loadRepair(id: number) {
   }>();
 }
 
-function mechanicOwnsRepair(user: { role:string; technicianId:number|null }, repair: { technician_id:number|null }) {
+async function mechanicOwnsRepair(user: { role:string; technicianId:number|null }, repair: { id:number;technician_id:number|null }) {
   return user.role === 'mechanic'
     && Boolean(user.technicianId)
-    && Number(repair.technician_id ?? 0) === Number(user.technicianId);
+    && await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId));
 }
 
 export async function GET(request: Request) {
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
     if (!repair) throw new Error('Repair was not found.');
 
     const manager = isManagerRole(user.role);
-    const mechanicOwner = mechanicOwnsRepair(user, repair);
+    const mechanicOwner = await mechanicOwnsRepair(user, repair);
     if (user.role === 'mechanic' && !mechanicOwner) {
       throw new Error('This repair is not assigned to you.');
     }
@@ -225,7 +226,7 @@ export async function POST(request: Request) {
     if (!note) throw new Error('Repair note was not found.');
 
     const manager = isManagerRole(user.role);
-    const mechanicOwner = mechanicOwnsRepair(user, repair);
+    const mechanicOwner = await mechanicOwnsRepair(user, repair);
     const ownNote = Number(note.user_id ?? 0) === Number(user.id)
       || (note.user_id == null && Number(note.technician_id ?? 0) === Number(user.technicianId ?? 0));
     if (!manager) {
