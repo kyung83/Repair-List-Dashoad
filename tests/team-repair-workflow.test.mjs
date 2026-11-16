@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 const read=(file)=>readFile(new URL(`../${file}`,import.meta.url),'utf8');
 
 test('team member schema is additive and primary technician remains in repairs',async()=>{
-  const migration=await read('migrations/0163_repair_team_members.sql');
+  const migration=await read('migrations/0169_repair_team_members.sql');
   assert.match(migration,/CREATE TABLE IF NOT EXISTS repair_team_members/);
   assert.match(migration,/PRIMARY KEY \(repair_id, technician_id\)/);
   assert.doesNotMatch(migration,/ALTER TABLE repairs/);
@@ -51,7 +51,7 @@ test('shared workflows accept helpers and shop exposes join control',async()=>{
 });
 
 test('simultaneous PM and repair-type checklist edits reject stale answers',async()=>{
-  const migration=await read('migrations/0164_team_checklist_revisions.sql');
+  const migration=await read('migrations/0170_team_checklist_revisions.sql');
   assert.match(migration,/ALTER TABLE maintenance_checklist_items ADD COLUMN revision/);
   assert.match(migration,/ALTER TABLE repair_type_checklist_items ADD COLUMN revision/);
   const pm=await read('app/api/maintenance-checklist/route.ts');
