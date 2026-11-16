@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { activeRepairTypeChecklistTemplate, repairTypeForRepair } from '@/lib/repair-types';
@@ -9,11 +10,11 @@ type ItemRow={id:number;item_number:number;section:string;item_text:string;resul
 function numericRepairId(value:unknown){const match=String(value??'').match(/^(?:repair-)?(\d+)$/);const id=match?Number(match[1]):0;if(!id)throw new Error('Repair was not found.');return id}
 function canManage(user:AppUser){return user.role==='manager'||user.role==='admin'}
 async function loadRepair(id:number){const row=await env.DB.prepare(`SELECT r.id,r.equipment_id,r.technician_id,COALESCE(r.status,'') AS status,COALESCE(e.unit,'') AS unit,r.repair_type_id,COALESCE(rt.name,'') AS repair_type_name,COALESCE(rt.checklist_mode,'none') AS checklist_mode FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id LEFT JOIN repair_types rt ON rt.id=r.repair_type_id WHERE r.id=?`).bind(id).first<RepairRow>();if(!row)throw new Error('Repair was not found.');if(!row.repair_type_id||row.checklist_mode==='none')throw new Error('This repair type does not use a checklist.');return row}
-function requireAccess(user:AppUser,repair:RepairRow){if(canManage(user))return;if(user.role!=='mechanic'||!user.technicianId||Number(repair.technician_id??0)!==Number(user.technicianId))throw new Error('This repair is not assigned to you.')}
+async function requireAccess(user:AppUser,repair:RepairRow){if(canManage(user))return;if(user.role!=='mechanic'||!user.technicianId||!(await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId))))throw new Error('This repair is not assigned to you.')}
 async function loadRun(repairId:number){return env.DB.prepare(`SELECT id,repair_id,repair_type_id,template_id,template_version,status,started_at,completed_at FROM repair_type_checklist_runs WHERE repair_id=?`).bind(repairId).first<RunRow>()}
 
 async function ensureRun(user:AppUser,repair:RepairRow){
- requireAccess(user,repair);if(repair.status.toLowerCase().includes('complete'))throw new Error('That repair is already completed.');
+ await requireAccess(user,repair);if(repair.status.toLowerCase().includes('complete'))throw new Error('That repair is already completed.');
  const existing=await loadRun(repair.id);if(existing)return existing;
  const template=await activeRepairTypeChecklistTemplate(env.DB,Number(repair.repair_type_id));if(!template)throw new Error(`${repair.repair_type_name} does not have a checklist configured yet.`);
  await env.DB.batch([
@@ -44,12 +45,12 @@ async function createCorrective(user:AppUser,repair:RepairRow,item:ItemRow,notes
 }
 async function closeCorrective(user:AppUser,item:ItemRow){if(!item.corrective_repair_id)return;await env.DB.prepare(`UPDATE repairs SET status='Completed',completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'`).bind(item.corrective_repair_id).run();await env.DB.prepare(`INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail) VALUES(?,?,NULL,'completed_from_repair_type_checklist','Checklist item corrected and changed to Pass/N/A.')`).bind(item.corrective_repair_id,user.id).run()}
 
-export async function GET(request:Request){try{const user=await getSessionUser(env.DB,request);if(!user)return Response.json({error:'Authentication required.'},{status:401});const repair=await loadRepair(numericRepairId(new URL(request.url).searchParams.get('repairId')));requireAccess(user,repair);return Response.json(await payload(repair),{headers:{'cache-control':'no-store'}})}catch(error){return Response.json({error:error instanceof Error?error.message:'Checklist could not be loaded.'},{status:400})}}
+export async function GET(request:Request){try{const user=await getSessionUser(env.DB,request);if(!user)return Response.json({error:'Authentication required.'},{status:401});const repair=await loadRepair(numericRepairId(new URL(request.url).searchParams.get('repairId')));await requireAccess(user,repair);return Response.json(await payload(repair),{headers:{'cache-control':'no-store'}})}catch(error){return Response.json({error:error instanceof Error?error.message:'Checklist could not be loaded.'},{status:400})}}
 
 export async function POST(request:Request){
  try{
   const user=await getSessionUser(env.DB,request);if(!user)return Response.json({error:'Authentication required.'},{status:401});const contentType=request.headers.get('content-type')??'';let body:Record<string,unknown>={},form:FormData|null=null;if(contentType.includes('multipart/form-data')){form=await request.formData();for(const[k,v]of form.entries())if(typeof v==='string')body[k]=v}else body=await request.json() as Record<string,unknown>;
-  const repair=await loadRepair(numericRepairId(body.repairId));requireAccess(user,repair);const action=String(body.action??'');
+  const repair=await loadRepair(numericRepairId(body.repairId));await requireAccess(user,repair);const action=String(body.action??'');
   if(action==='startChecklist'){await ensureRun(user,repair);return Response.json({ok:true,...await payload(repair)})}
   if(action==='setItem'){
    const run=await ensureRun(user,repair);if(run.status==='completed')throw new Error('Completed checklists cannot be changed.');const n=Number(body.itemNumber),result=String(body.result??'pending'),notes=String(body.notes??'').trim().slice(0,1000),measurement=String(body.measurementValue??'').trim().slice(0,100);if(!Number.isInteger(n)||n<=0||!['pending','pass','fail','na'].includes(result))throw new Error('Checklist item/result is invalid.');
