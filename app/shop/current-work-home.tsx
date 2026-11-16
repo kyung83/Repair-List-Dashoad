@@ -1,5 +1,6 @@
-import RepairTeamPanel from './repair-team-panel';
 "use client";
+
+import RepairTeamPanel from './repair-team-panel';
 
 import type {ReactNode} from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
