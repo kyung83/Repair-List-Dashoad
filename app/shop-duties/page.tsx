@@ -2,7 +2,7 @@
 
 import {useEffect,useMemo,useState} from "react";
 
-type Mechanic={id:number;displayName:string;role:string;technicianId:number};
+type Mechanic={id:number;displayName:string;role:string;technicianId:number;yard:string};
 type ChecklistItem={id:number;section:string;text:string;sortOrder:number;required:boolean};
 type CurrentAssignment={
   id:number;periodKey:string;dueDate:string;assignedUserId:number;assignedName:string;status:string;
@@ -176,7 +176,7 @@ export default function ShopDutiesSetupPage(){
         : (current?.status==="pending"?"CHANGE THIS MONTH'S PERSON":"ASSIGN THIS MONTH");
 
     const description=kind==="bathroom"
-      ? "Normally rotates through all active mechanics weekly, but you can override this week's person before the duty is started."
+      ? "Rotates through Clare technicians only. You may change this week's assigned Clare technician before the duty is started."
       : kind==="shop"
         ? "You assign the Shop Check yourself. It is not tied to a shift or automatic mechanic rotation."
         : "You choose the mechanic yourself each month. There is no automatic monthly rotation.";
@@ -206,7 +206,7 @@ export default function ShopDutiesSetupPage(){
           disabled={busy||assignmentLocked}
         >
           <option value="">Choose mechanic…</option>
-          {mechanics.map(person=><option key={person.id} value={person.id}>{person.displayName}</option>)}
+          {mechanics.filter(person=>kind!=="bathroom"||person.yard?.trim().toLowerCase()==="clare").map(person=><option key={person.id} value={person.id}>{person.displayName}</option>)}
         </select>
       </label>
       <button type="button" style={primaryButton} disabled={busy||assignmentLocked||!assignmentChoice[template.templateKey]} onClick={()=>void assign(template)}>

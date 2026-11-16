@@ -447,11 +447,11 @@ export async function getShopDutySetupData(db:D1Database, now:Date|number = Date
   const [templateRows, mechanics, shifts, selected] = await Promise.all([
     getTemplates(db, false),
     db.prepare(q(
-      'SELECT id,display_name,role,technician_id FROM app_users',
+      'SELECT id,display_name,role,technician_id,COALESCE(yard,\'\') AS yard FROM app_users',
       "WHERE active=1 AND COALESCE(dispatch_access,0)=0 AND technician_id IS NOT NULL",
       "AND role IN ('mechanic','manager','admin')",
       "ORDER BY CASE role WHEN 'mechanic' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END,display_name COLLATE NOCASE,id"
-    )).all<{id:number;display_name:string;role:string;technician_id:number}>(),
+    )).all<{id:number;display_name:string;role:string;technician_id:number;yard:string}>(),
     db.prepare(
       'SELECT id,name,start_time,end_time,days_of_week,active FROM maintenance_shifts WHERE active=1 ORDER BY start_time,name'
     ).all<{id:number;name:string;start_time:string;end_time:string;days_of_week:string;active:number}>(),
@@ -547,7 +547,7 @@ export async function getShopDutySetupData(db:D1Database, now:Date|number = Date
     overdueAssignments:overdueRows.results.map(mapAlert),
     dueTodayAssignments:dueTodayRows.results.map(mapAlert),
     mechanics:mechanics.results.map((row) => ({
-      id:Number(row.id), displayName:row.display_name, role:row.role, technicianId:Number(row.technician_id),
+      id:Number(row.id), displayName:row.display_name, role:row.role, technicianId:Number(row.technician_id), yard:row.yard,
     })),
     shifts:shifts.results.map((row) => ({
       id:Number(row.id), name:row.name, startTime:row.start_time, endTime:row.end_time,
