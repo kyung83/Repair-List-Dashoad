@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { applyPartToRepair } from '@/lib/inventory-operations';
@@ -57,7 +58,7 @@ async function requirePartAccess(request: Request, repairId: number) {
   `).bind(repairId).first<{id:number;technician_id:number|null;status:string}>();
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
-  if (user.role === 'mechanic' && (!user.technicianId || Number(repair.technician_id ?? 0) !== Number(user.technicianId))) {
+  if (user.role === 'mechanic' && (!user.technicianId || !(await isRepairTeamMember(env.DB,repairId,Number(user.technicianId))))) {
     throw new Error('This repair is not assigned to you.');
   }
   return {user,repair};
