@@ -380,6 +380,42 @@ export async function POST(request: Request) {
     // The original handler owns validation for malformed/non-JSON requests.
   }
 
+  // Due PMs, annuals, and unmaterialized DVIRs are board rows, not yet repairs.
+  // Reuse the existing materialization action before setting the persistent Pull Thru
+  // flag. This keeps the normal checklist, Geotab, assignment and tablet alert flows.
+  if (body && String(body.action ?? '') === 'setPullThru') {
+    const sourceId = String(body.repairId ?? '');
+    const due = /^(pm|annual)-(\\d+)$/.exec(sourceId);
+    const rawDvir = sourceId.startsWith('dvir-') && !sourceId.startsWith('repair-');
+    if (due || rawDvir) {
+      try {
+        await managerUser(request.clone());
+        if (body.pullThru !== true) throw new Error('A due item must first be made into a work order before its Pull Thru flag can be cleared.');
+        const headers = new Headers(request.headers);
+        headers.set('content-type', 'application/json');
+        headers.delete('content-length');
+        const forward = (payload:Record<string,unknown>) => originalPOST(new Request(request.url,{
+          method:'POST',headers,body:JSON.stringify(payload),
+        }));
+        const created = await forward(due
+          ? {action:'createMaintenanceRepair',maintenanceId:sourceId}
+          : {action:'createDvirRepair',defectId:String(body.defectId ?? sourceId.slice(5))});
+        const creation = await created.json() as {ok?:boolean;error?:string;repairId?:string};
+        if (!created.ok || !creation.ok || !creation.repairId) {
+          throw new Error(creation.error || 'Could not create the work order for Pull Thru.');
+        }
+        const marked = await forward({action:'setPullThru',repairId:creation.repairId,pullThru:true});
+        const result = await marked.json() as {ok?:boolean;error?:string};
+        if (!marked.ok || !result.ok) {
+          throw new Error(result.error || 'Work order was created, but Pull Thru could not be saved. Check the new work order before retrying.');
+        }
+        return Response.json({ok:true,repairId:creation.repairId,pullThru:true,createdWorkOrder:!creation.existing});
+      } catch (error) {
+        return Response.json({ok:false,error:error instanceof Error?error.message:'Pull Thru could not be saved.'},{status:400});
+      }
+    }
+  }
+
   if (body && String(body.action ?? '') === 'syncDvir') {
     try {
       await managerUser(request);
