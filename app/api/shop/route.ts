@@ -150,7 +150,7 @@ async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repair
   `).bind(repairId).first<DvirRepairLink>();
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
-  if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
+  if (!(await isRepairTeamMember(env.DB,repairId,Number(user.technicianId)))) throw new Error('This repair is not assigned to you.');
 
   const timer = await env.DB.prepare(`
     SELECT repair_id FROM repair_labor_timers WHERE user_id = ?
