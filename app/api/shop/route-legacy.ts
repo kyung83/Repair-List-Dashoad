@@ -516,8 +516,11 @@ async function handleRepairOutcome(request:Request, body:Record<string,unknown>)
     const result = await env.DB.prepare(`
       UPDATE repairs
       SET status='Completed', completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND technician_id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
-    `).bind(id,technician.id).run();
+      WHERE id=? AND (technician_id=? OR EXISTS(
+        SELECT 1 FROM repair_team_members team WHERE team.repair_id=repairs.id AND team.technician_id=?
+      )) AND NOT EXISTS(SELECT 1 FROM repair_labor_timers rt WHERE rt.repair_id=repairs.id)
+      AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+    `).bind(id,technician.id,technician.id).run();
     if (Number(result.meta.changes ?? 0) === 0) throw new Error('Repair could not be completed.');
     await releaseRepairPartRequests(env.DB,id,user.id);
     await repairJobEvent(id,user.id,technician.id,'completed',`${technician.name} reported Repaired.`);
