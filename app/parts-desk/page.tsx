@@ -1,3 +1,4 @@
+import {getAssignedYard} from '@/lib/client-assigned-yard';
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
@@ -43,6 +44,7 @@ const money=(value:number|null)=>value==null?"—":value.toLocaleString(undefine
 
 export default function PartsDeskPage(){
   const[data,setData]=useState<DeskData|null>(null),[message,setMessage]=useState(""),[busy,setBusy]=useState(""),[yard,setYard]=useState("ALL");
+  useEffect(()=>{void getAssignedYard().then(({warehouseCode})=>{if(warehouseCode)setYard(current=>current==='ALL'?warehouseCode:current)}).catch(()=>undefined)},[]);
   const[orderQty,setOrderQty]=useState<Record<string,string>>({}),[receiveQty,setReceiveQty]=useState<Record<string,string>>({});
   const[showOneTime,setShowOneTime]=useState(false),[oneTime,setOneTime]=useState<OneTimeForm>(blankOneTime);
   const[historySearch,setHistorySearch]=useState("");
