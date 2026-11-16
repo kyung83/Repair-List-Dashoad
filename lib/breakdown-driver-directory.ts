@@ -269,3 +269,23 @@ export async function resolveBreakdownDriverDirectorySelection(db: D1Database, i
     phoneLast4: row.phone_last4,
   };
 }
+
+/**
+ * Phone-only fallback for a Geotab-identified driver. Never guess between
+ * matching names or read a previous directory sync generation.
+ */
+export async function exactBreakdownDriverPhone(db: D1Database, driverName: string) {
+  const normalized = normalizeName(driverName).slice(0, 160);
+  if (!normalized || normalized.split(' ').length < 2) return '';
+  const generation = await activeGeneration(db);
+  if (!generation) return '';
+  const rows = await db.prepare(`
+    SELECT phone_e164, phone_display
+    FROM breakdown_driver_directory
+    WHERE generation=? AND full_name_norm=?
+    LIMIT 3
+  `).bind(generation, normalized).all<{ phone_e164: string; phone_display: string }>();
+  if (rows.results.length !== 1) return '';
+  const row = rows.results[0];
+  return normalizePhone(row.phone_e164) ? String(row.phone_display || '').trim().slice(0, 60) : '';
+}
