@@ -9,7 +9,7 @@ type TechnicianOption={id:number;name:string};
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
 type LaborEntry={id:number;technician:string;laborDate:string;hours:number;rate:number;notes:string};
-type Repair={id:string;equipmentId:number|null;unit:string;issue:string;status:string;location:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];yard?:string;handoffNote?:string};
+type Repair={teamIds?:number[];id:string;equipmentId:number|null;unit:string;issue:string;status:string;location:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];yard?:string;handoffNote?:string};
 type Part={id:number;partNumber:string;description:string;quantityOnHand:number};
 type PartRequest={id:number;repairId:string;repairNumericId:number;partId:number;partNumber:string;description:string;warehouseCode:string;warehouseName:string;unit:string;technicianId:number|null;assignedTo:string;priority:string;outOfService:boolean;requestedQuantity:number;reservedQuantity:number;usedQuantity:number;remainingQuantity:number;shortageQuantity:number;state:string;createdAt:string;updatedAt:string};
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
@@ -85,7 +85,7 @@ export default function ShopPage(){
   const activeRepair=useMemo(()=>data?.repairs.find(repair=>repair.id===data.activeTimer?.repairId)??null,[data]);
   const activeUnitRepairs=useMemo(()=>activeRepair&&data?data.repairs.filter(repair=>sameUnit(repair,activeRepair)):[],[data,activeRepair]);
   const activeRequests=useMemo(()=>activeRepair?(data?.partRequests??[]).filter(request=>request.repairId===activeRepair.id):[],[data,activeRepair]);
-  const mine=useMemo(()=>data?.user.technicianId?data.repairs.filter(repair=>repair.technicianId===data.user.technicianId):[],[data]);
+  const mine=useMemo(()=>data?.user.technicianId?data.repairs.filter(repair=>repair.technicianId===data.user.technicianId||(repair.teamIds||[]).includes(Number(data.user.technicianId))):[],[data]);
   const available=useMemo(()=>data?.repairs.filter(repair=>repair.technicianId===null)??[],[data]);
   const visible=useMemo(()=>!data?[]:view==="mine"?mine:view==="available"?available:data.repairs,[data,view,mine,available]);
   const groups=useMemo(()=>groupByUnit(visible),[visible]);
@@ -121,6 +121,7 @@ export default function ShopPage(){
       handoffPanel={handoffPanel}
       onRepaired={()=>void repaired(activeRepair)}
       onDoneWorking={()=>setHandoffOpen(open=>!open)}
+      onTeamChanged={load}
       onChooseRepair={repair=>void chooseRepair(repair)}
       onFoundRepairAdded={load}
       onUsePlannedPart={(repair,part)=>void usePlannedPart(repair,part)}
@@ -134,7 +135,7 @@ export default function ShopPage(){
       {message&&<div style={notice}>{message}</div>}
       {data?.user.role==="mechanic"&&!data.user.technicianId&&<div style={errorNotice}>Your login is not linked to a technician record yet. Ask an administrator to update the account.</div>}
       <div style={tabs}><button onClick={()=>setView("mine")} style={view==="mine"?activeTab:tab}>My Units ({mineGroups.length})</button><button onClick={()=>setView("available")} style={view==="available"?activeTab:tab}>Available Units ({availableGroups.length})</button><button onClick={()=>setView("all")} style={view==="all"?activeTab:tab}>All Open Units ({allGroups.length})</button></div>
-      <section style={queue}>{groups.map(group=>{const workable=group.repairs.find(repair=>repair.technicianId===data?.user.technicianId||repair.technicianId===null);return <article key={group.key} style={unitCard}><div style={unitHeader}><a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={unitLink}>Unit {group.unit||"—"} ↗</a><span style={openCount}>{group.repairs.length} OPEN</span></div><div style={repairList}>{group.repairs.map(repair=><div key={repair.id} style={repairRow}><div><strong>{repair.issue}</strong><div style={repairMeta}>{repair.technicianId===null?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`} · {repair.laborHours.toFixed(2)} hr logged</div></div><div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{repair.pullThru&&<span style={pullThruBadge}>PULL THRU</span>}<span style={statusBadge}>{repair.status}</span></div></div>)}</div>{workable&&data?.user.technicianId?<button disabled={busy} onClick={()=>void startRepair(workable)} style={startButton}>START WORKING ON UNIT</button>:<a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={viewButton}>VIEW UNIT</a>}</article>})}{data&&!groups.length&&<div style={empty}>No units in this view.</div>}</section>
+      <section style={queue}>{groups.map(group=>{const workable=group.repairs.find(repair=>repair.technicianId===data?.user.technicianId||(repair.teamIds||[]).includes(Number(data?.user.technicianId))||repair.technicianId===null);return <article key={group.key} style={unitCard}><div style={unitHeader}><a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={unitLink}>Unit {group.unit||"—"} ↗</a><span style={openCount}>{group.repairs.length} OPEN</span></div><div style={repairList}>{group.repairs.map(repair=><div key={repair.id} style={repairRow}><div><strong>{repair.issue}</strong><div style={repairMeta}>{repair.technicianId===null?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`} · {repair.laborHours.toFixed(2)} hr logged</div></div><div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{repair.pullThru&&<span style={pullThruBadge}>PULL THRU</span>}<span style={statusBadge}>{repair.status}</span></div></div>)}</div>{workable&&data?.user.technicianId?<button disabled={busy} onClick={()=>void startRepair(workable)} style={startButton}>START WORKING ON UNIT</button>:<a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={viewButton}>VIEW UNIT</a>}</article>})}{data&&!groups.length&&<div style={empty}>No units in this view.</div>}</section>
     </div>
   </main>;
 }
