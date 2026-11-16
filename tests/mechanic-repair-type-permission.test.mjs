@@ -12,14 +12,14 @@ test('mechanic worker gate allows repair type selection and repair type checklis
   assert.match(worker,/TECHNICIAN_SHOP_WRITE_PATHS\.has\(pathname\)/);
 });
 
-test('repair type API still requires the repair to be assigned and WORKING NOW',()=>{
-  assert.match(repairType,/Number\(repair\.technician_id \?\? 0\) !== Number\(user\.technicianId\)/);
+test('repair type API requires team membership and WORKING NOW',()=>{
+  assert.match(repairType,/isRepairTeamMember\(env.DB,repairId,Number\(user.technicianId\)\)/);
   assert.match(repairType,/SELECT repair_id,technician_id FROM repair_labor_timers WHERE user_id=\?/);
   assert.match(repairType,/Choose the Repair Type while this repair is WORKING NOW/);
 });
 
-test('repair type checklist still limits mechanics to their assigned repair',()=>{
+test('repair type checklist limits mechanics to assigned repair team',()=>{
   assert.match(checklist,/user\.role!=='mechanic'/);
-  assert.match(checklist,/Number\(repair\.technician_id\?\?0\)!==Number\(user\.technicianId\)/);
+  assert.match(checklist,/isRepairTeamMember\(env.DB,repair.id,Number\(user.technicianId\)\)/);
   assert.match(checklist,/This repair is not assigned to you/);
 });
