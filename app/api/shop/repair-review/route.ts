@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     const completed = repair.status.toLowerCase().includes('complete');
     const canCorrect = manager || (mechanicOwner && !completed);
 
-    const [notes, parts, labor, requests] = await Promise.all([
+    const [notes, parts, labor, requests, unmatchedRequests] = await Promise.all([
       env.DB.prepare(`
         SELECT e.id, e.user_id, e.technician_id, COALESCE(e.detail, '') AS detail, e.created_at,
                COALESCE(t.name, 'Technician') AS technician_name
@@ -125,6 +125,16 @@ export async function GET(request: Request) {
         created_at:string;
         updated_at:string;
       }>(),
+      env.DB.prepare(`
+        SELECT q.id,q.requested_text,q.requested_quantity,q.warehouse_code,
+               q.status,q.created_at,q.updated_at
+        FROM unmatched_part_requests q
+        WHERE q.repair_id=?
+        ORDER BY q.created_at ASC,q.id ASC
+      `).bind(id).all<{
+        id:number;requested_text:string;requested_quantity:number;warehouse_code:string;
+        status:string;created_at:string;updated_at:string;
+      }>(),
     ]);
 
     return Response.json({
@@ -162,6 +172,15 @@ export async function GET(request: Request) {
         notes:row.notes,
         startedAt:row.started_at,
         endedAt:row.ended_at,
+      })),
+      unmatchedRequests:unmatchedRequests.results.map(row=>({
+        id:Number(row.id),
+        requestedText:row.requested_text,
+        requestedQuantity:Number(row.requested_quantity),
+        warehouseCode:row.warehouse_code,
+        status:row.status,
+        createdAt:row.created_at,
+        updatedAt:row.updated_at,
       })),
       requests:requests.results.map((row)=>{
         const requestedQuantity=Number(row.requested_quantity ?? 0);
