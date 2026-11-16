@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 
@@ -47,7 +48,7 @@ async function openPmRepair(id: number) {
 async function requirePmAccess(user: AppUser, repairId: number) {
   const repair = await openPmRepair(repairId);
   if (!isManager(user)) {
-    if (!user.technicianId || Number(repair.technician_id ?? 0) !== user.technicianId) {
+    if (!user.technicianId || !(await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId)))) {
       throw new Error('That PM work order is not assigned to you.');
     }
   }
