@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import ModuleTabs from "../module-tabs";
+import {getAssignedYard} from "@/lib/client-assigned-yard";
 
 type Warehouse={id:number;code:string;name:string};
 type Stock={warehouseCode:string;warehouseName:string;quantityOnHand:number;available?:number;physicalOnHand?:number;reserved?:number};
@@ -17,6 +18,8 @@ export default function InventoryControlsPage(){
   const[query,setQuery]=useState(""),[selectedId,setSelectedId]=useState<number|null>(null),[refsText,setRefsText]=useState("");
   const[source,setSource]=useState(""),[kind,setKind]=useState<"terminal"|"outside"|"remove">("terminal"),[destination,setDestination]=useState(""),[destinationLabel,setDestinationLabel]=useState(""),[quantity,setQuantity]=useState("1"),[notes,setNotes]=useState("");
   const[busy,setBusy]=useState(""),[message,setMessage]=useState("");
+  const[preferredSource,setPreferredSource]=useState("");
+  useEffect(()=>{void getAssignedYard().then(({warehouseCode})=>setPreferredSource(warehouseCode)).catch(()=>undefined)},[]);
 
   async function load(){
     const[inventoryResponse,transferResponse]=await Promise.all([
@@ -45,7 +48,7 @@ export default function InventoryControlsPage(){
     setQuery(`${part.partNumber} — ${part.description}`);
     setRefsText((part.crossReferences??[]).join("\n"));
     const stocks=(part.warehouseStocks??[]).filter(stock=>Number(stock.available??stock.quantityOnHand)>0);
-    setSource(stocks[0]?.warehouseCode??"");
+    setSource(stocks.find(stock=>stock.warehouseCode===preferredSource)?.warehouseCode??stocks[0]?.warehouseCode??"");
     setKind("terminal");setDestination("");setDestinationLabel("");setQuantity("1");setNotes("");setMessage("");
   }
 
