@@ -49,3 +49,17 @@ test('shared workflows accept helpers and shop exposes join control',async()=>{
   assert.match(await read('app/shop/page-v2.tsx'),/teamIds/);
   assert.match(await read('app/api/shop/route-legacy.ts'),/teamByRepair/);
 });
+
+test('simultaneous PM and repair-type checklist edits reject stale answers',async()=>{
+  const migration=await read('migrations/0164_team_checklist_revisions.sql');
+  assert.match(migration,/ALTER TABLE maintenance_checklist_items ADD COLUMN revision/);
+  assert.match(migration,/ALTER TABLE repair_type_checklist_items ADD COLUMN revision/);
+  const pm=await read('app/api/maintenance-checklist/route.ts');
+  const type=await read('app/api/repair-type-checklist/route.ts');
+  assert.match(pm,/revision=revision\+1/);
+  assert.match(type,/revision=revision\+1/);
+  assert.match(pm,/expectedRevision/);
+  assert.match(type,/expectedRevision/);
+  assert.match(await read('app/shop/maintenance-checklist-panel-v2.tsx'),/expectedRevision:item.revision/);
+  assert.match(await read('app/shop/repair-type-checklist-panel.tsx'),/expectedRevision:item.revision/);
+});
