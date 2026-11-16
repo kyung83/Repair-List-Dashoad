@@ -320,6 +320,10 @@ export async function POST(request: Request) {
     try {
       const repairId = numericRepairId(body.repairId);
       if (!repairId) throw new Error('Repair was not found.');
+      const remaining=await env.DB.prepare(
+        'SELECT 1 AS active FROM repair_labor_timers WHERE repair_id=? AND user_id<>? LIMIT 1'
+      ).bind(repairId,(await getSessionUser(env.DB,request.clone()))?.id??-1).first<{active:number}>();
+      if(remaining)throw new Error('Another technician is still working on this repair. They must finish their timer before closing the job.');
       await validateRepairTypeChecklistBeforeClose(env.DB,repairId);
       const dvir = await markLinkedDvirRepairedBeforeShopCompletion(request.clone(),repairId);
       const response = await legacyPOST(request);
