@@ -463,12 +463,10 @@ export default function PlanningCenter(){
    </>;
   }
   if(row.source==='dvir')return <>
-   <button className={path.includes("planning")?"s.pullThruButton":"s.pullThruAction"} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'setPullThru',pullThru:true,defectId:row.dvirDefectId})}>PULL THRU</button>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'createDvirRepair',defectId:row.dvirDefectId})}>Create Job</button>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'markDvirRepaired',defectId:row.dvirDefectId,logId:row.dvirLogId})}>Mark DVIR Repaired</button>
   </>;
   if(raw(row.source))return <>
-   <button className={path.includes("planning")?"s.pullThruButton":"s.pullThruAction"} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'setPullThru',pullThru:true,defectId:row.dvirDefectId})}>PULL THRU</button>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'createMaintenanceRepair',maintenanceId:row.maintenanceId||row.id})}>Create Work Order</button>
    <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>void change(row.id,{action:'completeMaintenance',maintenanceId:row.maintenanceId||row.id})}>Complete Due Item</button>
   </>;
