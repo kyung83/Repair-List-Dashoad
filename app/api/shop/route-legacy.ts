@@ -556,8 +556,16 @@ export async function GET(request: Request) {
     [key: string]: unknown;
   };
   const activeRepairId = String(payload.activeTimer?.repairId ?? '');
+  const teamRows=await env.DB.prepare('SELECT repair_id,technician_id FROM repair_team_members').all<{repair_id:number;technician_id:number}>();
+  const teamByRepair=new Map<number,number[]>();
+  for(const row of teamRows.results){
+    const ids=teamByRepair.get(Number(row.repair_id))||[];
+    ids.push(Number(row.technician_id));
+    teamByRepair.set(Number(row.repair_id),ids);
+  }
   const yards = await equipmentYards();
-  let repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status));
+  let repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status))
+    .map(repair=>({...repair,teamIds:teamByRepair.get(numericRepairId(repair.id))||[]}));
 
   let shopWarehouse:AssignedWarehouse|null=null;
   if (user && (user.role === 'mechanic' || user.role === 'manager')) {
@@ -566,7 +574,8 @@ export async function GET(request: Request) {
     if (user.role === 'mechanic' && user.technicianId) {
       const technicianId = Number(user.technicianId);
       repairs = repairs.filter((repair) => {
-        const assignedToMe = Number(repair.technicianId ?? 0) === technicianId;
+        const assignedToMe = Number(repair.technicianId ?? 0) === technicianId
+           || ((repair as ShopRepair & {teamIds?:number[]}).teamIds||[]).includes(technicianId);
         if (assignedToMe || repair.id === activeRepairId) return true;
         return Boolean(yard) && physicalYard(repair, yards) === yard;
       });
