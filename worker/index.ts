@@ -84,6 +84,7 @@ const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/repair-review',
   '/api/shop/repair-photos',
   '/api/shop/repair-type',
+  '/api/shop/team',
   '/api/shop/indirect-labor',
   '/api/shop/pull-thru-alert',
   '/api/shop-duties',
