@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { allocateWaitingForPart, normalizeWarehouseCode } from '@/lib/parts-lifecycle';
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
 
     if (user.role === 'mechanic') {
       if (!user.technicianId) throw new Error('Your technician login is not linked to a technician record.');
-      const assigned = Number(repair.technician_id ?? 0) === Number(user.technicianId);
+      const assigned = await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId));
       const active = assigned ? null : await env.DB.prepare(`
         SELECT repair_id FROM repair_labor_timers WHERE user_id = ? AND repair_id = ?
       `).bind(user.id, repairId).first<{ repair_id:number }>();

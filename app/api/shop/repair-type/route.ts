@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { listRepairTypes, repairTypeForRepair, requireRepairType } from '@/lib/repair-types';
@@ -33,7 +34,7 @@ async function repairForUser(request:Request, repairId:number, requireWorkingNow
   `).bind(repairId).first<RepairRow>();
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
-  if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
+  if (!(await isRepairTeamMember(env.DB,repairId,Number(user.technicianId)))) throw new Error('This repair is not assigned to you.');
 
   if (requireWorkingNow) {
     const timer = await env.DB.prepare(`SELECT repair_id,technician_id FROM repair_labor_timers WHERE user_id=?`).bind(user.id).first<{repair_id:number;technician_id:number}>();

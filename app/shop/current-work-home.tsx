@@ -1,5 +1,7 @@
 "use client";
 
+import RepairTeamPanel from './repair-team-panel';
+
 import type {ReactNode} from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
@@ -11,7 +13,7 @@ import MechanicUnitHistory from "./mechanic-unit-history";
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
 type LaborEntry={id:number;technician:string;laborDate:string;hours:number;rate:number;notes:string};
-type Repair={id:string;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
+type Repair={teamIds?:number[];id:string;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
 type PartRequest={id:number;repairId:string;partNumber:string;description:string;reservedQuantity:number;shortageQuantity:number};
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
 
@@ -27,6 +29,7 @@ type Props={
   handoffPanel?:ReactNode;
   onRepaired:()=>void;
   onDoneWorking:()=>void;
+  onTeamChanged:()=>void;
   onChooseRepair:(repair:Repair)=>void;
   onFoundRepairAdded:()=>void|Promise<void>;
   onUsePlannedPart:(repair:Repair,part:PlannedPart)=>void;
@@ -43,7 +46,7 @@ export default function CurrentWorkHome(props:Props){
   const runningTime=duration(timer.startedAt,now);
   const noUnit=!String(repair.unit||timer.unit||"").trim();
   const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
-  const repairMine=repair.technicianId===technicianId&&technicianId!==null;
+  const repairMine=technicianId!==null&&(repair.technicianId===technicianId||(repair.teamIds||[]).includes(technicianId));
   const otherRepairs=unitRepairs.filter(item=>item.id!==timer.repairId);
   const visibleOtherRepairs=noUnit?[]:otherRepairs;
 
@@ -64,6 +67,7 @@ export default function CurrentWorkHome(props:Props){
         <div style={timerStyle}>◷ {runningTime}</div>
       </section>
 
+      <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} onChanged={props.onTeamChanged}/>
       {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>} 
 
       <section style={{...actionGrid,gridTemplateColumns:noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))"}}>

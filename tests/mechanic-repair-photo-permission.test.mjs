@@ -11,9 +11,9 @@ test('mechanic worker gate allows repair photo uploads',()=>{
   assert.match(worker,/if \(ASSIGNED_MAINTENANCE_WRITE_PATHS\.has\(pathname\) \|\| TECHNICIAN_SHOP_WRITE_PATHS\.has\(pathname\)\) return true/);
 });
 
-test('repair photo API still limits mechanics to their assigned repair',()=>{
+test('repair photo API limits mechanics to primary or explicitly authorized team helpers',()=>{
   assert.match(photoRoute,/user\.role === 'mechanic'/);
-  assert.match(photoRoute,/Number\(repair\.technician_id \?\? 0\) === Number\(user\.technicianId\)/);
+  assert.match(photoRoute,/isRepairTeamMember\(env.DB,repair.id,Number\(user.technicianId\)\)/);
   assert.match(photoRoute,/if \(!manager && !mechanicOwner\) throw new Error\('This repair is not assigned to you\.'\)/);
 });
 

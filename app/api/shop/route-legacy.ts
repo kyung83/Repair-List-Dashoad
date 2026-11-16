@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { isRepairTeamMember, activeRepairTeammates } from '@/lib/repair-team';
 import { getSessionUser } from '@/lib/auth';
 import { getShopLaborRate } from '@/lib/billing';
 import { GET as originalGET, POST as originalPOST } from './original';
@@ -181,7 +182,7 @@ async function requirePartAccess(request: Request, repairId: number) {
   if (!repair) throw new Error('Repair was not found.');
   if (completed(repair.status)) throw new Error('That repair is already completed.');
   if (user.role === 'mechanic') {
-    if (!user.technicianId || Number(repair.technician_id ?? 0) !== Number(user.technicianId)) {
+    if (!user.technicianId || !(await isRepairTeamMember(env.DB,repairId,Number(user.technicianId)))) {
       throw new Error('This repair is not assigned to you.');
     }
   }
@@ -277,8 +278,9 @@ async function stopLaborSession(
 async function startLaborSession(user:SessionUser, technician:Technician, id:number, notesValue:unknown='') {
   const repair = await loadRepairUnit(id);
   if (completed(repair.status)) throw new Error('Completed repairs cannot be opened for labor.');
-  if (repair.technician_id !== null && Number(repair.technician_id) !== technician.id) {
-    throw new Error('That repair is assigned to another technician.');
+  if (repair.technician_id !== null && Number(repair.technician_id) !== technician.id
+    && !(await isRepairTeamMember(env.DB,id,technician.id))) {
+    throw new Error('That repair is assigned to another technician. Ask the primary technician to add you as a helper.');
   }
   const existing = await activeTimer(user.id);
   if (existing) {
@@ -291,19 +293,24 @@ async function startLaborSession(user:SessionUser, technician:Technician, id:num
   const results = await env.DB.batch([
     env.DB.prepare(`
       UPDATE repairs
-      SET technician_id = ?, driver = ?,
+      SET technician_id = COALESCE(technician_id, ?),
+          driver = CASE WHEN technician_id IS NULL THEN ? ELSE driver END,
           status = CASE WHEN lower(trim(COALESCE(status,''))) = 'waiting on part' THEN 'Open' ELSE status END,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-        AND (technician_id IS NULL OR technician_id = ?)
+        AND (technician_id IS NULL OR technician_id = ? OR EXISTS (
+          SELECT 1 FROM repair_team_members team WHERE team.repair_id=repairs.id AND team.technician_id=?
+        ))
         AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
-    `).bind(technician.id, technician.name, id, technician.id),
+    `).bind(technician.id, technician.name, id, technician.id,technician.id),
     env.DB.prepare(`
       INSERT INTO repair_labor_timers (user_id, repair_id, technician_id, notes)
       SELECT ?, r.id, ?, ? FROM repairs r
-      WHERE r.id = ? AND r.technician_id = ?
+      WHERE r.id = ? AND (r.technician_id = ? OR EXISTS (
+          SELECT 1 FROM repair_team_members team WHERE team.repair_id=r.id AND team.technician_id=?
+        ))
         AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
-    `).bind(user.id, technician.id, notes, id, technician.id),
+    `).bind(user.id, technician.id, notes, id, technician.id,technician.id),
   ]);
   if (Number(results[1]?.meta.changes ?? 0) === 0) throw new Error('Labor could not be started for that repair.');
   if (wasUnassigned) await repairJobEvent(id,user.id,technician.id,'claimed',`${technician.name} claimed the repair while opening the unit workspace.`);
@@ -399,6 +406,8 @@ async function handleShiftHandoff(request:Request, body:Record<string,unknown>) 
   const timer = await activeTimer(user.id);
   if (!timer) throw new Error('You do not have an active unit session to hand off.');
   const current = await loadRepairUnit(Number(timer.repair_id));
+  if (current.technician_id !== technician.id)
+    throw new Error('Helpers can finish their own work, but only the primary technician can hand off the unit.');
 
   const targetValue = body.targetTechnicianId;
   const targetId = targetValue == null || String(targetValue).trim() === '' ? 0 : Number(targetValue);
@@ -477,6 +486,8 @@ async function handleRepairOutcome(request:Request, body:Record<string,unknown>)
   if (!id) throw new Error('Repair was not found.');
   const outcome = String(body.outcome ?? '');
   if (!['repaired','waiting_part','skip'].includes(outcome)) throw new Error('Unknown repair outcome.');
+  if (outcome==='repaired' && await activeRepairTeammates(env.DB,id,user.id))
+    throw new Error('Another technician is still working on this repair. All helpers must finish their timers before the repair can be completed.');
   const timer = await activeTimer(user.id);
   if (!timer || Number(timer.repair_id) !== id) throw new Error('That repair is not WORKING NOW.');
 
@@ -501,12 +512,21 @@ async function handleRepairOutcome(request:Request, body:Record<string,unknown>)
   }
 
   const stopped = await stopLaborSession(user,technician,id,true,body.notes);
+  if (outcome !== 'repaired' && await activeRepairTeammates(env.DB,id,user.id)) {
+    await repairJobEvent(id,user.id,technician.id,'team_member_stopped',
+      `${technician.name} stopped their own labor; another team member remains working.`);
+    return {ok:true,repairId:`repair-${id}`,hours:stopped!.hours,
+      waitingOnPart:false,completed:false,nextRepairId:null,laborStarted:false,teamStillWorking:true};
+  }
   if (outcome === 'repaired') {
     const result = await env.DB.prepare(`
       UPDATE repairs
       SET status='Completed', completed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND technician_id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
-    `).bind(id,technician.id).run();
+      WHERE id=? AND (technician_id=? OR EXISTS(
+        SELECT 1 FROM repair_team_members team WHERE team.repair_id=repairs.id AND team.technician_id=?
+      )) AND NOT EXISTS(SELECT 1 FROM repair_labor_timers rt WHERE rt.repair_id=repairs.id)
+      AND lower(COALESCE(status,'')) NOT LIKE '%complete%'
+    `).bind(id,technician.id,technician.id).run();
     if (Number(result.meta.changes ?? 0) === 0) throw new Error('Repair could not be completed.');
     await releaseRepairPartRequests(env.DB,id,user.id);
     await repairJobEvent(id,user.id,technician.id,'completed',`${technician.name} reported Repaired.`);
@@ -545,8 +565,16 @@ export async function GET(request: Request) {
     [key: string]: unknown;
   };
   const activeRepairId = String(payload.activeTimer?.repairId ?? '');
+  const teamRows=await env.DB.prepare('SELECT repair_id,technician_id FROM repair_team_members').all<{repair_id:number;technician_id:number}>();
+  const teamByRepair=new Map<number,number[]>();
+  for(const row of teamRows.results){
+    const ids=teamByRepair.get(Number(row.repair_id))||[];
+    ids.push(Number(row.technician_id));
+    teamByRepair.set(Number(row.repair_id),ids);
+  }
   const yards = await equipmentYards();
-  let repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status));
+  let repairs = (payload.repairs ?? []).filter((repair) => !deferred(repair.status))
+    .map(repair=>({...repair,teamIds:teamByRepair.get(numericRepairId(repair.id))||[]}));
 
   let shopWarehouse:AssignedWarehouse|null=null;
   if (user && (user.role === 'mechanic' || user.role === 'manager')) {
@@ -555,7 +583,8 @@ export async function GET(request: Request) {
     if (user.role === 'mechanic' && user.technicianId) {
       const technicianId = Number(user.technicianId);
       repairs = repairs.filter((repair) => {
-        const assignedToMe = Number(repair.technicianId ?? 0) === technicianId;
+        const assignedToMe = Number(repair.technicianId ?? 0) === technicianId
+           || ((repair as ShopRepair & {teamIds?:number[]}).teamIds||[]).includes(technicianId);
         if (assignedToMe || repair.id === activeRepairId) return true;
         return Boolean(yard) && physicalYard(repair, yards) === yard;
       });

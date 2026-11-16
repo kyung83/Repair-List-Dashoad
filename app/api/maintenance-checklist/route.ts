@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { getAssignedChecklistTemplate } from '@/lib/maintenance-checklist-templates';
@@ -41,6 +42,7 @@ type ItemRow = {
   result: 'pending' | 'pass' | 'fail' | 'na';
   notes: string | null;
   updated_at: string;
+  revision:number;
   corrective_repair_id: number | null;
   corrective_repair_status: string | null;
 };
@@ -54,6 +56,7 @@ type PhotoRow = {
 };
 type MutableItemRow = {
   id: number;
+  revision:number;
   item_text: string;
   result: 'pending' | 'pass' | 'fail' | 'na';
   allow_pass: number;
@@ -141,10 +144,10 @@ async function loadRepair(id: number) {
   return row;
 }
 
-function requireWorkAccess(user: AppUser, repair: RepairRow) {
+async function requireWorkAccess(user: AppUser, repair: RepairRow) {
   if (canManage(user)) return;
   if (user.role !== 'mechanic' || !user.technicianId) throw new Error('Technician access is required.');
-  if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) {
+  if (!(await isRepairTeamMember(env.DB,repair.id,Number(user.technicianId)))) {
     throw new Error('This maintenance work order is not assigned to you.');
   }
 }
@@ -160,7 +163,7 @@ async function loadRun(id: number) {
 }
 
 async function ensureRun(user: AppUser, repair: RepairRow) {
-  requireWorkAccess(user, repair);
+  await requireWorkAccess(user, repair);
   if (String(repair.status).toLowerCase().includes('complete')) throw new Error('That maintenance work order is already completed.');
 
   // A run that already existed before this deployment is intentionally left alone.
@@ -409,13 +412,13 @@ async function payloadFor(repair: RepairRow) {
       mileageUpdatedAt: repair.mileage_updated_at,
       mileageEntryAllowed,
       mileageStale,
-      items: template.items.filter((item) => item.enabled).map((item) => ({ number: item.position, section: item.section, text: item.text, id: null, result: 'pending', notes: '', photos: [], correctiveRepair: null })),
+      items: template.items.filter((item) => item.enabled).map((item) => ({ number: item.position, section: item.section, text: item.text, id: null, revision:0, result: 'pending', notes: '', photos: [], correctiveRepair: null })),
     };
   }
 
   const [items, photos] = await Promise.all([
     env.DB.prepare(`
-      SELECT i.id, i.item_number, i.section, i.item_text, i.result, i.notes, i.updated_at,
+      SELECT i.id, i.item_number, i.section, i.item_text, i.result, i.notes, i.updated_at, i.revision,
              cr.id AS corrective_repair_id, cr.status AS corrective_repair_status
       FROM maintenance_checklist_items i
       LEFT JOIN repairs cr ON cr.maintenance_checklist_item_id = i.id
@@ -467,6 +470,7 @@ async function payloadFor(repair: RepairRow) {
       result: item.result,
       notes: item.notes ?? '',
       updatedAt: item.updated_at,
+      revision:Number(item.revision),
       correctiveRepair: item.corrective_repair_id == null ? null : {
         id: `repair-${item.corrective_repair_id}`,
         status: item.corrective_repair_status ?? '',
@@ -509,7 +513,7 @@ export async function POST(request: Request) {
     const action = String(body.action ?? '');
     const id = repairId(body.repairId);
     const repair = await loadRepair(id);
-    requireWorkAccess(user, repair);
+    await requireWorkAccess(user, repair);
 
     if (action === 'startChecklist') {
       await ensureRun(user, repair);
@@ -526,7 +530,7 @@ export async function POST(request: Request) {
       const notes = String(body.notes ?? '').trim().slice(0, 1000);
 
       const item = await env.DB.prepare(`
-        SELECT i.id, i.item_text, i.result,
+        SELECT i.id, i.item_text, i.result, i.revision,
                i.allow_pass, i.allow_fail, i.allow_na,
                i.require_notes, i.require_photo, i.require_measurement,
                i.measurement_value,
@@ -540,12 +544,17 @@ export async function POST(request: Request) {
       if (!item) throw new Error('Checklist item was not found.');
       validateItemAnswer(item, result, notes);
 
+      const expectedRevision=Number(body.expectedRevision);
+      if(!Number.isInteger(expectedRevision)||expectedRevision<0)
+        throw new Error('Refresh the checklist before saving this answer.');
       const changed = await env.DB.prepare(`
         UPDATE maintenance_checklist_items
-        SET result = ?, notes = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND checklist_run_id = ?
-      `).bind(result, notes || null, user.id, item.id, run.id).run();
-      if (!Number(changed.meta.changes ?? 0)) throw new Error('Checklist item was not found.');
+        SET result = ?, notes = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP,
+            revision=revision+1
+        WHERE id = ? AND checklist_run_id = ? AND revision = ?
+      `).bind(result, notes || null, user.id, item.id, run.id,expectedRevision).run();
+      if (!Number(changed.meta.changes ?? 0))
+        throw new Error('Another technician updated this checklist item. Refresh to see their answer before saving yours.');
 
       await syncCorrectiveRepair(user, repair, itemNumber, item, result, notes);
       await env.DB.prepare(`

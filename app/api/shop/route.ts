@@ -1,3 +1,4 @@
+import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { applyPartToRepair } from '@/lib/inventory-operations';
@@ -57,7 +58,7 @@ async function requirePartAccess(request: Request, repairId: number) {
   `).bind(repairId).first<{id:number;technician_id:number|null;status:string}>();
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
-  if (user.role === 'mechanic' && (!user.technicianId || Number(repair.technician_id ?? 0) !== Number(user.technicianId))) {
+  if (user.role === 'mechanic' && (!user.technicianId || !(await isRepairTeamMember(env.DB,repairId,Number(user.technicianId))))) {
     throw new Error('This repair is not assigned to you.');
   }
   return {user,repair};
@@ -112,6 +113,12 @@ async function reconcileDoneUnitWaiting(request:Request,response:Response) {
     return Response.json(payload,{status:response.status,headers:{'cache-control':'no-store'}});
   }
 
+  const anotherWorker=await env.DB.prepare(
+    'SELECT 1 AS active FROM repair_labor_timers WHERE repair_id=? LIMIT 1'
+  ).bind(repairId).first<{active:number}>();
+  if(anotherWorker)return Response.json({...payload,teamStillWorking:true},
+    {status:response.status,headers:{'cache-control':'no-store'}});
+
   const wasWaiting = alreadyWaitingForParts(repair.status);
   await env.DB.prepare(`
     UPDATE repairs
@@ -149,7 +156,7 @@ async function markLinkedDvirRepairedBeforeShopCompletion(request:Request,repair
   `).bind(repairId).first<DvirRepairLink>();
   if (!repair) throw new Error('Repair was not found.');
   if (repair.status.toLowerCase().includes('complete')) throw new Error('That repair is already completed.');
-  if (Number(repair.technician_id ?? 0) !== Number(user.technicianId)) throw new Error('This repair is not assigned to you.');
+  if (!(await isRepairTeamMember(env.DB,repairId,Number(user.technicianId)))) throw new Error('This repair is not assigned to you.');
 
   const timer = await env.DB.prepare(`
     SELECT repair_id FROM repair_labor_timers WHERE user_id = ?
@@ -313,6 +320,10 @@ export async function POST(request: Request) {
     try {
       const repairId = numericRepairId(body.repairId);
       if (!repairId) throw new Error('Repair was not found.');
+      const remaining=await env.DB.prepare(
+        'SELECT 1 AS active FROM repair_labor_timers WHERE repair_id=? AND user_id<>? LIMIT 1'
+      ).bind(repairId,(await getSessionUser(env.DB,request.clone()))?.id??-1).first<{active:number}>();
+      if(remaining)throw new Error('Another technician is still working on this repair. They must finish their timer before closing the job.');
       await validateRepairTypeChecklistBeforeClose(env.DB,repairId);
       const dvir = await markLinkedDvirRepairedBeforeShopCompletion(request.clone(),repairId);
       const response = await legacyPOST(request);
