@@ -8,7 +8,7 @@ import TechnicianRepairReview from './technician-repair-review';
 import RepairTypeChecklistPanel from './repair-type-checklist-panel';
 import type {ChecklistData,Part} from './maintenance-types';
 
-type Props={repairId:string;canWork:boolean;parts?:Part[];children?:ReactNode};
+type Props={repairId:string;canWork:boolean;parts?:Part[];children?:ReactNode;compact?:boolean};
 
 export default function MaintenanceChecklistPanelV3(props:Props){
   const[checklist,setChecklist]=useState<ChecklistData|null>(null);
@@ -53,7 +53,7 @@ export default function MaintenanceChecklistPanelV3(props:Props){
     </section>}
     {inspectionOpen&&showTires&&<PmSheetDetails repairId={props.repairId} canWork={props.canWork} tiresOnly/>}
     {inspectionOpen&&<MaintenanceChecklistPanelV2 {...props}/>} 
-    <TechnicianRepairTools repairId={props.repairId} canWork={props.canWork} mode="notes"/>
+    <TechnicianRepairTools repairId={props.repairId} canWork={props.canWork} mode="notes" compact={props.compact}/>
     {props.children}
     <TechnicianRepairReview repairId={props.repairId} canWork={props.canWork} checklist={checklist}/>
   </>;
