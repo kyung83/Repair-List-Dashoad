@@ -9,7 +9,7 @@ const tire=read("app/shop/found-repair-control.tsx");
 const shopPage=read("app/shop/page-v2.tsx");
 const closeRoute=read("app/api/shop/route.ts");
 
-test("Logan sees required Repair Type before helpers and REPAIRED, not hidden in Notes",()=>{
+test("Logan sees required Repair Type at the top after Working Now, before other repairs and REPAIRED",()=>{
   const notes=work.slice(work.indexOf('id="pilot-panel-notes"'),work.indexOf('id="pilot-panel-parts"'));
   assert.match(notes,/<TechnicianRepairTools repairId=\{repair\.id\} canWork mode="notes" compact\/>/);
   assert.doesNotMatch(notes,/CurrentRepairTypeControl/);
@@ -17,7 +17,8 @@ test("Logan sees required Repair Type before helpers and REPAIRED, not hidden in
   const required=work.indexOf('id="pilot-required-repair-type"');
   const helper=work.indexOf('id="pilot-helper-panel"');
   const actions=work.indexOf('id={pilot?"pilot-actions"');
-  assert.ok(other>0 && other<required && required<helper && helper<actions);
+  const working=work.indexOf('<section style={{...workingCard');
+  assert.ok(working>0 && working<required && required<other && other<helper && helper<actions);
   const slot=work.slice(required,helper);
   assert.match(work,/pilot&&repairMine&&<div id="pilot-required-repair-type"/);
   assert.match(slot,/<CurrentRepairTypeControl repairId=\{repair\.id\}\/>/);

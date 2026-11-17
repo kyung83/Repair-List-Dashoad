@@ -134,6 +134,10 @@ export default function CurrentWorkHome(props:Props){
         </div>
         <div style={{...timerStyle,...(pilot?{fontSize:23}:{})}}>◷ {runningTime}</div>
       </section>
+      {pilot&&repairMine&&<div id="pilot-required-repair-type" style={{scrollMarginTop:92}}>
+        <CurrentRepairTypeControl repairId={repair.id}/>
+      </div>}
+
 
 
 
@@ -144,9 +148,6 @@ export default function CurrentWorkHome(props:Props){
           <span style={{minWidth:0,textAlign:"left"}}><strong style={{display:"block",fontSize:12,lineHeight:1.3}}>{item.issue}</strong><span style={repairMeta}>{state(item,timer.repairId)} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</span></span><span aria-hidden="true">›</span>
         </button>)}</div>
       </details>}
-      {pilot&&repairMine&&<div id="pilot-required-repair-type" style={{scrollMarginTop:92}}>
-        <CurrentRepairTypeControl repairId={repair.id}/>
-      </div>}
       {pilot?<>{repair.technicianId===technicianId&&technicianId!==null&&<details id="pilot-helper-panel" style={pilotSetupFold}>
         <summary style={pilotSetupSummary}>+ ADD / MANAGE HELPER <span style={pilotSetupHint}>Tap to expand</span></summary>
         <div style={pilotSetupContents}>
