@@ -2,7 +2,7 @@
 
 import RepairTeamPanel from './repair-team-panel';
 
-import type {ReactNode} from "react";
+import {useState,type ReactNode} from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
 import RepairPhotoControl from "./repair-photo-control";
@@ -46,6 +46,7 @@ function state(repair:Repair,activeId:string){if(repair.id===activeId)return "WO
 export default function CurrentWorkHome(props:Props){
   const {timer,repair,unitRepairs,requests,technicianId,now,busy}=props;
   const pilot=Boolean(props.pilot);
+  const [pilotTool,setPilotTool]=useState<"notes"|"parts"|"photos"|"checklist"|"history">("notes");
   const runningTime=duration(timer.startedAt,now);
   const noUnit=!String(repair.unit||timer.unit||"").trim();
   const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
@@ -54,16 +55,16 @@ export default function CurrentWorkHome(props:Props){
   const visibleOtherRepairs=noUnit?[]:otherRepairs;
 
   function goToFinalReview(){window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
-  const maintenanceBlock=repairMine?(<MaintenanceChecklistPanel repairId={repair.id} canWork compact={pilot}>
-        <section style={twoCol}>
+  const partsAndLaborPanel=(<section style={twoCol}>
           {!noUnit&&<div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
             {requests.length>0&&<div style={requestList}>{requests.map(request=><div key={request.id} style={requestRow}><span><b>{request.partNumber}</b><br/><small>{numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</small></span>{request.reservedQuantity>0&&<button disabled={busy} onClick={()=>props.onUseReservedPart(request)} style={smallButton}>Use Reserved</button>}</div>)}</div>}
             {repair.plannedParts.length>0&&<div style={requestList}>{repair.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity);return <div key={planned.id} style={requestRow}><span><b>{planned.partNumber}</b><br/><small>{numberText(remaining)} remaining · {planned.description}</small></span>{remaining>0&&<button disabled={busy} onClick={()=>props.onUsePlannedPart(repair,planned)} style={smallButton}>Use / Request</button>}</div>;})}</div>}
           </div>}
           <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current {noUnit?"Work":"Repair"} Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours {noUnit?"on Work Order":"on Unit"}</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
-        </section>
-</MaintenanceChecklistPanel>):null;
-  function pilotJump(id:string){document.getElementById(id)?.scrollIntoView({behavior:"smooth",block:"start"})}
+        </section>);
+  const maintenanceBlock=repairMine?(<MaintenanceChecklistPanel repairId={repair.id} canWork compact={pilot} showNotes={!pilot}>
+    {!pilot&&partsAndLaborPanel}
+  </MaintenanceChecklistPanel>):null;
 
   return <main style={page}>
     <div style={{...shell,...(pilot?{gap:10}:{})}}>
@@ -83,6 +84,7 @@ export default function CurrentWorkHome(props:Props){
             ?<a href={unitHref} style={{...workingUnit,display:"block",color:"white",fontSize:25,textDecoration:"none"}}>Unit {timer.unit||repair.unit} ↗</a>
             :<h1 style={workingUnit}>{noUnit?"SHOP / NO UNIT":`Unit ${timer.unit||repair.unit}`}</h1>}
           <div style={{...workingIssue,...(pilot?{marginTop:3,fontSize:15,lineHeight:1.25}:{})}}>{timer.title||repair.issue}</div>
+          {pilot&&<div style={pilotSavedTime}>Current timer is running · {repair.laborHours.toFixed(2)} hrs previously saved on this repair</div>}
           {!pilot&&<div style={tracking}>● &nbsp; Labor is tracking automatically {noUnit?"to you, not to a fleet unit.":"while this unit is open."}</div>}
         </div>
         <div style={{...timerStyle,...(pilot?{fontSize:23}:{})}}>◷ {runningTime}</div>
@@ -90,12 +92,23 @@ export default function CurrentWorkHome(props:Props){
 
 
 
-      {pilot&&<nav aria-label="Jump to work tools" style={pilotNav}>
-        {([["Notes","pilot-notes"],["Parts","pilot-parts-section"],["Photos","pilot-photos"],["Checklist","pilot-checklist"],["History","pilot-unit-history"],["+ Repair","pilot-add-repair"],...(visibleOtherRepairs.length?[["Other Jobs","pilot-other-repairs"]]:[])] as string[][]).map(([label,target])=>
-          <button key={target} type="button" onClick={()=>pilotJump(target)} style={pilotNavButton}>{label}</button>)}
-      </nav>}
-      <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} compact={pilot} onChanged={props.onTeamChanged}/>
-      {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>} 
+
+      {pilot&&visibleOtherRepairs.length>0&&<details id="pilot-other-repairs" defaultOpen style={pilotOtherCard}>
+        <summary style={pilotOtherSummary}>Other repairs on {repair.unit} <span style={countBadge}>{visibleOtherRepairs.length}</span></summary>
+        <div style={pilotOtherList}>{visibleOtherRepairs.map(item=><button key={item.id} type="button" disabled={busy} onClick={()=>props.onChooseRepair(item)} title={item.issue} style={pilotOtherRow}>
+          <span style={{minWidth:0,textAlign:"left"}}><strong style={{display:"block",fontSize:12,lineHeight:1.3}}>{item.issue}</strong><span style={repairMeta}>{state(item,timer.repairId)} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</span></span><span aria-hidden="true">›</span>
+        </button>)}</div>
+      </details>}
+      {pilot?<details style={pilotSetupFold}>
+        <summary style={pilotSetupSummary}>Helpers &amp; repair type <span style={pilotSetupHint}>Expand when needed</span></summary>
+        <div style={pilotSetupContents}>
+          <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} compact={pilot} onChanged={props.onTeamChanged}/>
+          {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>}
+        </div>
+      </details>:<>
+        <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} compact={pilot} onChanged={props.onTeamChanged}/>
+        {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>}
+      </>}
 
       <section id={pilot?"pilot-actions":undefined} style={{...actionGrid,gridTemplateColumns:pilot||noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))",...(pilot?{gap:8}:{})}}>
         <button disabled={busy} onClick={props.onRepaired} style={pilot?{...repairedButton,minHeight:82,padding:"10px 8px"}:repairedButton}><span style={pilot?{...actionIcon,fontSize:22}:actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
@@ -105,22 +118,46 @@ export default function CurrentWorkHome(props:Props){
       </section>
 
       {props.handoffPanel}
-      {pilot&&maintenanceBlock&&<section id="pilot-checklist" style={pilotSection}><strong style={pilotHeading}>PM / Annual / Repair Checklist</strong>{maintenanceBlock}</section>}
-      {pilot&&repairMine&&<section id="pilot-parts-section" style={pilotSection}><TechnicianRepairTools repairId={repair.id} canWork mode="parts" compact /></section>}
-      {pilot&&<section id="pilot-photos" style={pilotSection}><RepairPhotoControl repairId={repair.id} canWork compact /></section>}
+      {repair.handoffNote&&pilot&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
 
-      {repairMine&&!noUnit&&(pilot?<section id="pilot-unit-history" style={pilotSection}><MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/></section>:<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>)}
+      {pilot&&<section id="pilot-workspace" style={pilotWorkspace}>
+        <nav aria-label="Work tools" role="tablist" style={pilotNav}>
+          {(["notes","parts","photos","checklist","history"] as const).map(tool=><button
+            key={tool} id={`pilot-tab-${tool}`} type="button" role="tab" aria-selected={pilotTool===tool} aria-controls={`pilot-panel-${tool}`}
+            onClick={()=>setPilotTool(tool)} style={{...pilotNavButton,...(pilotTool===tool?pilotNavSelected:{})}}>
+            {tool==="checklist"?"Checklist / Review":tool.charAt(0).toUpperCase()+tool.slice(1)}
+          </button>)}
+        </nav>
+        <div id="pilot-panel-notes" role="tabpanel" aria-labelledby="pilot-tab-notes" hidden={pilotTool!=="notes"} style={{...pilotTabPanel,display:pilotTool==="notes"?"grid":"none"}}>
+          {repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/>:<div style={empty}>Only assigned repair team members can edit notes.</div>}
+        </div>
+        <div id="pilot-panel-parts" role="tabpanel" aria-labelledby="pilot-tab-parts" hidden={pilotTool!=="parts"} style={{...pilotTabPanel,display:pilotTool==="parts"?"grid":"none"}}>
+          {repairMine&&partsAndLaborPanel}
+          {repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="parts" compact/>:<div style={empty}>Parts access requires an assigned repair.</div>}
+        </div>
+        <div id="pilot-panel-photos" role="tabpanel" aria-labelledby="pilot-tab-photos" hidden={pilotTool!=="photos"} style={{...pilotTabPanel,display:pilotTool==="photos"?"grid":"none"}}>
+          <RepairPhotoControl repairId={repair.id} canWork compact/>
+        </div>
+        <div id="pilot-panel-checklist" role="tabpanel" aria-labelledby="pilot-tab-checklist" hidden={pilotTool!=="checklist"} style={{...pilotTabPanel,display:pilotTool==="checklist"?"grid":"none"}}>
+          {maintenanceBlock??<div style={empty}>Checklist and final review are available to assigned team members.</div>}
+        </div>
+        <div id="pilot-panel-history" role="tabpanel" aria-labelledby="pilot-tab-history" hidden={pilotTool!=="history"} style={{...pilotTabPanel,display:pilotTool==="history"?"grid":"none"}}>
+          {repairMine&&!noUnit?<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>:<div style={empty}>Unit history is not available for this work order.</div>}
+        </div>
+      </section>}
+
+      {!pilot&&repairMine&&!noUnit&&<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>}
 
       {!pilot&&<RepairPhotoControl repairId={repair.id} canWork />}
 
       {!pilot&&repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
 
-      {visibleOtherRepairs.length>0&&<section id={pilot?"pilot-other-repairs":undefined} style={card}>
+      {!pilot&&visibleOtherRepairs.length>0&&<section style={card}>
         <div style={{...cardTitleRow,...(pilot?{marginBottom:6}:{})}}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
         <div style={{...repairList,...(pilot?{gap:5}:{})}}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={{...repairRow,...(pilot?{padding:"8px 10px",gap:7,borderRadius:8}:{})}} title={item.issue}><div style={{minWidth:0,textAlign:"left"}}><strong style={pilot?{fontSize:13,lineHeight:1.25,display:"block"}:undefined}>{item.issue}</strong><div style={{...repairMeta,...(pilot?{marginTop:2}:{})}}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={{...chevron,...(pilot?{fontSize:20}:{})}}>›</span></button>})}</div>
       </section>}
 
-      {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
+      {!pilot&&repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
 
       {!pilot&&maintenanceBlock}
 
@@ -136,10 +173,20 @@ export default function CurrentWorkHome(props:Props){
   </main>;
 }
 
-const pilotNav={position:"sticky" as const,top:5,zIndex:30,display:"flex",gap:6,overflowX:"auto" as const,padding:"6px",border:"1px solid #cbd9df",borderRadius:10,background:"#f7fafc",boxShadow:"0 3px 12px #102a5311",scrollbarWidth:"thin" as const} as const;
-const pilotNavButton={flex:"0 0 auto",padding:"8px 10px",minHeight:40,background:"white",border:"1px solid #cad5df",borderRadius:8,color:"#173f37",fontSize:12,fontWeight:900,cursor:"pointer"} as const;
-const pilotSection={display:"grid",gap:9,scrollMarginTop:74} as const;
-const pilotHeading={display:"block",fontSize:15,color:"#102a53",margin:"3px 0"} as const;
+const pilotNav={position:"sticky" as const,top:0,zIndex:40,display:"flex",gap:5,overflowX:"auto" as const,padding:"8px",border:"1px solid #cbd9df",borderRadius:11,background:"#f7fafc",boxShadow:"0 4px 12px #102a5314",scrollbarWidth:"thin" as const} as const;
+const pilotNavButton={flex:"0 0 auto",padding:"10px 12px",minHeight:44,border:"1px solid #cad5df",borderRadius:9,background:"white",color:"#173f37",fontSize:12,fontWeight:850,cursor:"pointer"} as const;
+const pilotNavSelected={background:"#173f37",borderColor:"#173f37",color:"white"} as const;
+const pilotWorkspace={display:"grid",gap:8,minWidth:0,alignContent:"start"} as const;
+const pilotTabPanel={gap:10,minWidth:0,alignContent:"start",padding:"2px 0"} as const;
+const pilotSavedTime={marginTop:6,fontSize:11,color:"#d1e5da",lineHeight:1.35} as const;
+const pilotOtherCard={padding:"10px 12px",border:"1px solid #d7e1e6",borderRadius:12,background:"white"} as const;
+const pilotOtherSummary={display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,color:"#102a53",fontSize:13,fontWeight:900,cursor:"pointer",minHeight:31} as const;
+const pilotOtherList={display:"grid",gap:5,marginTop:8} as const;
+const pilotOtherRow={width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:9,padding:"8px 10px",border:"1px solid #dde5eb",borderRadius:8,background:"#f9fbfc",color:"#1b2421",cursor:"pointer"} as const;
+const pilotSetupFold={padding:"9px 12px",border:"1px solid #d7e1e6",borderRadius:10,background:"white"} as const;
+const pilotSetupSummary={display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,minHeight:30,fontSize:12,fontWeight:900,color:"#173f37",cursor:"pointer"} as const;
+const pilotSetupHint={fontSize:11,fontWeight:600,color:"#637783"} as const;
+const pilotSetupContents={display:"grid",gap:9,marginTop:10} as const;
 const page={minHeight:"100vh",background:"#f4f6f4",padding:"18px clamp(10px,2vw,20px) 36px",color:"#173f37"} as const;
 const shell={maxWidth:860,margin:"0 auto",display:"grid",gap:12} as const;
 const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
