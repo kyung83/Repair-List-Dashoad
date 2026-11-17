@@ -17,7 +17,7 @@ test('both repair form placements enable self-assignment only for technicians',(
 });
 test('server accepts opt-out and defaults to secure mechanic self assignment',()=>{
  const api=read('app/api/repair-types/create-repair/route.ts');
- assert.match(api,/body\.assignToMe === false \? null : mechanicTechnician/);
+ assert.match(api,/if\(mechanic&&body\.assignToMe===false\)technician=null/);
  assert.match(api,/const status=technician\?'Assigned':'New'/);
  assert.match(api,/if\(!mechanic\)\{/);
 });
