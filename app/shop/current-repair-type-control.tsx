@@ -39,7 +39,7 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       const doneWorking=target.matches('[data-shop-action="done-working"]')||text.startsWith("DONE WORKING");
       if(!repaired&&!doneWorking)return;
       event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
-      const message=repaired?"Choose the Repair Type under Notes before marking REPAIRED.":"Choose the Repair Type under Notes before leaving this work.";
+      const message=repaired?"Choose the Repair Type above the repair actions before marking REPAIRED.":"Choose the Repair Type above the repair actions before leaving this work.";
       setMessage(message);
       window.dispatchEvent(new CustomEvent("shop-repair-close-blocked",{detail:{repairId,reason:"repair-type",message}}));
       window.requestAnimationFrame(()=>document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"}));
