@@ -106,8 +106,8 @@ export default function CurrentWorkHome(props:Props){
 
       {props.handoffPanel}
       {pilot&&maintenanceBlock&&<section id="pilot-checklist" style={pilotSection}><strong style={pilotHeading}>PM / Annual / Repair Checklist</strong>{maintenanceBlock}</section>}
-      {pilot&&repairMine&&<section id="pilot-parts-section" style={pilotSection}><TechnicianRepairTools repairId={repair.id} canWork mode="parts"/></section>}
-      {pilot&&<section id="pilot-photos" style={pilotSection}><RepairPhotoControl repairId={repair.id} canWork /></section>}
+      {pilot&&repairMine&&<section id="pilot-parts-section" style={pilotSection}><TechnicianRepairTools repairId={repair.id} canWork mode="parts" compact /></section>}
+      {pilot&&<section id="pilot-photos" style={pilotSection}><RepairPhotoControl repairId={repair.id} canWork compact /></section>}
 
       {repairMine&&!noUnit&&(pilot?<section id="pilot-unit-history" style={pilotSection}><MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/></section>:<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>)}
 
@@ -116,8 +116,8 @@ export default function CurrentWorkHome(props:Props){
       {!pilot&&repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
 
       {visibleOtherRepairs.length>0&&<section id={pilot?"pilot-other-repairs":undefined} style={card}>
-        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
-        <div style={repairList}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
+        <div style={{...cardTitleRow,...(pilot?{marginBottom:6}:{})}}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
+        <div style={{...repairList,...(pilot?{gap:5}:{})}}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={{...repairRow,...(pilot?{padding:"8px 10px",gap:7,borderRadius:8}:{})}} title={item.issue}><div style={{minWidth:0,textAlign:"left"}}><strong style={pilot?{fontSize:13,lineHeight:1.25,display:"block"}:undefined}>{item.issue}</strong><div style={{...repairMeta,...(pilot?{marginTop:2}:{})}}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={{...chevron,...(pilot?{fontSize:20}:{})}}>›</span></button>})}</div>
       </section>}
 
       {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
@@ -136,8 +136,8 @@ export default function CurrentWorkHome(props:Props){
   </main>;
 }
 
-const pilotNav={position:"sticky" as const,top:0,zIndex:4,display:"flex",gap:6,overflowX:"auto" as const,padding:"8px",border:"1px solid #d7e1e6",borderRadius:10,background:"#f7fafc",boxShadow:"0 3px 12px #102a5311"} as const;
-const pilotNavButton={flex:"0 0 auto",padding:"9px 10px",background:"white",border:"1px solid #cad5df",borderRadius:9,color:"#173f37",fontSize:12,fontWeight:900,cursor:"pointer"} as const;
+const pilotNav={position:"sticky" as const,top:5,zIndex:30,display:"flex",gap:6,overflowX:"auto" as const,padding:"6px",border:"1px solid #cbd9df",borderRadius:10,background:"#f7fafc",boxShadow:"0 3px 12px #102a5311",scrollbarWidth:"thin" as const} as const;
+const pilotNavButton={flex:"0 0 auto",padding:"8px 10px",minHeight:40,background:"white",border:"1px solid #cad5df",borderRadius:8,color:"#173f37",fontSize:12,fontWeight:900,cursor:"pointer"} as const;
 const pilotSection={display:"grid",gap:9,scrollMarginTop:74} as const;
 const pilotHeading={display:"block",fontSize:15,color:"#102a53",margin:"3px 0"} as const;
 const page={minHeight:"100vh",background:"#f4f6f4",padding:"18px clamp(10px,2vw,20px) 36px",color:"#173f37"} as const;
