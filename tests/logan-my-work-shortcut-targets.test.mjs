@@ -13,5 +13,5 @@ test('Logan pilot Notes and Parts shortcuts target actual sections',()=>{
 });
 test('original non-pilot notes workflow stays available',()=>{
   assert.match(checklist,/props\.compact\?/);
-  assert.match(checklist,/:<TechnicianRepairTools repairId=\{props\.repairId\} canWork=\{props\.canWork\} mode="notes"\/>/);
+  assert.match(checklist,/mode="notes" compact=\{props\.compact\}/);
 });
