@@ -3,7 +3,7 @@ import {useEffect,useState} from 'react';
 
 type Member={technicianId:number;name:string;role:string;working:boolean};
 type Technician={id:number;name:string};
-export default function RepairTeamPanel({repairId,editable,onChanged}:{repairId:string;editable:boolean;onChanged:()=>void}){
+export default function RepairTeamPanel({repairId,editable,onChanged,compact=false}:{repairId:string;editable:boolean;onChanged:()=>void;compact?:boolean}){
   const[team,setTeam]=useState<Member[]>([]);
   const[technicians,setTechnicians]=useState<Technician[]>([]);
   const[choice,setChoice]=useState('');
@@ -31,9 +31,9 @@ export default function RepairTeamPanel({repairId,editable,onChanged}:{repairId:
   }
   if(!editable)return null;
   const available=technicians.filter(t=>!team.some(m=>m.technicianId===t.id));
-  return <section style={{padding:14,border:'1px solid #cbd5e1',borderRadius:12,background:'#fff',display:'grid',gap:10}}>
+  return <section style={{padding:compact?10:14,border:'1px solid #cbd5e1',borderRadius:12,background:'#fff',display:'grid',gap:compact?6:10}}>
     <strong style={{fontSize:16}}>Technicians on this work order</strong>
-    <div style={{fontSize:12,color:'#64748b'}}>Each person tracks their own labor. The primary assignment stays unchanged.</div>
+    <div style={{fontSize:12,color:'#64748b'}}>{compact?"Each helper records separate labor.":"Each person tracks their own labor. The primary assignment stays unchanged."}</div>
     {team.map(member=><div key={member.technicianId} style={{display:'flex',gap:8,alignItems:'center',justifyContent:'space-between'}}>
       <span>{member.name} — {member.role==='primary'?'Primary':'Helping'}{member.working?' · Working now':''}</span>
       {member.role==='helper'&&<button type="button" disabled={busy||member.working} onClick={()=>void change('remove',member.technicianId)}>Remove</button>}
