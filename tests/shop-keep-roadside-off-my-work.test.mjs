@@ -16,7 +16,7 @@ test('previously started roadside labor is retained until the technician can saf
   assert.match(shop,/visible_timer\.repair_id=r\.id AND visible_timer\.user_id=\?/);
   // Timer owner id is bound before the technician sort parameter, matching the SQL.
   assert.match(shop,/\.bind\(user\.id, user\.technicianId \?\? -1\)\.all/);
-  assert.match(page,/data\.repairs\.find\(repair=>repair\.id===data\.activeTimer\?\.repairId\)/);
+  assert.match(page,/data\?\.repairs\.find\(repair=>repair\.id===data\.activeTimer\?\.repairId\)/);
 });
 
 test('this filters My Work only, preserving repair board and roadside history',()=>{
