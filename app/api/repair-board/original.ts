@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import { requireReadyMaintenanceChecklist } from '@/lib/maintenance-close-guard';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { completeMaintenanceBoardItem, getMaintenanceBoardItems } from '@/lib/maintenance-board';
@@ -552,6 +553,7 @@ export async function POST(request: Request) {
       const status = String(body.status ?? '').trim();
       if (!STATUSES.has(status)) throw new Error('Choose a valid repair status.');
       if (status === 'Completed' && await env.DB.prepare('SELECT user_id FROM repair_labor_timers WHERE repair_id = ?').bind(id).first()) throw new Error('Stop active labor before completing this repair.');
+      if (status === 'Completed') await requireReadyMaintenanceChecklist(env.DB,id);
       await env.DB.batch([
         env.DB.prepare(`UPDATE repairs SET status = ?, completed_at = CASE WHEN ? = 'Completed' THEN CURRENT_TIMESTAMP ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(status, status, id),
         env.DB.prepare(`INSERT INTO repair_job_events (repair_id,user_id,technician_id,action,detail) VALUES (?,?,?,'status_changed',?)`).bind(id, user.id, repair.technician_id, `${user.displayName} changed status to ${status}.`),
