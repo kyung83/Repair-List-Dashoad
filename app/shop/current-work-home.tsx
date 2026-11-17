@@ -9,6 +9,7 @@ import RepairPhotoControl from "./repair-photo-control";
 import TechnicianRepairTools from "./technician-repair-tools-v2";
 import CurrentRepairTypeControl from "./current-repair-type-control";
 import MechanicUnitHistory from "./mechanic-unit-history";
+import LoganPilotAddRepair from "./logan-pilot-add-repair";
 
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
@@ -32,6 +33,7 @@ type Props={
   onTeamChanged:()=>void;
   onChooseRepair:(repair:Repair)=>void;
   onFoundRepairAdded:()=>void|Promise<void>;
+  pilot?:boolean;
   onUsePlannedPart:(repair:Repair,part:PlannedPart)=>void;
   onUseReservedPart:(request:PartRequest)=>void;
 };
@@ -43,6 +45,7 @@ function state(repair:Repair,activeId:string){if(repair.id===activeId)return "WO
 
 export default function CurrentWorkHome(props:Props){
   const {timer,repair,unitRepairs,requests,technicianId,now,busy}=props;
+  const pilot=Boolean(props.pilot);
   const runningTime=duration(timer.startedAt,now);
   const noUnit=!String(repair.unit||timer.unit||"").trim();
   const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
@@ -51,47 +54,7 @@ export default function CurrentWorkHome(props:Props){
   const visibleOtherRepairs=noUnit?[]:otherRepairs;
 
   function goToFinalReview(){window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
-
-  return <main style={page}>
-    <div style={shell}>
-      {props.message&&<div style={notice}>{props.message}</div>}
-      {repair.pullThru&&<div style={pullThruNotice}><strong>PULL THRU</strong><span>This unit is coming through the shop. Be ready for it.</span></div>}
-
-      <section style={unitStrip}>
-        <div><span style={crumb}>MY WORK · WORKING NOW</span>{noUnit?<strong style={unitLink}>SHOP / NO UNIT</strong>:<a href={unitHref} style={unitLink}>Unit {repair.unit} ↗</a>}</div>
-        <div style={unitStatus}><strong>{noUnit?"SHOP LABOR":"REPAIR"}</strong><span>● Open</span></div>
-      </section>
-
-      <section style={workingCard}>
-        <div style={{minWidth:0}}><p style={workingEyebrow}>WORKING NOW</p><h1 style={workingUnit}>{noUnit?"SHOP / NO UNIT":`Unit ${timer.unit||repair.unit}`}</h1><div style={workingIssue}>{timer.title||repair.issue}</div><div style={tracking}>● &nbsp; Labor is tracking automatically {noUnit?"to you, not to a fleet unit.":"while this unit is open."}</div></div>
-        <div style={timerStyle}>◷ {runningTime}</div>
-      </section>
-
-      <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} onChanged={props.onTeamChanged}/>
-      {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>} 
-
-      <section style={{...actionGrid,gridTemplateColumns:noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))"}}>
-        <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
-        <button disabled={busy} onClick={props.onDoneWorking} style={doneButton}><span style={actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Keep open / hand off</small></button>
-        {!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>} 
-      </section>
-
-      {props.handoffPanel}
-
-      {repairMine&&!noUnit&&<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>}
-
-      <RepairPhotoControl repairId={repair.id} canWork />
-
-      {repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
-
-      {visibleOtherRepairs.length>0&&<section style={card}>
-        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
-        <div style={repairList}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
-      </section>}
-
-      {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
-
-      {repairMine&&<MaintenanceChecklistPanel repairId={repair.id} canWork>
+  const maintenanceBlock=repairMine?(<MaintenanceChecklistPanel repairId={repair.id} canWork>
         <section style={twoCol}>
           {!noUnit&&<div style={miniCard}><strong style={miniTitle}>Parts Actually Used</strong>{repair.usedParts.length?<div style={chipWrap}>{repair.usedParts.map(part=><span key={part.partId} style={chip}>{part.partNumber} × {numberText(part.quantity)}</span>)}</div>:<div style={empty}>No parts used yet.</div>}
             {requests.length>0&&<div style={requestList}>{requests.map(request=><div key={request.id} style={requestRow}><span><b>{request.partNumber}</b><br/><small>{numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</small></span>{request.reservedQuantity>0&&<button disabled={busy} onClick={()=>props.onUseReservedPart(request)} style={smallButton}>Use Reserved</button>}</div>)}</div>}
@@ -99,7 +62,58 @@ export default function CurrentWorkHome(props:Props){
           </div>}
           <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current {noUnit?"Work":"Repair"} Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>Total Hours {noUnit?"on Work Order":"on Unit"}</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
         </section>
-      </MaintenanceChecklistPanel>}
+</MaintenanceChecklistPanel>):null;
+  function pilotJump(id:string){document.getElementById(id)?.scrollIntoView({behavior:"smooth",block:"start"})}
+
+  return <main style={page}>
+    <div style={{...shell,...(pilot?{gap:10}:{})}}>
+      {props.message&&<div style={notice}>{props.message}</div>}
+      {pilot&&<div style={{fontSize:12,fontWeight:800,color:"#1a5c48",padding:"7px 10px",border:"1px solid #cce1d8",borderRadius:8,background:"#f1faf5"}}>LOGAN PILOT · All current repair functions remain available on this page</div>}
+      {repair.pullThru&&<div style={pullThruNotice}><strong>PULL THRU</strong><span>This unit is coming through the shop. Be ready for it.</span></div>}
+
+      <section style={{...unitStrip,...(pilot?{padding:"10px 12px"}:{})}}>
+        <div><span style={crumb}>MY WORK · WORKING NOW</span>{noUnit?<strong style={unitLink}>SHOP / NO UNIT</strong>:<a href={unitHref} style={unitLink}>Unit {repair.unit} ↗</a>}</div>
+        <div style={unitStatus}><strong>{noUnit?"SHOP LABOR":"REPAIR"}</strong><span>● Open</span></div>
+      </section>
+
+      <section style={{...workingCard,...(pilot?{padding:13,alignItems:"center",flexWrap:"wrap" as const}:{})}}>
+        <div style={{minWidth:0}}><p style={workingEyebrow}>WORKING NOW</p><h1 style={workingUnit}>{noUnit?"SHOP / NO UNIT":`Unit ${timer.unit||repair.unit}`}</h1><div style={workingIssue}>{timer.title||repair.issue}</div><div style={tracking}>● &nbsp; Labor is tracking automatically {noUnit?"to you, not to a fleet unit.":"while this unit is open."}</div></div>
+        <div style={timerStyle}>◷ {runningTime}</div>
+      </section>
+
+      {pilot&&<nav aria-label="Jump to work tools" style={pilotNav}>
+        {(["Notes","Parts","Photos","Checklist","History","+ Repair"] as const).map((label,index)=><button key={label} type="button" onClick={()=>pilotJump(["pilot-notes","pilot-parts","pilot-photos","pilot-checklist","pilot-unit-history","pilot-add-repair"][index])} style={pilotNavButton}>{label}</button>)}
+      </nav>}
+      <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} onChanged={props.onTeamChanged}/>
+      {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>} 
+
+      <section style={{...actionGrid,gridTemplateColumns:pilot||noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))"}}>
+        <button disabled={busy} onClick={props.onRepaired} style={repairedButton}><span style={actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
+        <button disabled={busy} onClick={props.onDoneWorking} style={doneButton}><span style={actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Keep open / hand off</small></button>
+        {!pilot&&!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>} 
+      </section>
+
+      {props.handoffPanel}
+      {pilot&&maintenanceBlock&&<section id="pilot-checklist" style={pilotSection}><strong style={pilotHeading}>PM / Annual / Repair Checklist</strong>{maintenanceBlock}</section>}
+      {pilot&&repairMine&&<section id="pilot-notes" style={pilotSection}><TechnicianRepairTools repairId={repair.id} canWork mode="parts"/></section>}
+      {pilot&&<section id="pilot-photos" style={pilotSection}><RepairPhotoControl repairId={repair.id} canWork /></section>}
+      {pilot&&<section id="pilot-add-repair" style={pilotSection}><strong style={pilotHeading}>Additional Repair Actions</strong>{!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>}<LoganPilotAddRepair onSaved={props.onFoundRepairAdded}/></section>}
+
+      {repairMine&&!noUnit&&(pilot?<section id="pilot-unit-history" style={pilotSection}><MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/></section>:<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>)}
+
+      {!pilot&&<RepairPhotoControl repairId={repair.id} canWork />}
+
+      {!pilot&&repairMine&&!noUnit&&<TechnicianRepairTools repairId={repair.id} canWork mode="parts"/>}
+
+      {visibleOtherRepairs.length>0&&<section id={pilot?"pilot-other-repairs":undefined} style={card}>
+        <div style={cardTitleRow}><strong style={cardTitle}>🔧 Other Repairs on This Unit</strong><span style={countBadge}>{visibleOtherRepairs.length}</span></div>
+        <div style={repairList}>{visibleOtherRepairs.map(item=>{const s=state(item,timer.repairId);return <button key={item.id} disabled={busy} onClick={()=>props.onChooseRepair(item)} style={repairRow}><div style={{minWidth:0,textAlign:"left"}}><strong>{item.issue}</strong><div style={repairMeta}>{s} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</div></div><span style={chevron}>›</span></button>})}</div>
+      </section>}
+
+      {repair.handoffNote&&<div style={handoffNotice}><strong>SHIFT HANDOFF</strong><div>{repair.handoffNote}</div></div>}
+
+      {!pilot&&maintenanceBlock}
+
 
       {!noUnit&&<nav style={quickTools} aria-label="Current repair tools">
         <a href="/repair-board" style={quickButton}>▣<span>DVIR</span></a>
@@ -112,6 +126,10 @@ export default function CurrentWorkHome(props:Props){
   </main>;
 }
 
+const pilotNav={position:"sticky" as const,top:0,zIndex:4,display:"flex",gap:6,overflowX:"auto" as const,padding:"8px",border:"1px solid #d7e1e6",borderRadius:10,background:"#f7fafc",boxShadow:"0 3px 12px #102a5311"} as const;
+const pilotNavButton={flex:"0 0 auto",padding:"9px 10px",background:"white",border:"1px solid #cad5df",borderRadius:9,color:"#173f37",fontSize:12,fontWeight:900,cursor:"pointer"} as const;
+const pilotSection={display:"grid",gap:9,scrollMarginTop:74} as const;
+const pilotHeading={display:"block",fontSize:15,color:"#102a53",margin:"3px 0"} as const;
 const page={minHeight:"100vh",background:"#f4f6f4",padding:"18px clamp(10px,2vw,20px) 36px",color:"#173f37"} as const;
 const shell={maxWidth:860,margin:"0 auto",display:"grid",gap:12} as const;
 const notice={padding:"10px 12px",border:"1px solid #f2c66d",borderRadius:10,background:"#fff8e6",fontSize:13,fontWeight:800} as const;
