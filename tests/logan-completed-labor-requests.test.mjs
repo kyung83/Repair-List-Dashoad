@@ -11,6 +11,7 @@ const manager=read('app/labor-review/page.tsx');
 const menu=read('app/navigation-config.ts');
 const workOrders=read('app/work-orders/page.tsx');
 const original=read('app/shop/current-work-home.tsx');
+const worker=read('worker/index.ts');
 
 test('only Logan receives Completed pilot, existing active repair and shop-duty UI are reused',()=>{
   assert.match(shop,/user\.id===29&&data\.user\.username==="loganr"&&data\.user\.role==="mechanic"/);
@@ -66,4 +67,18 @@ test('manager Labor Corrections queue is visible from repairs and work-order rev
   assert.match(manager,/ASK FOR DETAILS/);
   assert.match(manager,/REJECT/);
   assert.match(manager,/Current: \{hours\(item\.currentHours\)\}/);
+});
+
+test('outer Worker clearance permits technician labor request submission while API enforces Logan-only changes and manager approvals',()=>{
+  const start=worker.indexOf('const TECHNICIAN_SHOP_WRITE_PATHS');
+  const end=worker.indexOf('const DISPATCH_READ_PATHS',start);
+  assert.ok(start>=0&&end>start);
+  const allowlist=worker.slice(start,end);
+  assert.match(allowlist,/'\/api\/shop\/labor-review'/);
+  assert.match(worker,/TECHNICIAN_SHOP_WRITE_PATHS\.has\(pathname\)/);
+  assert.match(api,/if\(!isPilot\(user\)\)throw new Error\('Only Logan can submit during the pilot\.'\)/);
+  assert.match(api,/if\(!isManager\(user\)\)throw new Error\('Managers only\.'\)/);
+  assert.match(api,/if\(action==='submit'\)/);
+  assert.match(api,/if\(action==='approve'\)/);
+  assert.doesNotMatch(allowlist,/'\/api\/labor-review'/);
 });
