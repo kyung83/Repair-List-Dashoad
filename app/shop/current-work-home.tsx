@@ -91,7 +91,7 @@ export default function CurrentWorkHome(props:Props){
 
 
       {pilot&&<nav aria-label="Jump to work tools" style={pilotNav}>
-        {([["Notes","pilot-notes"],["Parts","pilot-parts"],["Photos","pilot-photos"],["Checklist","pilot-checklist"],["History","pilot-unit-history"],["+ Repair","pilot-add-repair"],...(visibleOtherRepairs.length?[["Other Jobs","pilot-other-repairs"]]:[])] as string[][]).map(([label,target])=>
+        {([["Notes","pilot-notes"],["Parts","pilot-parts-section"],["Photos","pilot-photos"],["Checklist","pilot-checklist"],["History","pilot-unit-history"],["+ Repair","pilot-add-repair"],...(visibleOtherRepairs.length?[["Other Jobs","pilot-other-repairs"]]:[])] as string[][]).map(([label,target])=>
           <button key={target} type="button" onClick={()=>pilotJump(target)} style={pilotNavButton}>{label}</button>)}
       </nav>}
       <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} compact={pilot} onChanged={props.onTeamChanged}/>
