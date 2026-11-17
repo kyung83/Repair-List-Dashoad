@@ -19,7 +19,7 @@ test("Logan sees required Repair Type before helpers and REPAIRED, not hidden in
   const actions=work.indexOf('id={pilot?"pilot-actions"');
   assert.ok(other>0 && other<required && required<helper && helper<actions);
   const slot=work.slice(required,helper);
-  assert.match(slot,/pilot&&repairMine/);
+  assert.match(work,/pilot&&repairMine&&<div id="pilot-required-repair-type"/);
   assert.match(slot,/<CurrentRepairTypeControl repairId=\{repair\.id\}\/>/);
   assert.equal((work.match(/<CurrentRepairTypeControl repairId=\{repair\.id\}\/>/g)||[]).length,2); // pilot and classic only
   assert.match(work,/!pilot&&maintenanceBlock/);
