@@ -3,6 +3,7 @@
 import {useEffect,useMemo,useState} from "react";
 import CurrentWorkHome from "./current-work-home";
 import ShopDutyWorkHome, {type ActiveShopDuty} from "./shop-duty-work-home";
+import LoganPilotAddRepair from "./logan-pilot-add-repair";
 
 type User={id:number;username:string;displayName:string;role:"viewer"|"mechanic"|"manager"|"admin";technicianId:number|null;yard?:string};
 type TechnicianOption={id:number;name:string};
@@ -92,6 +93,8 @@ export default function ShopPage(){
   const mineGroups=useMemo(()=>groupByUnit(mine),[mine]);
   const availableGroups=useMemo(()=>groupByUnit(available),[available]);
   const allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
+  // Strict account-level pilot: no other mechanic, manager or yard is affected.
+  const loganPilot=data?.user.id===29&&data.user.username==="loganr"&&data.user.role==="mechanic";
   const canAssignHandoff=data?.user.role==="manager"||data?.user.role==="admin";
   const techOptions=useMemo(()=>canAssignHandoff?(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId):[],[data,canAssignHandoff]);
 
@@ -125,6 +128,7 @@ export default function ShopPage(){
       onTeamChanged={load}
       onChooseRepair={repair=>void chooseRepair(repair)}
       onFoundRepairAdded={load}
+      pilot={loganPilot}
       onUsePlannedPart={(repair,part)=>void usePlannedPart(repair,part)}
       onUseReservedPart={request=>void useReserved(request as PartRequest)}
     />;
@@ -134,6 +138,7 @@ export default function ShopPage(){
     <div style={shell}>
       <header style={header}><div><p style={eyebrow}>TECHNICIAN SHOP QUEUE</p><h1 style={title}>Shop Jobs</h1><p style={subtitle}>Pick a unit. Labor starts automatically when you begin working.</p></div><div style={{textAlign:"right"}}><strong>{data?.user.displayName??"Loading…"}</strong><div style={userName}>{data?.user.username?`@${data.user.username}`:""}</div></div></header>
       {message&&<div style={notice}>{message}</div>}
+      {loganPilot&&<section style={{marginTop:12,display:"grid",gap:8}}><p style={{margin:0,color:"#176440",fontSize:12,fontWeight:800}}>LOGAN PILOT · Create a repair without leaving My Work</p><LoganPilotAddRepair onSaved={load}/></section>}
       {data?.user.role==="mechanic"&&!data.user.technicianId&&<div style={errorNotice}>Your login is not linked to a technician record yet. Ask an administrator to update the account.</div>}
       <div style={tabs}><button onClick={()=>setView("mine")} style={view==="mine"?activeTab:tab}>My Units ({mineGroups.length})</button><button onClick={()=>setView("available")} style={view==="available"?activeTab:tab}>Available Units ({availableGroups.length})</button><button onClick={()=>setView("all")} style={view==="all"?activeTab:tab}>All Open Units ({allGroups.length})</button></div>
       <section style={queue}>{groups.map(group=>{const workable=group.repairs.find(repair=>repair.technicianId===data?.user.technicianId||(repair.teamIds||[]).includes(Number(data?.user.technicianId))||repair.technicianId===null);return <article key={group.key} style={unitCard}><div style={unitHeader}><a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={unitLink}>Unit {group.unit||"—"} ↗</a><span style={openCount}>{group.repairs.length} OPEN</span></div><div style={repairList}>{group.repairs.map(repair=><div key={repair.id} style={repairRow}><div><strong>{repair.issue}</strong><div style={repairMeta}>{repair.technicianId===null?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`} · {repair.laborHours.toFixed(2)} hr logged</div></div><div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{repair.pullThru&&<span style={pullThruBadge}>PULL THRU</span>}<span style={statusBadge}>{repair.status}</span>{data?.user.technicianId&&(repair.technicianId===data.user.technicianId||(repair.teamIds||[]).includes(Number(data.user.technicianId))||repair.technicianId===null)&&<button type="button" disabled={busy} onClick={()=>void startRepair(repair)} style={startButton}>START THIS REPAIR</button>}</div></div>)}</div>{!workable||!data?.user.technicianId?<a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={viewButton}>VIEW UNIT</a>:<div style={repairMeta}>Choose the exact repair above to start labor. Other jobs on this unit remain separate.</div>}</article>})}{data&&!groups.length&&<div style={empty}>No units in this view.</div>}</section>
