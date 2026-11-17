@@ -35,10 +35,14 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       const target=event.target instanceof Element?event.target.closest("button"):null;
       if(!target)return;
       const text=target.textContent?.trim().toUpperCase()??"";
-      if(!text.startsWith("REPAIRED")&&!text.startsWith("DONE WORKING"))return;
+      const repaired=target.matches('[data-shop-action="repaired"]')||text.startsWith("REPAIRED");
+      const doneWorking=target.matches('[data-shop-action="done-working"]')||text.startsWith("DONE WORKING");
+      if(!repaired&&!doneWorking)return;
       event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
-      setMessage("Choose the Repair Type before leaving this work.");
-      document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"});
+      const message=repaired?"Choose the Repair Type under Notes before marking REPAIRED.":"Choose the Repair Type under Notes before leaving this work.";
+      setMessage(message);
+      window.dispatchEvent(new CustomEvent("shop-repair-close-blocked",{detail:{repairId,reason:"repair-type",message}}));
+      window.requestAnimationFrame(()=>document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"}));
     };
     document.addEventListener("click",blockExit,true);return()=>document.removeEventListener("click",blockExit,true);
   },[data]);
@@ -53,6 +57,7 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       setData(payload);
       setMessage(`${payload.current?.name||"Repair Type"} saved.`);
       window.dispatchEvent(new CustomEvent("repair-type-changed",{detail:{repairId}}));
+      window.dispatchEvent(new CustomEvent("shop-repair-close-updated",{detail:{repairId}}));
     }catch(error){
       const text=error instanceof Error?error.message:"Repair Type could not be saved.";
       await load();

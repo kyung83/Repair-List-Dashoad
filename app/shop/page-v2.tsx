@@ -62,7 +62,15 @@ export default function ShopPage(){
       else if(result.laborStarted)setMessage("Unit workspace opened. Labor started automatically.");
       await load();
       return result;
-    }catch(error){setMessage(error instanceof Error?error.message:"Shop action failed.");return null}finally{setBusy(false)}
+    }catch(error){
+      const failure=error instanceof Error?error.message:"Shop action failed.";
+      setMessage(failure);
+      if(body.action==="repairOutcome"&&body.outcome==="repaired"){
+        const reason=/repair type/i.test(failure)?"repair-type":/tire.position/i.test(failure)?"tire":/checklist|inspection|annual|PM /i.test(failure)?"checklist":/another technician|helper.*(working|timer)/i.test(failure)?"helper":"server";
+        window.dispatchEvent(new CustomEvent("shop-repair-close-blocked",{detail:{repairId:String(body.repairId??""),reason,message:failure}}));
+      }
+      return null;
+    }finally{setBusy(false)}
   }
 
   async function startRepair(repair:Repair){await action({action:"startUnit",repairId:repair.id})}

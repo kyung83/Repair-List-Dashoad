@@ -2,7 +2,7 @@
 
 import RepairTeamPanel from './repair-team-panel';
 
-import {useState,type ReactNode} from "react";
+import {useEffect,useState,type ReactNode} from "react";
 import MaintenanceChecklistPanel from "./maintenance-checklist-panel";
 import FoundRepairControl from "./found-repair-control";
 import RepairPhotoControl from "./repair-photo-control";
@@ -47,12 +47,53 @@ export default function CurrentWorkHome(props:Props){
   const {timer,repair,unitRepairs,requests,technicianId,now,busy}=props;
   const pilot=Boolean(props.pilot);
   const [pilotTool,setPilotTool]=useState<"notes"|"parts"|"photos"|"checklist"|"history">("notes");
+  const [closeBlock,setCloseBlock]=useState<{reason:string;message:string}|null>(null);
   const runningTime=duration(timer.startedAt,now);
   const noUnit=!String(repair.unit||timer.unit||"").trim();
   const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
   const repairMine=technicianId!==null&&(repair.technicianId===technicianId||(repair.teamIds||[]).includes(technicianId));
   const otherRepairs=unitRepairs.filter(item=>item.id!==timer.repairId);
   const visibleOtherRepairs=noUnit?[]:otherRepairs;
+
+  useEffect(()=>{
+    if(!pilot)return;
+    setCloseBlock(null);
+    const blocked=(event:Event)=>{
+      const info=(event as CustomEvent<{repairId?:string;reason?:string;message?:string}>).detail;
+      if(!info||info.repairId!==repair.id)return;
+      setCloseBlock({reason:info.reason||"server",message:info.message||"Finish the required step before marking this repair REPAIRED."});
+      if(info.reason==="repair-type"||info.reason==="checklist"){
+        setPilotTool(info.reason==="repair-type"?"notes":"checklist");
+        window.requestAnimationFrame(()=>document.getElementById(info.reason==="repair-type"?"current-repair-type":"pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }else if(info.reason==="tire"){
+        window.requestAnimationFrame(()=>document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }else{
+        window.requestAnimationFrame(()=>document.getElementById("pilot-close-guidance")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }
+    };
+    const updated=(event:Event)=>{
+      const info=(event as CustomEvent<{repairId?:string}>).detail;
+      if(info?.repairId===repair.id)setCloseBlock(null);
+    };
+    window.addEventListener("shop-repair-close-blocked",blocked);
+    window.addEventListener("shop-repair-close-updated",updated);
+    return()=>{
+      window.removeEventListener("shop-repair-close-blocked",blocked);
+      window.removeEventListener("shop-repair-close-updated",updated);
+    };
+  },[pilot,repair.id]);
+
+  function goToCloseRequirement(reason:string){
+    if(reason==="repair-type"||reason==="checklist"){
+      setPilotTool(reason==="repair-type"?"notes":"checklist");
+      window.requestAnimationFrame(()=>document.getElementById(reason==="repair-type"?"current-repair-type":"pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
+    }else if(reason==="tire"){
+      document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"});
+    }else if(reason==="helper"){
+      const helpers=document.getElementById("pilot-helper-panel") as HTMLDetailsElement|null;
+      if(helpers){helpers.open=true;helpers.scrollIntoView({behavior:"smooth",block:"center"});}
+    }
+  }
 
   function goToFinalReview(){window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
   const partsAndLaborPanel=(<section style={twoCol}>
@@ -99,20 +140,29 @@ export default function CurrentWorkHome(props:Props){
           <span style={{minWidth:0,textAlign:"left"}}><strong style={{display:"block",fontSize:12,lineHeight:1.3}}>{item.issue}</strong><span style={repairMeta}>{state(item,timer.repairId)} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</span></span><span aria-hidden="true">›</span>
         </button>)}</div>
       </details>}
-      {pilot?<details style={pilotSetupFold}>
-        <summary style={pilotSetupSummary}>Helpers &amp; repair type <span style={pilotSetupHint}>Expand when needed</span></summary>
+      {pilot?<>{repair.technicianId===technicianId&&technicianId!==null&&<details id="pilot-helper-panel" style={pilotSetupFold}>
+        <summary style={pilotSetupSummary}>+ ADD / MANAGE HELPER <span style={pilotSetupHint}>Tap to expand</span></summary>
         <div style={pilotSetupContents}>
-          <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} compact={pilot} onChanged={props.onTeamChanged}/>
-          {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>}
+          <RepairTeamPanel repairId={repair.id} editable compact onChanged={props.onTeamChanged}/>
         </div>
-      </details>:<>
+      </details>}</>:<>
         <RepairTeamPanel repairId={repair.id} editable={repair.technicianId===technicianId&&technicianId!==null} compact={pilot} onChanged={props.onTeamChanged}/>
         {repairMine&&<CurrentRepairTypeControl repairId={repair.id}/>}
       </>}
 
+      {pilot&&<section id="pilot-close-guidance" style={pilotCloseGuide}>
+        <strong>REPAIRED — what is required?</strong>
+        <span>Choose a Repair Type in Notes, save tire positions if requested, and finish any required checklist. Helpers must stop their own timers first. DONE WORKING saves labor without closing the repair.</span>
+        {closeBlock&&<div role="alert" style={pilotCloseError}>
+          <strong>Cannot mark repaired yet:</strong> {closeBlock.message}
+          {["repair-type","tire","checklist","helper"].includes(closeBlock.reason)&&<button type="button" onClick={()=>goToCloseRequirement(closeBlock.reason)} style={pilotCloseAction}>
+            {closeBlock.reason==="repair-type"?"OPEN REPAIR TYPE":closeBlock.reason==="tire"?"GO TO TIRE POSITIONS":closeBlock.reason==="checklist"?"OPEN CHECKLIST":"SHOW HELPERS"}
+          </button>}
+        </div>}
+      </section>}
       <section id={pilot?"pilot-actions":undefined} style={{...actionGrid,gridTemplateColumns:pilot||noUnit?"repeat(2,minmax(0,1fr))":"repeat(3,minmax(0,1fr))",...(pilot?{gap:8}:{})}}>
-        <button disabled={busy} onClick={props.onRepaired} style={pilot?{...repairedButton,minHeight:82,padding:"10px 8px"}:repairedButton}><span style={pilot?{...actionIcon,fontSize:22}:actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
-        <button disabled={busy} onClick={props.onDoneWorking} style={pilot?{...doneButton,minHeight:82,padding:"10px 8px"}:doneButton}><span style={pilot?{...actionIcon,fontSize:22}:actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Keep open / hand off</small></button>
+        <button data-shop-action="repaired" disabled={busy} onClick={props.onRepaired} style={pilot?{...repairedButton,minHeight:82,padding:"10px 8px"}:repairedButton}><span style={pilot?{...actionIcon,fontSize:22}:actionIcon}>✓</span><strong>{noUnit?"DONE":"REPAIRED"}</strong><small>Save labor & close this {noUnit?"work order":"repair"}</small></button>
+        <button data-shop-action="done-working" disabled={busy} onClick={props.onDoneWorking} style={pilot?{...doneButton,minHeight:82,padding:"10px 8px"}:doneButton}><span style={pilot?{...actionIcon,fontSize:22}:actionIcon}>▶▶</span><strong>DONE WORKING</strong><small>Keep open / hand off</small></button>
         {!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>}
         {pilot&&<div id="pilot-add-repair" style={{scrollMarginTop:72}}><LoganPilotAddRepair onSaved={props.onFoundRepairAdded}/></div>}
       </section>
@@ -129,7 +179,7 @@ export default function CurrentWorkHome(props:Props){
           </button>)}
         </nav>
         <div id="pilot-panel-notes" role="tabpanel" aria-labelledby="pilot-tab-notes" hidden={pilotTool!=="notes"} style={{...pilotTabPanel,display:pilotTool==="notes"?"grid":"none"}}>
-          {repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/>:<div style={empty}>Only assigned repair team members can edit notes.</div>}
+          {repairMine?<><TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/><CurrentRepairTypeControl repairId={repair.id}/></>:<div style={empty}>Only assigned repair team members can edit notes.</div>}
         </div>
         <div id="pilot-panel-parts" role="tabpanel" aria-labelledby="pilot-tab-parts" hidden={pilotTool!=="parts"} style={{...pilotTabPanel,display:pilotTool==="parts"?"grid":"none"}}>
           {repairMine&&partsAndLaborPanel}
@@ -183,6 +233,9 @@ const pilotOtherCard={padding:"10px 12px",border:"1px solid #d7e1e6",borderRadiu
 const pilotOtherSummary={display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,color:"#102a53",fontSize:13,fontWeight:900,cursor:"pointer",minHeight:31} as const;
 const pilotOtherList={display:"grid",gap:5,marginTop:8} as const;
 const pilotOtherRow={width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:9,padding:"8px 10px",border:"1px solid #dde5eb",borderRadius:8,background:"#f9fbfc",color:"#1b2421",cursor:"pointer"} as const;
+const pilotCloseGuide={padding:"9px 11px",border:"1px solid #cbd9df",borderRadius:10,background:"#f7fafc",fontSize:11,color:"#3c5260",display:"grid",gap:4,lineHeight:1.45} as const;
+const pilotCloseError={padding:"9px 10px",border:"1px solid #dfb46c",borderRadius:8,background:"#fff7eb",color:"#714514",fontSize:12,fontWeight:700,display:"grid",gap:7} as const;
+const pilotCloseAction={justifySelf:"start",border:"1px solid #9fb4c7",background:"white",borderRadius:7,padding:"8px 10px",color:"#173f37",fontSize:11,fontWeight:900,cursor:"pointer"} as const;
 const pilotSetupFold={padding:"9px 12px",border:"1px solid #d7e1e6",borderRadius:10,background:"white"} as const;
 const pilotSetupSummary={display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,minHeight:30,fontSize:12,fontWeight:900,color:"#173f37",cursor:"pointer"} as const;
 const pilotSetupHint={fontSize:11,fontWeight:600,color:"#637783"} as const;
