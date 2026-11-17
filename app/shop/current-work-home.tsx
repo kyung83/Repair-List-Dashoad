@@ -62,6 +62,14 @@ export default function CurrentWorkHome(props:Props){
       const info=(event as CustomEvent<{repairId?:string;reason?:string;message?:string}>).detail;
       if(!info||info.repairId!==repair.id)return;
       setCloseBlock({reason:info.reason||"server",message:info.message||"Finish the required step before marking this repair REPAIRED."});
+      if(info.reason==="repair-type"||info.reason==="checklist"){
+        setPilotTool(info.reason==="repair-type"?"notes":"checklist");
+        window.requestAnimationFrame(()=>document.getElementById(info.reason==="repair-type"?"current-repair-type":"pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }else if(info.reason==="tire"){
+        window.requestAnimationFrame(()=>document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }else{
+        window.requestAnimationFrame(()=>document.getElementById("pilot-close-guidance")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }
     };
     const updated=(event:Event)=>{
       const info=(event as CustomEvent<{repairId?:string}>).detail;
