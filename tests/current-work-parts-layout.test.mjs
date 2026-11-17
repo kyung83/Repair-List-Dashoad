@@ -12,7 +12,9 @@ test('Current Work puts part lookup directly below repair photos',()=>{
   const photoIndex=currentWork.indexOf('!pilot&&<RepairPhotoControl');
   const partIndex=currentWork.indexOf('!pilot&&repairMine&&!noUnit&&<TechnicianRepairTools');
   assert.ok(photoIndex>=0&&partIndex>photoIndex);
-  assert.match(currentWork,/pilot&&repairMine&&<section id="pilot-parts-section"/);
+  assert.match(currentWork,/id="pilot-panel-parts"/);
+  assert.match(currentWork,/hidden=\{pilotTool!=="parts"\}/);
+  assert.match(currentWork,/<TechnicianRepairTools repairId=\{repair\.id\} canWork mode="parts" compact\/>/);
   assert.doesNotMatch(currentWork,/Open Repair on This Unit/);
 });
 
