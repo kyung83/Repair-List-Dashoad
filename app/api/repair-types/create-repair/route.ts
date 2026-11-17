@@ -95,9 +95,8 @@ export async function POST(request:Request){
 
     // Technicians may choose to leave a new repair unassigned; omission preserves
     // the prior safe default of assigning a newly created repair to themselves.
-    let technician:Technician|null=mechanic
-      ? (body.assignToMe === false ? null : mechanicTechnician)
-      : null;
+    let technician:Technician|null=mechanicTechnician;
+    if(mechanic&&body.assignToMe===false)technician=null;
     if(!mechanic){
       const technicianId=Number(body.technicianId??0);
       if(technicianId>0){
