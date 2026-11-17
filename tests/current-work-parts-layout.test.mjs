@@ -7,9 +7,12 @@ const maintenance=readFileSync(new URL('../app/shop/maintenance-checklist-panel-
 const tools=readFileSync(new URL('../app/shop/technician-repair-tools-v2.tsx',import.meta.url),'utf8');
 
 test('Current Work puts part lookup directly below repair photos',()=>{
-  const photoIndex=currentWork.indexOf('<RepairPhotoControl');
-  const partIndex=currentWork.indexOf('mode="parts"');
+  // Existing non-pilot technician flow preserves Photos -> Parts ordering.
+  // Logan's isolated pilot intentionally brings Notes/Parts nearer the top.
+  const photoIndex=currentWork.indexOf('!pilot&&<RepairPhotoControl');
+  const partIndex=currentWork.indexOf('!pilot&&repairMine&&!noUnit&&<TechnicianRepairTools');
   assert.ok(photoIndex>=0&&partIndex>photoIndex);
+  assert.match(currentWork,/pilot&&repairMine&&<section id="pilot-notes"/);
   assert.doesNotMatch(currentWork,/Open Repair on This Unit/);
 });
 
