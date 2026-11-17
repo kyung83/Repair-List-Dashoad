@@ -171,7 +171,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE (e.user_id=? OR e.technician_id=?) AND e.created_at>=? AND e.created_at<=?
-      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','technician_note','unit_session_ended','labor_stopped')
+      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','part_requested_awaiting','technician_note','unit_session_ended','labor_stopped')
     ORDER BY e.created_at,e.id
   ` : `
     SELECT e.repair_id,COALESCE(eq.unit,'') AS unit,COALESCE(r.title,'Repair') AS title,
@@ -180,7 +180,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE e.user_id=? AND e.created_at>=? AND e.created_at<=?
-      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested')
+      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','part_requested_awaiting')
     ORDER BY e.created_at,e.id
   `;
   const eventStmt = user.technician_id
@@ -213,7 +213,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
 
   const activity:PersonActivity={
     user,labor,events,parts,
-    activeTimer:timer?{repairId:Number(timer.repair_id),unit:timer.unit,title:timer.title,startedAt:timer.started_at}:null,
+    activeTimer:timer&&parseDbDate(timer.started_at)<=end.getTime()?{repairId:Number(timer.repair_id),unit:timer.unit,title:timer.title,startedAt:timer.started_at}:null,
     unfinishedJobs:[],
   };
   activity.unfinishedJobs=await unfinishedJobsForActivity(db,activity);
@@ -314,7 +314,7 @@ function uniqueJobs(activity:PersonActivity) {
 function actionLabel(action:string) {
   return ({
     completed:'Completed',waiting_on_part:'Waiting on Part',shift_handoff:'Shift Handoff',found_repair:'Found Repair',
-    repair_created:'Repair Added',self_assigned:'Picked Up Work',unmatched_part_requested:'Part Requested',
+    repair_created:'Repair Added',self_assigned:'Picked Up Work',unmatched_part_requested:'Part Requested',part_requested_awaiting:'Part Requested / Awaiting',
     technician_note:'Technician Note',unit_session_ended:'Stopped Working',labor_stopped:'Labor Saved',
   } as Record<string,string>)[action] ?? action;
 }
@@ -490,17 +490,18 @@ async function sendLateShiftAddendum(db:D1Database,shift:ShiftRow,workDate:strin
     for(const user of users)activities.push(await personActivity(db,user,originalDue,addendumDue));
     // An active timer alone from the original email is not new work unless it
     // actually began after that email's cutoff.
-    const hasLateWork=activities.some(activity=>
+    const lateActivities=activities.filter(activity=>
       activity.labor.length>0||activity.events.length>0||activity.parts.length>0||
       Boolean(activity.activeTimer&&parseDbDate(activity.activeTimer.startedAt)>=originalDue.getTime()&&parseDbDate(activity.activeTimer.startedAt)<=addendumDue.getTime())
     );
+    const hasLateWork=lateActivities.length>0;
     if(!hasLateWork){
       await db.prepare(`
         UPDATE maintenance_shift_late_addendum_runs SET status='skipped',updated_at=CURRENT_TIMESTAMP WHERE id=?
       `).bind(run.id).run();
       return {sent:false,reason:'no_late_activity'};
     }
-    const message=renderSummary(shift,workDate,originalDue,addendumDue,addendumDue,activities,true);
+    const message=renderSummary(shift,workDate,originalDue,addendumDue,addendumDue,lateActivities,true);
     const sent=await sendGmailRuntimeEmail({
       to:MAINTENANCE_SHIFT_SUMMARY_RECIPIENT,
       subject:message.subject,html:message.html,text:message.text,
