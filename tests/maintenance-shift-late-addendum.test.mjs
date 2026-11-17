@@ -22,7 +22,7 @@ test('late summary requires original sent and one-time deduplication',()=>{
 });
 test('technician notes are preserved beside worked jobs, including completed jobs',()=>{
  assert.match(source,/\['technician_note','shift_handoff'\]\.includes\(event\.action\)/);
- assert.match(source,/current\.notes\.add\(event\.detail\.trim\(\)\)/);
+ assert.match(source,/job\.notes\.add\(event\.detail\.trim\(\)\)/);
  assert.match(source,/part_requested_awaiting/);
  assert.match(source,/repair_labor_entries/);
  assert.match(source,/inventory_operations/);
