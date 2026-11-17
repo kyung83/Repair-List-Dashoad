@@ -14,7 +14,7 @@ type SpeechResultLike={length:number;isFinal:boolean;[index:number]:{transcript:
 type SpeechEventLike={results:ArrayLike<SpeechResultLike>};
 type RecognitionLike={lang:string;continuous:boolean;interimResults:boolean;start:()=>void;stop:()=>void;onresult:((event:SpeechEventLike)=>void)|null;onerror:((event:{error?:string})=>void)|null;onend:(()=>void)|null};
 type RecognitionCtor=new()=>RecognitionLike;
-type Props={repairId:string;canWork:boolean;mode?:"all"|"notes"|"parts"};
+type Props={repairId:string;canWork:boolean;mode?:"all"|"notes"|"parts";compact?:boolean};
 
 function noteTime(value:string){const parsed=Date.parse(value.includes("T")?value:value.replace(" ","T")+"Z");return Number.isFinite(parsed)?new Date(parsed).toLocaleString():value}
 function qty(value:number|undefined){const number=Number(value??0);return Number.isInteger(number)?String(number):number.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")}
@@ -23,7 +23,7 @@ function refreshReview(repairId:string){window.dispatchEvent(new CustomEvent("re
 function refreshShop(){window.dispatchEvent(new Event("shop-jobs-refresh"))}
 function waitMessage(result:{waitingOnPart?:boolean;nextRepairId?:string|null;activeLaborContinues?:boolean}){if(result.nextRepairId)return " Labor was saved, this repair moved to Waiting on Part, and the next repair started.";if(result.waitingOnPart)return " Labor was saved and this repair moved to Waiting on Part.";if(result.activeLaborContinues)return " The request was saved, but another active labor session is still running on this repair.";return " The request was saved for Parts Desk."}
 
-export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Props){
+export default function TechnicianRepairToolsV2({repairId,canWork,mode="all",compact=false}:Props){
   const[note,setNote]=useState(""),[notes,setNotes]=useState<RepairNote[]>([]),[noteBusy,setNoteBusy]=useState(false),[noteMessage,setNoteMessage]=useState(""),[listening,setListening]=useState(false);
   const[parts,setParts]=useState<Part[]>([]),[search,setSearch]=useState(""),[selectedPart,setSelectedPart]=useState<Part|null>(null),[warehouseCode,setWarehouseCode]=useState(""),[quantity,setQuantity]=useState(1),[partBusy,setPartBusy]=useState(false),[partMessage,setPartMessage]=useState("");
   const[shopRole,setShopRole]=useState(""),[assignedWarehouseCode,setAssignedWarehouseCode]=useState(""),[assignedWarehouseName,setAssignedWarehouseName]=useState("");
@@ -69,16 +69,16 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
   const actionLabel=!effectiveWarehouseCode?(warehouseLocked?"WAREHOUSE NOT ASSIGNED":"CHOOSE WAREHOUSE"):selectedAvailable+0.000001>=quantity?"APPLY PART":"REQUEST PART";
 
   return <section style={mode==="parts"?partsOnlyPanel:toolsPanel}>
-    {showNotes&&<div id="pilot-notes" style={{...toolCard,scrollMarginTop:74}}>
-      <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>Type it or tap TALK. Saved notes stay on this repair and remain visible in the final review.</span></div>
-      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={4} style={textarea} disabled={noteBusy}/>
+    {showNotes&&<div id="pilot-notes" style={{...toolCard,...(compact?{padding:10,gap:7}:{}),scrollMarginTop:74}}>
+      <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>{compact?"Type or tap TALK. Notes save to this repair.":"Type it or tap TALK. Saved notes stay on this repair and remain visible in the final review."}</span></div>
+      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={compact?3:4} style={textarea} disabled={noteBusy}/>
       <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
       {noteMessage&&<div style={messageStyle}>{noteMessage}</div>}
       {notes.length>0&&<div style={history}><strong style={historyHeading}>SAVED NOTES</strong>{notes.map(item=><div key={item.id} style={noteRow}><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={meta}>{item.technician} · {noteTime(item.createdAt)}</div></div>)}</div>}
     </div>}
 
-    {showParts&&<div id="pilot-parts" style={{...toolCard,scrollMarginTop:74}}>
-      <div><strong style={heading}>PART LOOKUP</strong><span style={help}>{warehouseLocked?`Parts are automatically tied to ${assignedWarehouseName||assignedWarehouseCode||"your assigned warehouse"}. `:"Choose the exact warehouse. "}Stocked and one-time parts use this same lookup. Apply what you have. A stocked shortage automatically saves labor and moves the repair to Waiting on Part; one-time parts never create reorder demand.</span></div>
+    {showParts&&<div id="pilot-parts" style={{...toolCard,...(compact?{padding:10,gap:7}:{}),scrollMarginTop:74}}>
+      <div><strong style={heading}>PART LOOKUP</strong><span style={help}>{compact?`Use or request parts from ${assignedWarehouseName||assignedWarehouseCode||"your warehouse"}. Stock shortages may stop labor and set Waiting on Part. One-time parts do not reorder.`:<>{warehouseLocked?`Parts are automatically tied to ${assignedWarehouseName||assignedWarehouseCode||"your assigned warehouse"}. `:"Choose the exact warehouse. "}Stocked and one-time parts use this same lookup. Apply what you have. A stocked shortage automatically saves labor and moves the repair to Waiting on Part; one-time parts never create reorder demand.</>}</span></div>
       {warehouseLocked&&<div style={lockedWarehouseBox}><span>YOUR PARTS WAREHOUSE</span><strong>{assignedWarehouseName||assignedWarehouseCode||"NOT ASSIGNED"}</strong></div>}
       <div style={searchRow}><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedPart(null);if(!warehouseLocked)setWarehouseCode("");setPartMessage("")}} placeholder="Type part number or description…" style={input} disabled={partBusy||!canWork||(warehouseLocked&&!assignedWarehouseCode)}/><input aria-label="Part quantity" type="number" min="0.01" step="any" value={quantity} onChange={event=>setQuantity(Number(event.target.value))} style={qtyInput} disabled={partBusy||!canWork||(warehouseLocked&&!assignedWarehouseCode)}/></div>
       {matches.length>0&&<div style={results}>{matches.map(part=><button key={part.id} type="button" onClick={()=>{setSelectedPart(part);if(!warehouseLocked)setWarehouseCode("");setSearch(`${part.partNumber} — ${part.description}`);setPartMessage("")}} style={selectedPart?.id===part.id?selectedResult:resultButton}><span><span style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><strong>{part.partNumber}</strong>{part.inventoryClass==="one_time"&&<em style={oneTimeBadge}>ONE-TIME</em>}</span><span>{part.description}</span>{(part.crossReferences??[]).length>0&&<small style={crossRef}>Cross: {(part.crossReferences??[]).join(" · ")}</small>}</span><span style={availability}>{part.inventoryClass==="one_time"?"ONE-TIME · ":""}{qty(part.available??part.quantityOnHand)} available{warehouseLocked&&effectiveWarehouseCode?` · ${effectiveWarehouseCode}`:""}</span></button>)}</div>}

@@ -4,12 +4,12 @@ import {useEffect,useState} from "react";
 
 type Photo={id:number;fileName:string;contentType:string;note:string;createdAt:string;uploadedBy:string;url:string};
 type Payload={ok?:boolean;error?:string;photos?:Photo[]};
-type Props={repairId:string;canWork:boolean};
+type Props={repairId:string;canWork:boolean;compact?:boolean};
 
 function when(value:string){const parsed=Date.parse(value.includes("T")?value:value.replace(" ","T")+"Z");return Number.isFinite(parsed)?new Date(parsed).toLocaleString():value}
 function refreshReview(repairId:string){window.dispatchEvent(new CustomEvent("repair-review-refresh",{detail:{repairId}}))}
 
-export default function RepairPhotoControl({repairId,canWork}:Props){
+export default function RepairPhotoControl({repairId,canWork,compact=false}:Props){
   const[photos,setPhotos]=useState<Photo[]>([]),[note,setNote]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
 
   async function load(){const response=await fetch(`/api/shop/repair-photos?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});const result=await response.json() as Payload;if(!response.ok||!result.ok)throw new Error(result.error||"Repair photos could not be loaded.");setPhotos(result.photos??[])}
@@ -48,8 +48,8 @@ export default function RepairPhotoControl({repairId,canWork}:Props){
     }finally{setBusy(false)}
   }
 
-  return <section style={card}>
-    <div style={head}><div><strong style={title}>📷 REPAIR PHOTOS</strong><div style={help}>Optional. Take a picture of what you found, before/after work, damage, leaks, or anything the next person should see.</div></div><span style={count}>{photos.length} photo{photos.length===1?"":"s"}</span></div>
+  return <section style={compact?{...card,padding:10,gap:7,marginTop:3}:card}>
+    <div style={head}><div><strong style={title}>📷 REPAIR PHOTOS</strong><div style={help}>{compact?"Optional · Take or upload repair photos.":"Optional. Take a picture of what you found, before/after work, damage, leaks, or anything the next person should see."}</div></div><span style={count}>{photos.length} photo{photos.length===1?"":"s"}</span></div>
     {canWork&&<><input value={note} onChange={event=>setNote(event.target.value.slice(0,500))} placeholder="Optional photo note — e.g. Before repair, leak found…" style={input} disabled={busy}/><label style={cameraButton}>📷 {busy?"SAVING…":"TAKE PICTURE"}<input type="file" accept="image/*" capture="environment" disabled={busy} style={{display:"none"}} onChange={event=>{const input=event.currentTarget;const file=input.files?.[0]??null;void upload(file).finally(()=>{try{input.value=""}catch{}})}}/></label></>}
     {message&&<div style={messageStyle}>{message}</div>}
     {photos.length>0&&<div style={grid}>{photos.map(photo=><a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={thumb}><img src={photo.url} alt={photo.note||photo.fileName} style={image}/><span style={caption}>{photo.note||photo.fileName}<small>{photo.uploadedBy} · {when(photo.createdAt)}</small></span></a>)}</div>}

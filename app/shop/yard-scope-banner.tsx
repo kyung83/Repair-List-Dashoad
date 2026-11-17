@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { yardLabel, type YardSelection } from "@/lib/yards";
 
-type User={role:"viewer"|"mechanic"|"manager"|"admin";yard?:YardSelection;yardAssigned?:boolean};
+type User={id?:number;username?:string;role:"viewer"|"mechanic"|"manager"|"admin";yard?:YardSelection;yardAssigned?:boolean};
 
 export default function YardScopeBanner(){
   const[user,setUser]=useState<User|null>(null);
@@ -14,7 +14,9 @@ export default function YardScopeBanner(){
       .catch(()=>setUser(null));
   },[]);
 
+  // Logan-only layout pilot: hide the informational yard banner, not yard restrictions.
   if(!user||(user.role!=="mechanic"&&user.role!=="manager"))return null;
+  if(user.id===29&&user.username==="loganr"&&user.role==="mechanic")return null;
   const yard=user.yard||"";
   if(!yard)return <section style={{margin:"18px 34px 0",padding:14,border:"2px solid #c94738",borderRadius:12,background:"#fff4f2",color:"#4d1d17"}}>
     <strong style={{display:"block"}}>No work yard is assigned to your user.</strong>
