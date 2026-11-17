@@ -77,7 +77,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
       {notes.length>0&&<div style={history}><strong style={historyHeading}>SAVED NOTES</strong>{notes.map(item=><div key={item.id} style={noteRow}><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={meta}>{item.technician} · {noteTime(item.createdAt)}</div></div>)}</div>}
     </div>}
 
-    {showParts&&<div style={toolCard}>
+    {showParts&&<div id="pilot-parts" style={{...toolCard,scrollMarginTop:74}}>
       <div><strong style={heading}>PART LOOKUP</strong><span style={help}>{warehouseLocked?`Parts are automatically tied to ${assignedWarehouseName||assignedWarehouseCode||"your assigned warehouse"}. `:"Choose the exact warehouse. "}Stocked and one-time parts use this same lookup. Apply what you have. A stocked shortage automatically saves labor and moves the repair to Waiting on Part; one-time parts never create reorder demand.</span></div>
       {warehouseLocked&&<div style={lockedWarehouseBox}><span>YOUR PARTS WAREHOUSE</span><strong>{assignedWarehouseName||assignedWarehouseCode||"NOT ASSIGNED"}</strong></div>}
       <div style={searchRow}><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedPart(null);if(!warehouseLocked)setWarehouseCode("");setPartMessage("")}} placeholder="Type part number or description…" style={input} disabled={partBusy||!canWork||(warehouseLocked&&!assignedWarehouseCode)}/><input aria-label="Part quantity" type="number" min="0.01" step="any" value={quantity} onChange={event=>setQuantity(Number(event.target.value))} style={qtyInput} disabled={partBusy||!canWork||(warehouseLocked&&!assignedWarehouseCode)}/></div>
