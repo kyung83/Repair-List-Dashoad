@@ -93,7 +93,11 @@ export async function POST(request:Request){
       throw new Error(`${repairType.name} requires a unit.`);
     }
 
-    let technician:Technician|null=mechanicTechnician;
+    // Technicians may choose to leave a new repair unassigned; omission preserves
+    // the prior safe default of assigning a newly created repair to themselves.
+    let technician:Technician|null=mechanic
+      ? (body.assignToMe === false ? null : mechanicTechnician)
+      : null;
     if(!mechanic){
       const technicianId=Number(body.technicianId??0);
       if(technicianId>0){
