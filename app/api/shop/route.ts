@@ -9,6 +9,7 @@ import { markGeotabDefectRepaired } from '@/lib/geotab';
 import { queueGeotabRepairReview } from '@/lib/geotab-repair-review';
 import { normalizeYard } from '@/lib/yards';
 import { completeRepairTypeChecklist, validateRepairTypeChecklistBeforeClose } from '@/lib/repair-types';
+import { requireReadyMaintenanceChecklist } from '@/lib/maintenance-close-guard';
 import { GET as originalGET } from './original';
 import { GET as legacyGET, POST as legacyPOST } from './route-legacy';
 
@@ -324,6 +325,7 @@ export async function POST(request: Request) {
         'SELECT 1 AS active FROM repair_labor_timers WHERE repair_id=? AND user_id<>? LIMIT 1'
       ).bind(repairId,(await getSessionUser(env.DB,request.clone()))?.id??-1).first<{active:number}>();
       if(remaining)throw new Error('Another technician is still working on this repair. They must finish their timer before closing the job.');
+      await requireReadyMaintenanceChecklist(env.DB,repairId);
       await validateRepairTypeChecklistBeforeClose(env.DB,repairId);
       const dvir = await markLinkedDvirRepairedBeforeShopCompletion(request.clone(),repairId);
       const response = await legacyPOST(request);
