@@ -286,7 +286,31 @@ export default function PlanningCenter(){
   catch(error){setMessage(error instanceof Error?error.message:'Repair Board change failed.');}
   finally{setBusy('');}
  }
- async function assignSingle(row:Row,value:string){
+ async function claimSelectedToMe(){
+  if(data?.user.role!=='mechanic'||!data.user.technicianId)return;
+  const claimable=selectedRows.filter(row=>row.technicianId===null&&!row.activeTimer);
+  if(!claimable.length){setMessage('Select an unassigned unit before claiming work.');return;}
+  setBusy('self-assign');setMessage('');
+  let claimed=0;
+  const failures:string[]=[];
+  for(const row of claimable){
+   try{
+    await req(row.id,{action:'assignToMe'});
+    claimed+=1;
+   }catch(error){
+    failures.push(`Unit ${row.unit}: ${error instanceof Error?error.message:'Could not assign'}`);
+   }
+  }
+  try{await load();}catch(error){failures.push('Refresh failed; reopen the board to confirm the assignments.');}
+  setSelected(new Set());
+  setMessage([
+   claimed?`${claimed} job${claimed===1?'':'s'} assigned to you. Open Shop Jobs to start work.`:'',
+   ...failures.slice(0,4),
+   failures.length>4?`${failures.length-4} more jobs could not be assigned.`:'',
+  ].filter(Boolean).join(' '));
+  setBusy('');
+ }
+  async function assignSingle(row:Row,value:string){
   if(!value)return;
   if(value===BULK_OUTSIDE){await openOutside([row.id]);return;}
   if(value===BULK_UNASSIGN){
@@ -411,8 +435,14 @@ export default function PlanningCenter(){
   }catch(error){setMessage(error instanceof Error?error.message:'DVIR sync failed.');}
   finally{setBusy('');}
  }
+ function claimableRows(group:Group){
+  if(data?.canManage)return group.rows;
+  if(data?.user.role!=='mechanic'||!data.user.technicianId)return [];
+  return group.rows.filter(row=>row.technicianId===null&&!row.activeTimer);
+ }
  function toggleGroup(group:Group){
-  const ids=group.rows.map(row=>row.id);
+  const ids=claimableRows(group).map(row=>row.id);
+  if(!ids.length)return;
   setSelected(current=>{
    const next=new Set(current),all=ids.every(id=>next.has(id));
    ids.forEach(id=>all?next.delete(id):next.add(id));
@@ -429,13 +459,13 @@ export default function PlanningCenter(){
    <header className={s.panelHead}><strong>{title}</strong><span>{items.length}</span></header>
    <div className={s.rows}>
     {shown.map(group=>{
-     const top=lead(group),ids=group.rows.map(row=>row.id),checked=ids.length>0&&ids.every(id=>selected.has(id));
+     const top=lead(group),claimable=claimableRows(group),ids=claimable.map(row=>row.id),checked=ids.length>0&&ids.every(id=>selected.has(id));
      const yard=top.equipmentId?yards[String(top.equipmentId)]?.currentYard:'';
      const etaValue=top.equipmentId?etas[String(top.equipmentId)]||'':'';
      const futureCount=group.equipmentId?(futureByEquipment.get(group.equipmentId)?.length??0):0;
      return <div key={`${name}-${group.key}`} className={`${s.row} ${checked?s.rowSelected:''}`} role="button" tabIndex={0} onClick={()=>setDetailKey(group.key)} onKeyDown={event=>{if(event.key==='Enter')setDetailKey(group.key)}}>
-      {data?.canManage
-       ? <input aria-label={`Select Unit ${group.unit} ${title}`} className={s.rowCheck} type="checkbox" checked={checked} onClick={event=>event.stopPropagation()} onChange={()=>toggleGroup(group)}/>
+      {ids.length>0
+       ? <input aria-label={`Select Unit ${group.unit} ${title}`} className={s.rowCheck} type="checkbox" checked={checked} disabled={Boolean(busy)} onClick={event=>event.stopPropagation()} onChange={()=>toggleGroup(group)}/>
        : <span aria-hidden="true"/>}
       <div className={s.unit}><strong>{group.unit||'—'}</strong><small>{kind(group.equipmentType)}</small></div>
       <div className={s.issue}><strong>{groupIssue(group)||'Open work'}</strong><small>{groupParts(group)}</small></div>
@@ -508,7 +538,12 @@ export default function PlanningCenter(){
    {(attention!=='all'||assignee!=='all'||q.trim())&&<button className={s.quiet} type="button" onClick={()=>{setAttention('all');setAssignee('all');setQ('')}}>Clear filters</button>}
   </div>
 
-  {data?.canManage&&selected.size>0&&<div className={s.bulk}>
+  {data?.user.role==='mechanic'&&Boolean(data.user.technicianId)&&selected.size>0&&<div className={s.bulk}>
+   <strong>{selected.size} selected job{selected.size===1?'':'s'}</strong>
+   <button className={s.primary} type="button" disabled={Boolean(busy)} onClick={()=>void claimSelectedToMe()}>{busy==='self-assign'?'Assigning…':'ASSIGN SELECTED TO ME'}</button>
+   <button className={s.button} type="button" disabled={Boolean(busy)} onClick={()=>setSelected(new Set())}>Clear Selection</button>
+  </div>}
+    {data?.canManage&&selected.size>0&&<div className={s.bulk}>
    <strong>{selected.size} selected</strong><span>Action for checked work:</span>
    <select aria-label="Bulk action for checked work" value={bulkAction} onChange={event=>setBulkAction(event.target.value)}>
     <option value="">Choose action…</option>
@@ -604,6 +639,7 @@ export default function PlanningCenter(){
    </aside>
   </div>
   {data?.canManage&&<div className={s.classicHint}>Checkboxes select the exact work shown in that queue. Use one action in the blue bar for everything checked.</div>}
+  {data?.user.role==='mechanic'&&<div className={s.classicHint}>Check an available unit to select its unassigned jobs, then tap ASSIGN SELECTED TO ME. Jobs assigned to another technician cannot be claimed.</div>}
   <footer className={s.footer}>{data?`Updated ${when(data.updatedAt)}`:'Loading Planning Center…'}</footer>
 
   {outside&&<div style={modalBackdrop} role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&busy!=='outside-send')setOutside(null)}}>
