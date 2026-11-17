@@ -296,100 +296,216 @@ async function unfinishedJobsForActivity(db:D1Database,activity:PersonActivity):
   });
 }
 
-function uniqueJobs(activity:PersonActivity) {
-  const jobs = new Map<number,{unit:string;title:string;notes:Set<string>}>();
-  for (const row of activity.labor) {
-    const current = jobs.get(row.repairId) ?? {unit:row.unit,title:row.title,notes:new Set<string>()};
-    if (row.notes.trim()) current.notes.add(row.notes.trim());
-    jobs.set(row.repairId,current);
-  }
-  for (const event of activity.events) {
-    const current=jobs.get(event.repairId)??{unit:event.unit,title:event.title,notes:new Set<string>()};
-    if (['technician_note','shift_handoff'].includes(event.action)&&event.detail.trim()) current.notes.add(event.detail.trim());
-    jobs.set(event.repairId,current);
-  }
-  return [...jobs.entries()].map(([repairId,value])=>({repairId,...value,notes:[...value.notes]}));
+
+type SummaryJob = {
+  repairId:number;unit:string;title:string;labor:number;notes:Set<string>;
+  completed:boolean;worked:boolean;reported:boolean;status:string;
+  partsUsed:{partNumber:string;description:string;quantity:number}[];
+  pendingParts:OutstandingPart[];
+};
+
+function shortRepairTitle(title:string) {
+  if (title.startsWith('MILEAGE STALE')) return 'PM status — mileage not verified';
+  return title;
 }
 
-function actionLabel(action:string) {
-  return ({
-    completed:'Completed',waiting_on_part:'Waiting on Part',shift_handoff:'Shift Handoff',found_repair:'Found Repair',
-    repair_created:'Repair Added',self_assigned:'Picked Up Work',unmatched_part_requested:'Part Requested',part_requested_awaiting:'Part Requested / Awaiting',
-    technician_note:'Technician Note',unit_session_ended:'Stopped Working',labor_stopped:'Labor Saved',
-  } as Record<string,string>)[action] ?? action;
+function technicianJobs(activity:PersonActivity):SummaryJob[] {
+  const jobs=new Map<number,SummaryJob>();
+  const get=(id:number,unit:string,title:string)=>{
+    const found=jobs.get(id);
+    if(found)return found;
+    const job:SummaryJob={repairId:id,unit:unit||'No unit',title:shortRepairTitle(title),
+      labor:0,notes:new Set(),completed:false,worked:false,reported:false,status:'',
+      partsUsed:[],pendingParts:[]};
+    jobs.set(id,job);return job;
+  };
+  for(const labor of activity.labor){
+    const job=get(labor.repairId,labor.unit,labor.title);
+    job.labor+=labor.hours;job.worked=true;
+    if(labor.notes.trim())job.notes.add(labor.notes.trim());
+  }
+  for(const event of activity.events){
+    const job=get(event.repairId,event.unit,event.title);
+    if(event.action==='completed'){job.completed=true;job.worked=true;}
+    if(['waiting_on_part','shift_handoff','found_repair'].includes(event.action))job.worked=true;
+    if(['repair_created','self_assigned'].includes(event.action))job.reported=true;
+    if(['technician_note','shift_handoff'].includes(event.action)&&event.detail.trim())
+      job.notes.add(event.detail.trim());
+  }
+  for(const part of activity.parts){
+    const job=get(part.repairId,part.unit,part.description);
+    job.partsUsed.push({partNumber:part.partNumber,description:part.description,quantity:part.quantity});
+    job.worked=true;
+  }
+  for(const unfinished of activity.unfinishedJobs){
+    const job=get(unfinished.repairId,unfinished.unit,unfinished.title);
+    job.status=unfinished.status;
+    job.pendingParts=unfinished.pendingParts;
+    for(const note of unfinished.notes)if(note.trim())job.notes.add(note.trim());
+  }
+  if(activity.activeTimer){
+    const timer=activity.activeTimer;
+    get(timer.repairId,timer.unit,timer.title).worked=true;
+  }
+  return [...jobs.values()].filter(job=>job.worked||job.reported||job.notes.size>0)
+    .sort((a,b)=>a.unit.localeCompare(b.unit,undefined,{numeric:true})||a.repairId-b.repairId);
+}
+
+function reportJobState(job:SummaryJob) {
+  if(job.status)return 'Unfinished';
+  if(job.completed)return 'Completed';
+  if(job.worked)return 'Worked — status not confirmed';
+  return 'Repair reported / assigned';
 }
 
 function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Date,activities:PersonActivity[],lateAddendum=false) {
-  const totalLabor = activities.reduce((sum,item)=>sum+item.labor.reduce((subtotal,row)=>subtotal+row.hours,0),0);
-  const totalCompleted = activities.reduce((sum,item)=>sum+item.events.filter((event)=>event.action==='completed').length,0);
-  const totalParts = activities.reduce((sum,item)=>sum+item.parts.reduce((subtotal,row)=>subtotal+row.quantity,0),0);
-  const totalUnfinished = activities.reduce((sum,item)=>sum+item.unfinishedJobs.length,0);
-  const totalOutstandingParts = activities.reduce((sum,item)=>sum+item.unfinishedJobs.reduce((count,job)=>count+job.pendingParts.length,0),0);
-  const titleDate = dateDisplayFormatter.format(start);
-  const heading=lateAddendum?'Late Work Addendum':'Shift Summary';
-  const subject = `Maintenance ${heading} — ${shift.name} — ${titleDate}`;
-  const range = `${displayFormatter.format(start)} – ${displayFormatter.format(end)}`;
-
-  const htmlPeople = activities.map((activity)=>{
-    const laborTotal = activity.labor.reduce((sum,row)=>sum+row.hours,0);
-    const jobs = uniqueJobs(activity);
-    const hasActivity = laborTotal>0 || jobs.length>0 || activity.events.length>0 || activity.parts.length>0 || Boolean(activity.activeTimer);
-    const jobList = jobs.length ? `<ul>${jobs.map((job)=>`<li><strong>${htmlEscape(job.unit||'No unit')} — ${htmlEscape(job.title)}</strong>${job.notes.length?`<br><span style="color:#5f6f7f">${job.notes.map(htmlEscape).join(' · ')}</span>`:''}</li>`).join('')}</ul>` : '';
-    const eventList = activity.events.length ? `<ul>${activity.events.map((event)=>`<li><strong>${htmlEscape(actionLabel(event.action))}</strong> — ${htmlEscape(event.unit||event.title)}${event.detail?`: ${htmlEscape(event.detail)}`:''}</li>`).join('')}</ul>` : '';
-    const partList = activity.parts.length ? `<ul>${activity.parts.map((part)=>`<li>${htmlEscape(part.partNumber)} — ${htmlEscape(part.description)} × ${htmlEscape(part.quantity)}${part.unit?` on ${htmlEscape(part.unit)}`:''}</li>`).join('')}</ul>` : '';
-    const unfinishedList = activity.unfinishedJobs.length ? `<div style="margin:12px 0;padding:12px;background:#fff8e8;border-left:4px solid #bf761c;border-radius:6px">
-      <strong>Worked on — not finished (${activity.unfinishedJobs.length})</strong>
-      ${activity.unfinishedJobs.map(job=>`<div style="margin-top:10px;padding-top:8px;border-top:1px solid #ead9b6">
-        <strong>${htmlEscape(job.unit||'No unit')} — ${htmlEscape(job.title)}</strong>
-        <span style="color:#6b531b"> (${htmlEscape(job.status)})</span>
-        ${job.notes.length?`<p style="margin:5px 0"><strong>Technician notes:</strong> ${job.notes.map(htmlEscape).join(' · ')}</p>`:'<p style="margin:5px 0;color:#6b7280">No technician notes recorded.</p>'}
-        ${job.pendingParts.length?`<p style="margin:6px 0 3px"><strong>Waiting on requested parts:</strong></p><ul style="margin:0 0 0 12px;padding-left:15px">${job.pendingParts.map(part=>`<li>${htmlEscape(part.partNumber)} — ${htmlEscape(part.description)}; ${htmlEscape(hours(part.remaining))} still needed of ${htmlEscape(hours(part.requested))} requested (${htmlEscape(part.warehouse)})</li>`).join('')}</ul>`:''}
-      </div>`).join('')}
-    </div>` : '';
-    const timer = activity.activeTimer ? `<p style="margin:8px 0;padding:9px 11px;background:#fff3cd;border-radius:7px"><strong>Still clocked in:</strong> ${htmlEscape(activity.activeTimer.unit||activity.activeTimer.title)} since ${htmlEscape(displayFormatter.format(new Date(parseDbDate(activity.activeTimer.startedAt))))}</p>` : '';
-    return `<section style="border-top:1px solid #dfe5ea;padding:16px 0">
-      <h3 style="margin:0 0 8px;color:#17324d">${htmlEscape(activity.user.display_name)} <span style="font-size:13px;color:#6c7886">(${roleLabel(activity.user.role)})</span></h3>
-      <p style="margin:4px 0"><strong>Saved labor:</strong> ${hours(laborTotal)} hr</p>
-      ${timer}
-      ${unfinishedList}
-      ${!hasActivity?'<p style="color:#6c7886">No recorded repair activity during this shift.</p>':''}
-      ${jobList?`<p style="margin-bottom:4px"><strong>Repairs / units worked:</strong></p>${jobList}`:''}
-      ${eventList?`<p style="margin-bottom:4px"><strong>Key outcomes:</strong></p>${eventList}`:''}
-      ${partList?`<p style="margin-bottom:4px"><strong>Parts used:</strong></p>${partList}`:''}
+  const prepared=activities.map(activity=>{
+    const jobs=technicianJobs(activity);
+    const labor=activity.labor.reduce((sum,row)=>sum+row.hours,0);
+    const completed=jobs.filter(job=>job.completed&&!job.status);
+    const unfinished=jobs.filter(job=>Boolean(job.status));
+    const worked=jobs.filter(job=>job.worked);
+    const reported=jobs.filter(job=>!job.worked&&job.reported);
+    return {activity,jobs,labor,completed,unfinished,worked,reported};
+  });
+  const totalLabor=prepared.reduce((sum,person)=>sum+person.labor,0);
+  const completedIds=new Set(prepared.flatMap(person=>person.completed.map(job=>job.repairId)));
+  const unfinishedIds=new Set(prepared.flatMap(person=>person.unfinished.map(job=>job.repairId)));
+  const workedIds=new Set(prepared.flatMap(person=>person.worked.map(job=>job.repairId)));
+  const totalParts=activities.reduce((sum,person)=>sum+person.parts.reduce((n,part)=>n+part.quantity,0),0);
+  // A shared repair counts once for the shift, while each technician keeps their own labor.
+  const pendingByJob=new Map<string,{unit:string;techs:Set<string>;part:OutstandingPart;repairId:number}>();
+  for(const person of prepared)for(const job of person.unfinished)for(const part of job.pendingParts){
+    const key=`${job.repairId}:${part.source}:${part.partNumber}:${part.warehouse}:${part.description}`;
+    const existing=pendingByJob.get(key);
+    if(existing)existing.techs.add(person.activity.user.display_name);
+    else pendingByJob.set(key,{unit:job.unit,repairId:job.repairId,techs:new Set([person.activity.user.display_name]),part});
+  }
+  const pending=[...pendingByJob.values()];
+  const heading=lateAddendum?'Late Work Addendum':'Technician Performance Summary';
+  const titleDate=dateDisplayFormatter.format(start);
+  const subject=`Maintenance ${heading} — ${shift.name} — ${titleDate}`;
+  const range=`${displayFormatter.format(start)} – ${displayFormatter.format(end)}`;
+  const noActivity='No recorded repair activity in this reporting window.';
+  const badge=(label:string)=>`<span style="display:inline-block;border-radius:6px;padding:3px 7px;font-size:11px;font-weight:700;background:#edf2f7;color:#34485e">${htmlEscape(label)}</span>`;
+  const unitTitle=(unit:string,name:string)=>`${htmlEscape(unit)} <span style="color:#607080;font-weight:600">— ${htmlEscape(name)}</span>`;
+  const detail=(job:SummaryJob,techName:string)=>{
+    const state=reportJobState(job);
+    const notes=[...job.notes];
+    const partList=job.partsUsed.length?`<div style="font-size:12px;color:#526579;margin-top:3px"><strong>Parts used:</strong> ${job.partsUsed.map(part=>`${htmlEscape(part.partNumber)} × ${htmlEscape(hours(part.quantity))}`).join('; ')}</div>`:'';
+    const waiting=job.pendingParts.length?`<div style="font-size:12px;color:#915b13;margin-top:4px"><strong>Waiting for:</strong> ${job.pendingParts.map(part=>`${htmlEscape(part.partNumber)} × ${htmlEscape(hours(part.remaining))} (${htmlEscape(part.warehouse)})`).join('; ')}</div>`:'';
+    return `<div style="padding:9px 0;border-top:1px solid #edf0f2">
+      <div style="font-size:13px"><strong>${unitTitle(job.unit,techName)}</strong> · ${htmlEscape(job.title)}</div>
+      <div style="margin-top:3px;font-size:12px;color:#45566b">${badge(state)} · ${hours(job.labor)} saved labor hr</div>
+      ${notes.length?`<div style="margin-top:5px;font-size:12px"><strong>Tech notes:</strong> ${notes.map(htmlEscape).join(' · ')}</div>`:''}
+      ${partList}${waiting}
+    </div>`;
+  };
+  const overviewRows=prepared.map(person=>`<tr>
+    <td style="padding:9px 7px;border-bottom:1px solid #e8edf1;font-weight:700">${htmlEscape(person.activity.user.display_name)}</td>
+    <td align="center" style="padding:9px 5px;border-bottom:1px solid #e8edf1">${person.completed.length}</td>
+    <td align="center" style="padding:9px 5px;border-bottom:1px solid #e8edf1">${person.unfinished.length}</td>
+    <td align="center" style="padding:9px 5px;border-bottom:1px solid #e8edf1">${person.worked.length}</td>
+    <td align="right" style="padding:9px 7px;border-bottom:1px solid #e8edf1">${hours(person.labor)}</td>
+  </tr>`).join('');
+  const personHtml=prepared.map(person=>{
+    const name=person.activity.user.display_name;
+    const groups=[
+      {label:'Completed work',items:person.completed},
+      {label:'Worked — not finished',items:person.unfinished},
+      {label:'Other work recorded',items:person.jobs.filter(job=>job.worked&&!job.completed&&!job.status)},
+      {label:'New repairs reported (not yet worked)',items:person.reported},
+    ];
+    const sections=groups.filter(group=>group.items.length).map(group=>`
+      <div style="margin-top:12px"><div style="font-weight:800;font-size:13px;color:#263a4f">${group.label} (${group.items.length})</div>
+      ${group.items.map(job=>detail(job,name)).join('')}</div>`).join('');
+    const timer=person.activity.activeTimer?`<p style="color:#895b15;font-size:12px">Timer still running on ${htmlEscape(person.activity.activeTimer.unit)} at the report cutoff.</p>`:'';
+    return `<section style="border-top:2px solid #dfe7ee;padding:15px 0">
+      <h3 style="margin:0 0 5px;color:#17324d">${htmlEscape(name)} <span style="font-size:12px;font-weight:400;color:#6c7886">(${roleLabel(person.activity.user.role)})</span></h3>
+      <div style="font-size:12px;color:#536678">${person.completed.length} completed · ${person.unfinished.length} unfinished · ${person.worked.length} jobs worked · ${hours(person.labor)} saved labor hr</div>
+      ${timer}${sections||`<p style="font-size:12px;color:#657489">${noActivity}</p>`}
     </section>`;
   }).join('');
-
-  const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1b2733;line-height:1.45">
-    <div style="max-width:760px;margin:0 auto;padding:22px">
-      <p style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#f47b20;margin:0">NORTHERN LOGISTICS MAINTENANCE</p>
-      <h1 style="margin:7px 0 4px;color:#0d1b2b">${htmlEscape(shift.name)} ${heading}</h1>
-      <p style="margin:0;color:#607080">${htmlEscape(range)} · Detroit time</p>
-      <p style="margin:4px 0 18px;color:#607080">${lateAddendum?'Additional activity recorded after the original shift email. This covers only the later activity window.':'Sent 30 minutes after shift end to capture closeout, parts requests, and handoffs.'}</p>
-      <div style="display:flex;gap:18px;flex-wrap:wrap;background:#f4f7f9;border-radius:9px;padding:12px 14px">
-        <span><strong>${activities.length}</strong> techs/managers</span><span><strong>${hours(totalLabor)}</strong> labor hr</span><span><strong>${totalCompleted}</strong> repairs completed</span><span><strong>${totalUnfinished}</strong> unfinished work items</span><span><strong>${totalOutstandingParts}</strong> outstanding part requests</span><span><strong>${hours(totalParts)}</strong> parts qty used</span>
-      </div>
-      ${htmlPeople || '<p>No active technicians or managers were assigned to this shift.</p>'}
-      <p style="font-size:12px;color:#7a8794;border-top:1px solid #dfe5ea;padding-top:12px">Work date ${htmlEscape(workDate)}. ${lateAddendum?'Late-work window':'Summary window'} ends ${htmlEscape(displayFormatter.format(due))}${lateAddendum?'.': ' and includes the 30-minute closeout period.'}</p>
+  const handoffs=new Map<number,{job:SummaryJob;names:Set<string>}>();
+  for(const person of prepared)for(const job of person.unfinished){
+    const existing=handoffs.get(job.repairId);
+    if(existing)existing.names.add(person.activity.user.display_name);
+    else handoffs.set(job.repairId,{job,names:new Set([person.activity.user.display_name])});
+  }
+  const handoffHtml=[...handoffs.values()].map(item=>`<tr>
+    <td style="padding:8px;border-bottom:1px solid #e5eaf0"><strong>${htmlEscape(item.job.unit)}</strong> — ${[...item.names].map(htmlEscape).join(', ')}</td>
+    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.job.title)}</td>
+    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.job.status)}</td>
+  </tr>`).join('');
+  const partsHtml=pending.map(item=>`<tr>
+    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.unit)} — ${[...item.techs].map(htmlEscape).join(', ')}</td>
+    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.part.partNumber)} · ${htmlEscape(item.part.description)}</td>
+    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${hours(item.part.remaining)} remaining · ${htmlEscape(item.part.warehouse)}</td>
+  </tr>`).join('');
+  const caption=lateAddendum
+    ?'This is an additional activity window only; it does not repeat the original shift totals.'
+    :'Reported 30 minutes after shift end; activity recorded later may appear in a separate late-work addendum.';
+  const tableHead='style="padding:9px 7px;text-align:left;font-size:11px;background:#f2f5f8;color:#536678"';
+  const html=`<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1b2733;line-height:1.4">
+    <div style="max-width:800px;margin:0 auto;padding:20px">
+      <p style="font-size:11px;letter-spacing:.12em;color:#ee741b;font-weight:900">NORTHERN LOGISTICS MAINTENANCE</p>
+      <h1 style="margin:5px 0;color:#0d1b2b;font-size:25px">${htmlEscape(shift.name)} — ${heading}</h1>
+      <p style="font-size:12px;color:#607080">${htmlEscape(range)} · Detroit time</p>
+      <p style="font-size:12px;color:#607080">${caption}</p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7f9;border-radius:8px;margin:16px 0"><tr>
+        <td style="padding:12px 7px;text-align:center"><strong>${prepared.length}</strong><br><small>Techs/managers</small></td>
+        <td style="padding:12px 7px;text-align:center"><strong>${completedIds.size}</strong><br><small>Jobs completed</small></td>
+        <td style="padding:12px 7px;text-align:center"><strong>${workedIds.size}</strong><br><small>Jobs worked</small></td>
+        <td style="padding:12px 7px;text-align:center"><strong>${unfinishedIds.size}</strong><br><small>Still open</small></td>
+        <td style="padding:12px 7px;text-align:center"><strong>${hours(totalLabor)}</strong><br><small>Labor hr</small></td>
+      </tr></table>
+      <h2 style="font-size:17px;color:#17324d;margin:18px 0 8px">Technician performance at a glance</h2>
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">
+        <tr><th ${tableHead}>Technician</th><th ${tableHead}>Done</th><th ${tableHead}>Open</th><th ${tableHead}>Worked</th><th ${tableHead}>Labor hr</th></tr>
+        ${overviewRows}
+      </table>
+      <h2 style="font-size:17px;color:#17324d;margin-top:22px">What each technician accomplished</h2>
+      ${personHtml||`<p>There are no technicians assigned to this shift.</p>`}
+      <h2 style="font-size:17px;color:#17324d;margin-top:22px">Next shift — unfinished work (${handoffs.size})</h2>
+      ${handoffs.size?`<table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px"><tr><th ${tableHead}>Unit / technicians</th><th ${tableHead}>Repair</th><th ${tableHead}>Status</th></tr>${handoffHtml}</table>`:'<p style="font-size:12px;color:#5d6e7e">No unfinished work recorded by these technicians.</p>'}
+      <h2 style="font-size:17px;color:#17324d;margin-top:22px">Outstanding requested parts (${pending.length})</h2>
+      ${pending.length?`<table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px"><tr><th ${tableHead}>Unit / technicians</th><th ${tableHead}>Part</th><th ${tableHead}>Needed</th></tr>${partsHtml}</table>`:'<p style="font-size:12px;color:#5d6e7e">No outstanding parts identified in this reporting window.</p>'}
+      <p style="font-size:11px;color:#7a8794;border-top:1px solid #dfe5ea;padding-top:12px">${htmlEscape(workDate)} · Saved labor, not scheduled hours or productivity percentage. Total parts used: ${hours(totalParts)}. Per-tech job counts may overlap when multiple technicians work on one repair.</p>
     </div></body></html>`;
 
-  const textPeople = activities.map((activity)=>{
-    const laborTotal = activity.labor.reduce((sum,row)=>sum+row.hours,0);
-    const jobs = uniqueJobs(activity);
-    const lines = [`${activity.user.display_name} (${roleLabel(activity.user.role)})`,`Saved labor: ${hours(laborTotal)} hr`];
-    if (activity.activeTimer) lines.push(`STILL CLOCKED IN: ${activity.activeTimer.unit||activity.activeTimer.title}`);
-    for(const job of activity.unfinishedJobs) {
-      lines.push(`NOT FINISHED: ${job.unit||'No unit'} - ${job.title} [${job.status}]`);
-      lines.push(`  Technician notes: ${job.notes.length?job.notes.join(' | '):'None recorded'}`);
-      for(const part of job.pendingParts)lines.push(`  WAITING FOR PART: ${part.partNumber} - ${part.description}; ${hours(part.remaining)} still needed of ${hours(part.requested)} requested (${part.warehouse})`);
+  const textPeople=prepared.map(person=>{
+    const name=person.activity.user.display_name;
+    const lines=[`${name} — ${person.completed.length} completed, ${person.unfinished.length} unfinished, ${person.worked.length} worked, ${hours(person.labor)} labor hr`];
+    for(const job of person.jobs){
+      lines.push(`  ${job.unit} — ${name}: ${job.title} [${reportJobState(job)}] · ${hours(job.labor)} hr`);
+      if(job.notes.size)lines.push(`    Tech notes: ${[...job.notes].join(' | ')}`);
+      for(const part of job.partsUsed)lines.push(`    Used: ${part.partNumber} x${hours(part.quantity)}`);
+      for(const part of job.pendingParts)lines.push(`    Waiting: ${part.partNumber} x${hours(part.remaining)} from ${part.warehouse}`);
     }
-    if (jobs.length) lines.push(`Repairs / units: ${jobs.map((job)=>`${job.unit||'No unit'} - ${job.title}`).join('; ')}`);
-    if (activity.events.length) lines.push(`Key outcomes: ${activity.events.map((event)=>`${actionLabel(event.action)} - ${event.unit||event.title}${event.detail?` (${event.detail})`:''}`).join('; ')}`);
-    if (activity.parts.length) lines.push(`Parts used: ${activity.parts.map((part)=>`${part.partNumber} x${part.quantity}${part.unit?` on ${part.unit}`:''}`).join('; ')}`);
-    if (lines.length===2 && laborTotal===0) lines.push('No recorded repair activity during this shift.');
+    if(person.jobs.length===0)lines.push('  '+noActivity);
     return lines.join('\n');
   }).join('\n\n');
-  const text = `NORTHERN LOGISTICS MAINTENANCE\n${shift.name} ${heading}\n${range} · Detroit time\n${lateAddendum?'Additional work recorded after the original shift email.\n':''}\n${activities.length} techs/managers · ${hours(totalLabor)} labor hr · ${totalCompleted} repairs completed · ${totalUnfinished} unfinished work items · ${totalOutstandingParts} outstanding part requests · ${hours(totalParts)} parts qty used\n\n${textPeople}\n\n${lateAddendum?'Late work addendum':'Sent 30 minutes after shift end'}. Work date ${workDate}.`;
-  return { subject,html,text };
+  const text=`NORTHERN LOGISTICS MAINTENANCE
+${shift.name} — ${heading}
+${range} · Detroit time
+${caption}
+
+${prepared.length} techs/managers | ${completedIds.size} completed | ${workedIds.size} jobs worked | ${unfinishedIds.size} unfinished | ${hours(totalLabor)} labor hr
+
+TECHNICIAN RESULTS
+${prepared.map(p=>`${p.activity.user.display_name}: ${p.completed.length} done, ${p.unfinished.length} open, ${p.worked.length} worked, ${hours(p.labor)} hr`).join('\n')}
+
+WHAT EACH TECHNICIAN ACCOMPLISHED
+${textPeople}
+
+NEXT SHIFT — UNFINISHED
+${[...handoffs.values()].map(x=>`${x.job.unit} — ${[...x.names].join(', ')}: ${x.job.title} [${x.job.status}]`).join('\n')||'None recorded'}
+
+OUTSTANDING PART REQUESTS
+${pending.map(x=>`${x.unit} — ${[...x.techs].join(', ')}: ${x.part.partNumber} x${hours(x.part.remaining)} (${x.part.warehouse})`).join('\n')||'None recorded'}
+
+Work date ${workDate}. Shared repairs counted once in shift total. Labor is saved labor, not productivity %.`;
+  return {subject,html,text};
 }
 
 async function reserveSummaryRun(db:D1Database,shift:ShiftRow,workDate:string,start:Date,end:Date,due:Date) {
