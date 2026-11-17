@@ -14,6 +14,7 @@ type Props={
   initialEquipmentId:number|null;
   lockEquipment?:boolean;
   allowTechnicianAssignment?:boolean;
+  allowSelfAssignment?:boolean;
   allowNewEquipment?:boolean;
   allowPullThru?:boolean;
   onClose:()=>void;
@@ -29,7 +30,7 @@ function kind(value:string):EquipmentKind{
 }
 function searchable(value:string){return value.trim().toLowerCase()}
 
-export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,allowNewEquipment=true,allowPullThru=false,onClose,onSaved}:Props){
+export default function RepairBoardAddRepair({equipment,technicians,initialEquipmentId,lockEquipment=false,allowTechnicianAssignment=true,allowSelfAssignment=false,allowNewEquipment=true,allowPullThru=false,onClose,onSaved}:Props){
   const initial=equipment.find(item=>item.id===initialEquipmentId)??null;
   const[selected,setSelected]=useState<Equipment|null>(initial);
   const[search,setSearch]=useState(initial?.unit??"");
@@ -42,6 +43,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   const[parts,setParts]=useState("");
   const[priority,setPriority]=useState(2);
   const[technicianId,setTechnicianId]=useState("");
+  const[assignToMe,setAssignToMe]=useState(true);
   const[pullThru,setPullThru]=useState(false);
   const[lastSavedUnit,setLastSavedUnit]=useState("");
   const[busy,setBusy]=useState(false);
@@ -84,6 +86,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
           location:selected?.location??newLocation.trim(),
           issue:repair,parts:parts.trim(),priority,
           technicianId:allowTechnicianAssignment&&technicianId?Number(technicianId):0,
+          ...(allowSelfAssignment?{assignToMe}:{}),
           pullThru:allowPullThru&&!noUnit&&pullThru,
         }),
       });
@@ -92,7 +95,7 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
       setIssue("");setParts("");setPullThru(false);
       if(result.equipmentId&&result.unit&&result.unit!=="SHOP / NO UNIT"){
         const sticky:Equipment={id:Number(result.equipmentId),unit:result.unit,equipmentType:selected?.equipmentType??newType,driver:selected?.driver??"",location:selected?.location??newLocation.trim()};
-        setSelected(sticky);setSearch(result.unit);setAddNew(false);setLastSavedUnit(result.unit);setMessage(`Repair added to Unit ${result.unit}. The tech will choose the Repair Type when the repair is worked.`);
+        setSelected(sticky);setSearch(result.unit);setAddNew(false);setLastSavedUnit(result.unit);setMessage(`Repair added to Unit ${result.unit}${allowSelfAssignment?(assignToMe?" and assigned to you":" as unassigned"):""}. The tech will choose the Repair Type when the repair is worked.`);
       }else{
         setSelected(null);setSearch("");setAddNew(false);setNoUnit(true);setLastSavedUnit("SHOP / NO UNIT");setMessage(`${result.repairType||"INDIRECT LABOR-OTHER"} added as SHOP / NO UNIT.`);
       }
@@ -101,6 +104,10 @@ export default function RepairBoardAddRepair({equipment,technicians,initialEquip
   }
 
   return <section className={s.addPanel}>
+    {allowSelfAssignment&&<label style={{display:"flex",alignItems:"center",gap:12,padding:"13px 14px",border:"1px solid #9eb8d4",borderRadius:10,background:assignToMe?"#eaf3ff":"#f6f8fa",cursor:"pointer"}}>
+      <input type="checkbox" aria-label="Assign to Me" checked={assignToMe} onChange={event=>setAssignToMe(event.target.checked)} style={{width:20,height:20,flexShrink:0}}/>
+      <span><strong style={{display:"block",fontSize:14,color:"#163b66"}}>ASSIGN TO ME</strong><small style={{display:"block",marginTop:3,color:"#566a7d"}}>{assignToMe?"This repair will be assigned to you when you save it.":"This repair will be created unassigned for the shop queue."}</small></span>
+    </label>}
     <h3>{lastSavedUnit?`Add another repair — ${lastSavedUnit==="SHOP / NO UNIT"?lastSavedUnit:`Unit ${lastSavedUnit}`}`:"Add Repair"}</h3>
     {message&&<div style={{gridColumn:"1 / -1",padding:"9px 11px",borderRadius:8,background:"#fff8e6",border:"1px solid #f2c66d",fontSize:12,fontWeight:700}}>{message}</div>}
     <div>
