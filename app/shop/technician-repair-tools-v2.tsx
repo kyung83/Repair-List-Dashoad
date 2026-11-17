@@ -69,7 +69,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
   const actionLabel=!effectiveWarehouseCode?(warehouseLocked?"WAREHOUSE NOT ASSIGNED":"CHOOSE WAREHOUSE"):selectedAvailable+0.000001>=quantity?"APPLY PART":"REQUEST PART";
 
   return <section style={mode==="parts"?partsOnlyPanel:toolsPanel}>
-    {showNotes&&<div style={toolCard}>
+    {showNotes&&<div id="pilot-notes" style={{...toolCard,scrollMarginTop:74}}>
       <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>Type it or tap TALK. Saved notes stay on this repair and remain visible in the final review.</span></div>
       <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={4} style={textarea} disabled={noteBusy}/>
       <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
