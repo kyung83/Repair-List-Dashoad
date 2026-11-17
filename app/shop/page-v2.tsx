@@ -4,6 +4,7 @@ import {useEffect,useMemo,useState} from "react";
 import CurrentWorkHome from "./current-work-home";
 import ShopDutyWorkHome, {type ActiveShopDuty} from "./shop-duty-work-home";
 import LoganPilotAddRepair from "./logan-pilot-add-repair";
+import TechnicianCompletedWork from "./technician-completed-work";
 
 type User={id:number;username:string;displayName:string;role:"viewer"|"mechanic"|"manager"|"admin";technicianId:number|null;yard?:string};
 type TechnicianOption={id:number;name:string};
@@ -27,6 +28,7 @@ function numberText(value:number){return Number.isInteger(value)?String(value):v
 export default function ShopPage(){
   const[data,setData]=useState<ShopData|null>(null);
   const[view,setView]=useState<View>("mine");
+  const[completedOpen,setCompletedOpen]=useState(false);
   const[message,setMessage]=useState("");
   const[busy,setBusy]=useState(false);
   const[now,setNow]=useState(Date.now());
@@ -105,9 +107,16 @@ export default function ShopPage(){
   const loganPilot=data?.user.id===29&&data.user.username==="loganr"&&data.user.role==="mechanic";
   const canAssignHandoff=data?.user.role==="manager"||data?.user.role==="admin";
   const techOptions=useMemo(()=>canAssignHandoff?(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId):[],[data,canAssignHandoff]);
+  const pilotTabs=loganPilot?<nav aria-label="My Work sections" style={completedNav}>
+    <button type="button" onClick={()=>setCompletedOpen(false)} aria-current={!completedOpen?"page":undefined} style={!completedOpen?completedActive:completedTab}>Working / Available</button>
+    <button type="button" onClick={()=>setCompletedOpen(true)} aria-current={completedOpen?"page":undefined} style={completedOpen?completedActive:completedTab}>Completed & Labor Requests</button>
+  </nav>:null;
+
+  if(loganPilot&&completedOpen)return <main style={page}><div style={shell}>{pilotTabs}<TechnicianCompletedWork isWorking={Boolean(data?.activeTimer)}/></div></main>;
+
 
   if(data?.activeTimer&&data.activeShopDuty){
-    return <ShopDutyWorkHome timer={data.activeTimer} duty={data.activeShopDuty} onRefresh={load}/>;
+    return <>{pilotTabs}<ShopDutyWorkHome timer={data.activeTimer} duty={data.activeShopDuty} onRefresh={load}/></>;
   }
 
   if(data?.activeTimer&&activeRepair){
@@ -121,7 +130,7 @@ export default function ShopPage(){
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>{canAssignHandoff?"HAND OFF TO NEXT SHIFT":"LEAVE UNASSIGNED"}</button></div></>}
     </section>:null;
 
-    return <CurrentWorkHome
+    return <>{pilotTabs}<CurrentWorkHome
       timer={data.activeTimer}
       repair={activeRepair}
       unitRepairs={activeUnitRepairs}
@@ -139,11 +148,12 @@ export default function ShopPage(){
       pilot={loganPilot}
       onUsePlannedPart={(repair,part)=>void usePlannedPart(repair,part)}
       onUseReservedPart={request=>void useReserved(request as PartRequest)}
-    />;
+    /></>;
   }
 
   return <main style={page}>
     <div style={shell}>
+      {pilotTabs}
       <header style={header}><div><p style={eyebrow}>TECHNICIAN SHOP QUEUE</p><h1 style={title}>Shop Jobs</h1><p style={subtitle}>Pick a unit. Labor starts automatically when you begin working.</p></div><div style={{textAlign:"right"}}><strong>{data?.user.displayName??"Loading…"}</strong><div style={userName}>{data?.user.username?`@${data.user.username}`:""}</div></div></header>
       {message&&<div style={notice}>{message}</div>}
       {loganPilot&&<section style={{marginTop:10,display:"grid",gap:8}}><LoganPilotAddRepair onSaved={load}/></section>}
@@ -187,3 +197,7 @@ const label={display:"grid",gap:5,fontSize:11,fontWeight:950,color:"#425565"} as
 const input={width:"100%",boxSizing:"border-box" as const,padding:"10px",border:"1px solid #bdc9d4",borderRadius:8,background:"white",color:"#1b2421"} as const;
 const cancelButton={border:"1px solid #9ca9b3",borderRadius:9,padding:"10px 13px",background:"white",color:"#253440",fontWeight:950,cursor:"pointer"} as const;
 const handoffButton={border:0,borderRadius:9,padding:"10px 13px",background:"#176fe6",color:"white",fontWeight:950,cursor:"pointer"} as const;
+
+const completedNav={display:'flex',gap:8,flexWrap:'wrap' as const,maxWidth:1100,margin:'10px auto',padding:'0 12px',color:'#173f37'} as const;
+const completedTab={padding:'10px 15px',border:'1px solid #bacbc5',borderRadius:10,background:'white',color:'#173f37',fontWeight:900,fontSize:12,cursor:'pointer'} as const;
+const completedActive={...completedTab,background:'#173f37',color:'white',borderColor:'#173f37'} as const;
