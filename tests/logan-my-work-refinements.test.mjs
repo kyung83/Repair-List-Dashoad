@@ -39,12 +39,18 @@ test('tire-position controls and blocking guard stay within the same action grid
   assert.match(found,/gridRow:"1"/);
 });
 
-test('same-page shortcuts remain sticky, accessible and target the existing notes and parts controls',()=>{
-  assert.match(current,/position:"sticky" as const,top:5,zIndex:30/);
-  assert.match(current,/pilotJump\(target\)/);
-  for(const target of ['pilot-notes','pilot-parts','pilot-photos','pilot-checklist','pilot-add-repair','pilot-other-repairs'])
-    assert.ok(current.includes(target)||notes.includes(target));
+test('Logan work tools switch within one sticky panel without changing the repair APIs',()=>{
+  assert.match(current,/position:"sticky" as const,top:0,zIndex:40/);
+  assert.match(current,/role="tablist"/);
+  assert.match(current,/setPilotTool\(tool\)/);
+  assert.match(current,/aria-selected=\{pilotTool===tool\}/);
+  assert.match(current,/hidden=\{pilotTool!=="notes"\}/);
+  assert.match(current,/hidden=\{pilotTool!=="parts"\}/);
+  assert.match(current,/hidden=\{pilotTool!=="photos"\}/);
+  assert.match(current,/hidden=\{pilotTool!=="checklist"\}/);
+  assert.match(current,/hidden=\{pilotTool!=="history"\}/);
   assert.match(current,/<LoganPilotAddRepair onSaved=\{props\.onFoundRepairAdded\}/);
+  assert.match(current,/!pilot&&maintenanceBlock/);
 });
 
 test('compact notes, photos and team are pilot-only; the existing work APIs and operations remain',()=>{
