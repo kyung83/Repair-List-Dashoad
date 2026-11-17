@@ -98,7 +98,7 @@ export default function WorkOrdersPage(){
         <h1 style={{margin:"6px 0 0",fontSize:31}}>Review finished shop work</h1>
         <p style={{margin:"7px 0 0",color:"#68746f",maxWidth:900,fontSize:13}}>Review the Repair Type along with the repair wording, labor, parts and outside cost. Approval makes the work order eligible for invoicing.</p>
       </div>
-      <div style={{display:"flex",gap:7}}><a href="/repair-board" style={linkButtonStyle}>Repair Board</a><button type="button" onClick={()=>void load()} style={buttonStyle}>Refresh</button></div>
+      <div style={{display:"flex",gap:7}}><a href="/repair-board" style={linkButtonStyle}>Repair Board</a>{data?.canApprove&&<a href="/labor-review" style={linkButtonStyle}>Labor Corrections</a>}<button type="button" onClick={()=>void load()} style={buttonStyle}>Refresh</button></div>
     </header>
 
     {message&&<div style={{marginTop:12,padding:10,background:"#fff8e6",border:"1px solid #f2c66d",fontSize:12}}>{message}</div>}
