@@ -51,8 +51,8 @@ test('shift email includes labor, repairs, parts, waiting, completed and handoff
   assert.match(summary,/completed/);
   assert.match(summary,/waiting_on_part/);
   assert.match(summary,/shift_handoff/);
-  assert.match(summary,/Still clocked in/);
-  assert.match(summary,/No recorded repair activity during this shift/);
+  assert.match(summary,/Timer still running on/);
+  assert.match(summary,/No recorded repair activity in this reporting window/);
   assert.match(summary,/sendGmailRuntimeEmail/);
   assert.match(summary,/to:MAINTENANCE_SHIFT_SUMMARY_RECIPIENT/);
 });
@@ -70,10 +70,10 @@ test('shift summary identifies unfinished worked repairs, technician notes and o
   assert.match(summary,/q\.requested_quantity>q\.used_quantity/);
   assert.match(summary,/unmatched_part_requests/);
   assert.match(summary,/q\.status='open'/);
-  assert.match(summary,/Waiting on requested parts:/);
-  assert.match(summary,/Technician notes:/);
-  assert.match(summary,/NOT FINISHED:/);
-  assert.match(summary,/WAITING FOR PART:/);
-  assert.match(summary,/outstanding part requests/);
-  assert.match(summary,/htmlEscape\(part\.description\)/);
+  assert.match(summary,/Outstanding requested parts/);
+  assert.match(summary,/Tech notes:/);
+  assert.match(summary,/Next shift — unfinished work/);
+  assert.match(summary,/Waiting for:/);
+  assert.match(summary,/OUTSTANDING PART REQUESTS/);
+  assert.match(summary,/htmlEscape\(item\.part\.description\)/);
 });
