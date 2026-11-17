@@ -13,8 +13,11 @@ test('pilot is restricted to Logan Rodriguez account and not mechanic role or Cl
 test('Logan keeps each existing workflow while changing only one-screen placement',()=>{
   for(const component of ['RepairTeamPanel','CurrentRepairTypeControl','FoundRepairControl','RepairPhotoControl','TechnicianRepairTools','MaintenanceChecklistPanel','MechanicUnitHistory'])assert.match(current,new RegExp(component));
   assert.match(current,/!pilot&&maintenanceBlock/);
-  assert.match(current,/pilot&&maintenanceBlock/);
-  assert.match(current,/pilot&&<nav aria-label="Jump to work tools"/);
+  assert.match(current,/id="pilot-panel-checklist"/);
+  assert.match(current,/maintenanceBlock\?\?/);
+  assert.match(current,/role="tablist"/);
+  assert.match(current,/setPilotTool\(tool\)/);
+  assert.match(current,/hidden=\{pilotTool!=="checklist"\}/);
   assert.match(current,/onRepaired/);
   assert.match(current,/onDoneWorking/);
   assert.match(current,/pilot-add-repair/);
