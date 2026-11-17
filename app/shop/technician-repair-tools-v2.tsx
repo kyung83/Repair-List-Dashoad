@@ -69,7 +69,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
   const actionLabel=!effectiveWarehouseCode?(warehouseLocked?"WAREHOUSE NOT ASSIGNED":"CHOOSE WAREHOUSE"):selectedAvailable+0.000001>=quantity?"APPLY PART":"REQUEST PART";
 
   return <section style={mode==="parts"?partsOnlyPanel:toolsPanel}>
-    {showNotes&&<div style={toolCard}>
+    {showNotes&&<div id="pilot-notes" style={{...toolCard,scrollMarginTop:74}}>
       <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>Type it or tap TALK. Saved notes stay on this repair and remain visible in the final review.</span></div>
       <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={4} style={textarea} disabled={noteBusy}/>
       <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
@@ -77,7 +77,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all"}:Pr
       {notes.length>0&&<div style={history}><strong style={historyHeading}>SAVED NOTES</strong>{notes.map(item=><div key={item.id} style={noteRow}><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={meta}>{item.technician} · {noteTime(item.createdAt)}</div></div>)}</div>}
     </div>}
 
-    {showParts&&<div style={toolCard}>
+    {showParts&&<div id="pilot-parts" style={{...toolCard,scrollMarginTop:74}}>
       <div><strong style={heading}>PART LOOKUP</strong><span style={help}>{warehouseLocked?`Parts are automatically tied to ${assignedWarehouseName||assignedWarehouseCode||"your assigned warehouse"}. `:"Choose the exact warehouse. "}Stocked and one-time parts use this same lookup. Apply what you have. A stocked shortage automatically saves labor and moves the repair to Waiting on Part; one-time parts never create reorder demand.</span></div>
       {warehouseLocked&&<div style={lockedWarehouseBox}><span>YOUR PARTS WAREHOUSE</span><strong>{assignedWarehouseName||assignedWarehouseCode||"NOT ASSIGNED"}</strong></div>}
       <div style={searchRow}><input value={search} onChange={event=>{setSearch(event.target.value);setSelectedPart(null);if(!warehouseLocked)setWarehouseCode("");setPartMessage("")}} placeholder="Type part number or description…" style={input} disabled={partBusy||!canWork||(warehouseLocked&&!assignedWarehouseCode)}/><input aria-label="Part quantity" type="number" min="0.01" step="any" value={quantity} onChange={event=>setQuantity(Number(event.target.value))} style={qtyInput} disabled={partBusy||!canWork||(warehouseLocked&&!assignedWarehouseCode)}/></div>
