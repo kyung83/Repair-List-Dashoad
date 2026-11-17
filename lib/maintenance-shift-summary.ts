@@ -157,6 +157,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
       JOIN repairs r ON r.id=l.repair_id
       LEFT JOIN equipment eq ON eq.id=r.equipment_id
       WHERE l.technician_id=?
+        AND COALESCE(r.source,'') <> 'roadside-breakdown'
         AND COALESCE(l.started_at,l.created_at) <= ?
         AND COALESCE(l.ended_at,l.created_at) >= ?
       ORDER BY COALESCE(l.started_at,l.created_at),l.id
@@ -171,6 +172,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE (e.user_id=? OR e.technician_id=?) AND e.created_at>=? AND e.created_at<=?
+      AND COALESCE(r.source,'') <> 'roadside-breakdown'
       AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','part_requested_awaiting','technician_note','unit_session_ended','labor_stopped')
     ORDER BY e.created_at,e.id
   ` : `
@@ -180,6 +182,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE e.user_id=? AND e.created_at>=? AND e.created_at<=?
+      AND COALESCE(r.source,'') <> 'roadside-breakdown'
       AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','part_requested_awaiting')
     ORDER BY e.created_at,e.id
   `;
@@ -198,6 +201,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     LEFT JOIN repairs r ON r.id=o.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE o.user_id=? AND o.status='applied' AND l.line_type='part_issue'
+      AND COALESCE(r.source,'') <> 'roadside-breakdown'
       AND o.created_at>=? AND o.created_at<=?
     ORDER BY o.created_at,o.id,l.id
   `).bind(user.id,startDb,endDb).all<{repair_id:number|null;unit:string;part_number:string;description:string;quantity:number}>();
@@ -208,7 +212,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     FROM repair_labor_timers rt
     JOIN repairs r ON r.id=rt.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
-    WHERE rt.user_id=?
+    WHERE rt.user_id=? AND COALESCE(r.source,'') <> 'roadside-breakdown'
   `).bind(user.id).first<{repair_id:number;unit:string;title:string;started_at:string}>();
 
   const activity:PersonActivity={
@@ -242,8 +246,8 @@ async function unfinishedJobsForActivity(db:D1Database,activity:PersonActivity):
     FROM repairs r LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE r.id IN (${placeholders})
       AND lower(COALESCE(r.status,'')) NOT LIKE '%complete%'
-      AND lower(trim(COALESCE(r.status,''))) NOT IN ('repaired','closed')
-      AND COALESCE(r.source,'') <> 'cutover-archive'
+      AND lower(trim(COALESCE(r.status,''))) NOT IN ('repaired','closed','cancelled','canceled')
+      AND COALESCE(r.source,'') NOT IN ('cutover-archive','roadside-breakdown')
     ORDER BY eq.unit,r.id
   `).bind(...jobIds).all<{id:number;unit:string;title:string;status:string}>();
   if(!rows.results.length)return[];
@@ -367,7 +371,7 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
     const worked=jobs.filter(job=>job.worked);
     const reported=jobs.filter(job=>!job.worked&&job.reported);
     return {activity,jobs,labor,completed,unfinished,worked,reported};
-  });
+  }).filter(person=>person.jobs.length>0);
   const totalLabor=prepared.reduce((sum,person)=>sum+person.labor,0);
   const completedIds=new Set(prepared.flatMap(person=>person.completed.map(job=>job.repairId)));
   const unfinishedIds=new Set(prepared.flatMap(person=>person.unfinished.map(job=>job.repairId)));
@@ -408,35 +412,64 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
     <td align="center" style="padding:9px 5px;border-bottom:1px solid #e8edf1">${person.worked.length}</td>
     <td align="right" style="padding:9px 7px;border-bottom:1px solid #e8edf1">${hours(person.labor)}</td>
   </tr>`).join('');
+  // The technician appears once; every unit has one card with its individual ROs.
   const personHtml=prepared.map(person=>{
-    const name=person.activity.user.display_name;
-    const groups=[
-      {label:'Completed work',items:person.completed},
-      {label:'Worked — not finished',items:person.unfinished},
-      {label:'Other work recorded',items:person.jobs.filter(job=>job.worked&&!job.completed&&!job.status)},
-      {label:'New repairs reported (not yet worked)',items:person.reported},
-    ];
-    const sections=groups.filter(group=>group.items.length).map(group=>`
-      <div style="margin-top:12px"><div style="font-weight:800;font-size:13px;color:#263a4f">${group.label} (${group.items.length})</div>
-      ${group.items.map(job=>detail(job,name)).join('')}</div>`).join('');
-    const timer=person.activity.activeTimer?`<p style="color:#895b15;font-size:12px">Timer still running on ${htmlEscape(person.activity.activeTimer.unit)} at the report cutoff.</p>`:'';
-    return `<section style="border-top:2px solid #dfe7ee;padding:15px 0">
-      <h3 style="margin:0 0 5px;color:#17324d">${htmlEscape(name)} <span style="font-size:12px;font-weight:400;color:#6c7886">(${roleLabel(person.activity.user.role)})</span></h3>
-      <div style="font-size:12px;color:#536678">${person.completed.length} completed · ${person.unfinished.length} unfinished · ${person.worked.length} jobs worked · ${hours(person.labor)} saved labor hr</div>
-      ${timer}${sections||`<p style="font-size:12px;color:#657489">${noActivity}</p>`}
-    </section>`;
+    const byUnit=new Map<string,SummaryJob[]>();
+    for(const job of person.jobs){
+      if(!byUnit.has(job.unit))byUnit.set(job.unit,[]);
+      byUnit.get(job.unit)!.push(job);
+    }
+    const unitCards=[...byUnit].map(([unit,jobs])=>{
+      const unitNotes=new Map<string,string>(),used=new Map<string,{partNumber:string;description:string;quantity:number}>();
+      for(const job of jobs){
+        for(const note of job.notes){
+          const value=note.trim();
+          if(value&&!unitNotes.has(value))unitNotes.set(value,job.title);
+        }
+        for(const part of job.partsUsed){
+          const key=part.partNumber+'|'+part.description;
+          const prior=used.get(key);
+          if(prior)prior.quantity+=part.quantity;
+          else used.set(key,{...part});
+        }
+      }
+      const repairRows=jobs.map(job=>'<div style="padding:8px 0;border-bottom:1px solid #edf0f2;font-size:13px"><strong>'+
+        htmlEscape(job.title)+'</strong> · '+badge(job.status||reportJobState(job))+
+        '<div style="font-size:12px;color:#526579">'+hours(job.labor)+' saved labor hr</div></div>').join('');
+      const notesRows=[...unitNotes].map(([note,title])=>
+        '<div style="font-size:12px;margin:4px 0"><strong>'+htmlEscape(title)+':</strong> '+htmlEscape(note)+'</div>').join('');
+      const usedRows=[...used.values()].map(part=>
+        '<div style="font-size:12px;margin:4px 0">'+htmlEscape(part.partNumber)+' — '+htmlEscape(part.description)+' × '+hours(part.quantity)+'</div>').join('');
+      return '<div style="border:1px solid #dfe7ee;border-radius:8px;margin:12px 0;overflow:hidden">'+
+        '<div style="background:#f2f5f8;padding:11px 12px;font-size:15px;font-weight:800;color:#17324d">'+htmlEscape(unit)+
+        '<span style="float:right;font-size:12px;font-weight:600">'+hours(jobs.reduce((n,j)=>n+j.labor,0))+' labor hr</span></div>'+
+        '<div style="padding:11px 12px"><div style="font-size:12px;font-weight:800">Repairs on RO ('+jobs.length+')</div>'+
+        repairRows+'<div style="font-size:12px;font-weight:800;margin-top:12px">Work notes</div>'+
+        (notesRows||'<div style="font-size:12px;color:#657489">None recorded</div>')+
+        '<div style="font-size:12px;font-weight:800;margin-top:12px">Parts used</div>'+
+        (usedRows||'<div style="font-size:12px;color:#657489">None recorded</div>')+'</div></div>';
+    }).join('');
+    const timer=person.activity.activeTimer?'<p style="color:#895b15;font-size:12px">Timer still running on '+
+      htmlEscape(person.activity.activeTimer.unit)+' at the report cutoff.</p>':'';
+    return '<section style="border-top:2px solid #dfe7ee;padding:15px 0"><h3 style="margin:0 0 5px;color:#17324d">'+
+      htmlEscape(person.activity.user.display_name)+' <span style="font-size:12px;font-weight:400;color:#6c7886">('+
+      roleLabel(person.activity.user.role)+')</span></h3><div style="font-size:12px;color:#536678">'+
+      person.completed.length+' completed · '+person.unfinished.length+' unfinished · '+person.worked.length+
+      ' jobs worked · '+hours(person.labor)+' saved labor hr</div>'+timer+unitCards+'</section>';
   }).join('');
-  const handoffs=new Map<number,{job:SummaryJob;names:Set<string>}>();
+  // Handoff is one row per unit; the repair statuses remain individually visible.
+  const handoffs=new Map<string,{techs:Set<string>;repairs:Map<number,SummaryJob>}>();
   for(const person of prepared)for(const job of person.unfinished){
-    const existing=handoffs.get(job.repairId);
-    if(existing)existing.names.add(person.activity.user.display_name);
-    else handoffs.set(job.repairId,{job,names:new Set([person.activity.user.display_name])});
+    if(!handoffs.has(job.unit))handoffs.set(job.unit,{techs:new Set(),repairs:new Map()});
+    const group=handoffs.get(job.unit)!;
+    group.techs.add(person.activity.user.display_name);
+    if(!group.repairs.has(job.repairId))group.repairs.set(job.repairId,job);
   }
-  const handoffHtml=[...handoffs.values()].map(item=>`<tr>
-    <td style="padding:8px;border-bottom:1px solid #e5eaf0"><strong>${htmlEscape(item.job.unit)}</strong> — ${[...item.names].map(htmlEscape).join(', ')}</td>
-    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.job.title)}</td>
-    <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.job.status)}</td>
-  </tr>`).join('');
+  const handoffHtml=[...handoffs].map(([unit,group])=>'<tr><td style="padding:8px;border-bottom:1px solid #e5eaf0"><strong>'+
+    htmlEscape(unit)+'</strong> — '+[...group.techs].map(htmlEscape).join(', ')+'</td>'+
+    '<td colspan="2" style="padding:8px;border-bottom:1px solid #e5eaf0">'+
+    [...group.repairs.values()].map(job=>'<div style="padding:3px 0">'+htmlEscape(job.title)+' — '+htmlEscape(job.status)+'</div>').join('')+
+    '</td></tr>').join('');
   const partsHtml=pending.map(item=>`<tr>
     <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.unit)} — ${[...item.techs].map(htmlEscape).join(', ')}</td>
     <td style="padding:8px;border-bottom:1px solid #e5eaf0">${htmlEscape(item.part.partNumber)} · ${htmlEscape(item.part.description)}</td>
@@ -466,23 +499,37 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
       </table>
       <h2 style="font-size:17px;color:#17324d;margin-top:22px">What each technician accomplished</h2>
       ${personHtml||`<p>There are no technicians assigned to this shift.</p>`}
-      <h2 style="font-size:17px;color:#17324d;margin-top:22px">Next shift — unfinished work (${handoffs.size})</h2>
-      ${handoffs.size?`<table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px"><tr><th ${tableHead}>Unit / technicians</th><th ${tableHead}>Repair</th><th ${tableHead}>Status</th></tr>${handoffHtml}</table>`:'<p style="font-size:12px;color:#5d6e7e">No unfinished work recorded by these technicians.</p>'}
+      <h2 style="font-size:17px;color:#17324d;margin-top:22px">Next shift — units with unfinished work (${handoffs.size})</h2>
+      ${handoffs.size?`<table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px"><tr><th ${tableHead}>Unit / technicians</th><th ${tableHead} colspan="2">Remaining repairs / status</th></tr>${handoffHtml}</table>`:'<p style="font-size:12px;color:#5d6e7e">No unfinished work recorded by these technicians.</p>'}
       <h2 style="font-size:17px;color:#17324d;margin-top:22px">Outstanding requested parts (${pending.length})</h2>
       ${pending.length?`<table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px"><tr><th ${tableHead}>Unit / technicians</th><th ${tableHead}>Part</th><th ${tableHead}>Needed</th></tr>${partsHtml}</table>`:'<p style="font-size:12px;color:#5d6e7e">No outstanding parts identified in this reporting window.</p>'}
       <p style="font-size:11px;color:#7a8794;border-top:1px solid #dfe5ea;padding-top:12px">${htmlEscape(workDate)} · Saved labor, not scheduled hours or productivity percentage. Total parts used: ${hours(totalParts)}. Per-tech job counts may overlap when multiple technicians work on one repair.</p>
     </div></body></html>`;
 
   const textPeople=prepared.map(person=>{
-    const name=person.activity.user.display_name;
-    const lines=[`${name} — ${person.completed.length} completed, ${person.unfinished.length} unfinished, ${person.worked.length} worked, ${hours(person.labor)} labor hr`];
+    const lines=[person.activity.user.display_name+' — '+person.completed.length+' completed, '+
+      person.unfinished.length+' unfinished, '+person.worked.length+' worked, '+hours(person.labor)+' labor hr'];
+    const byUnit=new Map<string,SummaryJob[]>();
     for(const job of person.jobs){
-      lines.push(`  ${job.unit} — ${name}: ${job.title} [${reportJobState(job)}] · ${hours(job.labor)} hr`);
-      if(job.notes.size)lines.push(`    Tech notes: ${[...job.notes].join(' | ')}`);
-      for(const part of job.partsUsed)lines.push(`    Used: ${part.partNumber} x${hours(part.quantity)}`);
-      for(const part of job.pendingParts)lines.push(`    Waiting: ${part.partNumber} x${hours(part.remaining)} from ${part.warehouse}`);
+      if(!byUnit.has(job.unit))byUnit.set(job.unit,[]);
+      byUnit.get(job.unit)!.push(job);
     }
-    if(person.jobs.length===0)lines.push('  '+noActivity);
+    for(const [unit,jobs] of byUnit){
+      lines.push('  UNIT '+unit+' — '+hours(jobs.reduce((n,j)=>n+j.labor,0))+' labor hr');
+      const notes=new Set<string>(),parts=new Map<string,{partNumber:string;description:string;quantity:number}>();
+      for(const job of jobs){
+        lines.push('    Repair: '+job.title+' ['+(job.status||reportJobState(job))+'] · '+hours(job.labor)+' hr');
+        for(const note of job.notes)if(note.trim())notes.add(note.trim());
+        for(const part of job.partsUsed){
+          const key=part.partNumber+'|'+part.description;
+          const prior=parts.get(key);
+          if(prior)prior.quantity+=part.quantity;
+          else parts.set(key,{...part});
+        }
+      }
+      for(const note of notes)lines.push('    Work note: '+note);
+      for(const part of parts.values())lines.push('    Part used: '+part.partNumber+' x'+hours(part.quantity));
+    }
     return lines.join('\n');
   }).join('\n\n');
   const text=`NORTHERN LOGISTICS MAINTENANCE
@@ -499,7 +546,7 @@ WHAT EACH TECHNICIAN ACCOMPLISHED
 ${textPeople}
 
 NEXT SHIFT — UNFINISHED
-${[...handoffs.values()].map(x=>`${x.job.unit} — ${[...x.names].join(', ')}: ${x.job.title} [${x.job.status}]`).join('\n')||'None recorded'}
+${[...handoffs].map(([unit,group])=>`${unit} — ${[...group.techs].join(', ')}: ${[...group.repairs.values()].map(job=>`${job.title} [${job.status}]`).join('; ')}`).join('\n')||'None recorded'}
 
 OUTSTANDING PART REQUESTS
 ${pending.map(x=>`${x.unit} — ${[...x.techs].join(', ')}: ${x.part.partNumber} x${hours(x.part.remaining)} (${x.part.warehouse})`).join('\n')||'None recorded'}
