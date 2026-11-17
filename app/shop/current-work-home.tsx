@@ -95,7 +95,7 @@ export default function CurrentWorkHome(props:Props){
 
       {props.handoffPanel}
       {pilot&&maintenanceBlock&&<section id="pilot-checklist" style={pilotSection}><strong style={pilotHeading}>PM / Annual / Repair Checklist</strong>{maintenanceBlock}</section>}
-      {pilot&&repairMine&&<section id="pilot-notes" style={pilotSection}><TechnicianRepairTools repairId={repair.id} canWork mode="parts"/></section>}
+      {pilot&&repairMine&&<section id="pilot-parts-section" style={pilotSection}><TechnicianRepairTools repairId={repair.id} canWork mode="parts"/></section>}
       {pilot&&<section id="pilot-photos" style={pilotSection}><RepairPhotoControl repairId={repair.id} canWork /></section>}
       {pilot&&<section id="pilot-add-repair" style={pilotSection}><strong style={pilotHeading}>Additional Repair Actions</strong>{!noUnit&&<FoundRepairControl repairId={repair.id} unit={repair.unit} onAdded={props.onFoundRepairAdded}/>}<LoganPilotAddRepair onSaved={props.onFoundRepairAdded}/></section>}
 
