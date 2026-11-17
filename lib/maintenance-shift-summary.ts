@@ -3,8 +3,10 @@ import { sendGmailRuntimeEmail } from './gmail-client';
 export const MAINTENANCE_SHIFT_TIME_ZONE = 'America/Detroit';
 export const MAINTENANCE_SHIFT_SUMMARY_RECIPIENT = 'Maintenance@norloworld.com';
 export const MAINTENANCE_SHIFT_SUMMARY_DELAY_MINUTES = 30;
+export const MAINTENANCE_SHIFT_LATE_ADDENDUM_MINUTES = 120;
 
 const CLOSEOUT_MS = MAINTENANCE_SHIFT_SUMMARY_DELAY_MINUTES * 60_000;
+const LATE_ADDENDUM_MS = MAINTENANCE_SHIFT_LATE_ADDENDUM_MINUTES * 60_000;
 const RETRY_LOCK_MS = 20 * 60_000;
 const MAX_CATCHUP_MS = 36 * 60 * 60_000;
 
@@ -169,7 +171,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE (e.user_id=? OR e.technician_id=?) AND e.created_at>=? AND e.created_at<=?
-      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','technician_note','unit_session_ended','labor_stopped')
+      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','part_requested_awaiting','technician_note','unit_session_ended','labor_stopped')
     ORDER BY e.created_at,e.id
   ` : `
     SELECT e.repair_id,COALESCE(eq.unit,'') AS unit,COALESCE(r.title,'Repair') AS title,
@@ -178,7 +180,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
     JOIN repairs r ON r.id=e.repair_id
     LEFT JOIN equipment eq ON eq.id=r.equipment_id
     WHERE e.user_id=? AND e.created_at>=? AND e.created_at<=?
-      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested')
+      AND e.action IN ('completed','waiting_on_part','shift_handoff','found_repair','repair_created','self_assigned','unmatched_part_requested','part_requested_awaiting')
     ORDER BY e.created_at,e.id
   `;
   const eventStmt = user.technician_id
@@ -211,7 +213,7 @@ async function personActivity(db:D1Database,user:ShiftUser,start:Date,end:Date):
 
   const activity:PersonActivity={
     user,labor,events,parts,
-    activeTimer:timer?{repairId:Number(timer.repair_id),unit:timer.unit,title:timer.title,startedAt:timer.started_at}:null,
+    activeTimer:timer&&parseDbDate(timer.started_at)<=end.getTime()?{repairId:Number(timer.repair_id),unit:timer.unit,title:timer.title,startedAt:timer.started_at}:null,
     unfinishedJobs:[],
   };
   activity.unfinishedJobs=await unfinishedJobsForActivity(db,activity);
@@ -302,7 +304,9 @@ function uniqueJobs(activity:PersonActivity) {
     jobs.set(row.repairId,current);
   }
   for (const event of activity.events) {
-    if (!jobs.has(event.repairId)) jobs.set(event.repairId,{unit:event.unit,title:event.title,notes:new Set<string>()});
+    const current=jobs.get(event.repairId)??{unit:event.unit,title:event.title,notes:new Set<string>()};
+    if (['technician_note','shift_handoff'].includes(event.action)&&event.detail.trim()) current.notes.add(event.detail.trim());
+    jobs.set(event.repairId,current);
   }
   return [...jobs.entries()].map(([repairId,value])=>({repairId,...value,notes:[...value.notes]}));
 }
@@ -310,19 +314,20 @@ function uniqueJobs(activity:PersonActivity) {
 function actionLabel(action:string) {
   return ({
     completed:'Completed',waiting_on_part:'Waiting on Part',shift_handoff:'Shift Handoff',found_repair:'Found Repair',
-    repair_created:'Repair Added',self_assigned:'Picked Up Work',unmatched_part_requested:'Part Requested',
+    repair_created:'Repair Added',self_assigned:'Picked Up Work',unmatched_part_requested:'Part Requested',part_requested_awaiting:'Part Requested / Awaiting',
     technician_note:'Technician Note',unit_session_ended:'Stopped Working',labor_stopped:'Labor Saved',
   } as Record<string,string>)[action] ?? action;
 }
 
-function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Date,activities:PersonActivity[]) {
+function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Date,activities:PersonActivity[],lateAddendum=false) {
   const totalLabor = activities.reduce((sum,item)=>sum+item.labor.reduce((subtotal,row)=>subtotal+row.hours,0),0);
   const totalCompleted = activities.reduce((sum,item)=>sum+item.events.filter((event)=>event.action==='completed').length,0);
   const totalParts = activities.reduce((sum,item)=>sum+item.parts.reduce((subtotal,row)=>subtotal+row.quantity,0),0);
   const totalUnfinished = activities.reduce((sum,item)=>sum+item.unfinishedJobs.length,0);
   const totalOutstandingParts = activities.reduce((sum,item)=>sum+item.unfinishedJobs.reduce((count,job)=>count+job.pendingParts.length,0),0);
   const titleDate = dateDisplayFormatter.format(start);
-  const subject = `Maintenance Shift Summary — ${shift.name} — ${titleDate}`;
+  const heading=lateAddendum?'Late Work Addendum':'Shift Summary';
+  const subject = `Maintenance ${heading} — ${shift.name} — ${titleDate}`;
   const range = `${displayFormatter.format(start)} – ${displayFormatter.format(end)}`;
 
   const htmlPeople = activities.map((activity)=>{
@@ -357,14 +362,14 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
   const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#1b2733;line-height:1.45">
     <div style="max-width:760px;margin:0 auto;padding:22px">
       <p style="font-size:12px;font-weight:800;letter-spacing:.12em;color:#f47b20;margin:0">NORTHERN LOGISTICS MAINTENANCE</p>
-      <h1 style="margin:7px 0 4px;color:#0d1b2b">${htmlEscape(shift.name)} Shift Summary</h1>
+      <h1 style="margin:7px 0 4px;color:#0d1b2b">${htmlEscape(shift.name)} ${heading}</h1>
       <p style="margin:0;color:#607080">${htmlEscape(range)} · Detroit time</p>
-      <p style="margin:4px 0 18px;color:#607080">Sent 30 minutes after shift end to capture closeout, parts requests, and handoffs.</p>
+      <p style="margin:4px 0 18px;color:#607080">${lateAddendum?'Additional activity recorded after the original shift email. This covers only the later activity window.':'Sent 30 minutes after shift end to capture closeout, parts requests, and handoffs.'}</p>
       <div style="display:flex;gap:18px;flex-wrap:wrap;background:#f4f7f9;border-radius:9px;padding:12px 14px">
         <span><strong>${activities.length}</strong> techs/managers</span><span><strong>${hours(totalLabor)}</strong> labor hr</span><span><strong>${totalCompleted}</strong> repairs completed</span><span><strong>${totalUnfinished}</strong> unfinished work items</span><span><strong>${totalOutstandingParts}</strong> outstanding part requests</span><span><strong>${hours(totalParts)}</strong> parts qty used</span>
       </div>
       ${htmlPeople || '<p>No active technicians or managers were assigned to this shift.</p>'}
-      <p style="font-size:12px;color:#7a8794;border-top:1px solid #dfe5ea;padding-top:12px">Work date ${htmlEscape(workDate)}. Summary window ends ${htmlEscape(displayFormatter.format(due))} and includes the 30-minute closeout period.</p>
+      <p style="font-size:12px;color:#7a8794;border-top:1px solid #dfe5ea;padding-top:12px">Work date ${htmlEscape(workDate)}. ${lateAddendum?'Late-work window':'Summary window'} ends ${htmlEscape(displayFormatter.format(due))}${lateAddendum?'.': ' and includes the 30-minute closeout period.'}</p>
     </div></body></html>`;
 
   const textPeople = activities.map((activity)=>{
@@ -383,7 +388,7 @@ function renderSummary(shift:ShiftRow,workDate:string,start:Date,end:Date,due:Da
     if (lines.length===2 && laborTotal===0) lines.push('No recorded repair activity during this shift.');
     return lines.join('\n');
   }).join('\n\n');
-  const text = `NORTHERN LOGISTICS MAINTENANCE\n${shift.name} Shift Summary\n${range} · Detroit time\n\n${activities.length} techs/managers · ${hours(totalLabor)} labor hr · ${totalCompleted} repairs completed · ${totalUnfinished} unfinished work items · ${totalOutstandingParts} outstanding part requests · ${hours(totalParts)} parts qty used\n\n${textPeople}\n\nSent 30 minutes after shift end. Work date ${workDate}.`;
+  const text = `NORTHERN LOGISTICS MAINTENANCE\n${shift.name} ${heading}\n${range} · Detroit time\n${lateAddendum?'Additional work recorded after the original shift email.\n':''}\n${activities.length} techs/managers · ${hours(totalLabor)} labor hr · ${totalCompleted} repairs completed · ${totalUnfinished} unfinished work items · ${totalOutstandingParts} outstanding part requests · ${hours(totalParts)} parts qty used\n\n${textPeople}\n\n${lateAddendum?'Late work addendum':'Sent 30 minutes after shift end'}. Work date ${workDate}.`;
   return { subject,html,text };
 }
 
@@ -446,6 +451,75 @@ async function sendShiftSummary(db:D1Database,shift:ShiftRow,workDate:string,sta
   }
 }
 
+/**
+ * Preserve the on-time 30-minute email; send one separately labeled catch-up
+ * only when extra activity appears between that email's cutoff and two hours later.
+ * The independent ledger prevents duplicate sends on five-minute cron retries.
+ */
+async function sendLateShiftAddendum(db:D1Database,shift:ShiftRow,workDate:string,originalDue:Date,addendumDue:Date) {
+  const original=await db.prepare(`
+    SELECT status FROM maintenance_shift_summary_runs
+    WHERE shift_id=? AND shift_work_date=?
+  `).bind(shift.id,workDate).first<{status:string}>();
+  if(original?.status!=='sent')return {sent:false,reason:'original_summary_not_sent'};
+
+  const old=await db.prepare(`
+    SELECT id,status,last_attempt_at FROM maintenance_shift_late_addendum_runs
+    WHERE shift_id=? AND shift_work_date=?
+  `).bind(shift.id,workDate).first<{id:number;status:string;last_attempt_at:string|null}>();
+  if(old?.status==='sent'||old?.status==='skipped')return {sent:false,reason:'already_processed'};
+  if(old?.status==='sending'&&old.last_attempt_at&&Date.now()-parseDbDate(old.last_attempt_at)<RETRY_LOCK_MS)
+    return {sent:false,reason:'send_in_progress'};
+  const reserved=await db.prepare(`
+    INSERT INTO maintenance_shift_late_addendum_runs
+      (shift_id,shift_work_date,range_started_at,range_ended_at,status,attempts,last_attempt_at)
+    VALUES (?,?,?,?,'sending',1,CURRENT_TIMESTAMP)
+    ON CONFLICT(shift_id,shift_work_date) DO UPDATE SET
+      status='sending',attempts=maintenance_shift_late_addendum_runs.attempts+1,
+      last_attempt_at=CURRENT_TIMESTAMP,error=NULL,updated_at=CURRENT_TIMESTAMP
+    WHERE maintenance_shift_late_addendum_runs.status NOT IN ('sent','skipped')
+  `).bind(shift.id,workDate,dbTime(originalDue),dbTime(addendumDue)).run();
+  if(Number(reserved.meta.changes??0)===0)return {sent:false,reason:'already_processed'};
+  const run=await db.prepare(`
+    SELECT id FROM maintenance_shift_late_addendum_runs WHERE shift_id=? AND shift_work_date=?
+  `).bind(shift.id,workDate).first<{id:number}>();
+  if(!run)throw new Error('Late summary ledger entry could not be found.');
+  try {
+    const users=await assignedUsers(db,shift.id);
+    const activities:PersonActivity[]=[];
+    for(const user of users)activities.push(await personActivity(db,user,originalDue,addendumDue));
+    // An active timer alone from the original email is not new work unless it
+    // actually began after that email's cutoff.
+    const lateActivities=activities.filter(activity=>
+      activity.labor.length>0||activity.events.length>0||activity.parts.length>0||
+      Boolean(activity.activeTimer&&parseDbDate(activity.activeTimer.startedAt)>=originalDue.getTime()&&parseDbDate(activity.activeTimer.startedAt)<=addendumDue.getTime())
+    );
+    const hasLateWork=lateActivities.length>0;
+    if(!hasLateWork){
+      await db.prepare(`
+        UPDATE maintenance_shift_late_addendum_runs SET status='skipped',updated_at=CURRENT_TIMESTAMP WHERE id=?
+      `).bind(run.id).run();
+      return {sent:false,reason:'no_late_activity'};
+    }
+    const message=renderSummary(shift,workDate,originalDue,addendumDue,addendumDue,lateActivities,true);
+    const sent=await sendGmailRuntimeEmail({
+      to:MAINTENANCE_SHIFT_SUMMARY_RECIPIENT,
+      subject:message.subject,html:message.html,text:message.text,
+    });
+    await db.prepare(`
+      UPDATE maintenance_shift_late_addendum_runs
+      SET status='sent',sent_at=CURRENT_TIMESTAMP,error=NULL,gmail_message_id=?,gmail_thread_id=?,updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(sent.gmailMessageId||sent.messageId,sent.gmailThreadId||'',run.id).run();
+    return {sent:true,addendum:true,runId:run.id,workDate,shiftId:shift.id};
+  }catch(error){
+    await db.prepare(`
+      UPDATE maintenance_shift_late_addendum_runs SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?
+    `).bind(String(error).slice(0,900),run.id).run().catch(()=>undefined);
+    throw error;
+  }
+}
+
 export async function processDueMaintenanceShiftSummaries(db:D1Database,scheduledTime:number|Date=Date.now()) {
   const now = scheduledTime instanceof Date ? scheduledTime : new Date(scheduledTime);
   const shifts = await db.prepare(`
@@ -471,6 +545,15 @@ export async function processDueMaintenanceShiftSummaries(db:D1Database,schedule
       } catch (error) {
         console.error(JSON.stringify({ event:'maintenance_shift_summary_failed',shiftId:shift.id,shiftName:shift.name,workDate:window.workDate,error:String(error) }));
         results.push({ sent:false,shiftId:shift.id,workDate:window.workDate,error:String(error) });
+      }
+      const addendumDue=new Date(window.due.getTime()+LATE_ADDENDUM_MS);
+      if(addendumDue.getTime()<=now.getTime()&&now.getTime()-addendumDue.getTime()<=MAX_CATCHUP_MS){
+        try{
+          results.push(await sendLateShiftAddendum(db,shift,window.workDate,window.due,addendumDue));
+        }catch(error){
+          console.error(JSON.stringify({event:'maintenance_shift_late_addendum_failed',shiftId:shift.id,workDate:window.workDate,error:String(error)}));
+          results.push({sent:false,addendum:true,shiftId:shift.id,workDate:window.workDate,error:String(error)});
+        }
       }
     }
   }
