@@ -49,6 +49,7 @@ const sidebarGroups: SidebarGroup[] = [
       { href: "/next-pm-repairs", label: "Planned Repairs", roles: managerRoles },
       { href: "/outside-work", label: "Outside Repairs", exact: true, roles: managerRoles },
       { href: "/work-orders", label: "Completed Work", exact: true, roles: officeRoles },
+      { href: "/labor-review", label: "Labor Corrections", exact: true, roles: managerRoles },
     ],
   },
   {
