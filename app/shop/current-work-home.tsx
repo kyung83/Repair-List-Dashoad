@@ -62,9 +62,11 @@ export default function CurrentWorkHome(props:Props){
       const info=(event as CustomEvent<{repairId?:string;reason?:string;message?:string}>).detail;
       if(!info||info.repairId!==repair.id)return;
       setCloseBlock({reason:info.reason||"server",message:info.message||"Finish the required step before marking this repair REPAIRED."});
-      if(info.reason==="repair-type"||info.reason==="checklist"){
-        setPilotTool(info.reason==="repair-type"?"notes":"checklist");
-        window.requestAnimationFrame(()=>document.getElementById(info.reason==="repair-type"?"current-repair-type":"pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      if(info.reason==="repair-type"){
+        window.requestAnimationFrame(()=>document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"}));
+      }else if(info.reason==="checklist"){
+        setPilotTool("checklist");
+        window.requestAnimationFrame(()=>document.getElementById("pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
       }else if(info.reason==="tire"){
         window.requestAnimationFrame(()=>document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"}));
       }else{
@@ -84,9 +86,11 @@ export default function CurrentWorkHome(props:Props){
   },[pilot,repair.id]);
 
   function goToCloseRequirement(reason:string){
-    if(reason==="repair-type"||reason==="checklist"){
-      setPilotTool(reason==="repair-type"?"notes":"checklist");
-      window.requestAnimationFrame(()=>document.getElementById(reason==="repair-type"?"current-repair-type":"pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
+    if(reason==="repair-type"){
+      document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"});
+    }else if(reason==="checklist"){
+      setPilotTool("checklist");
+      window.requestAnimationFrame(()=>document.getElementById("pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
     }else if(reason==="tire"){
       document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"});
     }else if(reason==="helper"){
@@ -140,6 +144,9 @@ export default function CurrentWorkHome(props:Props){
           <span style={{minWidth:0,textAlign:"left"}}><strong style={{display:"block",fontSize:12,lineHeight:1.3}}>{item.issue}</strong><span style={repairMeta}>{state(item,timer.repairId)} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</span></span><span aria-hidden="true">›</span>
         </button>)}</div>
       </details>}
+      {pilot&&repairMine&&<div id="pilot-required-repair-type" style={{scrollMarginTop:92}}>
+        <CurrentRepairTypeControl repairId={repair.id}/>
+      </div>}
       {pilot?<>{repair.technicianId===technicianId&&technicianId!==null&&<details id="pilot-helper-panel" style={pilotSetupFold}>
         <summary style={pilotSetupSummary}>+ ADD / MANAGE HELPER <span style={pilotSetupHint}>Tap to expand</span></summary>
         <div style={pilotSetupContents}>
@@ -152,7 +159,7 @@ export default function CurrentWorkHome(props:Props){
 
       {pilot&&<section id="pilot-close-guidance" style={pilotCloseGuide}>
         <strong>REPAIRED — what is required?</strong>
-        <span>Choose a Repair Type in Notes, save tire positions if requested, and finish any required checklist. Helpers must stop their own timers first. DONE WORKING saves labor without closing the repair.</span>
+        <span>Choose the Repair Type above, save tire positions if requested, and finish any required checklist. Helpers must stop their own timers first. DONE WORKING saves labor without closing the repair.</span>
         {closeBlock&&<div role="alert" style={pilotCloseError}>
           <strong>Cannot mark repaired yet:</strong> {closeBlock.message}
           {["repair-type","tire","checklist","helper"].includes(closeBlock.reason)&&<button type="button" onClick={()=>goToCloseRequirement(closeBlock.reason)} style={pilotCloseAction}>
@@ -179,7 +186,7 @@ export default function CurrentWorkHome(props:Props){
           </button>)}
         </nav>
         <div id="pilot-panel-notes" role="tabpanel" aria-labelledby="pilot-tab-notes" hidden={pilotTool!=="notes"} style={{...pilotTabPanel,display:pilotTool==="notes"?"grid":"none"}}>
-          {repairMine?<><TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/><CurrentRepairTypeControl repairId={repair.id}/></>:<div style={empty}>Only assigned repair team members can edit notes.</div>}
+          {repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/>:<div style={empty}>Only assigned repair team members can edit notes.</div>}
         </div>
         <div id="pilot-panel-parts" role="tabpanel" aria-labelledby="pilot-tab-parts" hidden={pilotTool!=="parts"} style={{...pilotTabPanel,display:pilotTool==="parts"?"grid":"none"}}>
           {repairMine&&partsAndLaborPanel}

@@ -9,14 +9,21 @@ const tire=read("app/shop/found-repair-control.tsx");
 const shopPage=read("app/shop/page-v2.tsx");
 const closeRoute=read("app/api/shop/route.ts");
 
-test("Logan alone has Repair Type directly after the Notes tool",()=>{
+test("Logan sees required Repair Type before helpers and REPAIRED, not hidden in Notes",()=>{
   const notes=work.slice(work.indexOf('id="pilot-panel-notes"'),work.indexOf('id="pilot-panel-parts"'));
-  assert.ok(notes.includes('<TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/>'));
-  assert.ok(notes.includes('<CurrentRepairTypeControl repairId={repair.id}/>'));
-  assert.ok(notes.indexOf('<TechnicianRepairTools')<notes.indexOf('<CurrentRepairTypeControl'));
-  assert.match(work,/\{pilot\?<>{repair\.technicianId===technicianId/);
+  assert.match(notes,/<TechnicianRepairTools repairId=\{repair\.id\} canWork mode="notes" compact\/>/);
+  assert.doesNotMatch(notes,/CurrentRepairTypeControl/);
+  const other=work.indexOf('id="pilot-other-repairs"');
+  const required=work.indexOf('id="pilot-required-repair-type"');
+  const helper=work.indexOf('id="pilot-helper-panel"');
+  const actions=work.indexOf('id={pilot?"pilot-actions"');
+  assert.ok(other>0 && other<required && required<helper && helper<actions);
+  const slot=work.slice(required,helper);
+  assert.match(work,/pilot&&repairMine&&<div id="pilot-required-repair-type"/);
+  assert.match(slot,/<CurrentRepairTypeControl repairId=\{repair\.id\}\/>/);
+  assert.equal((work.match(/<CurrentRepairTypeControl repairId=\{repair\.id\}\/>/g)||[]).length,2); // pilot and classic only
   assert.match(work,/!pilot&&maintenanceBlock/);
-  assert.match(work,/\{repairMine&&<CurrentRepairTypeControl repairId=\{repair\.id\}\/>\}/);
+  assert.match(work, /\{repairMine&&<CurrentRepairTypeControl repairId=\{repair\.id\}\/>\}/);
 });
 
 test("Helpers are a separate collapsed action near the repair, not bundled with Repair Type",()=>{
@@ -35,7 +42,10 @@ test("REPAIRED blockers are shown by the action and navigate to the missing step
   assert.match(work,/data-shop-action="repaired"/);
   assert.match(work,/data-shop-action="done-working"/);
   assert.match(work,/shop-repair-close-blocked/);
-  assert.match(work,/setPilotTool\(info\.reason==="repair-type"\?"notes":"checklist"\)/);
+  assert.match(work,/if\(info\.reason==="repair-type"\)/);
+  assert.match(work,/getElementById\("current-repair-type"\)/);
+  assert.match(work,/setPilotTool\("checklist"\)/);
+  assert.doesNotMatch(work,/setPilotTool\(info\.reason==="repair-type"\?"notes":"checklist"\)/);
   assert.match(work,/shop-tire-position-required/);
   assert.match(shopPage,/shop-repair-close-blocked/);
   assert.match(shopPage,/body\.action==="repairOutcome"&&body\.outcome==="repaired"/);
