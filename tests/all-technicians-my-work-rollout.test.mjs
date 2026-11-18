@@ -11,8 +11,8 @@ const gateway=read('worker/index.ts');
 const manager=read('app/labor-review/page.tsx');
 const tech=read('app/shop/technician-completed-work.tsx');
 
-test('all linked mechanics share original Logan My Work interface, and manager/admin UI remains original',()=>{
-  assert.match(shop,/const technicianWorkspace=data\?\.user\.role==="mechanic"&&Boolean\(data\.user\.technicianId\)/);
+test('all linked mechanics share original Logan My Work interface, and office manager/admin UI remains original',()=>{
+  assert.match(shop,/const technicianWorkspace=Boolean\(data\?\.user\.technicianId\)&&\(data\.user\.role==="mechanic"\|\|data\.user\.role==="manager"\)/);
   assert.match(shop,/pilot=\{technicianWorkspace\}/);
   assert.match(shop,/if\(technicianWorkspace&&completedOpen\)/);
   assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\}/);
@@ -26,7 +26,7 @@ test('all linked mechanics share original Logan My Work interface, and manager/a
 });
 
 test('every eligible technician can request corrections for OWN labor, not submit manager approvals',()=>{
-  assert.match(api,/function isTechnician\(user:User\)\{return user\.role==='mechanic'&&Boolean\(user\.technicianId\)\}/);
+  assert.match(api,/function isTechnician\(user:User\)\{return Boolean\(user\.technicianId\)&&\(user\.role==='mechanic'\|\|user\.role==='manager'\)\}/);
   assert.match(api,/if\(!isTechnician\(user\)\)throw new Error\('Only linked technicians can submit labor review requests\.'\)/);
   assert.match(api,/entry\.technician_id!==techId/);
   assert.match(api,/WHERE requester_user_id=\?/);
@@ -44,7 +44,8 @@ test('informational yard card is removed but missing yard and assignment protect
   assert.match(banner,/fetch\('\/api\/shop\?view=queue'/);
   const missing=banner.indexOf('if(!yard)return <section');
   const hidden=banner.indexOf('if(user.role==="mechanic")return null');
-  assert.ok(missing>0&&missing<hidden);
+  const workingManagerHidden=banner.indexOf('if(user.role==="manager"&&Boolean(user.technicianId))return null');
+  assert.ok(missing>0&&missing<hidden&&hidden<workingManagerHidden);
   assert.match(banner,/An administrator needs to assign a work yard/);
   assert.match(shop,/Your login is not linked to a technician record yet/);
 });

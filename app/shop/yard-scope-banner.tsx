@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { yardLabel, type YardSelection } from "@/lib/yards";
 
-type User={id?:number;username?:string;role:"viewer"|"mechanic"|"manager"|"admin";yard?:YardSelection;yardAssigned?:boolean};
+type User={id?:number;username?:string;role:"viewer"|"mechanic"|"manager"|"admin";technicianId?:number|null;yard?:YardSelection;yardAssigned?:boolean};
 
 export default function YardScopeBanner(){
   const[user,setUser]=useState<User|null>(null);
@@ -24,6 +24,8 @@ export default function YardScopeBanner(){
   </section>;
 
   if(user.role==="mechanic")return null;
+  // A manager actively working as a technician uses the same uncluttered My Work view.
+  if(user.role==="manager"&&Boolean(user.technicianId))return null;
   const label=yardLabel(yard);
   return <section style={{margin:"18px 34px 0",padding:14,border:"1px solid #cfd8df",borderRadius:12,background:"#f7f9fa",color:"#1b2421"}}>
     <strong style={{display:"block"}}>WORK YARD · {label.toUpperCase()}</strong>

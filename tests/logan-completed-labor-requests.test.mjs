@@ -14,7 +14,7 @@ const original=read('app/shop/current-work-home.tsx');
 const worker=read('worker/index.ts');
 
 test('Completed tab reaches every linked mechanic without changing existing repair and duty actions',()=>{
-  assert.match(shop,/const technicianWorkspace=data\?\.user\.role==="mechanic"&&Boolean\(data\.user\.technicianId\)/);
+  assert.match(shop,/const technicianWorkspace=Boolean\(data\?\.user\.technicianId\)&&\(data\.user\.role==="mechanic"\|\|data\.user\.role==="manager"\)/);
   assert.match(shop,/if\(technicianWorkspace&&completedOpen\)/);
   assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\}/);
   assert.match(shop,/<>{workspaceTabs}<CurrentWorkHome/);
@@ -28,7 +28,7 @@ test('migration stores original labor, requested amount, audit decision and idem
   assert.match(migration,/CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_labor_review_one_pending_entry/);
 });
 test('technician can request correction or missed work but cannot mutate timer or labor directly',()=>{
-  assert.match(api,/function isTechnician\(user:User\)\{return user\.role==='mechanic'&&Boolean\(user\.technicianId\)\}/);
+  assert.match(api,/function isTechnician\(user:User\)\{return Boolean\(user\.technicianId\)&&\(user\.role==='mechanic'\|\|user\.role==='manager'\)\}/);
   assert.match(api,/if\(!isTechnician\(user\)\)throw new Error/);
   assert.match(api,/source_labor_entry_id/);
   assert.match(api,/entry\.technician_id!==techId/);

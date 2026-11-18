@@ -13,12 +13,12 @@ test('mechanics share simplified yard banner while missing-yard warning remains'
   assert.match(banner,/if\(!yard\)return <section/);
   assert.match(banner,/No work yard is assigned/);
   assert.match(banner,/fetch\('\/api\/shop\?view=queue'/);
-  assert.match(page,/const technicianWorkspace=data\?\.user\.role==="mechanic"&&Boolean\(data\.user\.technicianId\)/);
+  assert.match(page,/const technicianWorkspace=Boolean\(data\?\.user\.technicianId\)&&\(data\.user\.role==="mechanic"\|\|data\.user\.role==="manager"\)/);
   assert.doesNotMatch(page,/LOGAN PILOT ·/);
   assert.doesNotMatch(current,/LOGAN PILOT ·/);
 });
 
-test('mechanics share the compact working header while manager and admin layouts remain classic',()=>{
+test('mechanics share the compact working header while office-only managers and admin layouts remain classic',()=>{
   assert.match(current,/\{!pilot&&<section style=\{unitStrip\}>/);
   assert.match(current,/MY WORK · WORKING NOW/);
   assert.match(current,/pilot&&!noUnit/);

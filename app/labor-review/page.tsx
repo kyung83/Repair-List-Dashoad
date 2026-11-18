@@ -9,7 +9,7 @@ type Review={
   details:string;manager_note:string;sourceUnit:string;sourceTitle:string;targetUnit:string;targetTitle:string;created_at:string;updated_at:string;
 };
 type Repair={repairId:number;unit:string;title:string;status:string};
-type Payload={ok?:boolean;error?:string;requests?:Review[];repairs?:Repair[]};
+type Payload={ok?:boolean;error?:string;requests?:Review[];repairs?:Repair[];currentUserId?:number;currentTechnicianId?:number|null};
 function time(value:string){const date=new Date(value.includes('T')?value:value.replace(' ','T')+'Z');return Number.isFinite(date.getTime())?date.toLocaleString():value}
 function hours(v:number|null|undefined){return Number(v||0).toFixed(2)+' hr'}
 
@@ -22,14 +22,18 @@ export default function LaborReviewPage(){
   const[found,setFound]=useState<Record<number,Repair[]>>({});
   const[ack,setAck]=useState<Record<number,boolean>>({});
   const[loading,setLoading]=useState(true);
+  const[reviewerId,setReviewerId]=useState<number|null>(null);
+  const[reviewerTechnicianId,setReviewerTechnicianId]=useState<number|null>(null);
 
   async function reload(){
     const response=await fetch('/api/shop/labor-review',{cache:'no-store'});
     const result=await response.json() as Payload;
     if(!response.ok||!result.ok)throw new Error(result.error||'Unable to load the labor review queue.');
     setItems(result.requests||[]);
+    setReviewerId(result.currentUserId??null);
+    setReviewerTechnicianId(result.currentTechnicianId??null);
   }
-  useEffect(()=>{let alive=true;fetch('/api/shop/labor-review',{cache:'no-store'}).then(async response=>{const result=await response.json() as Payload;if(!response.ok||!result.ok)throw new Error(result.error||'Unable to load labor queue.');if(alive)setItems(result.requests||[])}).catch(e=>{if(alive)setError(String(e.message||e))}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
+  useEffect(()=>{let alive=true;fetch('/api/shop/labor-review',{cache:'no-store'}).then(async response=>{const result=await response.json() as Payload;if(!response.ok||!result.ok)throw new Error(result.error||'Unable to load labor queue.');if(alive){setItems(result.requests||[]);setReviewerId(result.currentUserId??null);setReviewerTechnicianId(result.currentTechnicianId??null)}}).catch(e=>{if(alive)setError(String(e.message||e))}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
   const pending=useMemo(()=>items.filter(x=>x.status==='pending'),[items]);
   const visible=useMemo(()=>filter==='pending'?items.filter(x=>x.status==='pending'||x.status==='needs_info'||x.status==='processing'):items.filter(x=>x.status==='approved'||x.status==='rejected'),[items,filter]);
 
@@ -43,7 +47,9 @@ export default function LaborReviewPage(){
       setFound(prev=>({...prev,[id]:result.repairs||[]}));
     }catch(e){setError(e instanceof Error?e.message:'Search failed.')}finally{setBusy(0)}
   }
+  function isOwnRequest(item:Review){return item.requester_user_id===reviewerId||(reviewerTechnicianId!==null&&item.technician_id===reviewerTechnicianId)}
   async function decide(item:Review,action:'approve'|'reject'|'needs_info'){
+    if(isOwnRequest(item)){setError('Another manager must review your own labor request.');return}
     const note=(notes[item.id]||'').trim();
     if(action!=='approve'&&note.length<5){setError('Enter a manager explanation to reject or request clarification.');return}
     if(action==='approve'&&item.request_type==='missed'&&!ack[item.id]){setError('Confirm that missed-work approval posts labor only. Verify parts and inspections separately.');return}
@@ -85,7 +91,8 @@ export default function LaborReviewPage(){
       {item.source_repair_id&&<div style={muted}>Source work order: #{item.source_repair_id} · {item.sourceUnit||'SHOP'} · {item.sourceTitle}</div>}
       {item.proposed_repair_id&&<div style={muted}>Requested destination: #{item.proposed_repair_id} · {item.targetUnit||'SHOP'} · {item.targetTitle}</div>}
       {item.manager_note&&item.status!=='pending'&&<div style={reviewed}>Manager note: {item.manager_note}</div>}
-      {item.status==='pending'&&<div style={controls}>
+      {item.status==='pending'&&isOwnRequest(item)&&<div style={reviewed}>You submitted this labor request. Another manager must approve, reject, or request clarification.</div>}
+      {item.status==='pending'&&!isOwnRequest(item)&&<div style={controls}>
         <label style={label}>Manager note (required for rejection or clarification)<textarea value={notes[item.id]||''} onChange={e=>setNotes(prev=>({...prev,[item.id]:e.target.value}))} rows={2} maxLength={1000} placeholder="Reason, evidence, or clarification needed" style={{...input,resize:'vertical'}}/></label>
         {(item.request_type==='missed'||Number(item.original_hours)>item.requested_hours)&&<div style={finder}>
           <strong style={{fontSize:12}}>{item.request_type==='missed'?'Required: select existing work order for missed labor':'Optional: choose destination for transferred hours'}</strong>

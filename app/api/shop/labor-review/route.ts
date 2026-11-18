@@ -19,7 +19,7 @@ function hoursOf(value:unknown){const n=Number(value);if(!Number.isFinite(n)||n<
 function detailOf(value:unknown){const text=String(value??'').trim();if(text.length<8||text.length>1500)throw new Error('Explain what happened (8–1500 characters).');return text}
 function dateOf(value:unknown){const v=String(value??'').trim();const parsed=new Date(v+'T12:00:00Z');const now=Date.now();if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(parsed.getTime())||parsed.toISOString().slice(0,10)!==v||parsed.getTime()<now-120*86400000||parsed.getTime()>now+86400000)throw new Error('Choose a work date within the last 120 days.');return v}
 function clockOf(value:unknown){const v=String(value??'').trim();if(v&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(v))throw new Error('Use a valid time such as 07:30.');return v}
-function isTechnician(user:User){return user.role==='mechanic'&&Boolean(user.technicianId)}
+function isTechnician(user:User){return Boolean(user.technicianId)&&(user.role==='mechanic'||user.role==='manager')}
 function isManager(user:User){return user.role==='manager'||user.role==='admin'}
 async function getEntry(entryId:number){return env.DB.prepare("SELECT l.id,l.repair_id,l.technician_id,l.hours,l.rate,COALESCE(l.notes,'') AS notes,l.labor_date,r.status,r.reviewed_at,r.go_live_archived_at,COALESCE(r.source,'') AS source,COALESCE(e.unit,'') AS unit,r.title FROM repair_labor_entries l JOIN repairs r ON r.id=l.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id WHERE l.id=?").bind(entryId).first<Entry>()}
 async function getRepair(repairId:number){return env.DB.prepare("SELECT r.id,r.status,r.reviewed_at,r.go_live_archived_at,COALESCE(r.source,'') AS source,r.title,COALESCE(e.unit,'') AS unit FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.id=?").bind(repairId).first<Repair>()}
@@ -50,9 +50,11 @@ export async function GET(request:Request){
       const rows=await env.DB.prepare("SELECT r.id AS repairId,COALESCE(e.unit,'') AS unit,r.title,r.status,COALESCE(r.location,'') AS location FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.go_live_archived_at IS NULL AND lower(trim(COALESCE(r.source,'')))<>'roadside-breakdown' AND (e.unit LIKE ? OR r.title LIKE ? OR CAST(r.id AS TEXT)=?) ORDER BY r.updated_at DESC LIMIT 35").bind(pattern,pattern,q).all();
       return Response.json({ok:true,repairs:rows.results},{headers:{'cache-control':'no-store'}});
     }
-    if(isManager(user)){
+    // Working managers can explicitly open their OWN Completed history; the unqualified route
+    // remains the full manager Labor Corrections queue used by management.
+    if(isManager(user)&&!(url.searchParams.get('view')==='mine'&&isTechnician(user))){
       const rows=await env.DB.prepare("SELECT l.*,t.name AS technicianName,u.display_name AS requestedBy,COALESCE(se.unit,'') AS sourceUnit,COALESCE(sr.title,'') AS sourceTitle,COALESCE(te.unit,'') AS targetUnit,COALESCE(tr.title,'') AS targetTitle,le.hours AS currentHours FROM shop_labor_review_requests l JOIN technicians t ON t.id=l.technician_id JOIN app_users u ON u.id=l.requester_user_id LEFT JOIN repair_labor_entries le ON le.id=l.source_labor_entry_id LEFT JOIN repairs sr ON sr.id=l.source_repair_id LEFT JOIN equipment se ON se.id=sr.equipment_id LEFT JOIN repairs tr ON tr.id=l.proposed_repair_id LEFT JOIN equipment te ON te.id=tr.equipment_id ORDER BY CASE l.status WHEN 'pending' THEN 0 WHEN 'needs_info' THEN 1 WHEN 'processing' THEN 2 ELSE 3 END,l.created_at DESC LIMIT 200").all();
-      return Response.json({ok:true,requests:rows.results,manager:true},{headers:{'cache-control':'no-store'}});
+      return Response.json({ok:true,requests:rows.results,manager:true,currentUserId:user.id,currentTechnicianId:user.technicianId},{headers:{'cache-control':'no-store'}});
     }
     const techId=Number(user.technicianId);
     const [history,completed,requests]=await Promise.all([
@@ -109,6 +111,8 @@ async function decision(user:User,body:Record<string,unknown>){
   if(!isManager(user))throw new Error('Managers only.');
   const id=idOf(body.requestId),action=String(body.action||''),note=String(body.managerNote||'').trim().slice(0,1000);
   if(!['reject','needs_info'].includes(action)||note.length<5)throw new Error('Provide a reason before rejecting or requesting clarification.');
+  const ownRequest=await requestById(id);
+  if(ownRequest&&(ownRequest.requester_user_id===user.id||(Boolean(user.technicianId)&&ownRequest.technician_id===user.technicianId)))throw new Error('Another manager must review your own labor request.');
   const result=await env.DB.prepare('UPDATE shop_labor_review_requests SET status=?,manager_note=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?').bind(action==='reject'?'rejected':'needs_info',note,user.id,id,'pending').run();
   if(result.meta.changes!==1)throw new Error('This request is no longer pending.');
   return {ok:true,id,status:action==='reject'?'rejected':'needs_info'};
@@ -117,6 +121,7 @@ async function approve(user:User,body:Record<string,unknown>){
   if(!isManager(user))throw new Error('Managers only.');
   const id=idOf(body.requestId),request=await requestById(id);
   if(!request||request.status!=='pending')throw new Error('This request is not pending.');
+  if(request.requester_user_id===user.id||(Boolean(user.technicianId)&&request.technician_id===user.technicianId))throw new Error('Another manager must review your own labor request.');
   const note=String(body.managerNote??'').trim().slice(0,1000);
   const techId=request.technician_id;
   let source:Entry|null=null;
