@@ -24,7 +24,6 @@ type Props={
   unitRepairs:Repair[];
   requests:PartRequest[];
   technicianId:number|null;
-  now:number;
   busy:boolean;
   message?:string;
   handoffPanel?:ReactNode;
@@ -40,15 +39,21 @@ type Props={
 
 function timerStartMs(value:string){const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";return Date.parse(normalized)}
 function duration(startedAt:string,now:number){const ms=Math.max(0,now-timerStartMs(startedAt)),total=Math.floor(ms/1000),h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60;return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`}
+function ElapsedTime({startedAt}:{startedAt:string}){
+  const[now,setNow]=useState(Date.now());
+  useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id)},[]);
+  return <>{duration(startedAt,now)}</>;
+}
 function numberText(value:number){return Number.isInteger(value)?String(value):value.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")}
 function state(repair:Repair,activeId:string){if(repair.id===activeId)return "WORKING NOW";if(repair.status.trim().toLowerCase()==="waiting on part")return "WAITING ON PART";return "OPEN"}
 
 export default function CurrentWorkHome(props:Props){
-  const {timer,repair,unitRepairs,requests,technicianId,now,busy}=props;
+  const {timer,repair,unitRepairs,requests,technicianId,busy}=props;
   const pilot=Boolean(props.pilot);
   const [pilotTool,setPilotTool]=useState<"notes"|"parts"|"photos"|"checklist"|"history">("notes");
+  // Mount a tool only after it is first opened, then keep it mounted to retain unsaved drafts.
+  const [visitedPilotTools,setVisitedPilotTools]=useState<Array<"notes"|"parts"|"photos"|"checklist"|"history">>(["notes"]);
   const [closeBlock,setCloseBlock]=useState<{reason:string;message:string}|null>(null);
-  const runningTime=duration(timer.startedAt,now);
   const noUnit=!String(repair.unit||timer.unit||"").trim();
   const unitHref=noUnit?"":`/unit?unit=${encodeURIComponent(repair.unit)}`;
   const repairMine=technicianId!==null&&(repair.technicianId===technicianId||(repair.teamIds||[]).includes(technicianId));
@@ -58,6 +63,8 @@ export default function CurrentWorkHome(props:Props){
   useEffect(()=>{
     if(!pilot)return;
     setCloseBlock(null);
+    setPilotTool("notes");
+    setVisitedPilotTools(["notes"]);
     const blocked=(event:Event)=>{
       const info=(event as CustomEvent<{repairId?:string;reason?:string;message?:string}>).detail;
       if(!info||info.repairId!==repair.id)return;
@@ -66,6 +73,7 @@ export default function CurrentWorkHome(props:Props){
         window.requestAnimationFrame(()=>document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"}));
       }else if(info.reason==="checklist"){
         setPilotTool("checklist");
+        setVisitedPilotTools(current=>current.includes("checklist")?current:[...current,"checklist"]);
         window.requestAnimationFrame(()=>document.getElementById("pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
       }else if(info.reason==="tire"){
         window.requestAnimationFrame(()=>document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"}));
@@ -90,6 +98,7 @@ export default function CurrentWorkHome(props:Props){
       document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"});
     }else if(reason==="checklist"){
       setPilotTool("checklist");
+      setVisitedPilotTools(current=>current.includes("checklist")?current:[...current,"checklist"]);
       window.requestAnimationFrame(()=>document.getElementById("pilot-panel-checklist")?.scrollIntoView({behavior:"smooth",block:"center"}));
     }else if(reason==="tire"){
       document.getElementById("shop-tire-position-required")?.scrollIntoView({behavior:"smooth",block:"center"});
@@ -105,9 +114,9 @@ export default function CurrentWorkHome(props:Props){
             {requests.length>0&&<div style={requestList}>{requests.map(request=><div key={request.id} style={requestRow}><span><b>{request.partNumber}</b><br/><small>{numberText(request.reservedQuantity)} reserved · {numberText(request.shortageQuantity)} awaiting</small></span>{request.reservedQuantity>0&&<button disabled={busy} onClick={()=>props.onUseReservedPart(request)} style={smallButton}>Use Reserved</button>}</div>)}</div>}
             {repair.plannedParts.length>0&&<div style={requestList}>{repair.plannedParts.map(planned=>{const remaining=Math.max(0,planned.quantity-planned.usedQuantity);return <div key={planned.id} style={requestRow}><span><b>{planned.partNumber}</b><br/><small>{numberText(remaining)} remaining · {planned.description}</small></span>{remaining>0&&<button disabled={busy} onClick={()=>props.onUsePlannedPart(repair,planned)} style={smallButton}>Use / Request</button>}</div>;})}</div>}
           </div>}
-          <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current {noUnit?"Work":"Repair"} Time</span><strong style={liveTime}>{runningTime}</strong></div><div><span>{pilot?"Saved Labor (excludes current timer)":`Total Hours ${noUnit?"on Work Order":"on Unit"}`}</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
+          <div style={miniCard}><strong style={miniTitle}>Labor Summary</strong><div style={laborGrid}><div><span>Current {noUnit?"Work":"Repair"} Time</span><strong style={liveTime}><ElapsedTime startedAt={timer.startedAt}/></strong></div><div><span>{pilot?"Saved Labor (excludes current timer)":`Total Hours ${noUnit?"on Work Order":"on Unit"}`}</span><strong style={hours}>{repair.laborHours.toFixed(2)} hrs</strong></div></div></div>
         </section>);
-  const maintenanceBlock=repairMine?(<MaintenanceChecklistPanel repairId={repair.id} canWork compact={pilot} showNotes={!pilot}>
+  const maintenanceBlock=repairMine?(<MaintenanceChecklistPanel repairId={repair.id} canWork compact={pilot} showNotes={!pilot} active={!pilot||pilotTool==="checklist"}>
     {!pilot&&partsAndLaborPanel}
   </MaintenanceChecklistPanel>):null;
 
@@ -132,7 +141,7 @@ export default function CurrentWorkHome(props:Props){
           {pilot&&<div style={pilotSavedTime}>Current timer is running · {repair.laborHours.toFixed(2)} hrs previously saved on this repair</div>}
           {!pilot&&<div style={tracking}>● &nbsp; Labor is tracking automatically {noUnit?"to you, not to a fleet unit.":"while this unit is open."}</div>}
         </div>
-        <div style={{...timerStyle,...(pilot?{fontSize:23}:{})}}>◷ {runningTime}</div>
+        <div style={{...timerStyle,...(pilot?{fontSize:23}:{})}}>◷ <ElapsedTime startedAt={timer.startedAt}/></div>
       </section>
       {pilot&&repairMine&&<div id="pilot-required-repair-type" style={{scrollMarginTop:92}}>
         <CurrentRepairTypeControl repairId={repair.id}/>
@@ -182,7 +191,7 @@ export default function CurrentWorkHome(props:Props){
         <nav aria-label="Work tools" role="tablist" style={pilotNav}>
           {(["notes","parts","photos","checklist","history"] as const).map(tool=><button
             key={tool} id={`pilot-tab-${tool}`} type="button" role="tab" aria-selected={pilotTool===tool} aria-controls={`pilot-panel-${tool}`}
-            onClick={()=>setPilotTool(tool)} style={{...pilotNavButton,...(pilotTool===tool?pilotNavSelected:{})}}>
+            onClick={()=>{setPilotTool(tool);setVisitedPilotTools(current=>current.includes(tool)?current:[...current,tool])}} style={{...pilotNavButton,...(pilotTool===tool?pilotNavSelected:{})}}>
             {tool==="checklist"?"Checklist / Review":tool.charAt(0).toUpperCase()+tool.slice(1)}
           </button>)}
         </nav>
@@ -190,17 +199,17 @@ export default function CurrentWorkHome(props:Props){
           {repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="notes" compact/>:<div style={empty}>Only assigned repair team members can edit notes.</div>}
         </div>
         <div id="pilot-panel-parts" role="tabpanel" aria-labelledby="pilot-tab-parts" hidden={pilotTool!=="parts"} style={{...pilotTabPanel,display:pilotTool==="parts"?"grid":"none"}}>
-          {repairMine&&partsAndLaborPanel}
-          {repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="parts" compact/>:<div style={empty}>Parts access requires an assigned repair.</div>}
+          {repairMine&&visitedPilotTools.includes("parts")&&partsAndLaborPanel}
+          {visitedPilotTools.includes("parts")&&(repairMine?<TechnicianRepairTools repairId={repair.id} canWork mode="parts" compact/>:<div style={empty}>Parts access requires an assigned repair.</div>)}
         </div>
         <div id="pilot-panel-photos" role="tabpanel" aria-labelledby="pilot-tab-photos" hidden={pilotTool!=="photos"} style={{...pilotTabPanel,display:pilotTool==="photos"?"grid":"none"}}>
-          <RepairPhotoControl repairId={repair.id} canWork compact/>
+          {visitedPilotTools.includes("photos")&&<RepairPhotoControl repairId={repair.id} canWork compact/>}
         </div>
         <div id="pilot-panel-checklist" role="tabpanel" aria-labelledby="pilot-tab-checklist" hidden={pilotTool!=="checklist"} style={{...pilotTabPanel,display:pilotTool==="checklist"?"grid":"none"}}>
-          {maintenanceBlock??<div style={empty}>Checklist and final review are available to assigned team members.</div>}
+          {visitedPilotTools.includes("checklist")&&(maintenanceBlock??<div style={empty}>Checklist and final review are available to assigned team members.</div>)}
         </div>
         <div id="pilot-panel-history" role="tabpanel" aria-labelledby="pilot-tab-history" hidden={pilotTool!=="history"} style={{...pilotTabPanel,display:pilotTool==="history"?"grid":"none"}}>
-          {repairMine&&!noUnit?<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>:<div style={empty}>Unit history is not available for this work order.</div>}
+          {visitedPilotTools.includes("history")&&(repairMine&&!noUnit?<MechanicUnitHistory repairId={repair.id} unit={repair.unit} currentIssue={repair.issue}/>:<div style={empty}>Unit history is not available for this work order.</div>)}
         </div>
       </section>}
 
