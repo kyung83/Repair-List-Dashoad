@@ -5,10 +5,10 @@ import {readFileSync} from 'node:fs';
 const work=readFileSync(new URL('../app/shop/current-work-home.tsx',import.meta.url),'utf8');
 const checklist=readFileSync(new URL('../app/shop/maintenance-checklist-panel-v3.tsx',import.meta.url),'utf8');
 
-test('Logan pilot work tabs have correctly linked targets, with original tools mounted',()=>{
+test('Logan pilot work tabs have correctly linked targets and retain tools after first use',()=>{
   assert.match(work,/role="tablist"/);
   assert.match(work,/aria-controls=\{`pilot-panel-\$\{tool\}`\}/);
-  assert.match(work,/onClick=\{\(\)=>setPilotTool\(tool\)\}/);
+  assert.match(work,/onClick=\{\(\)=>\{setPilotTool\(tool\);setVisitedPilotTools\(/);
   for(const target of ['notes','parts','photos','checklist','history']){
     assert.ok(work.includes(`id="pilot-panel-${target}"`));
     assert.ok(work.includes(`aria-labelledby="pilot-tab-${target}"`));
