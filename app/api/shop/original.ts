@@ -127,6 +127,8 @@ async function stopActiveLabor(
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
+    // Shop queue never reads the full parts catalog. Keep the normal API untouched for Parts lookup.
+    const queueOnly = new URL(request.url).searchParams.get('view') === 'queue';
     const [repairs, activeTimer, parts, usedParts, laborEntries, plannedParts] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id, r.equipment_id, COALESCE(e.unit, '') AS unit, r.title, r.status,
@@ -173,8 +175,9 @@ export async function GET(request: Request) {
                COALESCE(inventory_class,'stock') AS inventory_class
         FROM parts
         WHERE active = 1 AND deleted_at IS NULL
+          AND ? = 0
         ORDER BY description, part_number
-      `).all<{ id: number; part_number: string; description: string; quantity_on_hand: number; location: string; inventory_class:'stock'|'one_time' }>(),
+      `).bind(queueOnly ? 1 : 0).all<{ id: number; part_number: string; description: string; quantity_on_hand: number; location: string; inventory_class:'stock'|'one_time' }>(),
       env.DB.prepare(`
         SELECT rp.repair_id, rp.part_id, p.part_number, p.description, SUM(rp.quantity) AS quantity
         FROM repair_parts rp
