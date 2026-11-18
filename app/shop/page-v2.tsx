@@ -31,7 +31,6 @@ export default function ShopPage(){
   const[completedOpen,setCompletedOpen]=useState(false);
   const[message,setMessage]=useState("");
   const[busy,setBusy]=useState(false);
-  const[now,setNow]=useState(Date.now());
   const[handoffOpen,setHandoffOpen]=useState(false);
   const[handoffTechId,setHandoffTechId]=useState("");
   const[handoffNote,setHandoffNote]=useState("");
@@ -48,7 +47,6 @@ export default function ShopPage(){
 
   useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:"Shop jobs could not be loaded."));const id=window.setInterval(()=>void load().catch(()=>undefined),30000);return()=>window.clearInterval(id)},[]);
   useEffect(()=>{const refresh=()=>void load().catch(()=>undefined);window.addEventListener("shop-jobs-refresh",refresh);return()=>window.removeEventListener("shop-jobs-refresh",refresh)},[]);
-  useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id)},[]);
 
   async function action(body:Record<string,unknown>){
     setBusy(true);setMessage("");
@@ -137,7 +135,6 @@ export default function ShopPage(){
       unitRepairs={activeUnitRepairs}
       requests={activeRequests}
       technicianId={data.user.technicianId}
-      now={now}
       busy={busy}
       message={message}
       handoffPanel={handoffPanel}
