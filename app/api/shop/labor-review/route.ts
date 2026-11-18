@@ -54,7 +54,7 @@ export async function GET(request:Request){
     // remains the full manager Labor Corrections queue used by management.
     if(isManager(user)&&!(url.searchParams.get('view')==='mine'&&isTechnician(user))){
       const rows=await env.DB.prepare("SELECT l.*,t.name AS technicianName,u.display_name AS requestedBy,COALESCE(se.unit,'') AS sourceUnit,COALESCE(sr.title,'') AS sourceTitle,COALESCE(te.unit,'') AS targetUnit,COALESCE(tr.title,'') AS targetTitle,le.hours AS currentHours FROM shop_labor_review_requests l JOIN technicians t ON t.id=l.technician_id JOIN app_users u ON u.id=l.requester_user_id LEFT JOIN repair_labor_entries le ON le.id=l.source_labor_entry_id LEFT JOIN repairs sr ON sr.id=l.source_repair_id LEFT JOIN equipment se ON se.id=sr.equipment_id LEFT JOIN repairs tr ON tr.id=l.proposed_repair_id LEFT JOIN equipment te ON te.id=tr.equipment_id ORDER BY CASE l.status WHEN 'pending' THEN 0 WHEN 'needs_info' THEN 1 WHEN 'processing' THEN 2 ELSE 3 END,l.created_at DESC LIMIT 200").all();
-      return Response.json({ok:true,requests:rows.results,manager:true,currentUserId:user.id},{headers:{'cache-control':'no-store'}});
+      return Response.json({ok:true,requests:rows.results,manager:true,currentUserId:user.id,currentTechnicianId:user.technicianId},{headers:{'cache-control':'no-store'}});
     }
     const techId=Number(user.technicianId);
     const [history,completed,requests]=await Promise.all([
@@ -112,7 +112,7 @@ async function decision(user:User,body:Record<string,unknown>){
   const id=idOf(body.requestId),action=String(body.action||''),note=String(body.managerNote||'').trim().slice(0,1000);
   if(!['reject','needs_info'].includes(action)||note.length<5)throw new Error('Provide a reason before rejecting or requesting clarification.');
   const ownRequest=await requestById(id);
-  if(ownRequest&&ownRequest.requester_user_id===user.id)throw new Error('Another manager must review your own labor request.');
+  if(ownRequest&&(ownRequest.requester_user_id===user.id||(Boolean(user.technicianId)&&ownRequest.technician_id===user.technicianId)))throw new Error('Another manager must review your own labor request.');
   const result=await env.DB.prepare('UPDATE shop_labor_review_requests SET status=?,manager_note=?,reviewed_by_user_id=?,reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=?').bind(action==='reject'?'rejected':'needs_info',note,user.id,id,'pending').run();
   if(result.meta.changes!==1)throw new Error('This request is no longer pending.');
   return {ok:true,id,status:action==='reject'?'rejected':'needs_info'};
@@ -121,7 +121,7 @@ async function approve(user:User,body:Record<string,unknown>){
   if(!isManager(user))throw new Error('Managers only.');
   const id=idOf(body.requestId),request=await requestById(id);
   if(!request||request.status!=='pending')throw new Error('This request is not pending.');
-  if(request.requester_user_id===user.id)throw new Error('Another manager must review your own labor request.');
+  if(request.requester_user_id===user.id||(Boolean(user.technicianId)&&request.technician_id===user.technicianId))throw new Error('Another manager must review your own labor request.');
   const note=String(body.managerNote??'').trim().slice(0,1000);
   const techId=request.technician_id;
   let source:Entry|null=null;
