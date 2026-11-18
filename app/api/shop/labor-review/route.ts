@@ -19,7 +19,7 @@ function hoursOf(value:unknown){const n=Number(value);if(!Number.isFinite(n)||n<
 function detailOf(value:unknown){const text=String(value??'').trim();if(text.length<8||text.length>1500)throw new Error('Explain what happened (8–1500 characters).');return text}
 function dateOf(value:unknown){const v=String(value??'').trim();const parsed=new Date(v+'T12:00:00Z');const now=Date.now();if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(parsed.getTime())||parsed.toISOString().slice(0,10)!==v||parsed.getTime()<now-120*86400000||parsed.getTime()>now+86400000)throw new Error('Choose a work date within the last 120 days.');return v}
 function clockOf(value:unknown){const v=String(value??'').trim();if(v&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(v))throw new Error('Use a valid time such as 07:30.');return v}
-function isPilot(user:User){return user.id===29&&user.username==='loganr'&&user.role==='mechanic'&&Boolean(user.technicianId)}
+function isTechnician(user:User){return user.role==='mechanic'&&Boolean(user.technicianId)}
 function isManager(user:User){return user.role==='manager'||user.role==='admin'}
 async function getEntry(entryId:number){return env.DB.prepare("SELECT l.id,l.repair_id,l.technician_id,l.hours,l.rate,COALESCE(l.notes,'') AS notes,l.labor_date,r.status,r.reviewed_at,r.go_live_archived_at,COALESCE(r.source,'') AS source,COALESCE(e.unit,'') AS unit,r.title FROM repair_labor_entries l JOIN repairs r ON r.id=l.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id WHERE l.id=?").bind(entryId).first<Entry>()}
 async function getRepair(repairId:number){return env.DB.prepare("SELECT r.id,r.status,r.reviewed_at,r.go_live_archived_at,COALESCE(r.source,'') AS source,r.title,COALESCE(e.unit,'') AS unit FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.id=?").bind(repairId).first<Repair>()}
@@ -42,7 +42,7 @@ export async function GET(request:Request){
   try{
     const user=await getSessionUser(env.DB,request);
     if(!user)return problem('Sign in again.',401);
-    if(!isPilot(user)&&!isManager(user))return problem('Labor review pilot is not enabled for this account.',403);
+    if(!isTechnician(user)&&!isManager(user))return problem('Labor review is available to linked technicians and managers.',403);
     const url=new URL(request.url);
     const q=(url.searchParams.get('q')||'').trim().slice(0,70);
     if(q.length>=2){
@@ -65,7 +65,7 @@ export async function GET(request:Request){
 }
 
 async function submit(user:User,body:Record<string,unknown>){
-  if(!isPilot(user))throw new Error('Only Logan can submit during the pilot.');
+  if(!isTechnician(user))throw new Error('Only linked technicians can submit labor review requests.');
   const key=cleanKey(body.requestKey);
   const previous=await env.DB.prepare('SELECT id,requester_user_id FROM shop_labor_review_requests WHERE request_key=?').bind(key).first<{id:number;requester_user_id:number}>();
   if(previous){if(previous.requester_user_id!==user.id)throw new Error('Invalid request key.');return {ok:true,id:previous.id,duplicate:true}}
@@ -99,7 +99,7 @@ async function submit(user:User,body:Record<string,unknown>){
   return {ok:true,id:Number(inserted.meta.last_row_id),status:'pending'};
 }
 async function clarify(user:User,body:Record<string,unknown>){
-  if(!isPilot(user))throw new Error('Only Logan can clarify requests in the pilot.');
+  if(!isTechnician(user))throw new Error('Only linked technicians can clarify their own requests.');
   const id=idOf(body.requestId),details=detailOf(body.details);
   const result=await env.DB.prepare("UPDATE shop_labor_review_requests SET details=?,status='pending',updated_at=CURRENT_TIMESTAMP WHERE id=? AND requester_user_id=? AND status='needs_info'").bind(details,id,user.id).run();
   if(result.meta.changes!==1)throw new Error('This request is no longer awaiting clarification.');
