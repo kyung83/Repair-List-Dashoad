@@ -102,20 +102,20 @@ export default function ShopPage(){
   const mineGroups=useMemo(()=>groupByUnit(mine),[mine]);
   const availableGroups=useMemo(()=>groupByUnit(available),[available]);
   const allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
-  // Strict account-level pilot: no other mechanic, manager or yard is affected.
-  const loganPilot=data?.user.id===29&&data.user.username==="loganr"&&data.user.role==="mechanic";
+  // Shared technician workspace for linked mechanics. Manager and admin views are unchanged.
+  const technicianWorkspace=data?.user.role==="mechanic"&&Boolean(data.user.technicianId);
   const canAssignHandoff=data?.user.role==="manager"||data?.user.role==="admin";
   const techOptions=useMemo(()=>canAssignHandoff?(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId):[],[data,canAssignHandoff]);
-  const pilotTabs=loganPilot?<nav aria-label="My Work sections" style={completedNav}>
+  const workspaceTabs=technicianWorkspace?<nav aria-label="My Work sections" style={completedNav}>
     <button type="button" onClick={()=>setCompletedOpen(false)} aria-current={!completedOpen?"page":undefined} style={!completedOpen?completedActive:completedTab}>Working / Available</button>
     <button type="button" onClick={()=>setCompletedOpen(true)} aria-current={completedOpen?"page":undefined} style={completedOpen?completedActive:completedTab}>Completed & Labor Requests</button>
   </nav>:null;
 
-  if(loganPilot&&completedOpen)return <main style={page}><div style={shell}>{pilotTabs}<TechnicianCompletedWork isWorking={Boolean(data?.activeTimer)}/></div></main>;
+  if(technicianWorkspace&&completedOpen)return <main style={page}><div style={shell}>{workspaceTabs}<TechnicianCompletedWork isWorking={Boolean(data?.activeTimer)}/></div></main>;
 
 
   if(data?.activeTimer&&data.activeShopDuty){
-    return <>{pilotTabs}<ShopDutyWorkHome timer={data.activeTimer} duty={data.activeShopDuty} onRefresh={load}/></>;
+    return <>{workspaceTabs}<ShopDutyWorkHome timer={data.activeTimer} duty={data.activeShopDuty} onRefresh={load}/></>;
   }
 
   if(data?.activeTimer&&activeRepair){
@@ -129,7 +129,7 @@ export default function ShopPage(){
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>{canAssignHandoff?"HAND OFF TO NEXT SHIFT":"LEAVE UNASSIGNED"}</button></div></>}
     </section>:null;
 
-    return <>{pilotTabs}<CurrentWorkHome
+    return <>{workspaceTabs}<CurrentWorkHome
       timer={data.activeTimer}
       repair={activeRepair}
       unitRepairs={activeUnitRepairs}
@@ -143,7 +143,7 @@ export default function ShopPage(){
       onTeamChanged={load}
       onChooseRepair={repair=>void chooseRepair(repair)}
       onFoundRepairAdded={load}
-      pilot={loganPilot}
+      pilot={technicianWorkspace}
       onUsePlannedPart={(repair,part)=>void usePlannedPart(repair,part)}
       onUseReservedPart={request=>void useReserved(request as PartRequest)}
     /></>;
@@ -151,10 +151,10 @@ export default function ShopPage(){
 
   return <main style={page}>
     <div style={shell}>
-      {pilotTabs}
+      {workspaceTabs}
       <header style={header}><div><p style={eyebrow}>TECHNICIAN SHOP QUEUE</p><h1 style={title}>Shop Jobs</h1><p style={subtitle}>Pick a unit. Labor starts automatically when you begin working.</p></div><div style={{textAlign:"right"}}><strong>{data?.user.displayName??"Loading…"}</strong><div style={userName}>{data?.user.username?`@${data.user.username}`:""}</div></div></header>
       {message&&<div style={notice}>{message}</div>}
-      {loganPilot&&<section style={{marginTop:10,display:"grid",gap:8}}><LoganPilotAddRepair onSaved={load}/></section>}
+      {technicianWorkspace&&<section style={{marginTop:10,display:"grid",gap:8}}><LoganPilotAddRepair onSaved={load}/></section>}
       {data?.user.role==="mechanic"&&!data.user.technicianId&&<div style={errorNotice}>Your login is not linked to a technician record yet. Ask an administrator to update the account.</div>}
       <div style={tabs}><button onClick={()=>setView("mine")} style={view==="mine"?activeTab:tab}>My Units ({mineGroups.length})</button><button onClick={()=>setView("available")} style={view==="available"?activeTab:tab}>Available Units ({availableGroups.length})</button><button onClick={()=>setView("all")} style={view==="all"?activeTab:tab}>All Open Units ({allGroups.length})</button></div>
       <section style={queue}>{groups.map(group=>{const workable=group.repairs.find(repair=>repair.technicianId===data?.user.technicianId||(repair.teamIds||[]).includes(Number(data?.user.technicianId))||repair.technicianId===null);return <article key={group.key} style={unitCard}><div style={unitHeader}><a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={unitLink}>Unit {group.unit||"—"} ↗</a><span style={openCount}>{group.repairs.length} OPEN</span></div><div style={repairList}>{group.repairs.map(repair=><div key={repair.id} style={repairRow}><div><strong>{repair.issue}</strong><div style={repairMeta}>{repair.technicianId===null?"Unassigned":`Assigned to ${repair.assignedTo||"technician"}`} · {repair.laborHours.toFixed(2)} hr logged</div></div><div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{repair.pullThru&&<span style={pullThruBadge}>PULL THRU</span>}<span style={statusBadge}>{repair.status}</span>{data?.user.technicianId&&(repair.technicianId===data.user.technicianId||(repair.teamIds||[]).includes(Number(data.user.technicianId))||repair.technicianId===null)&&<button type="button" disabled={busy} onClick={()=>void startRepair(repair)} style={startButton}>START THIS REPAIR</button>}</div></div>)}</div>{!workable||!data?.user.technicianId?<a href={`/unit?unit=${encodeURIComponent(group.unit)}`} style={viewButton}>VIEW UNIT</a>:<div style={repairMeta}>Choose the exact repair above to start labor. Other jobs on this unit remain separate.</div>}</article>})}{data&&!groups.length&&<div style={empty}>No units in this view.</div>}</section>
