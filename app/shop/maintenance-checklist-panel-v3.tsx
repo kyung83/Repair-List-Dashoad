@@ -8,15 +8,17 @@ import TechnicianRepairReview from './technician-repair-review';
 import RepairTypeChecklistPanel from './repair-type-checklist-panel';
 import type {ChecklistData,Part} from './maintenance-types';
 
-type Props={repairId:string;canWork:boolean;parts?:Part[];children?:ReactNode;compact?:boolean;showNotes?:boolean};
+type Props={repairId:string;canWork:boolean;parts?:Part[];children?:ReactNode;compact?:boolean;showNotes?:boolean;active?:boolean};
 
 export default function MaintenanceChecklistPanelV3(props:Props){
   const[checklist,setChecklist]=useState<ChecklistData|null>(null);
   const[inspectionOpen,setInspectionOpen]=useState(false);
 
+  useEffect(()=>{setInspectionOpen(false);setChecklist(null)},[props.repairId]);
+
   useEffect(()=>{
+    if(props.active===false)return;
     let cancelled=false;
-    setInspectionOpen(false);
     async function load(){
       try{
         const r=await fetch(`/api/maintenance-checklist?repairId=${encodeURIComponent(props.repairId)}`,{cache:'no-store'});
@@ -27,7 +29,7 @@ export default function MaintenanceChecklistPanelV3(props:Props){
     void load();
     const id=window.setInterval(()=>void load(),3000);
     return()=>{cancelled=true;window.clearInterval(id)};
-  },[props.repairId]);
+  },[props.repairId,props.active]);
 
   const showTires=Boolean(
     checklist?.started&&
