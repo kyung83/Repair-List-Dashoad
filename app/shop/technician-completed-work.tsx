@@ -30,12 +30,12 @@ export default function TechnicianCompletedWork({isWorking}:Props){
   const key=useRef('');
 
   async function reload(){
-    const r=await fetch('/api/shop/labor-review',{cache:'no-store'});
+    const r=await fetch('/api/shop/labor-review?view=mine',{cache:'no-store'});
     const p=await r.json() as Data;
     if(!r.ok||!p.ok)throw new Error(p.error||'Work history could not be loaded.');
     setData(p);
   }
-  useEffect(()=>{let alive=true;fetch('/api/shop/labor-review',{cache:'no-store'}).then(async r=>{const p=await r.json() as Data;if(!r.ok||!p.ok)throw new Error(p.error||'Work history could not be loaded.');if(alive)setData(p)}).catch(e=>{if(alive)setError(String(e.message||e))});return()=>{alive=false}},[]);
+  useEffect(()=>{let alive=true;fetch('/api/shop/labor-review?view=mine',{cache:'no-store'}).then(async r=>{const p=await r.json() as Data;if(!r.ok||!p.ok)throw new Error(p.error||'Work history could not be loaded.');if(alive)setData(p)}).catch(e=>{if(alive)setError(String(e.message||e))});return()=>{alive=false}},[]);
   function openCorrection(entry:History){
     setForm('correction');setSelected(entry);setRequestedHours(String(entry.hours));setReason('');setTransferRepairId('');setQuery('');setResults([]);setError('');key.current='';
     window.requestAnimationFrame(()=>document.getElementById('labor-request-form')?.scrollIntoView({behavior:'smooth',block:'center'}));
