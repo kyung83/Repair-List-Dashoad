@@ -102,8 +102,9 @@ export default function ShopPage(){
   const mineGroups=useMemo(()=>groupByUnit(mine),[mine]);
   const availableGroups=useMemo(()=>groupByUnit(available),[available]);
   const allGroups=useMemo(()=>groupByUnit(data?.repairs??[]),[data]);
-  // Shared technician workspace for linked mechanics. Manager and admin views are unchanged.
-  const technicianWorkspace=data?.user.role==="mechanic"&&Boolean(data.user.technicianId);
+  // The streamlined technician workspace is for mechanics and working managers with linked technician records.
+  // Office-only managers and administrators retain the existing shop view and privileges.
+  const technicianWorkspace=Boolean(data?.user.technicianId)&&(data.user.role==="mechanic"||data.user.role==="manager");
   const canAssignHandoff=data?.user.role==="manager"||data?.user.role==="admin";
   const techOptions=useMemo(()=>canAssignHandoff?(data?.technicians??[]).filter(tech=>tech.id!==data?.user.technicianId):[],[data,canAssignHandoff]);
   const workspaceTabs=technicianWorkspace?<nav aria-label="My Work sections" style={completedNav}>
