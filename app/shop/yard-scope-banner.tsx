@@ -8,21 +8,22 @@ type User={id?:number;username?:string;role:"viewer"|"mechanic"|"manager"|"admin
 export default function YardScopeBanner(){
   const[user,setUser]=useState<User|null>(null);
   useEffect(()=>{
-    void fetch('/api/shop',{cache:'no-store'})
+    void fetch('/api/shop?view=queue',{cache:'no-store'})
       .then(async response=>response.ok?(await response.json() as{user:User}).user:null)
       .then(setUser)
       .catch(()=>setUser(null));
   },[]);
 
-  // Logan-only layout pilot: hide the informational yard banner, not yard restrictions.
+  // Hide the optional work-yard explanation for mechanics with a yard.
+  // Keep the missing-yard warning and all server-side yard authorization intact.
   if(!user||(user.role!=="mechanic"&&user.role!=="manager"))return null;
-  if(user.id===29&&user.username==="loganr"&&user.role==="mechanic")return null;
   const yard=user.yard||"";
   if(!yard)return <section style={{margin:"18px 34px 0",padding:14,border:"2px solid #c94738",borderRadius:12,background:"#fff4f2",color:"#4d1d17"}}>
     <strong style={{display:"block"}}>No work yard is assigned to your user.</strong>
     <span style={{display:"block",marginTop:4,fontSize:13}}>An administrator needs to assign a work yard in Users &amp; Access. Your already assigned jobs can still be shown, but unassigned yard work cannot be picked up until a yard is set.</span>
   </section>;
 
+  if(user.role==="mechanic")return null;
   const label=yardLabel(yard);
   return <section style={{margin:"18px 34px 0",padding:14,border:"1px solid #cfd8df",borderRadius:12,background:"#f7f9fa",color:"#1b2421"}}>
     <strong style={{display:"block"}}>WORK YARD · {label.toUpperCase()}</strong>

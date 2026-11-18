@@ -8,15 +8,17 @@ const banner = read('app/shop/yard-scope-banner.tsx');
 const found = read('app/shop/found-repair-control.tsx');
 const notes = read('app/shop/technician-repair-tools-v2.tsx');
 
-test('only Logan account hides the informational work-yard notice; all yard authorization remains intact',()=>{
-  assert.match(banner,/user\.id===29&&user\.username==="loganr"&&user\.role==="mechanic"/);
-  assert.match(page,/data\?\.user\.id===29&&data\.user\.username==="loganr"&&data\.user\.role==="mechanic"/);
+test('mechanics share simplified yard banner while missing-yard warning remains',()=>{
+  assert.match(banner,/if\(user.role==="mechanic"\)return null/);
+  assert.match(banner,/if\(!yard\)return <section/);
+  assert.match(banner,/No work yard is assigned/);
+  assert.match(banner,/fetch\('\/api\/shop\?view=queue'/);
+  assert.match(page,/const technicianWorkspace=data\?\.user\.role==="mechanic"&&Boolean\(data\.user\.technicianId\)/);
   assert.doesNotMatch(page,/LOGAN PILOT ·/);
   assert.doesNotMatch(current,/LOGAN PILOT ·/);
-  assert.match(banner,/No work yard is assigned/);
 });
 
-test('pilot has a single compact working header while the original view is preserved for other technicians',()=>{
+test('mechanics share the compact working header while manager and admin layouts remain classic',()=>{
   assert.match(current,/\{!pilot&&<section style=\{unitStrip\}>/);
   assert.match(current,/MY WORK · WORKING NOW/);
   assert.match(current,/pilot&&!noUnit/);
@@ -53,7 +55,7 @@ test('Logan work tools switch within one sticky panel without changing the repai
   assert.match(current,/!pilot&&maintenanceBlock/);
 });
 
-test('compact notes, photos and team are pilot-only; the existing work APIs and operations remain',()=>{
+test('compact notes, photos and team are mechanic-only; existing work operations remain',()=>{
   assert.match(current,/<RepairPhotoControl repairId=\{repair\.id\} canWork compact/);
   assert.match(current,/<TechnicianRepairTools repairId=\{repair\.id\} canWork mode="parts" compact/);
   assert.match(notes,/compact=false/);

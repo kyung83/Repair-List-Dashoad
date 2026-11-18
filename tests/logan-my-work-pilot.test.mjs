@@ -4,13 +4,14 @@ import {readFileSync} from 'node:fs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const page=read('app/shop/page-v2.tsx'),current=read('app/shop/current-work-home.tsx'),pilot=read('app/shop/logan-pilot-add-repair.tsx');
 
-test('pilot is restricted to Logan Rodriguez account and not mechanic role or Clare yard',()=>{
-  assert.match(page,/data\?\.user\.id===29&&data\.user\.username==="loganr"&&data\.user\.role==="mechanic"/);
-  assert.match(page,/pilot=\{loganPilot\}/);
-  assert.match(page,/loganPilot&&<section/);
-  assert.doesNotMatch(page,/data\?\.user\.role==="mechanic"&&<LoganPilotAddRepair/);
+test('shared My Work layout is enabled for all linked mechanic accounts, not managers or viewers',()=>{
+  assert.match(page,/const technicianWorkspace=data\?\.user\.role==="mechanic"&&Boolean\(data\.user\.technicianId\)/);
+  assert.match(page,/pilot=\{technicianWorkspace\}/);
+  assert.match(page,/technicianWorkspace&&<section/);
+  assert.match(page,/if\(technicianWorkspace&&completedOpen\)/);
+  assert.doesNotMatch(page,/user\.id===29|username==="loganr"|loganPilot/);
 });
-test('Logan keeps each existing workflow while changing only one-screen placement',()=>{
+test('all technicians retain original workflows and the streamlined repair actions',()=>{
   for(const component of ['RepairTeamPanel','CurrentRepairTypeControl','FoundRepairControl','RepairPhotoControl','TechnicianRepairTools','MaintenanceChecklistPanel','MechanicUnitHistory'])assert.match(current,new RegExp(component));
   assert.match(current,/!pilot&&maintenanceBlock/);
   assert.match(current,/id="pilot-panel-checklist"/);

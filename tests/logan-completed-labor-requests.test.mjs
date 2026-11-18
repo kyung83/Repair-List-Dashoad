@@ -13,12 +13,12 @@ const workOrders=read('app/work-orders/page.tsx');
 const original=read('app/shop/current-work-home.tsx');
 const worker=read('worker/index.ts');
 
-test('only Logan receives Completed pilot, existing active repair and shop-duty UI are reused',()=>{
-  assert.match(shop,/user\.id===29&&data\.user\.username==="loganr"&&data\.user\.role==="mechanic"/);
-  assert.match(shop,/if\(loganPilot&&completedOpen\)/);
+test('Completed tab reaches every linked mechanic without changing existing repair and duty actions',()=>{
+  assert.match(shop,/const technicianWorkspace=data\?\.user\.role==="mechanic"&&Boolean\(data\.user\.technicianId\)/);
+  assert.match(shop,/if\(technicianWorkspace&&completedOpen\)/);
   assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\}/);
-  assert.match(shop,/<>\{pilotTabs\}<CurrentWorkHome/);
-  assert.match(shop,/<>\{pilotTabs\}<ShopDutyWorkHome/);
+  assert.match(shop,/<>{workspaceTabs}<CurrentWorkHome/);
+  assert.match(shop,/<>{workspaceTabs}<ShopDutyWorkHome/);
   assert.match(shop,/onRepaired=\{\(\)=>void repaired\(activeRepair\)\}/);
   assert.match(original,/data-shop-action="repaired"/);
 });
@@ -28,13 +28,13 @@ test('migration stores original labor, requested amount, audit decision and idem
   assert.match(migration,/CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_labor_review_one_pending_entry/);
 });
 test('technician can request correction or missed work but cannot mutate timer or labor directly',()=>{
-  assert.match(api,/function isPilot\(user:User\)\{return user\.id===29/);
-  assert.match(api,/if\(!isPilot\(user\)\)throw new Error/);
+  assert.match(api,/function isTechnician\(user:User\)\{return user\.role==='mechanic'&&Boolean\(user\.technicianId\)\}/);
+  assert.match(api,/if\(!isTechnician\(user\)\)throw new Error/);
   assert.match(api,/source_labor_entry_id/);
   assert.match(api,/entry\.technician_id!==techId/);
   assert.match(api,/request_type:'correction'\|'missed'/);
   assert.match(api,/INSERT INTO shop_labor_review_requests/);
-  assert.match(api,/only Logan can submit during the pilot|Only Logan can submit during the pilot/);
+  assert.match(api,/Only linked technicians can submit labor review requests/);
   assert.match(completed,/SUBMIT FOR MANAGER REVIEW/);
   assert.match(completed,/Your current labor timer continues running/);
   assert.match(completed,/does not change labor, inventory, repair completion/);
@@ -69,14 +69,14 @@ test('manager Labor Corrections queue is visible from repairs and work-order rev
   assert.match(manager,/Current: \{hours\(item\.currentHours\)\}/);
 });
 
-test('outer Worker clearance permits technician labor request submission while API enforces Logan-only changes and manager approvals',()=>{
+test('outer Worker allows mechanic submissions while approval remains manager-only',()=>{
   const start=worker.indexOf('const TECHNICIAN_SHOP_WRITE_PATHS');
   const end=worker.indexOf('const DISPATCH_READ_PATHS',start);
   assert.ok(start>=0&&end>start);
   const allowlist=worker.slice(start,end);
   assert.match(allowlist,/'\/api\/shop\/labor-review'/);
   assert.match(worker,/TECHNICIAN_SHOP_WRITE_PATHS\.has\(pathname\)/);
-  assert.match(api,/if\(!isPilot\(user\)\)throw new Error\('Only Logan can submit during the pilot\.'\)/);
+  assert.match(api,/if\(!isTechnician\(user\)\)throw new Error\('Only linked technicians can submit labor review requests\.'\)/);
   assert.match(api,/if\(!isManager\(user\)\)throw new Error\('Managers only\.'\)/);
   assert.match(api,/if\(action==='submit'\)/);
   assert.match(api,/if\(action==='approve'\)/);
