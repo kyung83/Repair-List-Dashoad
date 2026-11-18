@@ -22,5 +22,8 @@ test('previously started roadside labor is retained until the technician can saf
 test('this filters My Work only, preserving repair board and roadside history',()=>{
   assert.match(board,/FROM repairs r/);
   assert.match(board,/roadside-breakdown/);
-  assert.match(page,/fetch\("\/api\/shop",\{cache:"no-store"\}\)/);
+  // Queue-only avoids a full parts scan, but still uses the same server-side roadside filter.
+  assert.match(page,/fetch\("\/api\/shop\?view=queue",\{cache:"no-store"\}\)/);
+  assert.match(shop,/const queueOnly = new URL\(request\.url\)\.searchParams\.get\('view'\) === 'queue'/);
+  assert.match(shop,/LOWER\(TRIM\(COALESCE\(r\.source,''\)\)\) <> 'roadside-breakdown'/);
 });
