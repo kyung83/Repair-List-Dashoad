@@ -633,7 +633,9 @@ export async function GET(request: Request) {
   });
   payload.repairs = repairs;
   payload.technicians = technicians.results.map((row)=>({id:Number(row.id),name:row.name}));
-  const decoratedParts = await decorateShopParts(env.DB, payload.parts ?? []);
+  // Skip warehouse stock decoration on queue-only reads; normal /api/shop still returns full lookup data.
+  const queueOnly = new URL(request.url).searchParams.get('view') === 'queue';
+  const decoratedParts = queueOnly ? [] : await decorateShopParts(env.DB, payload.parts ?? []);
   payload.parts = shopWarehouse ? scopePartsToWarehouse(decoratedParts,shopWarehouse) : decoratedParts;
   const visibleIds = new Set(repairs.map((repair) => numericRepairId(repair.id)).filter(Boolean));
   const requests = (await getRepairPartRequests(env.DB)).filter((partRequest) =>
