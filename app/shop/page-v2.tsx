@@ -37,7 +37,8 @@ export default function ShopPage(){
   const[handoffNote,setHandoffNote]=useState("");
 
   async function load(){
-    const response=await fetch("/api/shop",{cache:"no-store"});
+    // This page needs jobs and timers, not the entire 2,453+ part inventory on every refresh.
+    const response=await fetch("/api/shop?view=queue",{cache:"no-store"});
     const payload=await response.json() as ShopData&{error?:string};
     if(!response.ok)throw new Error(payload.error||"Shop jobs could not be loaded.");
     setData(payload);
