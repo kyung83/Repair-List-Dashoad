@@ -16,7 +16,7 @@ const eligibleRepair=[
   'NOT EXISTS (SELECT 1 FROM repair_labor_timers t WHERE t.repair_id=r.id)',
   'NOT EXISTS (SELECT 1 FROM invoices i WHERE i.repair_id=r.id)',
   'NOT EXISTS (SELECT 1 FROM invoice_repair_links irl WHERE irl.repair_id=r.id)',
-  "(r.technician_id=? OR EXISTS (SELECT 1 FROM repair_job_events ev WHERE ev.repair_id=r.id AND ev.user_id=? AND ev.action='completed'))",
+  "(r.technician_id=? OR (SELECT ev.user_id FROM repair_job_events ev WHERE ev.repair_id=r.id AND ev.action='completed' ORDER BY ev.id DESC LIMIT 1)=?)",
 ].join(' AND ');
 
 function problem(error:string,status=400){
@@ -48,7 +48,7 @@ export async function POST(request:Request){
       "EXISTS(SELECT 1 FROM invoices i WHERE i.repair_id=r.id) AS direct_invoice,"+
       "EXISTS(SELECT 1 FROM invoice_repair_links l WHERE l.repair_id=r.id) AS linked_invoice,"+
       "EXISTS(SELECT 1 FROM repair_labor_timers t WHERE t.repair_id=r.id) AS timer_running,"+
-      "EXISTS(SELECT 1 FROM repair_job_events e WHERE e.repair_id=r.id AND e.user_id=? AND e.action='completed') AS completed_by_me "+
+      "((SELECT e.user_id FROM repair_job_events e WHERE e.repair_id=r.id AND e.action='completed' ORDER BY e.id DESC LIMIT 1)=?) AS completed_by_me "+
       "FROM repairs r WHERE r.id=?"
     ).bind(user.id,id).first<{
       id:number;status:string;source:string;technician_id:number|null;completed_at:string|null;
