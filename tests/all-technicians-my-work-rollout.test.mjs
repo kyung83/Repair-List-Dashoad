@@ -15,7 +15,7 @@ test('all linked mechanics share original Logan My Work interface, and office ma
   assert.match(shop,/const technicianWorkspace=Boolean\(data\?\.user\.technicianId\)&&\(data\.user\.role==="mechanic"\|\|data\.user\.role==="manager"\)/);
   assert.match(shop,/pilot=\{technicianWorkspace\}/);
   assert.match(shop,/if\(technicianWorkspace&&completedOpen\)/);
-  assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\}/);
+  assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\} onReopened=\{load\} onGoToWorking=/);
   assert.match(shop,/\{technicianWorkspace&&<section/);
   assert.match(shop,/canAssignHandoff=data\?\.user\.role==="manager"\|\|data\?\.user\.role==="admin"/);
   assert.doesNotMatch(shop,/loganr|data\.user\.id===29/);
