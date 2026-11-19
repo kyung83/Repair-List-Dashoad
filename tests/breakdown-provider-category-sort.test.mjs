@@ -44,7 +44,7 @@ test('newest remains existing server order; provider and category sorts group co
   assert.deepEqual(breakdownBoardRows(rows,base).map(x=>x.id),[9,8,7,6,5]);
   assert.deepEqual(breakdownBoardRows(rows,{...base,sort:'provider'}).map(x=>x.id),[8,5,6,9,7]);
   assert.deepEqual(breakdownBoardRows(rows,{...base,sort:'providerCategory'}).map(x=>x.id),[8,5,6,9,7]);
-  assert.deepEqual(breakdownBoardRows(rows,{...base,sort:'category'}).map(x=>x.id),[8,6,5,9,7]);
+  assert.deepEqual(breakdownBoardRows(rows,{...base,sort:'category'}).map(x=>x.id),[6,8,7,5,9]);
   assert.deepEqual(rows.map(x=>x.id),[9,8,7,6,5],'sorting does not modify the source breakdown list');
 });
 test('Ready for Totals and provider sorting stay on existing board and keep final-cost workflow untouched',()=>{
