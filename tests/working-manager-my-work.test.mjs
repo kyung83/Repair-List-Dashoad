@@ -14,7 +14,7 @@ test('linked working managers get the same streamlined My Work view as mechanics
   assert.match(shop,/const technicianWorkspace=Boolean\(data\?\.user\.technicianId\)&&\(data\.user\.role==="mechanic"\|\|data\.user\.role==="manager"\)/);
   assert.match(shop,/pilot=\{technicianWorkspace\}/);
   assert.match(shop,/if\(technicianWorkspace&&completedOpen\)/);
-  assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\}/);
+  assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\} onReopened=\{load\} onGoToWorking=/);
   assert.match(shop,/\{technicianWorkspace&&<section/);
   assert.match(work,/id="pilot-required-repair-type"/);
   assert.match(work,/data-shop-action="repaired"/);
