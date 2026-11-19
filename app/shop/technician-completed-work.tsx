@@ -30,7 +30,10 @@ export default function TechnicianCompletedWork({isWorking,onReopened,onGoToWork
   const[reopenTarget,setReopenTarget]=useState<number|null>(null);
   const[reopenReason,setReopenReason]=useState('');
   const[reopenMessage,setReopenMessage]=useState('');
+  const[completedSearch,setCompletedSearch]=useState('');
+  const[showAllCompleted,setShowAllCompleted]=useState(false);
   const key=useRef('');
+  const matchingCompleted=(data?.completed||[]).filter(repair=>(repair.unit+' '+repair.title+' '+repair.repairId).toLowerCase().includes(completedSearch.trim().toLowerCase()));
 
   async function reload(){
     const r=await fetch('/api/shop/labor-review?view=mine',{cache:'no-store'});
@@ -99,6 +102,32 @@ export default function TechnicianCompletedWork({isWorking,onReopened,onGoToWork
       <div style={{marginTop:8}}><button type="button" onClick={onGoToWorking} style={secondary}>GO TO WORKING / AVAILABLE</button></div>
     </div>}
 
+    <section id="completed-work-orders" style={panel}>
+      <div style={heading}><strong>Completed Work Orders · Reopen to Add Parts</strong><span style={muted}>Last 90 days · {data?.completed.length??0} work orders</span></div>
+      <div style={miniNote}>Forgot to log parts or finish something? Find the original work order below and reopen it before management approves it. This keeps the same work order and the original labor history.</div>
+      <input aria-label="Find completed work order" value={completedSearch} onChange={event=>{setCompletedSearch(event.target.value);setShowAllCompleted(false)}} placeholder="Search unit, repair, or work order number…" style={input}/>
+      {!data&&<div style={muted}>Loading completed work orders…</div>}
+      {matchingCompleted.slice(0,completedSearch.trim()||showAllCompleted?100:10).map(repair=><div key={repair.repairId} style={line}>
+        <strong>{repair.unit||'SHOP'} · {repair.title} <span style={muted}>#{repair.repairId}</span></strong>
+        <div style={muted}>{when(repair.completedAt)} · {repair.status} · Total recorded on repair: {h(repair.totalHours)}</div>
+        {Boolean(repair.canReopen)?<>
+          <button type="button" disabled={saving} onClick={()=>{setReopenTarget(repair.repairId===reopenTarget?null:repair.repairId);setReopenReason('');setReopenMessage('');setError('')}} style={secondary}>REOPEN / ADD PARTS</button>
+          {reopenTarget===repair.repairId&&<div style={searchBox}>
+            <strong style={{fontSize:12}}>Why are you reopening this work order?</strong>
+            <textarea aria-label={'Reopen reason for work order '+repair.repairId} rows={2} maxLength={450} value={reopenReason} onChange={e=>setReopenReason(e.target.value)} placeholder="Example: Forgot to add parts used before completing the repair." style={{...input,resize:'vertical'}}/>
+            <div style={muted}>This returns the repair to My Units without deleting old labor or parts or starting a new timer. Add missing parts using the normal Parts tab, then mark REPAIRED again.</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <button type="button" onClick={()=>void reopenRepair(repair)} disabled={saving||reopenReason.trim().length<8} style={submitButton}>{saving?'REOPENING…':'CONFIRM REOPEN'}</button>
+              <button type="button" onClick={()=>{setReopenTarget(null);setReopenReason('')}} disabled={saving} style={quiet}>CANCEL</button>
+            </div>
+          </div>}
+        </>:<div style={muted}>Reopening requires management review or the assigned technician. Approved, invoiced, PM/annual and linked work orders remain protected.</div>}
+      </div>)}
+      {data&&data.completed.length===0&&<div style={muted}>No completed shop work orders in this period.</div>}
+      {data&&data.completed.length>0&&matchingCompleted.length===0&&<div style={muted}>No completed work orders match this search.</div>}
+      {data&&matchingCompleted.length>10&&!completedSearch.trim()&&<button type="button" style={quiet} onClick={()=>setShowAllCompleted(v=>!v)}>{showAllCompleted?'SHOW RECENT 10':'SHOW ALL '+matchingCompleted.length+' COMPLETED WORK ORDERS'}</button>}
+    </section>
+
     {form!=='none'&&<section id="labor-request-form" style={panel}>
       <div style={heading}><strong>{form==='correction'?'Request labor hour correction':'Report work missed during an outage'}</strong><button type="button" onClick={()=>{setForm('none');setError('')}} style={quiet}>Close</button></div>
       {form==='correction'&&selected&&<>
@@ -163,26 +192,7 @@ export default function TechnicianCompletedWork({isWorking,onReopened,onGoToWork
       {data&&data.history.length>18&&<button type="button" style={quiet} onClick={()=>setMore(v=>!v)}>{more?'Show fewer':'Show all saved sessions'}</button>}
     </section>
 
-    <section style={panel}>
-      <div style={heading}><strong>Completed work orders</strong><span style={muted}>Last 90 days</span></div>
-      {data?.completed.slice(0,40).map(repair=><div key={repair.repairId} style={line}>
-        <strong>{repair.unit||'SHOP'} · {repair.title}</strong>
-        <div style={muted}>{when(repair.completedAt)} · {repair.status} · Total recorded on repair: {h(repair.totalHours)}</div>
-        {Boolean(repair.canReopen)?<>
-          <button type="button" disabled={saving} onClick={()=>{setReopenTarget(repair.repairId===reopenTarget?null:repair.repairId);setReopenReason('');setReopenMessage('');setError('')}} style={secondary}>REOPEN WORK ORDER</button>
-          {reopenTarget===repair.repairId&&<div style={searchBox}>
-            <strong style={{fontSize:12}}>Why are you reopening this work order?</strong>
-            <textarea aria-label={'Reopen reason for work order '+repair.repairId} rows={2} maxLength={450} value={reopenReason} onChange={e=>setReopenReason(e.target.value)} placeholder="Example: Forgot to add parts used before completing the repair." style={{...input,resize:'vertical'}}/>
-            <div style={muted}>This returns the repair to My Units without deleting old labor or parts or starting a new timer. Add missing parts using the normal Parts tab, then mark REPAIRED again.</div>
-            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-              <button type="button" onClick={()=>void reopenRepair(repair)} disabled={saving||reopenReason.trim().length<8} style={submitButton}>{saving?'REOPENING…':'CONFIRM REOPEN'}</button>
-              <button type="button" onClick={()=>{setReopenTarget(null);setReopenReason('')}} disabled={saving} style={quiet}>CANCEL</button>
-            </div>
-          </div>}
-        </>:<div style={muted}>Reopening requires management review or the assigned technician. Approved, invoiced, PM/annual and linked work orders remain protected.</div>}
-      </div>)}
-      {data&&data.completed.length===0&&<div style={muted}>No completed work orders in this period.</div>}
-    </section>
+
   </div>;
 }
 const container={maxWidth:880,margin:'0 auto',display:'grid',gap:12,padding:'8px 12px 60px',color:'#173f37'} as const;
