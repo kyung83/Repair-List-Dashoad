@@ -1,6 +1,7 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
+import {startNoteDictation,type NoteDictation} from "@/lib/shop-voice-note-dictation";
 
 type RepairNote={id:number;detail:string;technician:string;createdAt:string};
 type WarehouseStock={warehouseCode:string;warehouseName?:string;available?:number;quantityOnHand?:number;physicalOnHand?:number;reserved?:number};
@@ -10,10 +11,6 @@ type ShopPayload={parts?:Part[];user?:ShopUser;error?:string};
 type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
 type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string;waitingOnPart?:boolean;nextRepairId?:string|null;hours?:number;laborStarted?:boolean;activeLaborContinues?:boolean};
 type UnmatchedResult={ok?:boolean;error?:string;requestedText?:string;requestedQuantity?:number;warehouseCode?:string;unmatchedPart?:boolean;awaitingParts?:boolean;waitingOnPart?:boolean;nextRepairId?:string|null;hours?:number;laborStarted?:boolean;activeLaborContinues?:boolean};
-type SpeechResultLike={length:number;isFinal:boolean;[index:number]:{transcript:string}|undefined};
-type SpeechEventLike={results:ArrayLike<SpeechResultLike>};
-type RecognitionLike={lang:string;continuous:boolean;interimResults:boolean;start:()=>void;stop:()=>void;onresult:((event:SpeechEventLike)=>void)|null;onerror:((event:{error?:string})=>void)|null;onend:(()=>void)|null};
-type RecognitionCtor=new()=>RecognitionLike;
 type Props={repairId:string;canWork:boolean;mode?:"all"|"notes"|"parts";compact?:boolean};
 
 function noteTime(value:string){const parsed=Date.parse(value.includes("T")?value:value.replace(" ","T")+"Z");return Number.isFinite(parsed)?new Date(parsed).toLocaleString():value}
@@ -27,14 +24,14 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all",com
   const[note,setNote]=useState(""),[notes,setNotes]=useState<RepairNote[]>([]),[noteBusy,setNoteBusy]=useState(false),[noteMessage,setNoteMessage]=useState(""),[listening,setListening]=useState(false);
   const[parts,setParts]=useState<Part[]>([]),[search,setSearch]=useState(""),[selectedPart,setSelectedPart]=useState<Part|null>(null),[warehouseCode,setWarehouseCode]=useState(""),[quantity,setQuantity]=useState(1),[partBusy,setPartBusy]=useState(false),[partMessage,setPartMessage]=useState("");
   const[shopRole,setShopRole]=useState(""),[assignedWarehouseCode,setAssignedWarehouseCode]=useState(""),[assignedWarehouseName,setAssignedWarehouseName]=useState("");
-  const recognitionRef=useRef<RecognitionLike|null>(null);
+  const recognitionRef=useRef<NoteDictation|null>(null);
   const showNotes=mode!=="parts";
   const showParts=mode!=="notes";
 
   async function loadNotes(){const response=await fetch(`/api/shop/found-repair?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});const result=await response.json() as NotesPayload;if(!response.ok||!result.ok)throw new Error(result.error||"Repair notes could not be loaded.");setNotes(result.notes??[])}
   async function loadParts(){const response=await fetch("/api/shop",{cache:"no-store"});const result=await response.json() as ShopPayload;if(!response.ok)throw new Error(result.error||"Parts could not be loaded.");const role=String(result.user?.role??"");const code=String(result.user?.assignedWarehouseCode??"");setParts(result.parts??[]);setShopRole(role);setAssignedWarehouseCode(code);setAssignedWarehouseName(String(result.user?.assignedWarehouseName??""));if((role==="mechanic"||role==="manager")&&!code)setPartMessage("Your account needs an assigned yard/parts warehouse before you can use or request parts.")}
 
-  useEffect(()=>{setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setWarehouseCode("");setQuantity(1);setPartMessage("");if(showNotes)void loadNotes().catch(error=>setNoteMessage(error instanceof Error?error.message:"Repair notes could not be loaded."));if(showParts)void loadParts().catch(error=>setPartMessage(error instanceof Error?error.message:"Parts could not be loaded."));return()=>{try{recognitionRef.current?.stop()}catch{}recognitionRef.current=null}},[repairId,showNotes,showParts]);
+  useEffect(()=>{setListening(false);setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setWarehouseCode("");setQuantity(1);setPartMessage("");if(showNotes)void loadNotes().catch(error=>setNoteMessage(error instanceof Error?error.message:"Repair notes could not be loaded."));if(showParts)void loadParts().catch(error=>setPartMessage(error instanceof Error?error.message:"Parts could not be loaded."));return()=>{recognitionRef.current?.dispose();recognitionRef.current=null}},[repairId,showNotes,showParts]);
 
   const matches=useMemo(()=>{const term=search.trim().toLowerCase();if(!term)return[];return parts.filter(part=>`${part.partNumber} ${part.description} ${(part.crossReferences??[]).join(" ")}`.toLowerCase().includes(term)).slice(0,8)},[parts,search]);
   const warehouseLocked=shopRole==="mechanic"||shopRole==="manager";
@@ -44,7 +41,13 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all",com
 
   async function saveNote(){const value=note.trim();if(!value){setNoteMessage("Type or dictate a repair note first.");return}setNoteBusy(true);setNoteMessage("");try{const response=await fetch("/api/shop/found-repair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"note",repairId,note:value})});const result=await response.json() as {ok?:boolean;error?:string};if(!response.ok||!result.ok)throw new Error(result.error||"Repair note could not be saved.");setNote("");setNoteMessage("Note saved. It is also in Review Before Finishing.");await loadNotes();refreshReview(repairId)}catch(error){setNoteMessage(error instanceof Error?error.message:"Repair note could not be saved.")}finally{setNoteBusy(false)}}
 
-  function talk(){if(listening){try{recognitionRef.current?.stop()}catch{}return}const speechWindow=window as typeof window&{SpeechRecognition?:RecognitionCtor;webkitSpeechRecognition?:RecognitionCtor};const Recognition=speechWindow.SpeechRecognition??speechWindow.webkitSpeechRecognition;if(!Recognition){setNoteMessage("Voice input is not available in this browser. Use the keyboard microphone or type the note.");return}try{const recognition=new Recognition();recognition.lang="en-US";recognition.continuous=false;recognition.interimResults=false;recognition.onresult=event=>{const result=event.results[event.results.length-1],spoken=result?.[0]?.transcript?.trim()??"";if(spoken)setNote(current=>[current.trim(),spoken].filter(Boolean).join(" ").slice(0,2000))};recognition.onerror=event=>{setNoteMessage(event.error?`Voice input stopped: ${event.error}.`:"Voice input stopped.");setListening(false)};recognition.onend=()=>{setListening(false);recognitionRef.current=null};recognitionRef.current=recognition;setNoteMessage("Listening… speak your repair note.");setListening(true);recognition.start()}catch{setListening(false);recognitionRef.current=null;setNoteMessage("Voice input could not start. You can still type the note.")}}
+  function talk(){
+    if(listening){recognitionRef.current?.stop();return}
+    recognitionRef.current?.dispose();
+    recognitionRef.current=startNoteDictation({
+      initialText:note,onText:setNote,onMessage:setNoteMessage,onListening:setListening,
+    });
+  }
 
   function validQuantity(){if(!Number.isFinite(quantity)||quantity<=0){setPartMessage("Enter a positive quantity.");return false}return true}
 
@@ -71,8 +74,8 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all",com
   return <section style={mode==="parts"?partsOnlyPanel:toolsPanel}>
     {showNotes&&<div id="pilot-notes" style={{...toolCard,...(compact?{padding:10,gap:7}:{}),scrollMarginTop:74}}>
       <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>{compact?"Type or tap TALK. Notes save to this repair.":"Type it or tap TALK. Saved notes stay on this repair and remain visible in the final review."}</span></div>
-      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={compact?3:4} style={textarea} disabled={noteBusy}/>
-      <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
+      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={compact?3:4} style={textarea} disabled={noteBusy||listening}/>
+      <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy||listening}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
       {noteMessage&&<div style={messageStyle}>{noteMessage}</div>}
       {notes.length>0&&<div style={history}><strong style={historyHeading}>SAVED NOTES</strong>{notes.map(item=><div key={item.id} style={noteRow}><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={meta}>{item.technician} · {noteTime(item.createdAt)}</div></div>)}</div>}
     </div>}
