@@ -16,7 +16,7 @@ const worker=read('worker/index.ts');
 test('Completed tab reaches every linked mechanic without changing existing repair and duty actions',()=>{
   assert.match(shop,/const technicianWorkspace=Boolean\(data\?\.user\.technicianId\)&&\(data\.user\.role==="mechanic"\|\|data\.user\.role==="manager"\)/);
   assert.match(shop,/if\(technicianWorkspace&&completedOpen\)/);
-  assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\}/);
+  assert.match(shop,/<TechnicianCompletedWork isWorking=\{Boolean\(data\?\.activeTimer\)\} onReopened=\{load\} onGoToWorking=/);
   assert.match(shop,/<>{workspaceTabs}<CurrentWorkHome/);
   assert.match(shop,/<>{workspaceTabs}<ShopDutyWorkHome/);
   assert.match(shop,/onRepaired=\{\(\)=>void repaired\(activeRepair\)\}/);
