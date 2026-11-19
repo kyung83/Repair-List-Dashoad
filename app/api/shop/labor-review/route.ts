@@ -64,6 +64,7 @@ export async function GET(request:Request){
         "CASE WHEN lower(trim(COALESCE(r.status,'')))='completed' AND lower(trim(COALESCE(r.source,'')))='manual' "+
         "AND r.reviewed_at IS NULL AND r.go_live_archived_at IS NULL "+
         "AND r.maintenance_checklist_item_id IS NULL AND r.maintenance_source_id IS NULL "+
+        "AND NOT EXISTS(SELECT 1 FROM pm_next_repairs n WHERE n.target_repair_id=r.id OR n.repair_id=r.id) "+
         "AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.repair_id=r.id) "+
         "AND NOT EXISTS(SELECT 1 FROM invoice_repair_links l WHERE l.repair_id=r.id) "+
         "AND NOT EXISTS(SELECT 1 FROM repair_labor_timers rt WHERE rt.repair_id=r.id) "+
