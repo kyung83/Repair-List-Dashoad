@@ -3,11 +3,11 @@
 import {useEffect,useRef,useState} from 'react';
 
 type History={entryId:number;repairId:number;laborDate:string;hours:number;rate:number;notes:string;startedAt:string|null;endedAt:string|null;unit:string;title:string;status:string};
-type Finished={repairId:number;unit:string;title:string;status:string;completedAt:string;totalHours:number};
+type Finished={repairId:number;unit:string;title:string;status:string;completedAt:string;totalHours:number;canReopen:number|boolean};
 type LaborRequest={id:number;request_type:'correction'|'missed';status:string;unit_snapshot:string;repair_snapshot:string;original_hours:number|null;requested_hours:number;source_labor_entry_id:number|null;labor_date:string;details:string;manager_note:string;created_at:string;proposed_repair_id:number|null};
 type SearchRepair={repairId:number;unit:string;title:string;status:string};
 type Data={ok:boolean;error?:string;history:History[];completed:Finished[];requests:LaborRequest[]};
-type Props={isWorking:boolean};
+type Props={isWorking:boolean;onReopened:()=>Promise<void>|void;onGoToWorking:()=>void};
 
 function when(value:string|null|undefined){if(!value)return'';const date=new Date(value.includes('T')?value:value.replace(' ','T')+'Z');return Number.isNaN(date.getTime())?value:date.toLocaleDateString();}
 function clock(value:string|null|undefined){if(!value)return'';const date=new Date(value.includes('T')?value:value.replace(' ','T')+'Z');return Number.isNaN(date.getTime())?'':date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});}
@@ -15,7 +15,7 @@ function h(value:number|null|undefined){return Number(value||0).toFixed(2)+' hr'
 function labelStatus(value:string){return value==='needs_info'?'Needs your reply':value==='approved'?'Approved':value==='rejected'?'Rejected':value==='processing'?'Under review':'Pending manager review';}
 function dateToday(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Detroit',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());return /^\d{4}-\d{2}-\d{2}$/.test(parts)?parts:new Date().toISOString().slice(0,10);}
 
-export default function TechnicianCompletedWork({isWorking}:Props){
+export default function TechnicianCompletedWork({isWorking,onReopened,onGoToWorking}:Props){
   const[data,setData]=useState<Data|null>(null),[error,setError]=useState(''),[saving,setSaving]=useState(false);
   const[form,setForm]=useState<'none'|'correction'|'missed'>('none');
   const[selected,setSelected]=useState<History|null>(null);
@@ -27,6 +27,9 @@ export default function TechnicianCompletedWork({isWorking}:Props){
   const[query,setQuery]=useState(''),[results,setResults]=useState<SearchRepair[]>([]),[searchBusy,setSearchBusy]=useState(false);
   const[clarifications,setClarifications]=useState<Record<number,string>>({});
   const[more,setMore]=useState(false);
+  const[reopenTarget,setReopenTarget]=useState<number|null>(null);
+  const[reopenReason,setReopenReason]=useState('');
+  const[reopenMessage,setReopenMessage]=useState('');
   const key=useRef('');
 
   async function reload(){
@@ -59,6 +62,21 @@ export default function TechnicianCompletedWork({isWorking}:Props){
       key.current='';setForm('none');setReason('');setSelected(null);await reload();
     }catch(e){setError(e instanceof Error?e.message:'Request was not saved.')}finally{setSaving(false)}
   }
+  async function reopenRepair(repair:Finished){
+    if(reopenReason.trim().length<8){setError('Explain why the work order needs to be reopened.');return}
+    setSaving(true);setError('');setReopenMessage('');
+    try{
+      const response=await fetch('/api/shop/reopen-completed',{
+        method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({repairId:repair.repairId,reason:reopenReason.trim()})
+      });
+      const result=await response.json() as {ok?:boolean;error?:string;message?:string};
+      if(!response.ok||!result.ok)throw new Error(result.error||'The work order could not be reopened.');
+      setReopenTarget(null);setReopenReason('');
+      setReopenMessage(result.message||'Work order reopened. Return to My Units to add the missing parts.');
+      try{await reload();await onReopened()}catch{setError('The work order was reopened, but the list did not refresh. Refresh My Work.')}
+    }catch(e){setError(e instanceof Error?e.message:'Could not reopen the work order.')}finally{setSaving(false)}
+  }
   async function submit(){
     if(!key.current)key.current=crypto.randomUUID();
     if(form==='correction'&&selected){
@@ -75,6 +93,11 @@ export default function TechnicianCompletedWork({isWorking}:Props){
     {isWorking&&<div style={info}>Your current labor timer continues running while you view Completed. Use Done Working in the existing work screen to stop it.</div>}
     <div style={miniNote}>Correction requests do not change recorded hours until a manager approves them. Missed work, parts and inspection details need separate verification.</div>
     {error&&<div role="alert" style={alert}>{error}</div>}
+    {reopenMessage&&<div role="status" style={info}>
+      <strong>{reopenMessage}</strong>
+      {isWorking&&<div style={{fontSize:12,marginTop:6}}>Your current labor timer is still running. Finish that work before starting the reopened repair.</div>}
+      <div style={{marginTop:8}}><button type="button" onClick={onGoToWorking} style={secondary}>GO TO WORKING / AVAILABLE</button></div>
+    </div>}
 
     {form!=='none'&&<section id="labor-request-form" style={panel}>
       <div style={heading}><strong>{form==='correction'?'Request labor hour correction':'Report work missed during an outage'}</strong><button type="button" onClick={()=>{setForm('none');setError('')}} style={quiet}>Close</button></div>
@@ -142,7 +165,22 @@ export default function TechnicianCompletedWork({isWorking}:Props){
 
     <section style={panel}>
       <div style={heading}><strong>Completed work orders</strong><span style={muted}>Last 90 days</span></div>
-      {data?.completed.slice(0,40).map(repair=><div key={repair.repairId} style={line}><strong>{repair.unit||'SHOP'} · {repair.title}</strong><div style={muted}>{when(repair.completedAt)} · {repair.status} · Total recorded on repair: {h(repair.totalHours)}</div></div>)}
+      {data?.completed.slice(0,40).map(repair=><div key={repair.repairId} style={line}>
+        <strong>{repair.unit||'SHOP'} · {repair.title}</strong>
+        <div style={muted}>{when(repair.completedAt)} · {repair.status} · Total recorded on repair: {h(repair.totalHours)}</div>
+        {Boolean(repair.canReopen)?<>
+          <button type="button" disabled={saving} onClick={()=>{setReopenTarget(repair.repairId===reopenTarget?null:repair.repairId);setReopenReason('');setReopenMessage('');setError('')}} style={secondary}>REOPEN WORK ORDER</button>
+          {reopenTarget===repair.repairId&&<div style={searchBox}>
+            <strong style={{fontSize:12}}>Why are you reopening this work order?</strong>
+            <textarea aria-label={'Reopen reason for work order '+repair.repairId} rows={2} maxLength={450} value={reopenReason} onChange={e=>setReopenReason(e.target.value)} placeholder="Example: Forgot to add parts used before completing the repair." style={{...input,resize:'vertical'}}/>
+            <div style={muted}>This returns the repair to My Units without deleting old labor or parts or starting a new timer. Add missing parts using the normal Parts tab, then mark REPAIRED again.</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <button type="button" onClick={()=>void reopenRepair(repair)} disabled={saving||reopenReason.trim().length<8} style={submitButton}>{saving?'REOPENING…':'CONFIRM REOPEN'}</button>
+              <button type="button" onClick={()=>{setReopenTarget(null);setReopenReason('')}} disabled={saving} style={quiet}>CANCEL</button>
+            </div>
+          </div>}
+        </>:<div style={muted}>Reopening requires management review or the assigned technician. Approved, invoiced, PM/annual and linked work orders remain protected.</div>}
+      </div>)}
       {data&&data.completed.length===0&&<div style={muted}>No completed work orders in this period.</div>}
     </section>
   </div>;

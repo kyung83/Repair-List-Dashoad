@@ -112,7 +112,7 @@ export default function ShopPage(){
     <button type="button" onClick={()=>setCompletedOpen(true)} aria-current={completedOpen?"page":undefined} style={completedOpen?completedActive:completedTab}>Completed & Labor Requests</button>
   </nav>:null;
 
-  if(technicianWorkspace&&completedOpen)return <main style={page}><div style={shell}>{workspaceTabs}<TechnicianCompletedWork isWorking={Boolean(data?.activeTimer)}/></div></main>;
+  if(technicianWorkspace&&completedOpen)return <main style={page}><div style={shell}>{workspaceTabs}<TechnicianCompletedWork isWorking={Boolean(data?.activeTimer)} onReopened={load} onGoToWorking={()=>{setView("mine");setCompletedOpen(false)}}/></div></main>;
 
 
   if(data?.activeTimer&&data.activeShopDuty){
