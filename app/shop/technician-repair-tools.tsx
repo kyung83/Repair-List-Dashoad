@@ -1,6 +1,7 @@
 "use client";
 
 import {useEffect,useMemo,useRef,useState} from "react";
+import {startNoteDictation,type NoteDictation} from "@/lib/shop-voice-note-dictation";
 
 type RepairNote={id:number;detail:string;technician:string;createdAt:string};
 type Part={id:number;partNumber:string;description:string;quantityOnHand:number;available?:number;location?:string;crossReferences?:string[]};
@@ -10,10 +11,6 @@ type NotesPayload={ok?:boolean;error?:string;notes?:RepairNote[]};
 type ActionResult={ok?:boolean;error?:string;awaitingParts?:boolean;partNumber?:string;shortageQuantity?:number;reservedQuantity?:number;usedImmediately?:number;warehouseCode?:string};
 type RemoveResult={ok?:boolean;error?:string;partNumber?:string;quantity?:number};
 type UnmatchedResult={ok?:boolean;error?:string;requestedText?:string;requestedQuantity?:number;warehouseCode?:string;unmatchedPart?:boolean};
-type SpeechResultLike={length:number;isFinal:boolean;[index:number]:{transcript:string}|undefined};
-type SpeechEventLike={results:ArrayLike<SpeechResultLike>};
-type RecognitionLike={lang:string;continuous:boolean;interimResults:boolean;start:()=>void;stop:()=>void;onresult:((event:SpeechEventLike)=>void)|null;onerror:((event:{error?:string})=>void)|null;onend:(()=>void)|null};
-type RecognitionCtor=new()=>RecognitionLike;
 
 type Props={repairId:string;canWork:boolean};
 
@@ -37,7 +34,7 @@ function partActionLabel(part:Part,quantity:number){
 export default function TechnicianRepairTools({repairId,canWork}:Props){
   const[note,setNote]=useState(""),[notes,setNotes]=useState<RepairNote[]>([]),[noteBusy,setNoteBusy]=useState(false),[noteMessage,setNoteMessage]=useState(""),[listening,setListening]=useState(false);
   const[parts,setParts]=useState<Part[]>([]),[appliedParts,setAppliedParts]=useState<AppliedPart[]>([]),[search,setSearch]=useState(""),[selectedPart,setSelectedPart]=useState<Part|null>(null),[quantity,setQuantity]=useState(1),[partBusy,setPartBusy]=useState(false),[partMessage,setPartMessage]=useState("");
-  const recognitionRef=useRef<RecognitionLike|null>(null);
+  const recognitionRef=useRef<NoteDictation|null>(null);
 
   async function loadNotes(){
     const response=await fetch(`/api/shop/found-repair?repairId=${encodeURIComponent(repairId)}`,{cache:"no-store"});
@@ -55,10 +52,10 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
   }
 
   useEffect(()=>{
-    setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setQuantity(1);setPartMessage("");setAppliedParts([]);
+    setListening(false);setNote("");setNoteMessage("");setSearch("");setSelectedPart(null);setQuantity(1);setPartMessage("");setAppliedParts([]);
     void loadNotes().catch(error=>setNoteMessage(error instanceof Error?error.message:"Repair notes could not be loaded."));
     void loadParts().catch(error=>setPartMessage(error instanceof Error?error.message:"Parts could not be loaded."));
-    return()=>{try{recognitionRef.current?.stop()}catch{}recognitionRef.current=null};
+    return()=>{recognitionRef.current?.dispose();recognitionRef.current=null};
   },[repairId]);
 
   const matches=useMemo(()=>{
@@ -81,18 +78,11 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
   }
 
   function talk(){
-    if(listening){try{recognitionRef.current?.stop()}catch{}return}
-    const speechWindow=window as typeof window&{SpeechRecognition?:RecognitionCtor;webkitSpeechRecognition?:RecognitionCtor};
-    const Recognition=speechWindow.SpeechRecognition??speechWindow.webkitSpeechRecognition;
-    if(!Recognition){setNoteMessage("Voice input is not available in this browser. Use the keyboard microphone or type the note.");return}
-    try{
-      const recognition=new Recognition();
-      recognition.lang="en-US";recognition.continuous=false;recognition.interimResults=false;
-      recognition.onresult=event=>{const result=event.results[event.results.length-1],spoken=result?.[0]?.transcript?.trim()??"";if(spoken)setNote(current=>[current.trim(),spoken].filter(Boolean).join(" ").slice(0,2000))};
-      recognition.onerror=event=>{setNoteMessage(event.error?`Voice input stopped: ${event.error}.`:"Voice input stopped.");setListening(false)};
-      recognition.onend=()=>{setListening(false);recognitionRef.current=null};
-      recognitionRef.current=recognition;setNoteMessage("Listening… speak your repair note.");setListening(true);recognition.start();
-    }catch{setListening(false);recognitionRef.current=null;setNoteMessage("Voice input could not start. You can still type the note.")}
+    if(listening){recognitionRef.current?.stop();return}
+    recognitionRef.current?.dispose();
+    recognitionRef.current=startNoteDictation({
+      initialText:note,onText:setNote,onMessage:setNoteMessage,onListening:setListening,
+    });
   }
 
   function validQuantity(){
@@ -148,8 +138,8 @@ export default function TechnicianRepairTools({repairId,canWork}:Props){
   return <section style={toolsPanel}>
     <div style={toolCard}>
       <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>Type it or tap TALK. Notes stay on this repair with technician and time.</span></div>
-      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={4} style={textarea} disabled={noteBusy}/>
-      <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
+      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={4} style={textarea} disabled={noteBusy||listening}/>
+      <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy||listening}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
       {noteMessage&&<div style={messageStyle}>{noteMessage}</div>}
       {notes.length>0&&<div style={history}><strong style={historyHeading}>RECENT NOTES</strong>{notes.map(item=><div key={item.id} style={noteRow}><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={meta}>{item.technician} · {noteTime(item.createdAt)}</div></div>)}</div>}
     </div>
