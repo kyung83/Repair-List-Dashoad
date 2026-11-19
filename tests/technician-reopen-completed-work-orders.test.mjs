@@ -121,12 +121,29 @@ test('Completed tab presents eligible own work orders with deliberate reason and
   assert.match(listing,/r\.reviewed_at IS NULL/);
   assert.match(listing,/NOT EXISTS\(SELECT 1 FROM invoice_repair_links/);
   assert.match(listing,/FROM repair_job_events ev WHERE ev\.repair_id=r\.id/);
-  assert.match(listing,/\.bind\(techId,user\.id,techId,techId\)\.all\(\)/);
-  assert.match(completed,/REOPEN WORK ORDER/);
+  assert.match(listing,/\.bind\(techId,user\.id,techId,techId,user\.id\)\.all\(\)/);
+  assert.match(completed,/REOPEN \/ ADD PARTS/);
   assert.match(completed,/Why are you reopening this work order/);
   assert.match(completed,/CONFIRM REOPEN/);
   assert.match(completed,/\/api\/shop\/reopen-completed/);
   assert.match(completed,/setReopenMessage/);
   assert.match(completed,/onGoToWorking/);
   assert.match(shop,/onReopened=\{load\} onGoToWorking=/);
+});
+
+
+test('recent completed orders and reopen actions are first and searchable rather than hidden under 69 labor sessions',()=>{
+  const completedPosition=completed.indexOf('id="completed-work-orders"');
+  const requestsPosition=completed.indexOf('<strong>My requests</strong>');
+  const laborPosition=completed.indexOf('<strong>Saved labor sessions</strong>');
+  const formPosition=completed.indexOf('id="labor-request-form"');
+  assert.ok(completedPosition>0&&completedPosition<formPosition&&formPosition<requestsPosition&&requestsPosition<laborPosition);
+  assert.match(completed,/aria-label="Find completed work order"/);
+  assert.match(completed,/matchingCompleted\.slice\(0,completedSearch\.trim\(\)\|\|showAllCompleted\?100:10\)/);
+  assert.match(completed,/SHOW ALL.*COMPLETED WORK ORDERS/);
+  assert.match(completed,/REOPEN \/ ADD PARTS/);
+  assert.match(completed,/CONFIRM REOPEN/);
+  assert.match(listing,/lower\(trim\(COALESCE\(r\.source,''\)\)\)<>'roadside-breakdown'/);
+  assert.match(listing,/OR \(SELECT ev\.user_id FROM repair_job_events ev WHERE ev\.repair_id=r\.id AND ev\.action='completed'/);
+  assert.match(listing,/\.bind\(techId,user\.id,techId,techId,user\.id\)\.all\(\)/);
 });
