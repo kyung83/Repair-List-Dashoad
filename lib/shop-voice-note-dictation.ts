@@ -71,12 +71,14 @@ export function startNoteDictation({
     running=false;
     clearSilence();
     clearRestart();
-    commitPending();
+    // Let a late final result replace any interim words before committing them.
+    // Calling stop() may produce one more onresult before onend.
+    if(!activeEngine)commitPending();
     if(!disposed){
       onListening(false);
       onMessage(message);
     }
-    try{activeEngine?.stop()}catch{}
+    try{activeEngine?.stop()}catch{commitPending()}
   }
   function armSilence(){
     if(!running||disposed||speechActive)return;
