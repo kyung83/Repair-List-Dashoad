@@ -67,7 +67,7 @@ export async function GET(request:Request){
         "AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.repair_id=r.id) "+
         "AND NOT EXISTS(SELECT 1 FROM invoice_repair_links l WHERE l.repair_id=r.id) "+
         "AND NOT EXISTS(SELECT 1 FROM repair_labor_timers rt WHERE rt.repair_id=r.id) "+
-        "AND (r.technician_id=? OR EXISTS(SELECT 1 FROM repair_job_events ev WHERE ev.repair_id=r.id AND ev.user_id=? AND ev.action='completed')) "+
+        "AND (r.technician_id=? OR (SELECT ev.user_id FROM repair_job_events ev WHERE ev.repair_id=r.id AND ev.action='completed' ORDER BY ev.id DESC LIMIT 1)=?) "+
         "THEN 1 ELSE 0 END AS canReopen "+
         "FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.go_live_archived_at IS NULL "+
         "AND lower(COALESCE(r.status,'')) LIKE '%complete%' AND r.completed_at>=datetime('now','-90 days') "+
