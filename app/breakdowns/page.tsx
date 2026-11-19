@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BreakdownRow } from '@/lib/roadside-breakdowns';
+import { breakdownBoardRows, breakdownProviderNames, UNASSIGNED_PROVIDER, type BoardSortMode, type BoardStageFilter } from '@/lib/breakdown-board-provider-sort';
 import DriverReceiptReview from './driver-receipt-review';
 import s from './breakdown-flow.module.css';
 
@@ -12,7 +13,7 @@ type ServiceProvider = { id:number; name:string; phone:string; city:string; stat
 type DiagnosticDraft = { category:string; notes:string };
 type DispatchDraft = { serviceProvider:string; serviceProviderPhone:string; eta:string };
 type NewProviderDraft = { name:string; phone:string; city:string; state:string; zip:string };
-type StageFilter = 'all'|'reported'|'diagnostics'|'enroute'|'onlocation';
+type StageFilter = BoardStageFilter;
 type BusyAction = 'diagnostics'|'claim'|'provider'|'onLocation'|'unit'|'clear'|null;
 
 const STAGE_LABELS:Record<number,string>={1:'Reported',2:'Diagnostics',3:'En Route',4:'On Location',5:'Complete'};
@@ -139,6 +140,8 @@ export default function BreakdownsPage(){
   const[selectedId,setSelectedId]=useState<number|null>(null);
   const[filter,setFilter]=useState<StageFilter>('all');
   const[categoryFilter,setCategoryFilter]=useState('');
+  const[providerFilter,setProviderFilter]=useState('');
+  const[boardSort,setBoardSort]=useState<BoardSortMode>('newest');
   const[query,setQuery]=useState('');
   const[loading,setLoading]=useState(true);
   const[busyAction,setBusyAction]=useState<BusyAction>(null);
@@ -209,21 +212,14 @@ export default function BreakdownsPage(){
     reported:breakdowns.filter(row=>row.stage===1).length,
     enRoute:breakdowns.filter(row=>row.stage===3).length,
     onLocation:breakdowns.filter(row=>row.stage===4).length,
+    readyForTotals:breakdowns.filter(row=>row.status==='ready_for_review').length,
   }),[breakdowns]);
+  const providerOptions=useMemo(()=>breakdownProviderNames(breakdowns),[breakdowns]);
 
-  const visible=useMemo(()=>{
-    const needle=query.trim().toLowerCase();
-    return breakdowns.filter(row=>{
-      if(filter==='reported'&&row.stage!==1)return false;
-      if(filter==='diagnostics'&&row.stage!==2)return false;
-      if(filter==='enroute'&&row.stage!==3)return false;
-      if(filter==='onlocation'&&row.stage!==4)return false;
-      const displayCategory=row.repair_needed||row.repair_category;
-      if(categoryFilter&&displayCategory!==categoryFilter)return false;
-      if(!needle)return true;
-      return [row.id,row.unit,row.driver_name,row.city,row.state,row.repair_category,row.repair_needed,row.description,row.service_provider,row.eta].join(' ').toLowerCase().includes(needle);
-    });
-  },[breakdowns,filter,categoryFilter,query]);
+  // Sorting and filtering change only this board's presentation, never dispatch or closeout data.
+  const visible=useMemo(()=>breakdownBoardRows(breakdowns,{
+    stage:filter,repairCategory:categoryFilter,provider:providerFilter,search:query,sort:boardSort,
+  }),[breakdowns,filter,categoryFilter,providerFilter,query,boardSort]);
 
   function openBreakdown(id:number){
     setSelectedId(id);setEditingUnit(false);setUnitDraft('');setUnitTypeDraft('truck');setMessage('');
@@ -436,7 +432,7 @@ export default function BreakdownsPage(){
   }
 
   const stageChips:Array<{key:StageFilter;label:string;count:number}>=[
-    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},
+    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},{key:'readyForTotals',label:'Ready for Totals',count:summary.readyForTotals},
   ];
 
   return <main className={s.page}><div className={s.shell}>
@@ -448,7 +444,18 @@ export default function BreakdownsPage(){
       <div className={s.panelHead}><div><h2 className={s.sectionTitle}>Breakdown Board</h2><p className={s.sectionCopy}>Tap or click one breakdown to open its single working card.</p></div><span className={s.badge}>{visible.length} shown</span></div>
       <div className={s.filters}>
         <input className={s.input} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search unit, driver, provider, category…"/>
-        <select className={s.select} value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)}><option value="">All Categories</option>{officeCategoryNames.map(category=><option key={category} value={category}>{category}</option>)}</select>
+        <select aria-label="Filter by repair category" className={s.select} value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)}><option value="">All Repair Categories</option>{officeCategoryNames.map(category=><option key={category} value={category}>{category}</option>)}</select>
+        <select aria-label="Filter by service provider" className={s.select} value={providerFilter} onChange={event=>setProviderFilter(event.target.value)}>
+          <option value="">All Providers</option>
+          <option value={UNASSIGNED_PROVIDER}>Provider Not Assigned</option>
+          {providerOptions.map(provider=><option key={provider.toLowerCase()} value={provider.toLowerCase()}>{provider}</option>)}
+        </select>
+        <select aria-label="Sort breakdowns" className={s.select} value={boardSort} onChange={event=>setBoardSort(event.target.value as BoardSortMode)}>
+          <option value="newest">Sort: Newest First</option>
+          <option value="providerCategory">Sort: Provider → Category</option>
+          <option value="provider">Sort: Provider A–Z</option>
+          <option value="category">Sort: Repair Category A–Z</option>
+        </select>
         <div className={s.chips}>{stageChips.map(item=><button type="button" key={item.key} className={filter===item.key?s.chipActive:s.chip} onClick={()=>setFilter(item.key)}>{item.label} {item.count}</button>)}</div>
       </div>
 
