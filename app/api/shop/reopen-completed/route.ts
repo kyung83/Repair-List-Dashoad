@@ -12,6 +12,7 @@ const eligibleRepair=[
   'r.reviewed_at IS NULL',
   'r.maintenance_checklist_item_id IS NULL',
   'r.maintenance_source_id IS NULL',
+  'NOT EXISTS (SELECT 1 FROM pm_next_repairs n WHERE n.target_repair_id=r.id OR n.repair_id=r.id)',
   "r.completed_at>=datetime('now','-90 days')",
   'NOT EXISTS (SELECT 1 FROM repair_labor_timers t WHERE t.repair_id=r.id)',
   'NOT EXISTS (SELECT 1 FROM invoices i WHERE i.repair_id=r.id)',
@@ -45,6 +46,7 @@ export async function POST(request:Request){
     const repair=await env.DB.prepare(
       "SELECT r.id,r.status,r.source,r.technician_id,r.completed_at,r.reviewed_at,"+
       "r.go_live_archived_at,r.maintenance_checklist_item_id,r.maintenance_source_id,"+
+      "EXISTS(SELECT 1 FROM pm_next_repairs n WHERE n.target_repair_id=r.id OR n.repair_id=r.id) AS maintenance_links,"+
       "EXISTS(SELECT 1 FROM invoices i WHERE i.repair_id=r.id) AS direct_invoice,"+
       "EXISTS(SELECT 1 FROM invoice_repair_links l WHERE l.repair_id=r.id) AS linked_invoice,"+
       "EXISTS(SELECT 1 FROM repair_labor_timers t WHERE t.repair_id=r.id) AS timer_running,"+
@@ -53,7 +55,7 @@ export async function POST(request:Request){
     ).bind(user.id,id).first<{
       id:number;status:string;source:string;technician_id:number|null;completed_at:string|null;
       reviewed_at:string|null;go_live_archived_at:string|null;maintenance_checklist_item_id:number|null;
-      maintenance_source_id:string|null;direct_invoice:number;linked_invoice:number;
+      maintenance_source_id:string|null;maintenance_links:number;direct_invoice:number;linked_invoice:number;
       timer_running:number;completed_by_me:number;
     }>();
     if(!repair)return problem('This repair was not found.',404);
@@ -64,7 +66,7 @@ export async function POST(request:Request){
     if(repair.direct_invoice||repair.linked_invoice)return problem('This repair is linked to an invoice. Ask management to make the correction.',409);
     if(repair.go_live_archived_at)return problem('Archived repairs cannot be reopened.',409);
     if(String(repair.status||'').trim().toLowerCase()!=='completed')return problem('This repair is not currently completed.',409);
-    if(String(repair.source||'').trim().toLowerCase()!=='manual'||repair.maintenance_checklist_item_id||repair.maintenance_source_id){
+    if(String(repair.source||'').trim().toLowerCase()!=='manual'||repair.maintenance_checklist_item_id||repair.maintenance_source_id||repair.maintenance_links){
       return problem('PM, annual, DVIR, roadside, and other externally linked repairs need management review.',409);
     }
     if(!repair.completed_at||Date.parse(repair.completed_at.replace(' ','T')+'Z')<Date.now()-90*86400000){
