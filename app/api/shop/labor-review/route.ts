@@ -59,7 +59,21 @@ export async function GET(request:Request){
     const techId=Number(user.technicianId);
     const [history,completed,requests]=await Promise.all([
       env.DB.prepare("SELECT l.id AS entryId,l.repair_id AS repairId,l.labor_date AS laborDate,l.hours,l.rate,COALESCE(l.notes,'') AS notes,l.started_at AS startedAt,l.ended_at AS endedAt,COALESCE(e.unit,'') AS unit,r.title,r.status FROM repair_labor_entries l JOIN repairs r ON r.id=l.repair_id LEFT JOIN equipment e ON e.id=r.equipment_id WHERE l.technician_id=? AND l.labor_date>=date('now','-90 days') AND r.go_live_archived_at IS NULL ORDER BY l.labor_date DESC,l.id DESC LIMIT 160").bind(techId).all(),
-      env.DB.prepare("SELECT r.id AS repairId,COALESCE(e.unit,'') AS unit,r.title,r.status,r.completed_at AS completedAt,COALESCE(r.labor_hours,0) AS totalHours FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.go_live_archived_at IS NULL AND lower(COALESCE(r.status,'')) LIKE '%complete%' AND r.completed_at>=datetime('now','-90 days') AND (r.technician_id=? OR EXISTS(SELECT 1 FROM repair_team_members m WHERE m.repair_id=r.id AND m.technician_id=?)) ORDER BY r.completed_at DESC LIMIT 100").bind(techId,techId).all(),
+      env.DB.prepare(
+        "SELECT r.id AS repairId,COALESCE(e.unit,'') AS unit,r.title,r.status,r.completed_at AS completedAt,COALESCE(r.labor_hours,0) AS totalHours,"+
+        "CASE WHEN lower(trim(COALESCE(r.status,'')))='completed' AND lower(trim(COALESCE(r.source,'')))='manual' "+
+        "AND r.reviewed_at IS NULL AND r.go_live_archived_at IS NULL "+
+        "AND r.maintenance_checklist_item_id IS NULL AND r.maintenance_source_id IS NULL "+
+        "AND NOT EXISTS(SELECT 1 FROM invoices i WHERE i.repair_id=r.id) "+
+        "AND NOT EXISTS(SELECT 1 FROM invoice_repair_links l WHERE l.repair_id=r.id) "+
+        "AND NOT EXISTS(SELECT 1 FROM repair_labor_timers rt WHERE rt.repair_id=r.id) "+
+        "AND (r.technician_id=? OR EXISTS(SELECT 1 FROM repair_job_events ev WHERE ev.repair_id=r.id AND ev.user_id=? AND ev.action='completed')) "+
+        "THEN 1 ELSE 0 END AS canReopen "+
+        "FROM repairs r LEFT JOIN equipment e ON e.id=r.equipment_id WHERE r.go_live_archived_at IS NULL "+
+        "AND lower(COALESCE(r.status,'')) LIKE '%complete%' AND r.completed_at>=datetime('now','-90 days') "+
+        "AND (r.technician_id=? OR EXISTS(SELECT 1 FROM repair_team_members m WHERE m.repair_id=r.id AND m.technician_id=?)) "+
+        "ORDER BY r.completed_at DESC LIMIT 100"
+      ).bind(techId,user.id,techId,techId).all(),
       env.DB.prepare('SELECT * FROM shop_labor_review_requests WHERE requester_user_id=? ORDER BY created_at DESC LIMIT 100').bind(user.id).all()
     ]);
     return Response.json({ok:true,history:history.results,completed:completed.results,requests:requests.results,manager:false},{headers:{'cache-control':'no-store'}});
