@@ -21,6 +21,7 @@ function fixture(){
     "CREATE TABLE repair_labor_timers(user_id INTEGER,repair_id INTEGER);"+
     "CREATE TABLE invoices(id INTEGER PRIMARY KEY,repair_id INTEGER);"+
     "CREATE TABLE invoice_repair_links(invoice_id INTEGER,repair_id INTEGER);"+
+    "CREATE TABLE pm_next_repairs(id INTEGER PRIMARY KEY,repair_id INTEGER,target_repair_id INTEGER);"+
     "CREATE TABLE repair_job_events(id INTEGER PRIMARY KEY,repair_id INTEGER,user_id INTEGER,technician_id INTEGER,action TEXT,detail TEXT);"+
     "CREATE TABLE repair_labor_entries(id INTEGER PRIMARY KEY,repair_id INTEGER,hours REAL);"+
     "CREATE TABLE repair_parts(id INTEGER PRIMARY KEY,repair_id INTEGER,part_id INTEGER,quantity REAL);"+
@@ -35,13 +36,15 @@ function fixture(){
     "(8,'Completed','manual',1,datetime('now','-1 hour')),"+
     "(9,'Completed','manual',1,datetime('now','-1 hour')),"+
     "(10,'Completed','manual',1,datetime('now','-1 hour')),"+
-    "(11,'Completed','manual',1,datetime('now','-1 hour'));"+
+    "(11,'Completed','manual',1,datetime('now','-1 hour')),"+
+    "(12,'Completed','manual',1,datetime('now','-1 hour'));"+
     "UPDATE repairs SET reviewed_at=CURRENT_TIMESTAMP WHERE id=2;"+
     "UPDATE repairs SET go_live_archived_at=CURRENT_TIMESTAMP WHERE id=9;"+
     "UPDATE repairs SET maintenance_checklist_item_id=123 WHERE id=10;"+
     "INSERT INTO invoices(id,repair_id) VALUES(1,3);"+
     "INSERT INTO invoice_repair_links(invoice_id,repair_id) VALUES(2,8);"+
     "INSERT INTO repair_labor_timers(user_id,repair_id) VALUES(43,11);"+
+    "INSERT INTO pm_next_repairs(id,repair_id,target_repair_id) VALUES(1,512,12);"+
     "INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail) VALUES"+
     "(1,29,1,'completed','Original completed'),(5,43,2,'completed','Completed by someone else'),(6,29,1,'completed','Completed as a helper');"+
     "INSERT INTO repair_labor_entries(repair_id,hours) VALUES(1,3.5);"+
@@ -83,7 +86,7 @@ test('reopening own shop repair preserves original completion event, labor and p
 
 test('reopen refuses approved, invoiced, external, archived, older, checklist-linked and timer-active repairs',()=>{
   const {db,reopen,row}=fixture();
-  for(const id of [2,3,4,7,8,9,10,11]){
+  for(const id of [2,3,4,7,8,9,10,11,12]){
     assert.deepEqual(reopen(id),{logged:0,reopened:0},'repair '+id+' should be protected');
     assert.equal(row(id).status,'Completed');
   }
@@ -103,6 +106,7 @@ test('reopen endpoint checks identity, reason, ownership, invoicing and audit be
   assert.match(route,/r\.go_live_archived_at IS NULL/);
   assert.match(route,/r\.maintenance_checklist_item_id IS NULL/);
   assert.match(route,/r\.maintenance_source_id IS NULL/);
+  assert.match(route,/NOT EXISTS \(SELECT 1 FROM pm_next_repairs/);
   assert.match(route,/r\.completed_at>=datetime\('now','-90 days'\)/);
   assert.match(route,/await env\.DB\.batch/);
   assert.match(route,/INSERT INTO repair_job_events/);
