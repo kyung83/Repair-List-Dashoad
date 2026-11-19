@@ -124,7 +124,10 @@ test('STOP cancels silence timer and does not restart or duplicate recognized wo
   assert.equal(s.last(),'Unit 45 replaced tire');
   assert.equal(s.listening.at(-1),false);
   assert.equal(mic.stopCount,1);
+  // Web Speech can promote the displayed interim to final after STOP.
+  mic.result(['replaced tire',true]);
   mic.end();
+  assert.equal(s.last(),'Unit 45 replaced tire','final callback after STOP must not repeat interim text');
   s.advance(9000);
   assert.equal(s.instances.length,1);
   assert.equal(s.timers.size,0);
