@@ -60,17 +60,20 @@ export default function TrailerAnnualShortcut({pmRepairId,canWork,active=true}:P
       const ip=await init.json() as {ok?:boolean;error?:string};
       if(!init.ok||!ip.ok)throw new Error(ip.error||"The Annual inspection could not be started.");
       let reused=0;
+      let reuseNotice='';
       try{
         const response=await fetch("/api/shop/trailer-annual-shortcut",{method:"POST",
           headers:{"content-type":"application/json"},
           body:JSON.stringify({action:"reuse",pmRepairId,annualRepairId:id})});
         const p=await response.json() as {ok?:boolean;error?:string;reused?:number};
         if(response.ok&&p.ok)reused=Number(p.reused||0);
-        else setMessage("The Annual is open. Its shared questions need individual inspection: "+(p.error||"reuse was unavailable."));
-      }catch{setMessage("The separate Annual is open. Shared items were not automatically filled; inspect them normally.")}
+        else reuseNotice="The Annual is open. Its shared questions need individual inspection: "+(p.error||"reuse was unavailable.");
+      }catch{reuseNotice="The separate Annual is open. Shared items were not automatically filled; inspect them normally."}
       setAnnualId(id);setOpened(true);setAnnualStatus("in_progress");
-      if(!message)setMessage(reused>0?`${reused} verified PM checks carried into the separate Annual. Answer the remaining Annual questions and sign.`:
-        "The separate Annual is open. Answer its required questions and sign.");
+      setMessage(reuseNotice||(
+        reused>0?`${reused} verified PM checks carried into the separate Annual. Answer the remaining Annual questions and sign.`:
+        "The separate Annual is open. Answer its required questions and sign."
+      ));
       await refresh();
     }catch(e){setError(e instanceof Error?e.message:"Unable to open the Annual.")}finally{setBusy(false)}
   }
