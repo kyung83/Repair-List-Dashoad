@@ -100,7 +100,7 @@ test('Annual includes essential trailer safety categories, rear impact guard and
   for(const term of ['ABS','pushrod','rear impact guard','tread','fasteners','brake','coupler']){
     assert.ok(annual.some(q=>q.item_text.toLowerCase().includes(term.toLowerCase())),term+' missing');
   }
-  for(const term of ['kingpin','landing gear','glad hands','air','tire','lights','Conestoga','flatbed','DOT']){
+  for(const term of ['kingpin','landing gear','glad hands','air','tire','lamps','Conestoga','flatbed','DOT']){
     assert.ok(pm.some(q=>q.item_text.toLowerCase().includes(term.toLowerCase())),term+' missing from PM');
   }
   assert.equal(annual.some(q=>/windshield wipers|clutch pedal|engine oil|cab air filter|power steering/i.test(q.item_text)),false);
