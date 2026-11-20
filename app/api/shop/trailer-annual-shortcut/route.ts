@@ -94,6 +94,12 @@ async function start(user:AppUser,pm:PmRow){
   if(pm.annual_enabled===0)throw new Error('Annual scheduling is disabled for this trailer. Contact maintenance management.');
   if(!(await runFor(pm.id)))throw new Error('Start the Trailer PM checklist before opening remaining Annual questions.');
   let annual=await existingAnnual(pm.equipment_id);
+  if(!annual&&pm.annual_date){
+    const annualDoneAt=Date.parse(pm.annual_date.slice(0,10)+'T12:00:00Z');
+    const recent=Date.now()-annualDoneAt;
+    if(Number.isFinite(annualDoneAt)&&recent>=0&&recent<30*dayMs)
+      throw new Error('This trailer Annual was completed within the last 30 days. Do not create another Annual for this visit.');
+  }
   if(!annual){
     // SELECT with NOT EXISTS is a single SQLite write statement; repeat requests
     // use the existing annual instead of creating duplicate open work orders.
