@@ -15,11 +15,13 @@ export const VERIFIED_TRAILER_PM_ANNUAL_V1=[
   {pm:22,annual:31,pmText:'Operate and inspect sliding tandem locks, pins, rails and stops where equipped.',annualText:'Check sliding tandem/adjustable axle locking pins and stops if equipped.'},
   {pm:24,annual:39,pmText:'Inspect landing gear feet, gears, braces, crank, mounting and operation.',annualText:'Inspect landing-gear structure, braces and feet for loose or unsafe mounting.'},
 ] as const;
-export function canReuseTrailerPmAnnual(pm:{template_key:string;template_version:number;event_type:string;status:string;started_at:string},annual:{template_key:string;template_version:number;event_type:string;status:string;signed_at:string|null},at=new Date()){
+export function canReuseTrailerPmAnnual(pm:{template_key:string;template_version:number;event_type:string;status:string;started_at:string},annual:{template_key:string;template_version:number;event_type:string;status:string;started_at:string;signed_at:string|null},at=new Date()){
   const when=Date.parse(pm.started_at.includes('T')?pm.started_at:pm.started_at.replace(' ','T')+'Z');
+  const annualWhen=Date.parse(annual.started_at.includes('T')?annual.started_at:annual.started_at.replace(' ','T')+'Z');
   return pm.template_key==='trailer-service'&&pm.template_version===1&&pm.event_type==='pm'&&
     annual.template_key==='trailer-annual-dot'&&annual.template_version===1&&annual.event_type==='annual'&&
     annual.status==='in_progress'&&!annual.signed_at&&
     (pm.status==='in_progress'||pm.status==='ready')&&
-    Number.isFinite(when)&&when<=at.getTime()&&at.getTime()-when<=36*60*60*1000;
+    Number.isFinite(when)&&when<=at.getTime()&&at.getTime()-when<=36*60*60*1000&&
+    Number.isFinite(annualWhen)&&annualWhen<=at.getTime()&&at.getTime()-annualWhen<=36*60*60*1000;
 }
