@@ -54,7 +54,7 @@ export default function MaintenanceChecklistPanelV3(props:Props){
         <span style={maintenanceLauncherAction}>{inspectionOpen?'CLOSE':'OPEN'}</span>
       </button>
     </section>}
-    {checklist?.eventType==='pm'&&<TrailerAnnualShortcut pmRepairId={props.repairId} canWork={props.canWork} active={props.active!==false}/>}
+    {checklist?.eventType==='pm'&&checklist.equipmentType==='trailer'&&<TrailerAnnualShortcut pmRepairId={props.repairId} canWork={props.canWork} active={props.active!==false}/>}
     {inspectionOpen&&showTires&&<PmSheetDetails repairId={props.repairId} canWork={props.canWork} tiresOnly/>}
     {inspectionOpen&&<MaintenanceChecklistPanelV2 {...props}/>} 
     {props.showNotes!==false&&(props.compact?<div id="pilot-notes" style={{scrollMarginTop:74}}><TechnicianRepairTools repairId={props.repairId} canWork={props.canWork} mode="notes" compact={props.compact}/></div>:<TechnicianRepairTools repairId={props.repairId} canWork={props.canWork} mode="notes" compact={props.compact}/>)}
