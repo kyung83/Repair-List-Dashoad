@@ -14,7 +14,7 @@ import LoganPilotAddRepair from "./logan-pilot-add-repair";
 type UsedPart={partId:number;partNumber:string;description:string;quantity:number};
 type PlannedPart={id:number;partId:number;partNumber:string;description:string;quantity:number;usedQuantity:number;kitName:string};
 type LaborEntry={id:number;technician:string;laborDate:string;hours:number;rate:number;notes:string};
-type Repair={teamIds?:number[];id:string;unit:string;issue:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
+type Repair={teamIds?:number[];id:string;unit:string;issue:string;driverDvirNotes?:string;status:string;technicianId:number|null;assignedTo:string;laborHours:number;pullThru:boolean;plannedParts:PlannedPart[];usedParts:UsedPart[];laborEntries:LaborEntry[];handoffNote?:string};
 type PartRequest={id:number;repairId:string;partNumber:string;description:string;reservedQuantity:number;shortageQuantity:number};
 type Timer={repairId:string;startedAt:string;title:string;unit:string};
 
@@ -138,6 +138,7 @@ export default function CurrentWorkHome(props:Props){
             ?<a href={unitHref} style={{...workingUnit,display:"block",color:"white",fontSize:25,textDecoration:"none"}}>Unit {timer.unit||repair.unit} ↗</a>
             :<h1 style={workingUnit}>{noUnit?"SHOP / NO UNIT":`Unit ${timer.unit||repair.unit}`}</h1>}
           <div style={{...workingIssue,...(pilot?{marginTop:3,fontSize:15,lineHeight:1.25}:{})}}>{timer.title||repair.issue}</div>
+          {repair.driverDvirNotes&&<div data-shop-driver-dvir-notes role="note" style={{marginTop:8,padding:'9px 12px',borderRadius:8,background:'rgba(255,255,255,.12)',whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:13,lineHeight:1.5}}><strong style={{display:'block',fontSize:11,marginBottom:3,letterSpacing:'.04em'}}>DRIVER DVIR NOTES</strong>{repair.driverDvirNotes}</div>}
           {pilot&&<div style={pilotSavedTime}>Current timer is running · {repair.laborHours.toFixed(2)} hrs previously saved on this repair</div>}
           {!pilot&&<div style={tracking}>● &nbsp; Labor is tracking automatically {noUnit?"to you, not to a fleet unit.":"while this unit is open."}</div>}
         </div>
@@ -154,7 +155,7 @@ export default function CurrentWorkHome(props:Props){
       {pilot&&visibleOtherRepairs.length>0&&<details id="pilot-other-repairs" defaultOpen style={pilotOtherCard}>
         <summary style={pilotOtherSummary}>Other repairs on {repair.unit} <span style={countBadge}>{visibleOtherRepairs.length}</span></summary>
         <div style={pilotOtherList}>{visibleOtherRepairs.map(item=><button key={item.id} type="button" disabled={busy} onClick={()=>props.onChooseRepair(item)} title={item.issue} style={pilotOtherRow}>
-          <span style={{minWidth:0,textAlign:"left"}}><strong style={{display:"block",fontSize:12,lineHeight:1.3}}>{item.issue}</strong><span style={repairMeta}>{state(item,timer.repairId)} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</span></span><span aria-hidden="true">›</span>
+          <span style={{minWidth:0,textAlign:"left"}}><strong style={{display:"block",fontSize:12,lineHeight:1.3}}>{item.issue}</strong>{item.driverDvirNotes&&<span style={{display:'block',fontSize:12,lineHeight:1.45,color:'#405569',whiteSpace:'pre-wrap',overflowWrap:'anywhere',marginTop:3}}><b>Driver DVIR:</b> {item.driverDvirNotes}</span>}<span style={repairMeta}>{state(item,timer.repairId)} · {item.technicianId===null?"Unassigned":`Assigned to ${item.assignedTo||"technician"}`}</span></span><span aria-hidden="true">›</span>
         </button>)}</div>
       </details>}
       {pilot?<>{repair.technicianId===technicianId&&technicianId!==null&&<details id="pilot-helper-panel" style={pilotSetupFold}>
