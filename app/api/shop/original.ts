@@ -132,12 +132,14 @@ export async function GET(request: Request) {
     const [repairs, activeTimer, parts, usedParts, laborEntries, plannedParts] = await Promise.all([
       env.DB.prepare(`
         SELECT r.id, r.equipment_id, COALESCE(e.unit, '') AS unit, r.title, r.status,
+               COALESCE(r.source,'') AS source, COALESCE(NULLIF(TRIM(dvir.comments),''),NULLIF(TRIM(r.description),''),'') AS driver_dvir_notes,
                COALESCE(r.location, '') AS location, r.technician_id,
                COALESCE(t.name, '') AS technician_name, COALESCE(r.labor_hours, 0) AS labor_hours,
                COALESCE(r.pull_thru,0) AS pull_thru
         FROM repairs r
         LEFT JOIN equipment e ON e.id = r.equipment_id
         LEFT JOIN technicians t ON t.id = r.technician_id
+        LEFT JOIN dvir_defects dvir ON dvir.geotab_defect_id = r.geotab_defect_id
         WHERE lower(COALESCE(r.status, '')) NOT LIKE '%complete%'
           AND COALESCE(r.source,'') <> 'shop-duty'
           -- Roadside breakdowns belong in the breakdown board, not the technician's My Work list.
@@ -153,6 +155,8 @@ export async function GET(request: Request) {
                  r.updated_at DESC, r.id DESC
       `).bind(user.id, user.technicianId ?? -1).all<{
         id: number;
+        source: string;
+        driver_dvir_notes: string;
         equipment_id: number | null;
         unit: string;
         title: string;
@@ -266,6 +270,7 @@ export async function GET(request: Request) {
         equipmentId: row.equipment_id === null ? null : Number(row.equipment_id),
         unit: row.unit,
         issue: row.title,
+        driverDvirNotes: row.source === 'geotab-dvir' ? row.driver_dvir_notes : '',
         status: row.status,
         location: row.location,
         technicianId: row.technician_id === null ? null : Number(row.technician_id),
