@@ -84,6 +84,7 @@ const TECHNICIAN_SHOP_WRITE_PATHS = new Set([
   '/api/shop/repair-review',
   '/api/shop/labor-review', // Technician request intake; endpoint enforces linked mechanic ownership and manager-only approvals.
   '/api/shop/reopen-completed', // Own unreviewed standard shop repair; route checks reviewer, invoice and audit eligibility.
+  '/api/shop/trailer-annual-shortcut', // Server validates PM membership, separate Annual, v1 verified mapping and Annual sign-off.
   '/api/shop/repair-photos',
   '/api/shop/repair-type',
   '/api/shop/team',
