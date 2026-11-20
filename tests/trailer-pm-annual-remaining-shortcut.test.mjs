@@ -66,7 +66,7 @@ test('trailer PM shows Annual due date and optional button, with separate pendin
  assert.match(child,/Last Annual:/);
  assert.match(child,/Next due:/);
  assert.match(child,/FINISH REMAINING ANNUAL QUESTIONS/);
- assert.match(child,/Separate Annual/);
+ assert.match(child,/SEPARATE ANNUAL FORM/);
  assert.match(child,/action:"startChecklist"/);
  assert.match(child,/action:"reuse"/);
  assert.match(child,/MaintenanceChecklistPanelV2 repairId=\{annualId\} canWork=\{canWork\} pendingOnly/);
