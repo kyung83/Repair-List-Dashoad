@@ -29,7 +29,7 @@ test('Annual reuse map references exact actual v1 questions, not vague category-
 test('only same-visit unsigned Annual and exact trailer v1 versions allow answer reuse',()=>{
  const now=new Date('2026-11-20T16:00:00Z');
  const pm={template_key:'trailer-service',template_version:1,event_type:'pm',status:'in_progress',started_at:'2026-11-20 10:00:00'};
- const annual={template_key:'trailer-annual-dot',template_version:1,event_type:'annual',status:'in_progress',signed_at:null};
+ const annual={template_key:'trailer-annual-dot',template_version:1,event_type:'annual',status:'in_progress',started_at:'2026-11-20 10:15:00',signed_at:null};
  const good=mod.canReuseTrailerPmAnnual;
  assert.equal(good(pm,annual,now),true);
  assert.equal(good({...pm,template_key:'default'},annual,now),false);
@@ -38,6 +38,7 @@ test('only same-visit unsigned Annual and exact trailer v1 versions allow answer
  assert.equal(good(pm,{...annual,status:'completed'},now),false);
  assert.equal(good(pm,{...annual,signed_at:'2026-11-20 13:00:00'},now),false);
  assert.equal(good({...pm,started_at:'2026-11-16 10:00:00'},annual,now),false);
+ assert.equal(good(pm,{...annual,started_at:'2026-11-15 10:15:00'},now),false);
 });
 
 test('technician authorization and separate Annual proof/signature enforced on server',()=>{
@@ -62,7 +63,7 @@ test('technician authorization and separate Annual proof/signature enforced on s
 });
 
 test('trailer PM shows Annual due date and optional button, with separate pending-only Annual workflow',()=>{
- assert.match(v3,/checklist\?\.eventType==='pm'&&<TrailerAnnualShortcut/);
+ assert.match(v3,/checklist\?\.eventType==='pm'&&checklist\.equipmentType==='trailer'&&<TrailerAnnualShortcut/);
  assert.match(child,/Last Annual:/);
  assert.match(child,/Next due:/);
  assert.match(child,/FINISH REMAINING ANNUAL QUESTIONS/);
