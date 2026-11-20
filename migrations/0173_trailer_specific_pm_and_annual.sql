@@ -74,7 +74,7 @@ WITH items(position,section,item_text,allow_na) AS (
     (10, 'Service & Parking Brakes', 'Verify trailer spring/parking/emergency brake operation and air supply or breakaway functionality.', 1),
     (11, 'Service & Parking Brakes', 'Verify trailer ABS warning lamp power-up cycle and required ABS components/wiring when applicable.', 1),
     (12, 'Service & Parking Brakes', 'Check electric or hydraulic brake systems and breakaway device to applicable standards when equipped.', 1),
-    (13, 'Coupling & Safety Devices', 'Inspect kingpin, upper coupler plate, attachment bolts, welds and structure for cracks, damage or excess wear.', 0),
+    (13, 'Coupling & Safety Devices', 'Inspect kingpin, upper coupler plate, attachment bolts, welds and structure for cracks, damage or excess wear.', 1),
     (14, 'Coupling & Safety Devices', 'Inspect pintle hook, drawbar/towbar eye, tongue or converter-dolly coupling if equipped.', 1),
     (15, 'Coupling & Safety Devices', 'Inspect required safety chains, hooks or cables and attachment points if equipped.', 1),
     (16, 'Coupling & Safety Devices', 'Check coupling/slider locking devices and stops if installed; all required latches must secure.', 1),
