@@ -3,7 +3,7 @@
 import {useEffect,useState} from "react";
 import type {RepairSubcategory} from "@/lib/repair-subcategories";
 
-type RepairType={id:number;name:string;checklistMode:"none"|"optional"|"required"};
+type RepairType={id:number;name:string;active?:boolean;checklistMode:"none"|"optional"|"required"};
 type Data={ok?:boolean;error?:string;repairId:string;current:RepairType|null;currentSubcategory?:RepairSubcategory|null;subcategories?:RepairSubcategory[];types:RepairType[];maintenanceEventType:"pm"|"annual"|null;maintenanceLabel:string;noUnit:boolean;locked:boolean;lockReason:"checklist_started"|"maintenance"|"no_unit"|null};
 type Props={repairId:string};
 
@@ -98,7 +98,7 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       <option value="">Choose Repair Type…</option>
       {data.types.map(type=><option key={type.id} value={type.id}>{type.name}{type.checklistMode==="required"?" · CHECKLIST":""}</option>)}
     </select>
-    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY · OPTIONAL</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy||(!subcategories.length&&!savedSubcategory)} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="">No subcategory / not specified</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>Add more detail if appropriate. The main Repair Type and checklist rules do not change.</small></label>}
+    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY · OPTIONAL</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy||data.current.active===false} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="">No subcategory / not specified</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>Add more detail if appropriate. The main Repair Type and checklist rules do not change.</small></label>}
     {checklist&&<div style={checklistNote}>{data.current?.name} uses a check sheet. {data.lockReason==="checklist_started"?"The Repair Type is now locked for this work order.":"It will appear below after this selection."}</div>}
     {message&&<div style={message.includes("saved")?successBox:errorBox}>{message}</div>}
   </section>;
