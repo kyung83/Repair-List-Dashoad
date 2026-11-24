@@ -65,9 +65,12 @@ function annualDates(pm:PmRow){
   return {lastAnnualDate:raw||null,nextAnnualDue:due,daysRemaining,annualIntervalDays:pm.annual_interval,
     annualEnabled:Boolean(pm.annual_enabled)};
 }
-async function countReusable(pmRepairId:number,actorId:number){
-  const pmRun=await runFor(pmRepairId);
-  if(!pmRun||!((pmRun.template_key==='trailer-service'&&pmRun.template_version===1)||pmRun.pm_body_type_snapshot))return 0;
+async function countReusable(pmRun:Run|null,annualRepairId:number|null,actorId:number){
+  if(!pmRun)return 0;
+  const annualRun=annualRepairId?await runFor(annualRepairId):null;
+  const assigned=annualRun?null:await env.DB.prepare(`SELECT t.template_key,t.version AS template_version FROM maintenance_checklist_templates t WHERE t.event_type='annual' AND t.active=1 AND t.template_key=COALESCE((SELECT template_key FROM maintenance_checklist_template_assignments WHERE event_type='annual' AND applies_to='trailer'),'default') LIMIT 1`).first<{template_key:string;template_version:number}>();
+  const target=annualRun??(assigned?{...assigned,event_type:'annual',status:'in_progress',signed_at:null,started_at:new Date().toISOString()}:null);
+  if(!target||!(canReuseTrailerPmAnnual(pmRun,target)||canReuseTrailerBodyPmAnnual(pmRun,target)))return 0;
   const a=await env.DB.prepare(`
     SELECT item_number,item_text,result,notes,updated_by_user_id,updated_at,
            require_photo,require_measurement,require_notes
@@ -79,7 +82,7 @@ async function context(user:AppUser,id:number){
   const pm=await pmFor(id,user);
   const annual=await existingAnnual(pm.equipment_id);
   const pmRun=await runFor(pm.id);
-  const possible=await countReusable(pm.id,user.id);
+  const possible=await countReusable(pmRun,annual?.id??null,user.id);
   return {ok:true,unit:pm.unit,pmRepairId:'repair-'+id,annualRepairId:annual?'repair-'+annual.id:null,
     pmStarted:Boolean(pmRun),pmStatus:pmRun?.status??'not_started',pmCompleted:pm.status.toLowerCase().includes('complete'),
     ...annualDates(pm),reusablePmAnswers:possible,verifiedMappingCount:VERIFIED_TRAILER_PM_ANNUAL_V1.length};
