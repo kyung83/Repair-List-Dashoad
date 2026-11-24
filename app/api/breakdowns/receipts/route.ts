@@ -57,6 +57,8 @@ export async function PATCH(request:Request){
     if(breakdown.status==='not_breakdown')throw new Error('This report was cleared as not a breakdown.');
     if(breakdown.stage>=5)return Response.json({ok:true,closed:true,alreadyClosed:true},{headers:{'cache-control':'no-store'}});
 
+    if(await getRollingReview(env.DB,id))throw new Error('Review the detected Geotab travel before closing this breakdown.');
+
     const cost=finalCost(body.totalAmount);
     const vendor=text(body.vendor,180);
     const invoiceNumber=text(body.invoiceNumber,100);
