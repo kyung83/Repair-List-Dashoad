@@ -1,5 +1,6 @@
 "use client";
 
+import NoteSpellcheck from './note-spellcheck';
 import {useEffect,useMemo,useState} from "react";
 
 type Photo={id:number;fileName:string;url:string};
@@ -26,7 +27,7 @@ export default function RepairTypeChecklistPanel({repairId,canWork}:Props){
      {!data.started?<div style={startBox}><strong>Ready to begin?</strong><span>This locks in checklist version v{data.templateVersion??1} for this work order.</span>{canWork&&<button style={primary} disabled={busy} onClick={()=>void post({action:"startChecklist"})}>START CHECKLIST</button>}</div>:<>
        <div style={progress}><strong>{answered} of {data.items.length} complete</strong><span>{data.pendingCount??0} remaining</span></div>
        <div style={items}>{data.items.map(item=><article key={item.number} style={{...itemCard,...(item.result==="fail"?failedCard:{})}}><div style={itemHead}><span style={number}>{item.number}</span><div><strong>{item.text}</strong><small>{item.section}</small></div><span style={resultBadge}>{item.result.toUpperCase()}</span></div>
-         <textarea style={input} rows={2} value={notes[item.number]??""} onChange={event=>setNotes(current=>({...current,[item.number]:event.target.value}))} placeholder={item.requireNotes||item.result==="fail"?"Note required":"Optional note"} disabled={!canWork||busy}/>
+         <NoteSpellcheck style={input} rows={2} value={notes[item.number]??""} onChange={event=>setNotes(current=>({...current,[item.number]:event.target.value}))} placeholder={item.requireNotes||item.result==="fail"?"Note required":"Optional note"} disabled={!canWork||busy}/>
          {item.requireMeasurement&&<label style={label}>{item.measurementLabel}{item.measurementUnit?` (${item.measurementUnit})`:""}<input style={input} value={measurements[item.number]??""} onChange={event=>setMeasurements(current=>({...current,[item.number]:event.target.value}))} disabled={!canWork||busy}/></label>}
          <div style={answerRow}>{item.allowPass&&<button style={pass} disabled={!canWork||busy} onClick={()=>void setItem(item,"pass")}>PASS</button>}{item.allowFail&&<button style={fail} disabled={!canWork||busy} onClick={()=>void setItem(item,"fail")}>FAIL</button>}{item.allowNa&&<button style={na} disabled={!canWork||busy} onClick={()=>void setItem(item,"na")}>N/A</button>}{item.result!=="pending"&&<button style={reset} disabled={!canWork||busy} onClick={()=>void setItem(item,"pending")}>RESET</button>}</div>
          {item.requirePhoto&&<div style={photoRow}><label style={photoButton}>+ PHOTO<input type="file" accept="image/*" capture="environment" hidden onChange={event=>{const file=event.target.files?.[0]??null;void upload(item,file);event.target.value=""}} disabled={!canWork||busy}/></label>{item.photos.map(photo=><span key={photo.id} style={photoChip}><a href={photo.url} target="_blank" rel="noreferrer">{photo.fileName}</a><button disabled={!canWork||busy} onClick={()=>void post({action:"removePhoto",photoId:photo.id})}>×</button></span>)}</div>}
