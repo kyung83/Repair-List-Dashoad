@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser, type AppUser } from '@/lib/auth';
+import {listRepairSubcategories,subcategoryName,subcategoryOrder} from '@/lib/repair-subcategories';
 
 type RepairTypeRow={id:number;name:string;unit_rule:'required'|'optional';checklist_mode:'none'|'optional'|'required';active:number;sort_order:number};
 type TemplateRow={id:number;repair_type_id:number;name:string;version:number;active:number;created_at:string};
@@ -41,7 +42,8 @@ async function payload(user:AppUser){
   const where=manager(user)?'':`WHERE active=1 AND upper(name)<>'INDIRECT LABOR-OTHER'`;
   const rows=await env.DB.prepare(`SELECT id,name,unit_rule,checklist_mode,active,sort_order FROM repair_types ${where} ORDER BY sort_order,name COLLATE NOCASE`).all<RepairTypeRow>();
   const types=await Promise.all(rows.results.map(async row=>({id:Number(row.id),name:row.name,unitRule:row.unit_rule,checklistMode:row.checklist_mode,active:Boolean(row.active),sortOrder:Number(row.sort_order),checklist:await activeTemplate(Number(row.id))})));
-  return{types,canManage:manager(user),updatedAt:new Date().toISOString()};
+  const subcategories=(await listRepairSubcategories(env.DB,!manager(user))).filter(s=>types.some(t=>t.id===s.repairTypeId&&t.name.toUpperCase()!=='INDIRECT LABOR-OTHER'));
+  return{types,subcategories,canManage:manager(user),updatedAt:new Date().toISOString()};
 }
 
 export async function GET(request:Request){
@@ -61,6 +63,19 @@ export async function POST(request:Request){
       const typeId=id(body.id),name=cleanName(body.name),rule=unitRule(body.unitRule),mode=checklistMode(body.checklistMode),active=Boolean(body.active);
       const sortOrder=Number.isFinite(Number(body.sortOrder))?Math.max(0,Math.floor(Number(body.sortOrder))):0;
       await env.DB.prepare(`UPDATE repair_types SET name=?,unit_rule=?,checklist_mode=?,active=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(name,rule,mode,active?1:0,sortOrder,typeId).run();
+    }else if(action==='createSubcategory'||action==='updateSubcategory'){
+      const parentId=id(body.repairTypeId),name=subcategoryName(body.name);
+      const parent=await env.DB.prepare('SELECT id,name FROM repair_types WHERE id=?').bind(parentId).first<{id:number;name:string}>();
+      if(!parent||parent.name.toUpperCase()==='INDIRECT LABOR-OTHER')throw new Error('Choose a fleet Repair Type. Indirect labor has its own category setup.');
+      if(action==='createSubcategory'){
+        const next=await env.DB.prepare('SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM repair_type_subcategories WHERE repair_type_id=?').bind(parentId).first<{n:number}>();
+        await env.DB.prepare('INSERT INTO repair_type_subcategories(repair_type_id,name,active,sort_order) VALUES(?,?,1,?)').bind(parentId,name,Number(next?.n??1)).run();
+      }else{
+        const subId=id(body.id,'Subcategory'),order=subcategoryOrder(body.sortOrder);
+        if(typeof body.active!=='boolean')throw new Error('Choose whether this subcategory is active.');
+        const updated=await env.DB.prepare('UPDATE repair_type_subcategories SET name=?,active=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND repair_type_id=?').bind(name,body.active?1:0,order,subId,parentId).run();
+        if(!updated.meta.changes)throw new Error('Subcategory was not found under this Repair Type.');
+      }
     }else if(action==='publishChecklist'){
       const typeId=id(body.id),items=parseItems(body.items),name=String(body.name??'').trim().slice(0,100)||'Repair Type Checklist';
       const type=await env.DB.prepare(`SELECT id,checklist_mode FROM repair_types WHERE id=?`).bind(typeId).first<{id:number;checklist_mode:string}>();if(!type)throw new Error('Repair type was not found.');
