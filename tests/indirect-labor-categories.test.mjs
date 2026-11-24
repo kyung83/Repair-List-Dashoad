@@ -9,7 +9,9 @@ const launcher=read('app/shop/indirect-labor-launcher.tsx');
 const create=read('app/api/shop/indirect-labor/route.ts');
 const setup=read('app/setup-center/page.tsx');
 const nav=read('app/navigation-config.ts');
-const page=read('app/indirect-labor-categories/page.tsx');
+const page=read('app/indirect-labor-categories/settings-panel.tsx');
+const standalone=read('app/indirect-labor-categories/page.tsx');
+const types=read('app/repair-types/page.tsx');
 
 test('indirect labor default choices are maintained in a standalone catalog',()=>{
   assert.match(migration,/CREATE TABLE IF NOT EXISTS indirect_labor_categories/);
@@ -39,5 +41,7 @@ test('setup link exists and disable/rename does not rewrite stored repair histor
   assert.match(nav,/indirect-labor-categories/);
   assert.match(page,/Save/);
   assert.match(page,/window\.confirm/);
+  assert.match(standalone,/<IndirectLaborCategoriesPanel\/>/);
+  assert.match(types,/<IndirectLaborCategoriesPanel\/>/);
   assert.doesNotMatch(api,/UPDATE repairs|DELETE FROM repairs|DELETE FROM repair_labor_entries/);
 });
