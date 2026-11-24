@@ -2,6 +2,7 @@ import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { listRepairTypes, repairTypeForRepair, requireRepairType } from '@/lib/repair-types';
+import {resolveRepairChecklist} from '@/lib/repair-checklist-scope';
 import {listRepairSubcategories,repairSubcategoryForRepair,requireRepairSubcategory} from '@/lib/repair-subcategories';
 
 function numericRepairId(value: unknown) {
@@ -57,6 +58,7 @@ async function payload(repair:RepairRow) {
   const types = all.filter(type => type.name.toUpperCase() !== 'INDIRECT LABOR-OTHER');
   const currentSubcategory=await repairSubcategoryForRepair(env.DB,repair.id);
   const subcategories=current&&current.name.toUpperCase()!=='INDIRECT LABOR-OTHER'?(await listRepairSubcategories(env.DB)).filter(s=>s.repairTypeId===current.id):[];
+  const checklistScope=current?await resolveRepairChecklist(env.DB,repair.id,current):null;
   const lockReason = checklistRun
     ? 'checklist_started'
     : maintenanceEventType
@@ -69,6 +71,10 @@ async function payload(repair:RepairRow) {
     current,
     currentSubcategory,
     subcategories,
+    checklistMode:checklistScope?.mode??'none',
+    checklistName:checklistScope?.template?.name??null,
+    checklistPendingSubcategory:checklistScope?.waitingForSubcategory??false,
+    subcategoryLocked:Boolean(checklistRun&&currentSubcategory),
     types,
     maintenanceEventType,
     maintenanceLabel:maintenanceEventType === 'annual' ? 'ANNUAL' : maintenanceEventType === 'pm' ? 'PM' : '',
@@ -109,7 +115,8 @@ export async function POST(request:Request) {
       const next=await requireRepairSubcategory(env.DB,parent.id,body.repairSubcategoryId);
       const current=await repairSubcategoryForRepair(env.DB,repairId);
       if((current?.id??null)!==(next?.id??null)){
-        const result=await env.DB.prepare(`UPDATE repairs SET repair_subcategory_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND repair_type_id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%' AND EXISTS(SELECT 1 FROM repair_labor_timers WHERE repair_id=? AND user_id=? AND technician_id=?)`).bind(next?.id??null,repairId,parent.id,repairId,user.id,user.technicianId).run();
+        if(current&&await env.DB.prepare('SELECT id FROM repair_type_checklist_runs WHERE repair_id=? LIMIT 1').bind(repairId).first())throw new Error('Subcategory cannot change after its checklist has started.');
+        const result=await env.DB.prepare(`UPDATE repairs SET repair_subcategory_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND repair_type_id=? AND (repair_subcategory_id IS NULL OR NOT EXISTS(SELECT 1 FROM repair_type_checklist_runs WHERE repair_id=repairs.id)) AND lower(COALESCE(status,'')) NOT LIKE '%complete%' AND EXISTS(SELECT 1 FROM repair_labor_timers WHERE repair_id=? AND user_id=? AND technician_id=?)`).bind(next?.id??null,repairId,parent.id,repairId,user.id,user.technicianId).run();
         if(!result.meta.changes)throw new Error('The repair changed or is no longer WORKING NOW. Reload before selecting a subcategory.');
         await env.DB.prepare(`INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail) VALUES(?,?,?,'repair_subcategory_selected',?)`).bind(repairId,user.id,user.technicianId,`${user.displayName} selected ${parent.name} subcategory: ${next?.name??'Not specified'}.`.slice(0,500)).run();
       }
@@ -124,7 +131,8 @@ export async function POST(request:Request) {
     if (current?.id !== next.id) {
       const run = await env.DB.prepare(`SELECT id FROM repair_type_checklist_runs WHERE repair_id=? LIMIT 1`).bind(repairId).first<{id:number}>();
       if (run) throw new Error('This Repair Type cannot be changed after its checklist has been started.');
-      await env.DB.prepare(`UPDATE repairs SET repair_type_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(next.id,repairId).run();
+      const changed=await env.DB.prepare(`UPDATE repairs SET repair_type_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND NOT EXISTS(SELECT 1 FROM repair_type_checklist_runs WHERE repair_id=repairs.id)`).bind(next.id,repairId).run();
+      if(!changed.meta.changes)throw new Error('The repair changed or its checklist has started. Reload before changing the Repair Type.');
       await env.DB.prepare(`
         INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
         VALUES(?,?,?,'repair_type_selected',?)

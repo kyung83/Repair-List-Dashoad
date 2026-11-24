@@ -31,12 +31,20 @@ function parseItems(value:unknown){
   return items;
 }
 
-async function activeTemplate(repairTypeId:number){
-  const t=await env.DB.prepare(`SELECT id,repair_type_id,name,version,active,created_at FROM repair_type_checklist_templates WHERE repair_type_id=? AND active=1 ORDER BY version DESC LIMIT 1`).bind(repairTypeId).first<TemplateRow>();
+async function activeTemplate(repairTypeId:number,subcategoryId:number|null=null){
+  const t=await env.DB.prepare(`SELECT id,repair_type_id,name,version,active,created_at FROM repair_type_checklist_templates WHERE repair_type_id=? AND repair_subcategory_id IS ? AND active=1 ORDER BY version DESC LIMIT 1`).bind(repairTypeId,subcategoryId).first<TemplateRow>();
   if(!t)return null;
   const rows=await env.DB.prepare(`SELECT position,section,item_text,enabled,allow_pass,allow_fail,allow_na,require_notes,require_photo,require_measurement,measurement_label,measurement_unit FROM repair_type_checklist_template_items WHERE template_id=? ORDER BY position,id`).bind(t.id).all<ItemRow>();
   return{id:Number(t.id),name:t.name,version:Number(t.version),createdAt:t.created_at,items:rows.results.map(row=>({position:Number(row.position),section:row.section,text:row.item_text,enabled:Boolean(row.enabled),allowPass:Boolean(row.allow_pass),allowFail:Boolean(row.allow_fail),allowNa:Boolean(row.allow_na),requireNotes:Boolean(row.require_notes),requirePhoto:Boolean(row.require_photo),requireMeasurement:Boolean(row.require_measurement),measurementLabel:row.measurement_label??'',measurementUnit:row.measurement_unit??''}))};
 }
+
+async function subcategoryChecklist(id:number){
+ const row=await env.DB.prepare(`SELECT s.id,s.name,s.repair_type_id,s.checklist_mode,rt.name AS parent_name,rt.checklist_mode AS parent_mode
+ FROM repair_type_subcategories s JOIN repair_types rt ON rt.id=s.repair_type_id WHERE s.id=?`).bind(id).first<{id:number;name:string;repair_type_id:number;checklist_mode:string;parent_name:string;parent_mode:string}>();
+ if(!row||row.parent_name.toUpperCase()==='INDIRECT LABOR-OTHER')throw new Error('Fleet repair subcategory was not found.');
+ return{subcategory:{id:row.id,name:row.name,repairTypeId:row.repair_type_id,checklistMode:row.checklist_mode,parentName:row.parent_name,parentMode:row.parent_mode},checklist:await activeTemplate(row.repair_type_id,row.id),parentChecklist:await activeTemplate(row.repair_type_id)};
+}
+function childChecklistMode(value:unknown){if(value==='inherit'||value==='none'||value==='optional'||value==='required')return value;throw new Error('Subcategory checklist setting is invalid.')}
 
 async function payload(user:AppUser){
   const where=manager(user)?'':`WHERE active=1 AND upper(name)<>'INDIRECT LABOR-OTHER'`;
@@ -47,7 +55,7 @@ async function payload(user:AppUser){
 }
 
 export async function GET(request:Request){
-  try{const user=await getSessionUser(env.DB,request);if(!user)return Response.json({error:'Authentication required.'},{status:401});return Response.json(await payload(user),{headers:{'cache-control':'no-store'}})}
+  try{const user=await getSessionUser(env.DB,request);if(!user)return Response.json({error:'Authentication required.'},{status:401});const sub=new URL(request.url).searchParams.get('subcategoryId');if(sub!==null){if(!manager(user))return Response.json({error:'Manager or administrator access is required.'},{status:403});return Response.json(await subcategoryChecklist(id(sub,'Subcategory')),{headers:{'cache-control':'no-store'}})}return Response.json(await payload(user),{headers:{'cache-control':'no-store'}})}
   catch(error){return Response.json({error:error instanceof Error?error.message:'Repair types could not be loaded.'},{status:500})}
 }
 
@@ -76,16 +84,25 @@ export async function POST(request:Request){
         const updated=await env.DB.prepare('UPDATE repair_type_subcategories SET name=?,active=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND repair_type_id=?').bind(name,body.active?1:0,order,subId,parentId).run();
         if(!updated.meta.changes)throw new Error('Subcategory was not found under this Repair Type.');
       }
+    }else if(action==='saveSubcategoryChecklistMode'){
+      const subId=id(body.subcategoryId,'Subcategory'),mode=childChecklistMode(body.checklistMode),config=await subcategoryChecklist(subId);
+      if((mode==='optional'||mode==='required')&&!config.checklist)throw new Error('Publish a checklist with at least one enabled question before selecting its own checklist.');
+      await env.DB.prepare('UPDATE repair_type_subcategories SET checklist_mode=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(mode,subId).run();
+      return Response.json({ok:true,...await subcategoryChecklist(subId)},{headers:{'cache-control':'no-store'}});
     }else if(action==='publishChecklist'){
       const typeId=id(body.id),items=parseItems(body.items),name=String(body.name??'').trim().slice(0,100)||'Repair Type Checklist';
+      const subId=body.subcategoryId==null?null:id(body.subcategoryId,'Subcategory');
       const type=await env.DB.prepare(`SELECT id,checklist_mode FROM repair_types WHERE id=?`).bind(typeId).first<{id:number;checklist_mode:string}>();if(!type)throw new Error('Repair type was not found.');
-      if(type.checklist_mode==='none')throw new Error('Set this repair type to Optional or Required checklist first.');
+      const mode=subId!==null?childChecklistMode(body.checklistMode):type.checklist_mode;
+      if(subId!==null){const config=await subcategoryChecklist(subId);if(config.subcategory.repairTypeId!==typeId)throw new Error('Subcategory does not belong to this Repair Type.');}
+      if(mode!=='optional'&&mode!=='required')throw new Error('Set this checklist to Optional or Required first.');
       const max=await env.DB.prepare(`SELECT COALESCE(MAX(version),0) AS n FROM repair_type_checklist_templates WHERE repair_type_id=?`).bind(typeId).first<{n:number}>();const version=Number(max?.n??0)+1;
-      const inserted=await env.DB.prepare(`INSERT INTO repair_type_checklist_templates(repair_type_id,name,version,active,created_by_user_id) VALUES(?,?,?,0,?)`).bind(typeId,name,version,user.id).run();
+      const inserted=await env.DB.prepare(`INSERT INTO repair_type_checklist_templates(repair_type_id,name,version,active,created_by_user_id,repair_subcategory_id) VALUES(?,?,?,0,?,?)`).bind(typeId,name,version,user.id,subId).run();
       const templateId=Number(inserted.meta.last_row_id);if(!templateId)throw new Error('Checklist version could not be created.');
       const statements=items.map(item=>env.DB.prepare(`INSERT INTO repair_type_checklist_template_items(template_id,position,section,item_text,enabled,allow_pass,allow_fail,allow_na,require_notes,require_photo,require_measurement,measurement_label,measurement_unit) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(templateId,item.position,item.section,item.text,item.enabled?1:0,item.allowPass?1:0,item.allowFail?1:0,item.allowNa?1:0,item.requireNotes?1:0,item.requirePhoto?1:0,item.requireMeasurement?1:0,item.measurementLabel||null,item.measurementUnit||null));
       for(let i=0;i<statements.length;i+=60)await env.DB.batch(statements.slice(i,i+60));
-      await env.DB.batch([env.DB.prepare(`UPDATE repair_type_checklist_templates SET active=0,updated_at=CURRENT_TIMESTAMP WHERE repair_type_id=? AND active=1`).bind(typeId),env.DB.prepare(`UPDATE repair_type_checklist_templates SET active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(templateId)]);
+      await env.DB.batch([env.DB.prepare(`UPDATE repair_type_checklist_templates SET active=0,updated_at=CURRENT_TIMESTAMP WHERE repair_type_id=? AND repair_subcategory_id IS ? AND active=1`).bind(typeId,subId),env.DB.prepare(`UPDATE repair_type_checklist_templates SET active=1,updated_at=CURRENT_TIMESTAMP WHERE id=?`).bind(templateId),...(subId!==null?[env.DB.prepare('UPDATE repair_type_subcategories SET checklist_mode=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(mode,subId)]:[])]);
+      if(subId!==null)return Response.json({ok:true,...await subcategoryChecklist(subId)},{headers:{'cache-control':'no-store'}});
     }else throw new Error('Unknown repair type action.');
     return Response.json({ok:true,...await payload(user)},{headers:{'cache-control':'no-store'}});
   }catch(error){console.error(JSON.stringify({event:'repair_types_post_failed',error:String(error)}));return Response.json({error:error instanceof Error?error.message:'Repair type change failed.'},{status:400})}

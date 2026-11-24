@@ -106,6 +106,6 @@ test('subcategory guard runs before timer stop, handoff, switch and completion w
  const legacy=read('app/api/shop/route-legacy.ts'),original=read('app/api/shop/original.ts');
  assert.ok(legacy.indexOf('await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,Number(timer.repair_id))')<legacy.indexOf('const elapsedHours ='));
  assert.match(legacy,/await requireConfiguredSubcategoryBeforeLeavingWork\(env.DB,id\);/);
- assert.match(original,/await requireConfiguredSubcategoryBeforeLeavingWork\(env.DB,id\);/);
+ assert.match(original,/await validateRepairTypeChecklistBeforeClose\(env.DB,id\);/);
  assert.match(original,/await requireConfiguredSubcategoryBeforeLeavingWork\(env.DB,Number\(timer.repair_id\)\);/);
 });
