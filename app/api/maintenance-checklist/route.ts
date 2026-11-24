@@ -13,6 +13,9 @@ type RepairRow = {
   status: string;
   unit: string;
   equipment_type: string | null;
+  truck_body_type:string|null;
+  trailer_type:string|null;
+  trailer_subtype:string|null;
   current_mileage: number | null;
   mileage_updated_at: string | null;
   geotab_device_id: string | null;
@@ -130,7 +133,7 @@ async function requireUser(request: Request) {
 async function loadRepair(id: number) {
   const row = await env.DB.prepare(`
     SELECT r.id, r.equipment_id, r.technician_id, COALESCE(r.source,'manual') AS source,
-           COALESCE(r.status,'') AS status, COALESCE(e.unit,'') AS unit, e.equipment_type,
+           COALESCE(r.status,'') AS status, COALESCE(e.unit,'') AS unit, e.equipment_type,e.truck_body_type,e.trailer_type,e.trailer_subtype,
            e.current_mileage, e.mileage_updated_at, e.geotab_device_id,
            s.mileage_interval
     FROM repairs r
@@ -174,7 +177,7 @@ async function ensureRun(user: AppUser, repair: RepairRow) {
   const kind = eventType(repair.source);
   const source = liveMileageSource(repair);
   const appliesTo = String(repair.equipment_type ?? '').toLowerCase() === 'trailer' ? 'trailer' : 'truck';
-  const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo);
+  const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo, repair);
 
   // D1 batch executes these statements atomically. The unique repair_id on the run
   // plus INSERT OR IGNORE makes simultaneous opens converge on one snapshot. The
@@ -185,8 +188,8 @@ async function ensureRun(user: AppUser, repair: RepairRow) {
       INSERT OR IGNORE INTO maintenance_checklist_runs (
         repair_id, equipment_id, event_type, mileage_at_start, mileage_source,
         mileage_updated_at, started_by_user_id, started_at, updated_at,
-        template_id, template_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
+        template_id, template_version,pm_body_type_snapshot
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?)
     `).bind(
       repair.id,
       repair.equipment_id,
@@ -197,6 +200,7 @@ async function ensureRun(user: AppUser, repair: RepairRow) {
       user.id,
       template.id,
       template.version,
+      template.bodyTypeAssignment??null,
     ),
     env.DB.prepare(`
       INSERT OR IGNORE INTO maintenance_checklist_items (
@@ -399,7 +403,7 @@ async function payloadFor(repair: RepairRow) {
   const mileageEntryAllowed = !repair.geotab_device_id || mileageStale;
   if (!run) {
     const appliesTo = String(repair.equipment_type ?? '').toLowerCase() === 'trailer' ? 'trailer' : 'truck';
-    const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo);
+    const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo, repair);
     return {
       repairId: `repair-${repair.id}`,
       equipmentId: repair.equipment_id,
