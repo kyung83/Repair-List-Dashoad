@@ -39,7 +39,7 @@ export async function PATCH(request:Request){
     if((action==='manual'||when!==parseRollingTime(candidate?.candidateAt))&&!note)throw new Error('Enter the reason for the office-entered time.');
     const source=action==='confirm'?'office_geotab':'office_manual';
     const stamp=new Date(when).toISOString();
-    const guard=action==='confirm'?` AND EXISTS(SELECT 1 FROM breakdown_rolling_checks c JOIN equipment_geotab_devices d ON d.equipment_id=c.equipment_id AND d.geotab_device_id=c.device_id AND d.current=1 WHERE c.breakdown_id=roadside_breakdowns.id AND c.equipment_id=roadside_breakdowns.equipment_id AND c.state='pending' AND c.candidate_at=?)`:'';
+    const guard=action==='confirm'?` AND EXISTS(SELECT 1 FROM breakdown_rolling_checks c JOIN equipment_geotab_devices d ON d.equipment_id=c.equipment_id AND d.geotab_device_id=c.device_id AND d.current=1 WHERE c.breakdown_id=roadside_breakdowns.id AND c.equipment_id=roadside_breakdowns.equipment_id AND julianday(d.assigned_at)<=julianday(roadside_breakdowns.created_at) AND c.state='pending' AND c.candidate_at=? AND (SELECT COUNT(*) FROM equipment_geotab_devices x WHERE x.equipment_id=roadside_breakdowns.equipment_id AND x.current=1)=1 AND (SELECT COUNT(*) FROM equipment_geotab_devices x WHERE x.geotab_device_id=c.device_id AND x.current=1)=1)`:'';
     const statement=env.DB.prepare(`UPDATE roadside_breakdowns
       SET rolling_at=strftime('%Y-%m-%d %H:%M:%S',?),rolling_confirmation_source=?,ready_for_review_at=CURRENT_TIMESTAMP,
           stage=CASE WHEN stage<4 THEN 4 ELSE stage END,status='ready_for_review',updated_at=CURRENT_TIMESTAMP
