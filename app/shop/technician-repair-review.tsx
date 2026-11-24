@@ -1,5 +1,6 @@
 "use client";
 
+import NoteSpellcheck from './note-spellcheck';
 import {useEffect,useMemo,useState} from "react";
 import {createPortal} from "react-dom";
 import type {ChecklistData} from "./maintenance-types";
@@ -142,7 +143,7 @@ export default function TechnicianRepairReview({repairId,canWork,checklist}:Prop
         <div style={sectionCard}>
           <strong style={sectionTitle}>REPAIR NOTES</strong>
           <div style={hint}>Saved notes stay here. Technicians can edit their own notes; managers and admins can correct any note.</div>
-          {data?.notes.length?<div style={list}>{data.notes.map(item=><div key={item.id} style={row}>{editingNoteId===item.id?<><textarea value={editDraft} onChange={event=>setEditDraft(event.target.value.slice(0,2000))} rows={4} style={editTextarea} disabled={savingNoteId!==null}/><div style={editActions}><button type="button" onClick={()=>void saveEditedNote(item)} style={saveEditButton} disabled={savingNoteId!==null}>{savingNoteId===item.id?"Saving…":"SAVE EDIT"}</button><button type="button" onClick={cancelEdit} style={cancelEditButton} disabled={savingNoteId!==null}>CANCEL</button></div></>:<><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={noteFooter}><div style={meta}>{item.technician} · {dateTime(item.createdAt)}</div>{item.canEdit&&<button type="button" onClick={()=>beginEdit(item)} style={editButton}>EDIT NOTE</button>}</div></>}</div>)}</div>:<div style={empty}>No repair notes saved yet.</div>}
+          {data?.notes.length?<div style={list}>{data.notes.map(item=><div key={item.id} style={row}>{editingNoteId===item.id?<><NoteSpellcheck value={editDraft} onChange={event=>setEditDraft(event.target.value.slice(0,2000))} rows={4} style={editTextarea} disabled={savingNoteId!==null}/><div style={editActions}><button type="button" onClick={()=>void saveEditedNote(item)} style={saveEditButton} disabled={savingNoteId!==null}>{savingNoteId===item.id?"Saving…":"SAVE EDIT"}</button><button type="button" onClick={cancelEdit} style={cancelEditButton} disabled={savingNoteId!==null}>CANCEL</button></div></>:<><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={noteFooter}><div style={meta}>{item.technician} · {dateTime(item.createdAt)}</div>{item.canEdit&&<button type="button" onClick={()=>beginEdit(item)} style={editButton}>EDIT NOTE</button>}</div></>}</div>)}</div>:<div style={empty}>No repair notes saved yet.</div>}
         </div>
 
         <div style={sectionCard}>
