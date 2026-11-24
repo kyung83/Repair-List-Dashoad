@@ -61,7 +61,7 @@ export default function ReportingCenter(){
    const setError=target==='a'?setErrorA:setErrorB,setLoading=target==='a'?setLoadingA:setLoadingB,setData=target==='a'?setA:setB;
    if(!scope.start||!scope.end||scope.start>scope.end){setError('Choose a valid date range.');return;}
    refs.current[target]?.abort();const c=new AbortController();refs.current[target]=c;setLoading(true);setError('');
-   try{const result=await readPeriod(scope,c.signal);if(!c.signal.aborted){setData(result);if(target==='a'){setDetail(null);setUnitFilter(null);setRepeatSelection(null);}}}
+   try{const result=await readPeriod(scope,c.signal);if(!c.signal.aborted){setData(result);setDetail(null);if(target==='a'){setUnitFilter(scope.unit?Number(scope.unit):null);setRepeatSelection(null);}}}
    catch(e){if(!c.signal.aborted)setError(e instanceof Error?e.message:'Could not load reports.');}
    finally{if(!c.signal.aborted)setLoading(false);}
  },[]);
