@@ -15,7 +15,7 @@ export async function GET(request:Request){
     if(!['','truck','trailer'].includes(type))throw new RangeError('Select a valid equipment type.');
     if(unit&&(!/^\d+$/.test(unit)||!Number.isSafeInteger(Number(unit))||Number(unit)<=0))throw new RangeError('Select a valid unit.');
     if(view!=='repairs'&&view!=='breakdowns')throw new RangeError('Invalid report view.');
-    const filters={startDate:start,endDate:end,equipmentType:type,equipmentId:unit};
+    const filters={startDate:start,endDate:end,equipmentType:type,equipmentId:unit,query:p.get('q'),deepSearch:true};
     const result=view==='repairs'?await getReportSearchData(env.DB,filters):await getBreakdownReportData(env.DB,filters);
     return Response.json(result,{headers:{'cache-control':'no-store'}});
   }catch(error){
