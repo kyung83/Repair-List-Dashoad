@@ -12,15 +12,17 @@ export async function findActiveChecklistTemplate(db:D1Database,repairTypeId:num
  return row?templateValue(row):null;
 }
 export async function resolveRepairChecklist(db:D1Database,repairId:number,type:RepairType):Promise<ChecklistScope>{
- const row=await db.prepare(`SELECT r.repair_subcategory_id,sc.name AS subcategory_name,sc.checklist_mode,
+ const row=await db.prepare(`SELECT r.repair_subcategory_id,r.equipment_id,sc.name AS subcategory_name,sc.checklist_mode,
+ EXISTS(SELECT 1 FROM maintenance_checklist_runs m WHERE m.repair_id=r.id AND m.event_type IN ('pm','annual')) AS maintenance,
  EXISTS(SELECT 1 FROM repair_type_subcategories s WHERE s.repair_type_id=r.repair_type_id AND s.active=1) AS has_options,
  t.id AS run_template_id,t.name AS run_template_name,t.version AS run_template_version,t.repair_subcategory_id AS run_template_subcategory_id
  FROM repairs r LEFT JOIN repair_type_subcategories sc ON sc.id=r.repair_subcategory_id AND sc.repair_type_id=r.repair_type_id
  LEFT JOIN repair_type_checklist_runs cr ON cr.repair_id=r.id LEFT JOIN repair_type_checklist_templates t ON t.id=cr.template_id WHERE r.id=?`).bind(repairId).first<{
- repair_subcategory_id:number|null;subcategory_name:string|null;checklist_mode:SubcategoryChecklistMode|null;has_options:number;
+ repair_subcategory_id:number|null;equipment_id:number|null;maintenance:number;subcategory_name:string|null;checklist_mode:SubcategoryChecklistMode|null;has_options:number;
  run_template_id:number|null;run_template_name:string|null;run_template_version:number|null;run_template_subcategory_id:number|null}>();
  const subcategoryId=row?.repair_subcategory_id??null,subcategoryName=row?.subcategory_name??null;
  if(row?.run_template_id!=null)return{mode:'required',template:{id:Number(row.run_template_id),name:row.run_template_name||type.name+' Checklist',version:Number(row.run_template_version),subcategoryId:row.run_template_subcategory_id??null},waitingForSubcategory:false,subcategoryId,subcategoryName,source:'started',started:true};
+ if(!row||row.equipment_id===null||row.maintenance||type.name.toUpperCase()==='INDIRECT LABOR-OTHER')return{mode:'none',template:null,waitingForSubcategory:false,subcategoryId,subcategoryName,source:'parent',started:false};
  const waitingForSubcategory=Boolean(row?.has_options&&!subcategoryId);
  const custom=Boolean(subcategoryId&&row?.checklist_mode&&row.checklist_mode!=='inherit');
  const mode=custom?row!.checklist_mode as ChecklistMode:type.checklistMode;
