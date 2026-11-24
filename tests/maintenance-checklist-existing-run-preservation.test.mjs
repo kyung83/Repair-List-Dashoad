@@ -193,7 +193,7 @@ test('Worker keeps existing runs on their own item snapshot through completion',
 
   const existingLookup = route.indexOf('const existing = await loadRun(repair.id);');
   const existingReturn = route.indexOf('if (existing) return existing;', existingLookup);
-  const templateLookup = route.indexOf('const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo);');
+  const templateLookup = route.indexOf('const template = await getAssignedChecklistTemplate(env.DB, kind, appliesTo, repair);');
   assert.ok(existingLookup >= 0 && existingReturn > existingLookup && templateLookup > existingReturn,
     'ensureRun must return a pre-existing run before loading the assigned published template.');
 
