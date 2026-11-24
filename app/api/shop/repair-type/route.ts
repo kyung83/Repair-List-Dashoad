@@ -131,7 +131,8 @@ export async function POST(request:Request) {
     if (current?.id !== next.id) {
       const run = await env.DB.prepare(`SELECT id FROM repair_type_checklist_runs WHERE repair_id=? LIMIT 1`).bind(repairId).first<{id:number}>();
       if (run) throw new Error('This Repair Type cannot be changed after its checklist has been started.');
-      await env.DB.prepare(`UPDATE repairs SET repair_type_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND NOT EXISTS(SELECT 1 FROM repair_type_checklist_runs WHERE repair_id=repairs.id)`).bind(next.id,repairId).run();
+      const changed=await env.DB.prepare(`UPDATE repairs SET repair_type_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND NOT EXISTS(SELECT 1 FROM repair_type_checklist_runs WHERE repair_id=repairs.id)`).bind(next.id,repairId).run();
+      if(!changed.meta.changes)throw new Error('The repair changed or its checklist has started. Reload before changing the Repair Type.');
       await env.DB.prepare(`
         INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail)
         VALUES(?,?,?,'repair_type_selected',?)
