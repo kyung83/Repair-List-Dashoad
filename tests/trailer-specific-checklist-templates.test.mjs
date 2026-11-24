@@ -111,7 +111,7 @@ test('Annual includes essential trailer safety categories, rear impact guard and
 });
 test('runs are snapshotted before template lookup, protecting started inspections',()=>{
   assert.match(activeRoute,/const existing = await loadRun\(repair\.id\);[\s\S]*if \(existing\) return existing/);
-  assert.match(activeRoute,/getAssignedChecklistTemplate\(env\.DB, kind, appliesTo\)/);
+  assert.match(activeRoute,/getAssignedChecklistTemplate\(env\.DB, kind, appliesTo, repair\)/);
   assert.match(activeRoute,/JOIN maintenance_checklist_template_items i ON i\.template_id = \?/);
   assert.match(templates,/ON CONFLICT\(event_type, applies_to\) DO UPDATE/);
   assert.doesNotMatch(migration,/\bDELETE\s+FROM\b|\bDROP\s+TABLE\b|\bALTER\s+TABLE\b|UPDATE\s+maintenance_checklist_runs|UPDATE\s+maintenance_checklist_items/i);

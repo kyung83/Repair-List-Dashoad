@@ -1,11 +1,11 @@
 import {env} from 'cloudflare:workers';
 import {getSessionUser,type AppUser} from '@/lib/auth';
 import {isRepairTeamMember} from '@/lib/repair-team';
-import {VERIFIED_TRAILER_PM_ANNUAL_V1,canReuseTrailerPmAnnual} from '@/lib/trailer-pm-annual-shared-items';
+import {VERIFIED_TRAILER_PM_ANNUAL_V1,canReuseTrailerPmAnnual,canReuseTrailerBodyPmAnnual,verifiedTrailerPmAnswer} from '@/lib/trailer-pm-annual-shared-items';
 
 type PmRow={id:number;equipment_id:number;unit:string;equipment_type:string;source:string;status:string;technician_id:number|null;annual_date:string|null;annual_interval:number;annual_enabled:number;location:string;driver:string};
 type AnnualRow={id:number;technician_id:number|null;status:string};
-type Run={id:number;repair_id:number;event_type:string;status:string;template_key:string;template_version:number;started_at:string;signed_at:string|null};
+type Run={id:number;repair_id:number;event_type:string;status:string;template_key:string;template_version:number;started_at:string;signed_at:string|null;pm_body_type_snapshot:string|null};
 type Answer={item_number:number;item_text:string;result:string;notes:string|null;updated_by_user_id:number|null;updated_at:string;require_photo:number;require_measurement:number;require_notes:number};
 const dayMs=86400000;
 function numberId(raw:unknown){
@@ -50,7 +50,7 @@ async function existingAnnual(equipmentId:number){
 }
 async function runFor(repairId:number){
   return env.DB.prepare(`
-    SELECT c.id,c.repair_id,c.event_type,c.status,c.started_at,c.signed_at,
+    SELECT c.id,c.repair_id,c.event_type,c.status,c.started_at,c.signed_at,c.pm_body_type_snapshot,
            COALESCE(t.template_key,'') AS template_key,COALESCE(c.template_version,0) AS template_version
     FROM maintenance_checklist_runs c
     LEFT JOIN maintenance_checklist_templates t ON t.id=c.template_id
@@ -65,26 +65,24 @@ function annualDates(pm:PmRow){
   return {lastAnnualDate:raw||null,nextAnnualDue:due,daysRemaining,annualIntervalDays:pm.annual_interval,
     annualEnabled:Boolean(pm.annual_enabled)};
 }
-async function countReusable(pmRepairId:number,actorId:number){
-  const pmRun=await runFor(pmRepairId);
-  if(!pmRun||pmRun.template_key!=='trailer-service'||pmRun.template_version!==1)return 0;
+async function countReusable(pmRun:Run|null,annualRepairId:number|null,actorId:number){
+  if(!pmRun)return 0;
+  const annualRun=annualRepairId?await runFor(annualRepairId):null;
+  const assigned=annualRun?null:await env.DB.prepare(`SELECT t.template_key,t.version AS template_version FROM maintenance_checklist_templates t WHERE t.event_type='annual' AND t.active=1 AND t.template_key=COALESCE((SELECT template_key FROM maintenance_checklist_template_assignments WHERE event_type='annual' AND applies_to='trailer'),'default') LIMIT 1`).first<{template_key:string;template_version:number}>();
+  const target=annualRun??(assigned?{...assigned,event_type:'annual',status:'in_progress',signed_at:null,started_at:new Date().toISOString()}:null);
+  if(!target||!(canReuseTrailerPmAnnual(pmRun,target)||canReuseTrailerBodyPmAnnual(pmRun,target)))return 0;
   const a=await env.DB.prepare(`
     SELECT item_number,item_text,result,notes,updated_by_user_id,updated_at,
            require_photo,require_measurement,require_notes
     FROM maintenance_checklist_items WHERE checklist_run_id=?
   `).bind(pmRun.id).all<Answer>();
-  const byNumber=new Map(a.results.map(i=>[i.item_number,i]));
-  return VERIFIED_TRAILER_PM_ANNUAL_V1.filter(pair=>{
-    const item=byNumber.get(pair.pm);
-    return item?.result==='pass'&&item.updated_by_user_id===actorId&&item.item_text===pair.pmText&&
-      !item.require_photo&&!item.require_measurement&&!item.require_notes;
-  }).length;
+  return VERIFIED_TRAILER_PM_ANNUAL_V1.filter(pair=>verifiedTrailerPmAnswer(pmRun,a.results,pair,actorId)).length;
 }
 async function context(user:AppUser,id:number){
   const pm=await pmFor(id,user);
   const annual=await existingAnnual(pm.equipment_id);
   const pmRun=await runFor(pm.id);
-  const possible=await countReusable(pm.id,user.id);
+  const possible=await countReusable(pmRun,annual?.id??null,user.id);
   return {ok:true,unit:pm.unit,pmRepairId:'repair-'+id,annualRepairId:annual?'repair-'+annual.id:null,
     pmStarted:Boolean(pmRun),pmStatus:pmRun?.status??'not_started',pmCompleted:pm.status.toLowerCase().includes('complete'),
     ...annualDates(pm),reusablePmAnswers:possible,verifiedMappingCount:VERIFIED_TRAILER_PM_ANNUAL_V1.length};
@@ -140,21 +138,20 @@ async function reuse(user:AppUser,pm:PmRow,annualId:number){
   if(!(await isRepairTeamMember(env.DB,annualId,Number(user.technicianId))))
     throw new Error('The Annual is not assigned to you.');
   const pmRun=await runFor(pm.id),annualRun=await runFor(annualId);
-  if(!pmRun||!annualRun||!canReuseTrailerPmAnnual(pmRun,annualRun))
-    throw new Error('This Annual needs its own inspection answers. Reuse requires the matching v1 templates, same visit, and an unsigned in-progress Annual.');
+  if(!pmRun||!annualRun||!(canReuseTrailerPmAnnual(pmRun,annualRun)||canReuseTrailerBodyPmAnnual(pmRun,annualRun)))
+    throw new Error('This Annual needs its own inspection answers. Reuse requires a verified original or body-specific PM, the original verified Annual template, the same visit, and an unsigned in-progress Annual.');
   const pmAnswers=await env.DB.prepare(`
     SELECT item_number,item_text,result,notes,updated_by_user_id,updated_at,
            require_photo,require_measurement,require_notes
     FROM maintenance_checklist_items WHERE checklist_run_id=?
   `).bind(pmRun.id).all<Answer>();
-  const byNumber=new Map(pmAnswers.results.map(i=>[i.item_number,i]));
   const actions=[];
   for(const pair of VERIFIED_TRAILER_PM_ANNUAL_V1){
-    const answer=byNumber.get(pair.pm);
+    const answer=verifiedTrailerPmAnswer(pmRun,pmAnswers.results,pair,user.id);
     // A technician may only attest to checks they personally marked PASS on this visit.
     if(!answer||answer.item_text!==pair.pmText||answer.result!=='pass'||
        answer.updated_by_user_id!==user.id||answer.require_photo||answer.require_measurement||answer.require_notes)continue;
-    const evidence=(`Checked during Trailer PM #${pm.id} item #${pair.pm}; reused for Annual by ${user.displayName} on this visit.`+
+    const evidence=(`Checked during Trailer PM #${pm.id} item #${answer.item_number}; reused for Annual by ${user.displayName} on this visit.`+
       (answer.notes?.trim()?' PM notes: '+answer.notes.trim():'' )).slice(0,1000);
     actions.push(env.DB.prepare(`
       UPDATE maintenance_checklist_items
@@ -168,7 +165,7 @@ async function reuse(user:AppUser,pm:PmRow,annualId:number){
           AND pmi.result='pass' AND pmi.updated_by_user_id=? AND pmi.require_photo=0
           AND pmi.require_measurement=0 AND pmi.require_notes=0)
     `).bind(evidence,user.id,annualRun.id,pair.annual,pair.annualText,annualRun.id,
-      pmRun.id,pair.pm,pair.pmText,user.id));
+      pmRun.id,answer.item_number,pair.pmText,user.id));
   }
   if(!actions.length)return {reused:0,remaining:null};
   const results=await env.DB.batch(actions);

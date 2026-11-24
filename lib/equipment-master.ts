@@ -7,6 +7,7 @@ type EquipmentMasterRow = {
   equipment_type: string;
   trailer_type: string | null;
   trailer_subtype: string | null;
+  truck_body_type: string;
   active: number;
   current_mileage: number | null;
   service_date: string | null;
@@ -99,7 +100,7 @@ function categoryFor(type: string, value: unknown) {
 
 export async function getEquipmentMaster(db: D1Database) {
   const result = await db.prepare(`
-    SELECT e.id, e.unit, e.category, e.equipment_type, e.trailer_type, e.trailer_subtype, e.active, e.current_mileage,
+    SELECT e.id, e.unit, e.category, e.equipment_type, e.trailer_type, e.trailer_subtype, e.truck_body_type, e.active, e.current_mileage,
            e.service_date, e.annual_date, e.notes, e.geotab_device_id, e.geotab_trailer_id,
            e.driver, e.location, e.vin, e.license_plate, e.license_state, e.model_year,
            e.make, e.model, e.engine, e.purchase_date, e.purchase_price, e.purchased_from,
@@ -131,6 +132,7 @@ export async function getEquipmentMaster(db: D1Database) {
           : 'Uncategorized',
       equipmentType: row.equipment_type,
       trailerType,
+      truckBodyType:row.truck_body_type??'',
       active,
       archived,
       archivedAt: row.archived_at ?? '',

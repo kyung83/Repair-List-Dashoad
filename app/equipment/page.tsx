@@ -17,6 +17,7 @@ type EquipmentItem = {
   category: string;
   equipmentType: string;
   trailerType: string;
+  truckBodyType: string;
   active: boolean;
   archived: boolean;
   archivedAt: string;
@@ -59,6 +60,7 @@ type EquipmentDraft = {
   category: string;
   equipmentType: string;
   trailerType: string;
+  truckBodyType: string;
   currentMileage: string;
   vin: string;
   licensePlate: string;
@@ -83,6 +85,7 @@ const emptyDraft: EquipmentDraft = {
   category: "Uncategorized",
   equipmentType: "truck",
   trailerType: "",
+  truckBodyType: "",
   currentMileage: "",
   vin: "",
   licensePlate: "",
@@ -141,6 +144,7 @@ function draftFor(item: EquipmentItem): EquipmentDraft {
     category: item.category,
     equipmentType: item.equipmentType,
     trailerType: item.trailerType,
+    truckBodyType:item.truckBodyType??'',
     currentMileage: item.currentMileage == null ? "" : String(item.currentMileage),
     vin: item.vin,
     licensePlate: item.licensePlate,
@@ -232,6 +236,7 @@ export default function EquipmentMasterPage() {
       category: current.category,
       equipmentType: current.equipmentType,
       trailerType: current.trailerType,
+      truckBodyType:current.truckBodyType,
       currentMileage: current.currentMileage || null,
       vin: current.vin,
       licensePlate: current.licensePlate,
@@ -333,6 +338,7 @@ export default function EquipmentMasterPage() {
         item.category,
         item.equipmentType,
         item.trailerType,
+        item.truckBodyType,
         item.source,
         item.vin,
         item.licensePlate,
@@ -440,7 +446,7 @@ export default function EquipmentMasterPage() {
                   </td>
                   <td>
                     <strong>{labelType(item.equipmentType)}</strong>
-                    <div className="cell-muted">{item.equipmentType === "trailer" && item.trailerType ? `${item.category} · ${item.trailerType}` : item.category}</div>
+                    <div className="cell-muted">{item.equipmentType === "trailer" && item.trailerType ? `${item.category} · ${item.trailerType}` : item.equipmentType==='truck'&&item.truckBodyType?`${item.category} · ${item.truckBodyType}`:item.category}</div>
                   </td>
                   <td><strong>{makeModel(item)}</strong></td>
                   <td>{item.engine || "—"}</td>
@@ -497,8 +503,9 @@ export default function EquipmentMasterPage() {
 
             <div className="equipment-form-grid">
               <label><span>Unit number / asset name *</span><input disabled={editing.source === "Geotab" && editing.id != null} value={editing.unit} onChange={(event) => setEditing({ ...editing, unit: event.target.value })} /></label>
-              <label><span>Equipment type *</span><select value={editing.equipmentType} onChange={(event) => { const next = event.target.value; setEditing({ ...editing, equipmentType: next, trailerType: next === "trailer" ? editing.trailerType : "", category: next === "trailer" ? "Trailers" : editing.category === "Trailers" ? "Uncategorized" : editing.category }); }}>{(data?.equipmentTypes ?? Object.keys(typeLabels)).map((value) => <option key={value} value={value}>{labelType(value)}</option>)}</select></label>
+              <label><span>Equipment type *</span><select value={editing.equipmentType} onChange={(event) => { const next = event.target.value; setEditing({ ...editing, equipmentType: next, trailerType: next === "trailer" ? editing.trailerType : "", truckBodyType:next==="truck"?editing.truckBodyType:"", category: next === "trailer" ? "Trailers" : editing.category === "Trailers" ? "Uncategorized" : editing.category }); }}>{(data?.equipmentTypes ?? Object.keys(typeLabels)).map((value) => <option key={value} value={value}>{labelType(value)}</option>)}</select></label>
               {editing.equipmentType === "trailer" && <label><span>Trailer body type *</span><select value={editing.trailerType} onChange={(event) => setEditing({ ...editing, trailerType: event.target.value })}><option value="">Choose body type</option>{(data?.trailerTypes ?? ["Flat Bed", "Step Deck", "Conestoga", "Dry Van"]).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>}
+              {editing.equipmentType==="truck"&&<label><span>Truck body type (PM checklist)</span><input value={editing.truckBodyType} maxLength={100} list="truck-body-types" placeholder="Enter or select a body type" onChange={event=>setEditing({...editing,truckBodyType:event.target.value})}/><datalist id="truck-body-types">{[...new Set((data?.equipment??[]).filter(item=>item.equipmentType==="truck"&&item.truckBodyType).map(item=>item.truckBodyType))].sort().map(value=><option key={value} value={value}/>)}</datalist><small>Blank uses the default truck PM checklist. Does not change the PM schedule.</small></label>}
               <label><span>PM / equipment group</span><select disabled={editing.equipmentType === "trailer"} value={editing.equipmentType === "trailer" ? "Trailers" : editing.category} onChange={(event) => setEditing({ ...editing, category: event.target.value })}><option>Uncategorized</option>{(data?.categories ?? []).filter((value) => value !== "Trailers").map((value) => <option key={value}>{value}</option>)}{editing.equipmentType === "trailer" && <option>Trailers</option>}</select></label>
               <label><span>Model year</span><input type="number" min="1900" max="2100" value={editing.modelYear} onChange={(event) => setEditing({ ...editing, modelYear: event.target.value })} /></label>
               <label><span>Make</span><input value={editing.make} onChange={(event) => setEditing({ ...editing, make: event.target.value })} /></label>

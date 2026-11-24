@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
+import {assignBodyPMTemplate,clearBodyPMTemplate,listPMBodyAssignments,listPMBodyTypes,requirePMBodyType} from '@/lib/pm-body-types';
 import {
   assignChecklistTemplate,
   createChecklistTemplate,
@@ -101,8 +102,8 @@ async function kindPayload(kind: ChecklistEventType) {
 }
 
 async function setupPayload() {
-  const [pm, annual] = await Promise.all([kindPayload('pm'), kindPayload('annual')]);
-  return { pm, annual, updatedAt: new Date().toISOString() };
+  const [pm, annual,bodyAssignments,bodyTypes] = await Promise.all([kindPayload('pm'), kindPayload('annual'),listPMBodyAssignments(env.DB),listPMBodyTypes(env.DB)]);
+  return { pm, annual,bodyAssignments,bodyTypes, updatedAt: new Date().toISOString() };
 }
 
 export async function GET(request: Request) {
@@ -124,6 +125,19 @@ export async function POST(request: Request) {
     const action = String(body.action ?? '');
     const kind = eventType(body.eventType);
 
+    if(action==='assignBody'||action==='clearBody'){
+      if(kind!=='pm')throw new Error('Body-specific assignments are only for PM checklists. Annual assignments are unchanged.');
+      const target=appliesTo(body.appliesTo);
+      const bodyType=await requirePMBodyType(env.DB,target,body.bodyType);
+      if(action==='assignBody'){
+        const templateKey=cleanText(body.templateKey,'Checklist template',180);
+        await assignBodyPMTemplate(env.DB,target,bodyType,templateKey,user.id);
+        return Response.json({ok:true,selectedTemplateKey:templateKey,...await setupPayload()},{headers:{'cache-control':'no-store'}});
+      }
+      await clearBodyPMTemplate(env.DB,target,bodyType);
+      return Response.json({ok:true,...await setupPayload()},{headers:{'cache-control':'no-store'}});
+    }
+
     if (action === 'assign') {
       const target = appliesTo(body.appliesTo);
       const templateKey = cleanText(body.templateKey, 'Checklist template', 180);
@@ -136,9 +150,13 @@ export async function POST(request: Request) {
       const defaultName = kind === 'annual' ? 'New Annual Template' : 'New PM Template';
       const name = String(body.name ?? '').trim() || defaultName;
       if (name.length > 100) throw new Error('Checklist name must be 100 characters or fewer.');
-      const created = await createChecklistTemplate(env.DB, kind, name, items, user.id);
       const assignTarget = body.assignTo === 'truck' || body.assignTo === 'trailer' ? body.assignTo : null;
-      if (assignTarget) await assignChecklistTemplate(env.DB, kind, assignTarget, created.templateKey, user.id);
+      const hasBody=typeof body.bodyType==='string'&&Boolean(body.bodyType.trim());
+      if(hasBody&&(kind!=='pm'||!assignTarget))throw new Error('Choose a truck or trailer PM body assignment.');
+      const assignBody=hasBody?await requirePMBodyType(env.DB,assignTarget!,body.bodyType):null;
+      const created = await createChecklistTemplate(env.DB, kind, name, items, user.id);
+      if(assignTarget&&assignBody)await assignBodyPMTemplate(env.DB,assignTarget,assignBody,created.templateKey,user.id);
+      else if (assignTarget) await assignChecklistTemplate(env.DB, kind, assignTarget, created.templateKey, user.id);
       return Response.json({ ok: true, selectedTemplateKey: created.templateKey, ...(await setupPayload()) }, { headers: { 'cache-control': 'no-store' } });
     }
 

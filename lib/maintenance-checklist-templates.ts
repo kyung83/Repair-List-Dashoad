@@ -1,4 +1,5 @@
 import { checklistFor } from './maintenance-checklists';
+import {bodyPMTemplateKey,type EquipmentBodyFields} from './pm-body-types';
 
 export type ChecklistEventType = 'pm' | 'annual';
 export type ChecklistAppliesTo = 'truck' | 'trailer';
@@ -27,6 +28,7 @@ export type ChecklistTemplate = {
   active: boolean;
   createdAt: string;
   items: ChecklistTemplateItem[];
+  bodyTypeAssignment?:string;
 };
 
 type TemplateRow = {
@@ -351,7 +353,12 @@ export async function getAssignedChecklistTemplate(
   db: D1Database,
   eventType: ChecklistEventType,
   appliesTo: ChecklistAppliesTo,
-) {
+  equipment?:EquipmentBodyFields,
+):Promise<ChecklistTemplate> {
+  if(eventType==='pm'&&equipment){
+    const override=await bodyPMTemplateKey(db,equipment);
+    if(override){const row=await activeRow(db,eventType,override.templateKey);if(row)return{...await rowToTemplate(db,row),bodyTypeAssignment:override.bodyType};}
+  }
   const assignment = await db.prepare(`
     SELECT template_key
     FROM maintenance_checklist_template_assignments
