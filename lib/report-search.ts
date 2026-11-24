@@ -18,6 +18,7 @@ type SearchInput = {
   expenseSource?: unknown;
   query?: unknown;
   deepSearch?: boolean;
+  includeInactive?: boolean;
 };
 
 type EquipmentRow = {
@@ -188,6 +189,7 @@ function normalizeInput(raw: SearchInput) {
     expenseSource: text(raw.expenseSource, 120),
     query: text(raw.query, 200),
     deepSearch: raw.deepSearch === true,
+    includeInactive: raw.includeInactive === true,
   };
 }
 
@@ -214,7 +216,7 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   const equipmentPromise = db.prepare(`
     SELECT id, unit, category, equipment_type, model_year, make, model
     FROM equipment
-    WHERE active = 1
+    ${input.includeInactive ? '' : 'WHERE active = 1'}
     ORDER BY unit COLLATE NOCASE
   `).all<EquipmentRow>();
 
@@ -260,7 +262,8 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   `;
   const repairPromise = db.prepare(repairSql).bind(...repairBinds).all<RepairRow>();
 
-  const historyClauses = [`substr(h.ro_date,1,10) BETWEEN ? AND ?`, `e.active=1`];
+  const historyClauses = [`substr(h.ro_date,1,10) BETWEEN ? AND ?`];
+  if(!input.includeInactive) historyClauses.push('e.active=1');
   const historyBinds: unknown[] = [input.startDate, input.endDate];
   addEquipmentFilters('e', input, historyClauses, historyBinds);
   if (input.repairType) historyClauses.push('1=0');
