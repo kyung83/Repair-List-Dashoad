@@ -1,5 +1,5 @@
 'use client';
-import {useRef,useState,type TextareaHTMLAttributes} from 'react';
+import {useRef,useState,type ChangeEvent,type TextareaHTMLAttributes} from 'react';
 type Props=TextareaHTMLAttributes<HTMLTextAreaElement>&{value:string};
 export default function NoteSpellcheck({value,onChange,disabled,maxLength,...props}:Props){
   const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[proposal,setProposal]=useState<{original:string;corrected:string}|null>(null),[undo,setUndo]=useState<{original:string;corrected:string}|null>(null);
@@ -8,7 +8,7 @@ export default function NoteSpellcheck({value,onChange,disabled,maxLength,...pro
   const limit=Math.min(maxLength??2000,2000);
   function change(next:string){
     // Preserve existing controlled-field handlers, including their length limits.
-    onChange?.({target:{value:next},currentTarget:{value:next}} as React.ChangeEvent<HTMLTextAreaElement>);
+    onChange?.({target:{value:next},currentTarget:{value:next}} as ChangeEvent<HTMLTextAreaElement>);
   }
   async function check(){
     const original=value;
