@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import {requireConfiguredSubcategoryBeforeLeavingWork} from '@/lib/repair-subcategories';
 import { isRepairTeamMember, activeRepairTeammates } from '@/lib/repair-team';
 import { getSessionUser } from '@/lib/auth';
 import { getShopLaborRate } from '@/lib/billing';
@@ -247,6 +248,7 @@ async function stopLaborSession(
     throw new Error('That repair is not the repair you are working on now.');
   }
 
+  await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,Number(timer.repair_id));
   const elapsedHours = Math.max(0.01, Math.round(((Date.now() - timestampMs(timer.started_at)) / 3600000) * 100) / 100);
   const rate = await getShopLaborRate(env.DB);
   const laborDate = new Date().toISOString().slice(0, 10);
@@ -491,6 +493,7 @@ async function handleRepairOutcome(request:Request, body:Record<string,unknown>)
   const timer = await activeTimer(user.id);
   if (!timer || Number(timer.repair_id) !== id) throw new Error('That repair is not WORKING NOW.');
 
+  await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,id);
   let partResult: Record<string,unknown>|null = null;
   if (outcome === 'waiting_part') {
     let shortage = await hasOpenPartShortage(id);
