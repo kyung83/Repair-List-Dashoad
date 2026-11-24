@@ -17,6 +17,7 @@ type SearchInput = {
   expenseCategory?: unknown;
   expenseSource?: unknown;
   query?: unknown;
+  deepSearch?: boolean;
 };
 
 type EquipmentRow = {
@@ -186,6 +187,7 @@ function normalizeInput(raw: SearchInput) {
     expenseCategory: text(raw.expenseCategory, 100),
     expenseSource: text(raw.expenseSource, 120),
     query: text(raw.query, 200),
+    deepSearch: raw.deepSearch === true,
   };
 }
 
@@ -227,6 +229,11 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   if (input.query) {
     repairClauses.push(`lower(COALESCE(e.unit,'') || ' ' || COALESCE(r.title,'') || ' ' || COALESCE(rt.name,'Uncategorized') || ' ' || COALESCE(r.status,'') || ' ' || COALESCE(r.source,'') || ' ' || COALESCE(t.name,r.driver,'') || ' ' || COALESCE(r.location,'')) LIKE ?`);
     repairBinds.push(`%${input.query.toLowerCase()}%`);
+    if(input.deepSearch){
+      const base=repairClauses.pop();
+      repairClauses.push(`(${base} OR lower(COALESCE(r.description,'') || ' ' || COALESCE(r.parts_text,'') || ' ' || COALESCE(r.review_note,'')) LIKE ? OR EXISTS(SELECT 1 FROM repair_job_events n WHERE n.repair_id=r.id AND n.action='technician_note' AND lower(COALESCE(n.detail,'')) LIKE ?) OR EXISTS(SELECT 1 FROM repair_parts pr JOIN parts pp ON pp.id=pr.part_id WHERE pr.repair_id=r.id AND lower(COALESCE(pp.part_number,'') || ' ' || COALESCE(pp.description,'')) LIKE ?))`);
+      repairBinds.push(...Array(3).fill(`%${input.query.toLowerCase()}%`));
+    }
   }
 
   const repairSql = `
@@ -264,6 +271,11 @@ export async function getReportSearchData(db: D1Database, raw: SearchInput) {
   if (input.query) {
     historyClauses.push(`lower(COALESCE(e.unit,'') || ' ' || COALESCE(h.ro_number,'') || ' ' || COALESCE(h.location,'') || ' ' || COALESCE(h.source_status,'')) LIKE ?`);
     historyBinds.push(`%${input.query.toLowerCase()}%`);
+    if(input.deepSearch){
+      const base=historyClauses.pop();
+      historyClauses.push(`(${base} OR EXISTS(SELECT 1 FROM historical_repair_lines hl WHERE hl.historical_repair_id=h.id AND lower(COALESCE(hl.vmrs_description,'') || ' ' || COALESCE(hl.major_category,'') || ' ' || COALESCE(hl.system_code,'') || ' ' || COALESCE(hl.assembly_code,'')) LIKE ?))`);
+      historyBinds.push(`%${input.query.toLowerCase()}%`);
+    }
   }
   const historySql = `
     WITH history_data AS (
