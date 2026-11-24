@@ -32,7 +32,10 @@ export default function CurrentRepairTypeControl({repairId}:Props){
 
   useEffect(()=>{
     const blockExit=(event:Event)=>{
-      if(!data||data.locked||data.maintenanceEventType||data.current)return;
+      if(!data||data.maintenanceEventType||data.noUnit)return;
+      const missingType=!data.current&&!data.locked;
+      const missingSubcategory=Boolean(data.current&&(data.subcategories??[]).length&&!data.currentSubcategory);
+      if(!missingType&&!missingSubcategory)return;
       const target=event.target instanceof Element?event.target.closest("button"):null;
       if(!target)return;
       const text=target.textContent?.trim().toUpperCase()??"";
@@ -40,7 +43,7 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       const doneWorking=target.matches('[data-shop-action="done-working"]')||text.startsWith("DONE WORKING");
       if(!repaired&&!doneWorking)return;
       event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
-      const message=repaired?"Choose the Repair Type above the repair actions before marking REPAIRED.":"Choose the Repair Type above the repair actions before leaving this work.";
+      const message=missingSubcategory?"Choose the required subcategory before leaving this work.":repaired?"Choose the Repair Type above the repair actions before marking REPAIRED.":"Choose the Repair Type above the repair actions before leaving this work.";
       setMessage(message);
       window.dispatchEvent(new CustomEvent("shop-repair-close-blocked",{detail:{repairId,reason:"repair-type",message}}));
       window.requestAnimationFrame(()=>document.getElementById("current-repair-type")?.scrollIntoView({behavior:"smooth",block:"center"}));
@@ -75,6 +78,7 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       const payload=await response.json() as Data;
       if(!response.ok||!payload.ok)throw new Error(payload.error||"Subcategory could not be saved.");
       setData(payload);setMessage(payload.currentSubcategory?payload.currentSubcategory.name+" saved.":"Subcategory cleared and saved.");
+      window.dispatchEvent(new CustomEvent("shop-repair-close-updated",{detail:{repairId}}));
     }catch(error){const text=error instanceof Error?error.message:"Subcategory could not be saved.";await load();setMessage(text);}
     finally{setBusy(false);}
   }
@@ -86,19 +90,20 @@ export default function CurrentRepairTypeControl({repairId}:Props){
   const subcategories=data.subcategories??[];
   const savedSubcategory=data.currentSubcategory;
   const subcategoryOptions=savedSubcategory&&!subcategories.some(s=>s.id===savedSubcategory.id)?[savedSubcategory,...subcategories]:subcategories;
+  const missingSubcategory=Boolean(data.current&&subcategories.length&&!savedSubcategory);
   const checklist=data.current?.checklistMode&&data.current.checklistMode!=="none";
   const helpText=data.lockReason==="checklist_started"
     ? "Locked because this category checklist has started."
     : data.current
       ? "You can change it until a category checklist is started."
       : "Select this while you are working. Repair entry stays fast for the office.";
-  return <section id="current-repair-type" style={data.current?box:requiredBox}>
+  return <section id="current-repair-type" style={data.current&&!missingSubcategory?box:requiredBox}>
     <div style={{display:"grid",gap:4}}><span style={label}>REPAIR TYPE {data.current?"":"· REQUIRED"}</span><strong style={headline}>{data.current?.name||"Choose what type of repair this is"}</strong><small style={help}>{helpText}</small></div>
     <select value={data.current?.id?String(data.current.id):""} disabled={busy||data.locked} onChange={event=>void choose(event.target.value)} style={{...select,...(data.locked?lockedSelect:{})}}>
       <option value="">Choose Repair Type…</option>
       {data.types.map(type=><option key={type.id} value={type.id}>{type.name}{type.checklistMode==="required"?" · CHECKLIST":""}</option>)}
     </select>
-    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY · OPTIONAL</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy||data.current.active===false} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="">No subcategory / not specified</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>Add more detail if appropriate. The main Repair Type and checklist rules do not change.</small></label>}
+    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY {subcategories.length?"· REQUIRED":""}</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="" disabled={subcategories.length>0}>{subcategories.length?"Choose required subcategory…":"No subcategory / not specified"}</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>Select a subcategory before leaving this repair. The main Repair Type and checklist rules do not change.</small></label>}
     {checklist&&<div style={checklistNote}>{data.current?.name} uses a check sheet. {data.lockReason==="checklist_started"?"The Repair Type is now locked for this work order.":"It will appear below after this selection."}</div>}
     {message&&<div style={message.includes("saved")?successBox:errorBox}>{message}</div>}
   </section>;
