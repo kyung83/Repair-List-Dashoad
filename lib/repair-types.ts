@@ -1,3 +1,5 @@
+import {requireConfiguredSubcategoryBeforeLeavingWork} from './repair-subcategories';
+
 export type RepairType={id:number;name:string;unitRule:'required'|'optional';checklistMode:'none'|'optional'|'required';active:boolean;sortOrder:number};
 
 type TypeRow={id:number;name:string;unit_rule:'required'|'optional';checklist_mode:'none'|'optional'|'required';active:number;sort_order:number};
@@ -28,6 +30,7 @@ export async function maintenanceWorkTypeForRepair(db:D1Database,repairId:number
 export async function requireRepairTypeBeforeLeavingWork(db:D1Database,repairId:number){
  const maintenance=await maintenanceWorkTypeForRepair(db,repairId);if(maintenance)return null;
  const type=await repairTypeForRepair(db,repairId);if(!type)throw new Error('Choose the Repair Type before leaving this work.');
+ await requireConfiguredSubcategoryBeforeLeavingWork(db,repairId);
  return type;
 }
 
