@@ -2,6 +2,7 @@ import {env} from 'cloudflare:workers';
 import {getSessionUser} from '@/lib/auth';
 import {getReportSearchData} from '@/lib/report-search';
 import {getBreakdownReportData} from '@/lib/breakdown-reports';
+import {getReportCenterHistoryLines} from '@/lib/report-center-history';
 
 export async function GET(request:Request){
   const user=await getSessionUser(env.DB,request);
@@ -14,9 +15,9 @@ export async function GET(request:Request){
     if(!validDate(start)||!validDate(end)||start>end)throw new RangeError('Select a valid date range.');
     if(!['','truck','trailer'].includes(type))throw new RangeError('Select a valid equipment type.');
     if(unit&&(!/^\d+$/.test(unit)||!Number.isSafeInteger(Number(unit))||Number(unit)<=0))throw new RangeError('Select a valid unit.');
-    if(view!=='repairs'&&view!=='breakdowns')throw new RangeError('Invalid report view.');
+    if(view!=='repairs'&&view!=='breakdowns'&&view!=='history')throw new RangeError('Invalid report view.');
     const filters={startDate:start,endDate:end,equipmentType:type,equipmentId:unit,query:p.get('q'),deepSearch:true,includeInactive:true};
-    const result=view==='repairs'?await getReportSearchData(env.DB,filters):await getBreakdownReportData(env.DB,filters);
+    const result=view==='repairs'?await getReportSearchData(env.DB,filters):view==='breakdowns'?await getBreakdownReportData(env.DB,filters):await getReportCenterHistoryLines(env.DB,filters);
     return Response.json(result,{headers:{'cache-control':'no-store'}});
   }catch(error){
     console.error(JSON.stringify({event:'report_center_pilot_failed',error:String(error)}));
