@@ -45,5 +45,5 @@ export async function requireConfiguredSubcategoryBeforeLeavingWork(db:D1Databas
  AND EXISTS(SELECT 1 FROM repair_type_subcategories s WHERE s.repair_type_id=rt.id AND s.active=1)
  AND NOT EXISTS(SELECT 1 FROM repair_type_subcategories selected WHERE selected.id=r.repair_subcategory_id AND selected.repair_type_id=rt.id)
  LIMIT 1`).bind(repairId).first<{name:string}>();
- if(missing)throw new Error('Choose the required subcategory for '+missing.name+' before leaving this work.');
+ if(missing)throw new Error('Choose the required Repair Type subcategory for '+missing.name+' before leaving this work.');
 }
