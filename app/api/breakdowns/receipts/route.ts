@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { getBreakdownReceiptReview } from '@/lib/breakdown-driver-followup';
+import { getRollingReview } from '@/lib/breakdown-rolling-review';
 
 async function requireManager(request:Request){
   const user=await getSessionUser(env.DB,request);
@@ -30,7 +31,11 @@ export async function GET(request:Request){
     const id=breakdownId(url.searchParams.get('breakdownId'));
     const review=await getBreakdownReceiptReview(id);
     if(!review)return Response.json({error:'Breakdown was not found.'},{status:404,headers:{'cache-control':'no-store'}});
-    return Response.json({ok:true,review},{headers:{'cache-control':'no-store'}});
+    const [rollingReview, timeline] = await Promise.all([
+      getRollingReview(env.DB,id),
+      env.DB.prepare('SELECT created_at,rolling_confirmation_source FROM roadside_breakdowns WHERE id=?').bind(id).first<{created_at:string;rolling_confirmation_source:string}>(),
+    ]);
+    return Response.json({ok:true,review:{...review,rollingReview,reportedAt:timeline?.created_at??null,rollingSource:timeline?.rolling_confirmation_source??''}},{headers:{'cache-control':'no-store'}});
   }catch(error){
     const message=error instanceof Error?error.message:String(error);
     const status=/Authentication required/i.test(message)?401:/Manager or administrator/i.test(message)?403:400;
