@@ -215,7 +215,7 @@ export default function BreakdownsPage(){
     open:breakdowns.length,
     reported:breakdowns.filter(row=>row.stage===1).length,
     enRoute:breakdowns.filter(row=>row.stage===3).length,
-    onLocation:breakdowns.filter(row=>row.stage===4).length,
+    onLocation:breakdowns.filter(row=>row.stage===4&&row.status!=='ready_for_review'&&!row.geotab_rolling_review_at).length,
     geotabRolling:breakdowns.filter(row=>Boolean(row.geotab_rolling_review_at)).length,
     readyForTotals:breakdowns.filter(row=>row.status==='ready_for_review').length,
   }),[breakdowns]);
@@ -437,7 +437,7 @@ export default function BreakdownsPage(){
   }
 
   const stageChips:Array<{key:StageFilter;label:string;count:number}>=[
-    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},{key:'geotabRolling',label:'Geotab Rolling Review',count:summary.geotabRolling},{key:'readyForTotals',label:'Ready for Totals',count:summary.readyForTotals},
+    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},{key:'geotabRolling',label:'Geotab Rolling Review',count:summary.geotabRolling},{key:'readyForTotals',label:'Ready for Review',count:summary.readyForTotals},
   ];
 
   return <main className={s.page}><div className={s.shell}>
