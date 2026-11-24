@@ -104,7 +104,7 @@ export default function TrailerAnnualShortcut({pmRepairId,canWork,active=true}:P
     </div>
     {!info.annualEnabled&&<div role="alert" style={{color:"#9b4b17",fontWeight:800}}>Annual schedule is disabled for this trailer. Contact management.</div>}
     {!info.pmStarted&&<div style={{fontSize:12,color:"#794f22"}}>Start the normal Trailer PM checklist first.</div>}
-    {info.pmStarted&&<div style={{fontSize:12,color:"#495d72"}}>Currently verified matching PM checks: <b>{info.reusablePmAnswers}</b>. Annual has 40 questions; the rest must be inspected.</div>}
+    {info.pmStarted&&<div style={{fontSize:12,color:"#495d72"}}>Currently verified matching PM checks: <b>{info.reusablePmAnswers}</b>. Only verified matching checks can be carried over; all remaining Annual questions must be inspected.</div>}
     {error&&<div role="alert" style={{color:"#ad2929",fontSize:13,fontWeight:700}}>{error}</div>}
     {message&&<div role="status" style={{color:"#246142",fontSize:13}}>{message}</div>}
     {!opened&&canWork&&!info.pmCompleted&&info.annualEnabled&&<button type="button" disabled={busy||!info.pmStarted}
