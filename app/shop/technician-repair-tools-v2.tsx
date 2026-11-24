@@ -1,5 +1,6 @@
 "use client";
 
+import NoteSpellcheck from './note-spellcheck';
 import {useEffect,useMemo,useRef,useState} from "react";
 import {startNoteDictation,type NoteDictation} from "@/lib/shop-voice-note-dictation";
 
@@ -74,7 +75,7 @@ export default function TechnicianRepairToolsV2({repairId,canWork,mode="all",com
   return <section style={mode==="parts"?partsOnlyPanel:toolsPanel}>
     {showNotes&&<div id="pilot-notes" style={{...toolCard,...(compact?{padding:10,gap:7}:{}),scrollMarginTop:74}}>
       <div><strong style={heading}>REPAIR NOTES</strong><span style={help}>{compact?"Type or tap TALK. Notes save to this repair.":"Type it or tap TALK. Saved notes stay on this repair and remain visible in the final review."}</span></div>
-      <textarea value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={compact?3:4} style={textarea} disabled={noteBusy||listening}/>
+      <NoteSpellcheck value={note} onChange={event=>setNote(event.target.value.slice(0,2000))} placeholder="What did you find, check, repair, or still need?" rows={compact?3:4} style={textarea} disabled={noteBusy||listening}/>
       <div style={buttonRow}><button type="button" onClick={talk} style={talkButton} disabled={noteBusy}>{listening?"■ STOP":"🎤 TALK"}</button><button type="button" onClick={()=>void saveNote()} style={saveButton} disabled={noteBusy||listening}>{noteBusy?"Saving…":"SAVE NOTE"}</button></div>
       {noteMessage&&<div style={messageStyle}>{noteMessage}</div>}
       {notes.length>0&&<div style={history}><strong style={historyHeading}>SAVED NOTES</strong>{notes.map(item=><div key={item.id} style={noteRow}><div style={{whiteSpace:"pre-wrap"}}>{item.detail}</div><div style={meta}>{item.technician} · {noteTime(item.createdAt)}</div></div>)}</div>}
