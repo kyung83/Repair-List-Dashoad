@@ -105,6 +105,7 @@ const sidebarGroups: SidebarGroup[] = [
     href: "/reports",
     roles: officeRoles,
     links: [
+      { href: "/reports/center", label: "Reporting Center (Trial)", exact: true, roles: managerRoles },
       { href: "/reports", label: "Fleet Summary", exact: true, roles: officeRoles },
       { href: "/reports/search", label: "Unit Cost / Search", exact: true, roles: officeRoles },
       { href: "/reports/parts-usage", label: "Parts Usage", exact: true, roles: officeRoles },

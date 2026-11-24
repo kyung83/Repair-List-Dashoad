@@ -11,6 +11,7 @@ type BreakdownReportInput = {
   status?: unknown;
   location?: unknown;
   query?: unknown;
+  deepSearch?: boolean;
 };
 
 type BreakdownDataRow = {
@@ -138,6 +139,7 @@ function normalizeInput(raw: BreakdownReportInput) {
     status: text(raw.status, 100),
     location: text(raw.location, 180),
     query: text(raw.query, 200),
+    deepSearch: raw.deepSearch === true,
   };
 }
 
@@ -169,6 +171,11 @@ function filterSql(input: ReturnType<typeof normalizeInput>) {
       COALESCE(b.city,'') || ' ' || COALESCE(b.state,'') || ' ' || COALESCE(b.status,'')
     ) LIKE ?`);
     binds.push(`%${input.query.toLowerCase()}%`);
+    if(input.deepSearch){
+      const base=clauses.pop();
+      clauses.push(`(${base} OR lower(COALESCE(r.description,'') || ' ' || COALESCE(b.closeout_notes,'') || ' ' || COALESCE(b.closeout_invoice_number,'')) LIKE ? OR EXISTS(SELECT 1 FROM repair_job_events n WHERE n.repair_id=r.id AND n.action='technician_note' AND lower(COALESCE(n.detail,'')) LIKE ?) OR EXISTS(SELECT 1 FROM roadside_breakdown_tires tt WHERE tt.breakdown_id=b.id AND lower(COALESCE(tt.position_code,'') || ' ' || COALESCE(tt.tire_size,'')) LIKE ?))`);
+      binds.push(...Array(3).fill(`%${input.query.toLowerCase()}%`));
+    }
   }
   return { clauses, binds };
 }
