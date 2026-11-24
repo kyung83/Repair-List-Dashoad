@@ -1,15 +1,16 @@
 'use client';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {analysisRows,cleared,repeats,unitRollups,sum,type AnalysisRow,type Dataset,type RepairData,type BreakdownData} from '@/lib/report-center-model';
+import type {HistoryLineData} from '@/lib/report-center-history';
 import ComparisonWorkspace from './comparison-workspace';
 import ReportTable,{column,defaultColumns,dateRangeLabel,formatValue,type TableRow} from './report-table';
 import RecordDetail from './record-detail';
 import styles from './report-center.module.css';
 
 type Scope={start:string;end:string;equipmentType:string;unit:string;q:string};
-type Period={scope:Scope;repairs:RepairData;breakdowns:BreakdownData};
-type Tab='overview'|'repairs'|'breakdowns'|'units'|'compare'|'repeat'|'parts'|'maintenance'|'expenses'|'technicians'|'library';
-const tabs:Array<{id:Tab;label:string}>=[{id:'overview',label:'Overview'},{id:'repairs',label:'Repairs & ROs'},{id:'breakdowns',label:'Breakdowns'},{id:'units',label:'Unit reliability / history'},{id:'compare',label:'Compare / custom reports'},{id:'repeat',label:'Repeat failures'},{id:'parts',label:'Parts'},{id:'maintenance',label:'PMs & annuals'},{id:'expenses',label:'Ownership & expenses'},{id:'technicians',label:'Technicians'},{id:'library',label:'All existing reports'}];
+type Period={scope:Scope;repairs:RepairData;breakdowns:BreakdownData;history:HistoryLineData};
+type Tab='overview'|'repairs'|'breakdowns'|'units'|'compare'|'repeat'|'parts'|'maintenance'|'expenses'|'technicians'|'history'|'library';
+const tabs:Array<{id:Tab;label:string}>=[{id:'overview',label:'Overview'},{id:'repairs',label:'Repairs & ROs'},{id:'breakdowns',label:'Breakdowns'},{id:'units',label:'Unit reliability / history'},{id:'compare',label:'Compare / custom reports'},{id:'repeat',label:'Repeat failures'},{id:'parts',label:'Parts'},{id:'maintenance',label:'PMs & annuals'},{id:'expenses',label:'Ownership & expenses'},{id:'technicians',label:'Technicians'},{id:'history',label:'Historical VMRS'},{id:'library',label:'All existing reports'}];
 const legacy=[
  ['Fleet Summary / lifetime costs','/reports','Fleet and unit costs, lifecycle cost, cost per recorded mile, yearly trends and original exports.'],
  ['Unit Cost / Search','/reports/search','All original equipment, repair, technician, location, source, PM and expense filters.'],
@@ -45,11 +46,11 @@ function ScopeFields({value,onChange,equipment,busy,onRun,label}:{value:Scope;on
 }
 async function readPeriod(scope:Scope,signal:AbortSignal):Promise<Period>{
  const params=new URLSearchParams({start:scope.start,end:scope.end,equipmentType:scope.equipmentType,unit:scope.unit,q:scope.q.trim()});
- async function get<T,>(view:'repairs'|'breakdowns'):Promise<T>{const r=await fetch('/api/reports/center?'+params.toString()+'&view='+view,{cache:'no-store',signal});const payload=await r.json();if(!r.ok)throw Error(payload.error||'Report request failed.');return payload as T;}
- const [repairs,breakdowns]=await Promise.all([get<RepairData>('repairs'),get<BreakdownData>('breakdowns')]);
- return {scope:{...scope,q:scope.q.trim()},repairs,breakdowns};
+ async function get<T,>(view:'repairs'|'breakdowns'|'history'):Promise<T>{const r=await fetch('/api/reports/center?'+params.toString()+'&view='+view,{cache:'no-store',signal});const payload=await r.json();if(!r.ok)throw Error(payload.error||'Report request failed.');return payload as T;}
+ const [repairs,breakdowns,history]=await Promise.all([get<RepairData>('repairs'),get<BreakdownData>('breakdowns'),get<HistoryLineData>('history')]);
+ return {scope:{...scope,q:scope.q.trim()},repairs,breakdowns,history};
 }
-function partial(p:Period|null):Record<Dataset,boolean>{return {repairs:!!p?.repairs.truncated.repairs,breakdowns:!!p?.breakdowns.truncated,maintenance:!!p?.repairs.truncated.maintenance,expenses:!!p?.repairs.truncated.expenses,parts:(p?.repairs.parts.length??0)>=1000};}
+function partial(p:Period|null):Record<Dataset,boolean>{return {repairs:!!p?.repairs.truncated.repairs,breakdowns:!!p?.breakdowns.truncated,maintenance:!!p?.repairs.truncated.maintenance,expenses:!!p?.repairs.truncated.expenses,parts:(p?.repairs.parts.length??0)>=1000,history:!!p?.history.truncated};}
 function context(p:Period|null){if(!p)return'No report loaded';const e=p.repairs.equipment.find(x=>String(x.id)===p.scope.unit)??p.breakdowns.filterOptions.equipment.find(x=>String(x.id)===p.scope.unit);return dateRangeLabel(p.scope)+' · '+(p.scope.equipmentType||'All equipment')+(p.scope.unit?' · '+(e?.unit??p.scope.unit):' · All units')+(p.scope.q?' · Search: '+p.scope.q:'');}
 
 function Library(){return <section className={styles.panel}><h2>Every existing report and workflow</h2><p className={styles.muted}>The trial is additive. These are the original reports and controls, with no replacement or loss of features.</p><div className={styles.two}>{legacy.map(([title,href,description])=><div key={href} className={styles.panel}><h3>{title}</h3><p className={styles.muted}>{description}</p><a className={styles.link} href={href}>Open {title}</a></div>)}</div></section>;}
@@ -66,8 +67,8 @@ export default function ReportingCenter(){
    finally{if(!c.signal.aborted)setLoading(false);}
  },[]);
  useEffect(()=>{void run(initialScope(),'a');return()=>{refs.current.a?.abort();refs.current.b?.abort();};},[run]);
- const dataA=useMemo(()=>analysisRows(a?.repairs??null,a?.breakdowns??null),[a]);
- const dataB=useMemo(()=>b?analysisRows(b.repairs,b.breakdowns):null,[b]);
+ const dataA=useMemo(()=>analysisRows(a?.repairs??null,a?.breakdowns??null,a?.history??null),[a]);
+ const dataB=useMemo(()=>b?analysisRows(b.repairs,b.breakdowns,b.history):null,[b]);
  const pa=partial(a),pb=b?partial(b):null,scopeA=context(a),scopeB=context(b);
  const equipment=useMemo(()=>{const map=new Map<number,Equipment>();for(const e of [...(a?.breakdowns.filterOptions.equipment??[]),...(b?.breakdowns.filterOptions.equipment??[]),...(a?.repairs.equipment??[]),...(b?.repairs.equipment??[])])map.set(e.id,e);return [...map.values()];},[a,b]);
  const actual=useMemo(()=>(a?.breakdowns.breakdowns??[]).filter(x=>!cleared(x)),[a]);
@@ -80,9 +81,10 @@ export default function ReportingCenter(){
  function clearB(){refs.current.b?.abort();setB(null);setLoadingB(false);setErrorB('');}
  const sourcePartial=Object.values(pa).some(Boolean),known=actual.filter(r=>r.downtimeMinutes!==null),noCost=actual.filter(r=>r.stage>=5&&r.totalCost===0);
  const card=(label:string,value:string|number,hint:string,action:()=>void)=><button className={styles.metric} type="button" onClick={action}><span>{label}</span><strong>{value}</strong><small>{hint}</small></button>;
- const isRecordTab=['repairs','breakdowns','parts','maintenance','expenses'].includes(tab);
+ const isRecordTab=['repairs','breakdowns','parts','maintenance','expenses','history'].includes(tab);
  const dataset=isRecordTab?tab as Dataset:'repairs';
  const activeUnit=unitFilter==null?null:units.find(x=>x.fields.equipmentId===unitFilter);
+ const unitHistory=dataA.history.filter(r=>r.fields.equipmentId===unitFilter);
  const unitRepairs=dataA.repairs.filter(r=>r.fields.equipmentId===unitFilter),unitBreakdowns=dataA.breakdowns.filter(r=>r.fields.equipmentId===unitFilter),unitMaintenance=dataA.maintenance.filter(r=>r.fields.equipmentId===unitFilter),unitExpenses=dataA.expenses.filter(r=>r.fields.equipmentId===unitFilter);
  return <main className={styles.page}><div className={styles.shell}>
  <header className={styles.header}><div><div className={styles.eyebrow}>Northern Logistics · reporting trial</div><h1>Fleet Reporting Center</h1><div className={styles.muted}>Explore, compare, drill down and export. All original reporting tools remain available.</div></div><a className={styles.primary} href="/reports">Return to classic reports</a></header>
@@ -105,18 +107,19 @@ export default function ReportingCenter(){
  {card('Other recorded expenses',money(a.repairs.summary.expenseCost),'Ownership / operating expense records',()=>go('expenses'))}
  </div><p className={styles.muted}>Repair and roadside costs overlap through their linked repairs; they are not added together. Recorded downtime excludes unknown Rolling times and office closeout delay. Open-record costs are not necessarily final.</p></section>
  <section className={styles.panel}><h2>Choose a question to investigate</h2><div className={styles.two}>
- {([['What keeps failing?','Compare repair categories and failure frequency by unit or make.','repairs','category'],['Which providers cost the most?','Compare breakdown costs, arrival time, downtime and count.','breakdowns','provider'],['What are our most expensive units?','Compare repair cost by unit, fleet or model year.','repairs','unit'],['Where are our breakdowns occurring?','Compare roadside locations and failure types.','breakdowns','location'],['Which tires are failing?','Compare recorded tire position sets and repair costs.','breakdowns','tirePositions'],['How is spending changing?','Compare costs by month or across two date ranges.','repairs','month'],['Which parts are used most?','Compare part quantity, cost and repair associations.','parts','partNumber'],['Which PMs are completed?','Compare recorded maintenance events by type, unit and month.','maintenance','pmType']] as Array<[string,string,Dataset,string]>).map(([title,description,ds,dim])=><div key={title} className={styles.panel}><h3>{title}</h3><p className={styles.muted}>{description}</p><button className={styles.button} onClick={()=>compare(ds,dim)}>Analyze →</button></div>)}
+ {([['What keeps failing?','Compare repair categories and failure frequency by unit or make.','repairs','category'],['Which providers cost the most?','Compare breakdown costs, arrival time, downtime and count.','breakdowns','provider'],['What are our most expensive units?','Compare repair cost by unit, fleet or model year.','repairs','unit'],['Where are our breakdowns occurring?','Compare roadside locations and failure types.','breakdowns','location'],['Which tires are failing?','Compare recorded tire position sets and repair costs.','breakdowns','tirePositions'],['How is spending changing?','Compare costs by month or across two date ranges.','repairs','month'],['Which parts are used most?','Compare part quantity, cost and repair associations.','parts','partNumber'],['Which historical systems cost the most?','Compare imported VMRS lines by system, assembly, category or model.','history','systemCode'],['Which PMs are completed?','Compare recorded maintenance events by type, unit and month.','maintenance','pmType']] as Array<[string,string,Dataset,string]>).map(([title,description,ds,dim])=><div key={title} className={styles.panel}><h3>{title}</h3><p className={styles.muted}>{description}</p><button className={styles.button} onClick={()=>compare(ds,dim)}>Analyze →</button></div>)}
  </div></section>
  <ReportTable key="overview-units" title="Highest recorded unit repair costs" rows={units} initialColumns={defaultColumns.units} initialSort="repairCost" context={scopeA} partial={pa.repairs||pa.breakdowns} onOpen={row=>{setUnitFilter(Number(row.fields.equipmentId));go('units');}} openLabel="Open unit history"/>
  </>}
  {a&&isRecordTab&&<>
- <div className={styles.line}><div className={styles.actions}><button className={styles.primary} onClick={()=>compare(dataset)}>Detailed comparisons</button><a className={styles.link} href={dataset==='breakdowns'?'/reports/breakdowns':dataset==='parts'?'/reports/parts-usage':'/reports/search'}>Original advanced filters & reports</a></div>{dataset==='breakdowns'&&<label className={styles.field}><span><input type="checkbox" checked={includeCleared} onChange={e=>setIncludeCleared(e.target.checked)}/> Include Not a Breakdown</span></label>}</div>
+ <div className={styles.line}><div className={styles.actions}><button className={styles.primary} onClick={()=>compare(dataset)}>Detailed comparisons</button><a className={styles.link} href={dataset==='breakdowns'?'/reports/breakdowns':dataset==='parts'?'/reports/parts-usage':dataset==='history'?'/reports/history':'/reports/search'}>Original advanced filters & reports</a></div>{dataset==='breakdowns'&&<label className={styles.field}><span><input type="checkbox" checked={includeCleared} onChange={e=>setIncludeCleared(e.target.checked)}/> Include Not a Breakdown</span></label>}</div>
  <ReportTable key={dataset+'-records'} title={tabs.find(x=>x.id===tab)?.label??'Records'} rows={dataset==='breakdowns'?breakdownRows:dataA[dataset]} initialColumns={defaultColumns[dataset]} context={scopeA} partial={pa[dataset]} onOpen={open} initialSort={dataset==='parts'?'totalCost':'date'}/>
  </>}
  {a&&tab==='units'&&<>
  <ReportTable key="unit-rank" title="Equipment reliability and repair costs" rows={units} initialColumns={defaultColumns.units} context={scopeA} partial={pa.repairs||pa.breakdowns} initialSort="repairCost" onOpen={row=>{setUnitFilter(Number(row.fields.equipmentId));setDetail(null);}} openLabel="Open unit history"/>
  {activeUnit&&<><section className={styles.panel}><div className={styles.line}><h2>Unit {String(activeUnit.fields.unit)} · selected history</h2><button className={styles.button} onClick={()=>{setUnitFilter(null);setDetail(null);}}>Clear unit</button></div><p className={styles.muted}>The records below follow the applied date range and search. To see lifetime history, run an All history scope for this unit.</p><div className={styles.actions}><button className={styles.button} onClick={()=>{const next={...a.scope,unit:String(unitFilter),start:'1900-01-01',end:day(),q:''};setDraft(next);void run(next,'a');}}>Run all history for this unit</button><a className={styles.link} href="/reports">Classic lifetime ownership / cost per mile</a><a className={styles.link} href="/reports/history">Historical VMRS breakdown</a></div></section>
  <ReportTable key={'unit-r'+unitFilter} title="Unit repairs and imported ROs" rows={unitRepairs} initialColumns={defaultColumns.repairs} context={scopeA} partial={pa.repairs} onOpen={open}/>
+ <ReportTable key={'unit-h'+unitFilter} title="Unit historical VMRS lines (already included in RO totals)" rows={unitHistory} initialColumns={defaultColumns.history} context={scopeA} partial={pa.history} onOpen={open}/>
  <ReportTable key={'unit-b'+unitFilter} title="Unit breakdown history (including cleared reports)" rows={unitBreakdowns} initialColumns={defaultColumns.breakdowns} context={scopeA} partial={pa.breakdowns} onOpen={open}/>
  <ReportTable key={'unit-m'+unitFilter} title="Unit PM & annual history" rows={unitMaintenance} initialColumns={defaultColumns.maintenance} context={scopeA} partial={pa.maintenance} onOpen={open}/>
  <ReportTable key={'unit-e'+unitFilter} title="Unit ownership and other expenses" rows={unitExpenses} initialColumns={defaultColumns.expenses} context={scopeA} partial={pa.expenses} onOpen={open}/>
