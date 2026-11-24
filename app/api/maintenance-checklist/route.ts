@@ -36,6 +36,8 @@ type RunRow = {
   completed_at: string | null;
   template_id: number | null;
   template_version: number | null;
+  pm_body_type_snapshot:string|null;
+  template_name:string|null;
 };
 type ItemRow = {
   id: number;
@@ -159,7 +161,8 @@ async function loadRun(id: number) {
   return env.DB.prepare(`
     SELECT id, repair_id, equipment_id, event_type, status,
            mileage_at_start, mileage_at_completion, mileage_source, mileage_updated_at,
-           started_at, ready_at, completed_at, template_id, template_version
+           started_at, ready_at, completed_at, template_id, template_version,pm_body_type_snapshot,
+           (SELECT name FROM maintenance_checklist_templates t WHERE t.id=maintenance_checklist_runs.template_id) AS template_name
     FROM maintenance_checklist_runs
     WHERE repair_id = ?
   `).bind(id).first<RunRow>();
@@ -411,6 +414,9 @@ async function payloadFor(repair: RepairRow) {
       equipmentType: repair.equipment_type === 'trailer' ? 'trailer' : 'truck',
       eventType: kind,
       started: false,
+      templateName:template.name,
+      templateVersion:template.version,
+      pmBodyType:template.bodyTypeAssignment??null,
       status: 'not_started',
       currentMileage: repair.current_mileage,
       mileageSource: liveSource,
@@ -454,6 +460,9 @@ async function payloadFor(repair: RepairRow) {
     equipmentType: repair.equipment_type === 'trailer' ? 'trailer' : 'truck',
     eventType: kind,
     started: true,
+    templateName:run.template_name,
+    templateVersion:run.template_version,
+    pmBodyType:run.pm_body_type_snapshot,
     runId: run.id,
     status: run.status,
     currentMileage: locked ? run.mileage_at_completion : repair.current_mileage,
