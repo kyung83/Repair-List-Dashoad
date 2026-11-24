@@ -1,9 +1,10 @@
 "use client";
 
 import {useEffect,useState} from "react";
+import type {RepairSubcategory} from "@/lib/repair-subcategories";
 
 type RepairType={id:number;name:string;checklistMode:"none"|"optional"|"required"};
-type Data={ok?:boolean;error?:string;repairId:string;current:RepairType|null;types:RepairType[];maintenanceEventType:"pm"|"annual"|null;maintenanceLabel:string;noUnit:boolean;locked:boolean;lockReason:"checklist_started"|"maintenance"|"no_unit"|null};
+type Data={ok?:boolean;error?:string;repairId:string;current:RepairType|null;currentSubcategory?:RepairSubcategory|null;subcategories?:RepairSubcategory[];types:RepairType[];maintenanceEventType:"pm"|"annual"|null;maintenanceLabel:string;noUnit:boolean;locked:boolean;lockReason:"checklist_started"|"maintenance"|"no_unit"|null};
 type Props={repairId:string};
 
 export default function CurrentRepairTypeControl({repairId}:Props){
@@ -66,10 +67,25 @@ export default function CurrentRepairTypeControl({repairId}:Props){
     finally{setBusy(false)}
   }
 
+  async function chooseSubcategory(value:string){
+    if(!data?.current||busy)return;
+    setBusy(true);setMessage("");
+    try{
+      const response=await fetch("/api/shop/repair-type",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"setSubcategory",repairId,repairTypeId:data.current.id,repairSubcategoryId:value?Number(value):null})});
+      const payload=await response.json() as Data;
+      if(!response.ok||!payload.ok)throw new Error(payload.error||"Subcategory could not be saved.");
+      setData(payload);setMessage(payload.currentSubcategory?payload.currentSubcategory.name+" saved.":"Subcategory cleared and saved.");
+    }catch(error){const text=error instanceof Error?error.message:"Subcategory could not be saved.";await load();setMessage(text);}
+    finally{setBusy(false);}
+  }
+
   if(!data)return message?<div id="current-repair-type" style={errorBox}>{message}</div>:<div id="current-repair-type" style={loadingBox}>Loading Repair Type…</div>;
   if(data.maintenanceEventType)return <section id="current-repair-type" style={fixedBox}><div><span style={label}>WORK TYPE</span><strong style={fixedValue}>{data.maintenanceLabel}</strong></div><small style={help}>PM and Annual keep their own maintenance workflow.</small></section>;
   if(data.noUnit)return <section id="current-repair-type" style={fixedBox}><div><span style={label}>REPAIR TYPE</span><strong style={fixedValue}>{data.current?.name||"INDIRECT LABOR-OTHER"}</strong></div><small style={help}>Shop labor stays separate from fleet-unit repair categories.</small></section>;
 
+  const subcategories=data.subcategories??[];
+  const savedSubcategory=data.currentSubcategory;
+  const subcategoryOptions=savedSubcategory&&!subcategories.some(s=>s.id===savedSubcategory.id)?[savedSubcategory,...subcategories]:subcategories;
   const checklist=data.current?.checklistMode&&data.current.checklistMode!=="none";
   const helpText=data.lockReason==="checklist_started"
     ? "Locked because this category checklist has started."
@@ -82,6 +98,7 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       <option value="">Choose Repair Type…</option>
       {data.types.map(type=><option key={type.id} value={type.id}>{type.name}{type.checklistMode==="required"?" · CHECKLIST":""}</option>)}
     </select>
+    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY · OPTIONAL</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy||(!subcategories.length&&!savedSubcategory)} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="">No subcategory / not specified</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>Add more detail if appropriate. The main Repair Type and checklist rules do not change.</small></label>}
     {checklist&&<div style={checklistNote}>{data.current?.name} uses a check sheet. {data.lockReason==="checklist_started"?"The Repair Type is now locked for this work order.":"It will appear below after this selection."}</div>}
     {message&&<div style={message.includes("saved")?successBox:errorBox}>{message}</div>}
   </section>;
