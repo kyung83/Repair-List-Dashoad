@@ -2,6 +2,7 @@
 import {useEffect,useState} from 'react';
 import type {AnalysisRow} from '@/lib/report-center-model';
 import styles from './report-center.module.css';
+import FullPrintButton from './full-print-button';
 
 type Row=Record<string,unknown>;
 type Detail={repair?:Row;breakdown?:Row|null;historical?:Row;receipt?:Row|null;notes?:Row[];parts?:Row[];labor?:Row[];events?:Row[];photos?:Row[];receiptPages?:Row[];lines?:Row[];truncated?:boolean};
@@ -26,7 +27,7 @@ export default function RecordDetail({row,onClose}:{row:AnalysisRow;onClose:()=>
   const r=data?.repair,b=data?.breakdown,h=data?.historical;
   const media=[...(data?.photos??[]),...(data?.receiptPages??[])];
   return <section className={styles.panel+' '+styles.detail} aria-label="Record details">
-    <div className={styles.line}><div><div className={styles.eyebrow}>{row.kind==='historical'?'Historical repair order':row.kind==='breakdown'?'Roadside breakdown':'Repair record'} #{row.id}</div><h2>{plain(row.fields.unit)} — {plain(row.fields.issue)}</h2></div><div className={styles.actions}><button className={styles.button} type="button" onClick={onClose}>Close details</button></div></div>
+    <div className={styles.line}><div><div className={styles.eyebrow}>{row.kind==='historical'?'Historical repair order':row.kind==='breakdown'?'Roadside breakdown':'Repair record'} #{row.id}</div><h2>{plain(row.fields.unit)} — {plain(row.fields.issue)}</h2></div><div className={styles.actions}><FullPrintButton source={{title:'Detailed '+row.kind+' #'+row.id,context:String(row.fields.unit??'')+' · '+String(row.fields.date??''),tables:[],cohorts:[{label:'Selected record',records:[row],partial:!!data?.truncated}]}}/><button className={styles.button} type="button" onClick={onClose}>Close details</button></div></div>
     <Fields items={[['Date',row.fields.date],['Status',row.fields.status],['Category',row.fields.category],['Parts',dollars(row.fields.partsCost)],['Labor',dollars(row.fields.laborCost)],['Outside',dollars(row.fields.outsideCost)],['Selected record cost',dollars(row.fields.totalCost)]]}/>
     {loading&&<p role="status">Loading full record…</p>}{error&&<p role="alert" className={styles.error}>{error}</p>}
     {data?.truncated&&<p className={styles.warning}>Some detail sections reached their row limits. Use the classic records for the full history.</p>}
