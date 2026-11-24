@@ -12,6 +12,7 @@ type Filters = {
   make: string;
   model: string;
   repairType: string;
+  repairSubcategory:string;
   repairStatus: string;
   technician: string;
   repairSource: string;
@@ -41,7 +42,7 @@ type Data = {
     operatingCost: number;
   };
   equipment: Array<{ id: number; unit: string; category: string; equipmentType: string; modelYear: number | null; make: string; model: string }>;
-  repairs: Array<{ id: number; kind: string; equipmentId: number | null; unit: string; category: string; equipmentType: string; modelYear: number | null; make: string; model: string; date: string; repairType: string; repair: string; status: string; technician: string; source: string; location: string; partsCost: number; laborHours: number; laborCost: number; outsideCost: number; totalCost: number }>;
+  repairs: Array<{ id: number; kind: string; equipmentId: number | null; unit: string; category: string; equipmentType: string; modelYear: number | null; make: string; model: string; date: string; repairType: string; repairSubcategory?:string; repair: string; status: string; technician: string; source: string; location: string; partsCost: number; laborHours: number; laborCost: number; outsideCost: number; totalCost: number }>;
   maintenance: Array<{ id: number; equipmentId: number; unit: string; date: string; type: string; pmType: string; mileage: number | null; source: string; notes: string }>;
   expenses: Array<{ id: number; equipmentId: number; unit: string; date: string; category: string; amount: number; vendor: string; description: string; source: string }>;
   parts: Array<{ partNumber: string; description: string; quantity: number; repairCount: number; unitCount: number; cost: number }>;
@@ -52,6 +53,7 @@ type Data = {
     makes: string[];
     models: string[];
     repairTypes: string[];
+    repairSubcategories?:Array<{name:string;parent:string}>;
     repairStatuses: string[];
     technicians: string[];
     repairSources: string[];
@@ -144,6 +146,7 @@ const blankFilters: Filters = {
   make: "",
   model: "",
   repairType: "",
+  repairSubcategory:"",
   repairStatus: "",
   technician: "",
   repairSource: "",
@@ -170,7 +173,7 @@ export default function ReportSearchPage() {
       const params = new URLSearchParams({ start: next.start, end: next.end });
       const pairs: Array<[string, string]> = [
         ["unit", next.unit], ["category", next.category], ["equipmentType", next.equipmentType], ["make", next.make], ["model", next.model],
-        ["repairType", next.repairType], ["repairStatus", next.repairStatus], ["technician", next.technician], ["repairSource", next.repairSource], ["repairLocation", next.repairLocation],
+        ["repairType", next.repairType], ["repairSubcategory",next.repairSubcategory], ["repairStatus", next.repairStatus], ["technician", next.technician], ["repairSource", next.repairSource], ["repairLocation", next.repairLocation],
         ["maintenanceType", next.maintenanceType], ["pmType", next.pmType], ["maintenanceSource", next.maintenanceSource],
         ["expenseCategory", next.expenseCategory], ["expenseSource", next.expenseSource], ["q", next.q],
       ];
@@ -201,7 +204,7 @@ export default function ReportSearchPage() {
   }, [data, filters.category, filters.equipmentType, filters.make, filters.model]);
 
   function set<K extends keyof Filters>(key: K, value: Filters[K]) {
-    setFilters((current) => ({ ...current, [key]: value }));
+    setFilters((current) => ({ ...current, [key]: value, ...(key==='repairType'?{repairSubcategory:''}:{}) }));
   }
 
   function applyPreset(value: string) {
@@ -261,6 +264,7 @@ export default function ReportSearchPage() {
           <summary style={{ fontWeight: 850, cursor: "pointer" }}>Repair filters</summary>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(185px,1fr))", gap: 10, marginTop: 10 }}>
             <SelectFilter title="Repair type" value={filters.repairType} values={data.filterOptions.repairTypes} onChange={(value) => set("repairType", value)} />
+            <SelectFilter title="Repair subcategory" value={filters.repairSubcategory} values={[...new Set((data.filterOptions.repairSubcategories??[]).filter(s=>!filters.repairType||s.parent===filters.repairType).map(s=>s.name))]} onChange={value=>set("repairSubcategory",value)}/>
             <SelectFilter title="Repair status" value={filters.repairStatus} values={data.filterOptions.repairStatuses} onChange={(value) => set("repairStatus", value)} />
             <SelectFilter title="Technician" value={filters.technician} values={data.filterOptions.technicians} onChange={(value) => set("technician", value)} />
             <SelectFilter title="Repair source" value={filters.repairSource} values={data.filterOptions.repairSources} onChange={(value) => set("repairSource", value)} />
@@ -305,7 +309,7 @@ export default function ReportSearchPage() {
 
       <section style={{ ...panel, marginTop: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}><div><h2 style={{ margin: 0 }}>Repair & RO History</h2><small style={{ color: "#68746f" }}>{data.summary.currentRepairCount} software repairs + {data.summary.historicalRepairCount} imported historical ROs</small></div><button style={button} onClick={() => downloadCsv(`repairs-${rangeSlug}.csv`, data.repairs)}>Export CSV</button></div>
-        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1580 }}><thead><tr>{["Date","Unit","Type","Repair Type","Repair / RO","Status","Technician","Source","Location","Parts","Labor","Outside","Total"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.repairs.map((row) => <tr key={`${row.kind}-${row.id}`}><td style={td}>{row.date}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.kind}</td><td style={{...td,fontWeight:850}}>{row.repairType}</td><td style={td}>{row.repair}</td><td style={td}>{row.status}</td><td style={td}>{row.technician}</td><td style={td}>{row.source}</td><td style={td}>{row.location || "—"}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td></tr>)}</tbody></table></div>
+        <div style={{ overflowX: "auto", marginTop: 12 }}><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1580 }}><thead><tr>{["Date","Unit","Type","Repair Type","Subcategory","Repair / RO","Status","Technician","Source","Location","Parts","Labor","Outside","Total"].map((head) => <th key={head} style={th}>{head}</th>)}</tr></thead><tbody>{data.repairs.map((row) => <tr key={`${row.kind}-${row.id}`}><td style={td}>{row.date}</td><td style={{ ...td, fontWeight: 850 }}>{row.unit}</td><td style={td}>{row.kind}</td><td style={{...td,fontWeight:850}}>{row.repairType}</td><td style={td}>{row.repairSubcategory||'—'}</td><td style={td}>{row.repair}</td><td style={td}>{row.status}</td><td style={td}>{row.technician}</td><td style={td}>{row.source}</td><td style={td}>{row.location || "—"}</td><td style={td}>{money(row.partsCost)}</td><td style={td}>{money(row.laborCost)}</td><td style={td}>{money(row.outsideCost)}</td><td style={{ ...td, fontWeight: 850 }}>{money(row.totalCost)}</td></tr>)}</tbody></table></div>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(420px,1fr))", gap: 18, marginTop: 18 }}>
