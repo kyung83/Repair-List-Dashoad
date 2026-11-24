@@ -11,7 +11,7 @@ function load(p){
 }
 function fixture(){
  const db=new DatabaseSync(':memory:');
- db.exec(`PRAGMA foreign_keys=ON;CREATE TABLE repair_types(id INTEGER PRIMARY KEY,name TEXT);CREATE TABLE repairs(id INTEGER PRIMARY KEY,repair_type_id INTEGER);INSERT INTO repair_types VALUES(1,'Engine'),(2,'Cooling System');INSERT INTO repairs VALUES(1,1),(2,2),(3,NULL);`);
+ db.exec(`PRAGMA foreign_keys=ON;CREATE TABLE repair_types(id INTEGER PRIMARY KEY,name TEXT);CREATE TABLE repairs(id INTEGER PRIMARY KEY,repair_type_id INTEGER,equipment_id INTEGER DEFAULT 1);CREATE TABLE maintenance_checklist_runs(repair_id INTEGER,event_type TEXT);INSERT INTO repair_types VALUES(1,'Engine'),(2,'Cooling System');INSERT INTO repairs(id,repair_type_id) VALUES(1,1),(2,2),(3,NULL);`);
  db.exec(read('migrations/0175_repair_type_subcategories.sql'));
  db.exec("INSERT INTO repair_type_subcategories(id,repair_type_id,name) VALUES(10,1,'Oil leak'),(11,1,'Sensors'),(20,2,'Radiator')");
  return db;
@@ -19,7 +19,7 @@ function fixture(){
 test('migration leaves every existing repair and its required parent intact',()=>{
  const db=fixture();try{assert.deepEqual(db.prepare('SELECT id,repair_type_id,repair_subcategory_id FROM repairs ORDER BY id').all().map(x=>[x.id,x.repair_type_id,x.repair_subcategory_id]),[[1,1,null],[2,2,null],[3,null,null]]);}finally{db.close();}
 });
-test('subcategories must belong to their parent, may be blank, and clear automatically if the parent changes',()=>{
+test('in-progress repair subcategories must belong to their parent and clear automatically if the parent changes',()=>{
  const db=fixture();try{
   assert.throws(()=>db.exec('UPDATE repairs SET repair_subcategory_id=20 WHERE id=1'),/must belong/);
   assert.throws(()=>db.exec('INSERT INTO repairs(id,repair_type_id,repair_subcategory_id) VALUES(4,1,20)'),/must belong/);
@@ -51,7 +51,9 @@ test('service only permits active subcategories of the selected parent while ret
  try{
   const api=load('lib/repair-subcategories.ts');
   assert.equal((await api.requireRepairSubcategory(db,1,10)).name,'Oil leak');
-  assert.equal(await api.requireRepairSubcategory(db,1,null),null);
+  await assert.rejects(api.requireRepairSubcategory(db,1,null),/Choose a subcategory/);
+  sqlite.exec("INSERT INTO repair_types VALUES(3,'No subcategories')");
+  assert.equal(await api.requireRepairSubcategory(db,3,null),null);
   await assert.rejects(api.requireRepairSubcategory(db,1,20),/not available/);
   sqlite.exec('UPDATE repairs SET repair_subcategory_id=10 WHERE id=1;UPDATE repair_type_subcategories SET active=0 WHERE id=10');
   await assert.rejects(api.requireRepairSubcategory(db,1,10),/not available/);
@@ -74,8 +76,36 @@ test('setup, technician selection and reporting preserve the existing required p
  assert.match(setup,/createSubcategory/);assert.match(setup,/updateSubcategory/);assert.match(setup,/if\(!manager\(user\)\)/);
  assert.match(shop,/repairForUser\(request,repairId,true\)/);assert.match(shop,/action==='setSubcategory'/);
  assert.match(shop,/repair_type_id=\?/);assert.match(shop,/This Repair Type cannot be changed after its checklist has been started/);
- assert.match(control,/SUBCATEGORY · OPTIONAL/);assert.match(control,/No subcategory \/ not specified/);
- assert.match(helpers,/Choose the Repair Type before leaving this work/);assert.doesNotMatch(helpers,/repair_subcategory_id/);
+ assert.match(control,/Choose required subcategory/);assert.match(control,/disabled=\{subcategories.length>0\}/);
+ assert.match(helpers,/Choose the Repair Type before leaving this work/);assert.match(helpers,/await requireConfiguredSubcategoryBeforeLeavingWork\(db,repairId\)/);
  assert.match(read('lib/report-search.ts'),/repairSubcategory: row.repair_subcategory/);
  assert.match(read('lib/report-center-print.ts'),/\['Subcategory',repair.repair_subcategory\]/);
+});
+
+test('configured categories require a saved selection before leaving work, with safe exceptions',async()=>{
+ const sqlite=fixture();
+ const db={prepare:sql=>{const statement=sqlite.prepare(sql);return {bind:(...v)=>({first:async()=>statement.get(...v)??null})};}};
+ const api=load('lib/repair-subcategories.ts');
+ try{
+  await assert.rejects(api.requireConfiguredSubcategoryBeforeLeavingWork(db,1),/required Repair Type subcategory/);
+  sqlite.exec('UPDATE repairs SET repair_subcategory_id=10 WHERE id=1');
+  await api.requireConfiguredSubcategoryBeforeLeavingWork(db,1);
+  sqlite.exec('UPDATE repair_type_subcategories SET active=0 WHERE id=10');
+  await api.requireConfiguredSubcategoryBeforeLeavingWork(db,1);
+  sqlite.exec('UPDATE repairs SET repair_type_id=2 WHERE id=1');
+  await assert.rejects(api.requireConfiguredSubcategoryBeforeLeavingWork(db,1),/required Repair Type subcategory/);
+  sqlite.exec('UPDATE repair_type_subcategories SET active=0 WHERE repair_type_id=2');
+  await api.requireConfiguredSubcategoryBeforeLeavingWork(db,1);
+  sqlite.exec('UPDATE repair_type_subcategories SET active=1 WHERE repair_type_id=2;INSERT INTO maintenance_checklist_runs VALUES(1,\'pm\')');
+  await api.requireConfiguredSubcategoryBeforeLeavingWork(db,1);
+  sqlite.exec('DELETE FROM maintenance_checklist_runs;UPDATE repairs SET equipment_id=NULL WHERE id=1');
+  await api.requireConfiguredSubcategoryBeforeLeavingWork(db,1);
+ }finally{sqlite.close();}
+});
+test('subcategory guard runs before timer stop, handoff, switch and completion writes',()=>{
+ const legacy=read('app/api/shop/route-legacy.ts'),original=read('app/api/shop/original.ts');
+ assert.ok(legacy.indexOf('await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,Number(timer.repair_id))')<legacy.indexOf('const elapsedHours ='));
+ assert.match(legacy,/await requireConfiguredSubcategoryBeforeLeavingWork\(env.DB,id\);/);
+ assert.match(original,/await requireConfiguredSubcategoryBeforeLeavingWork\(env.DB,id\);/);
+ assert.match(original,/await requireConfiguredSubcategoryBeforeLeavingWork\(env.DB,Number\(timer.repair_id\)\);/);
 });
