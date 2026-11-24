@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:workers';
 import {requireConfiguredSubcategoryBeforeLeavingWork} from '@/lib/repair-subcategories';
+import {validateRepairTypeChecklistBeforeClose,completeRepairTypeChecklist} from '@/lib/repair-types';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { getShopLaborRate } from '@/lib/billing';
 import { usePartOnRepair } from '@/lib/inventory-db';
@@ -457,7 +458,7 @@ export async function POST(request: Request) {
     if (action === 'completeRepair') {
       const id = repairId(body.repairId ?? body.id);
       await requireAssignedRepair(technician.id, id);
-      await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,id);
+      await validateRepairTypeChecklistBeforeClose(env.DB,id);
       const stopped = await stopActiveLabor(user, technician, id, false, body.notes);
       const result = await env.DB.prepare(`
         UPDATE repairs
@@ -466,6 +467,7 @@ export async function POST(request: Request) {
           AND lower(COALESCE(status, '')) NOT LIKE '%complete%'
       `).bind(id, technician.id).run();
       if (Number(result.meta.changes ?? 0) === 0) throw new Error('Repair could not be completed.');
+      await completeRepairTypeChecklist(env.DB,id);
       await recordEvent(id, user, 'completed', `${technician.name} completed the repair.`);
       return Response.json({
         ok: true,
