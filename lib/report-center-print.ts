@@ -99,7 +99,9 @@ function summary(source:PrintSource,options:PrintOptions){
    const ranked=(rs:AnalysisRow[],k:string)=>grouped(rs,x=>String(x.fields[k]??'').trim()||'Not recorded').map(([label,items])=>({label,amount:sumField(items,'totalCost')??0,format:'money' as const})).sort((a,b)=>b.amount-a.amount).slice(0,10);
    return sub(c.label,barChart('Top repair categories by recorded cost',ranked(r,'category'))+barChart('Top units by repair / RO cost',ranked(r,'unit'))+barChart('Top breakdown providers by cost',ranked(b,'provider')));
   }).join('');
-  const compare=source.cohorts.length>1?barChart('Selected repair / RO cost by cohort',source.cohorts.map(c=>({label:c.label,amount:sumField(c.records.filter(r=>r.kind==='repair'||r.kind==='historical'&&!r.key.startsWith('hl')),'totalCost')??0,format:'money'})))+barChart('Actual breakdown count by cohort',source.cohorts.map(c=>({label:c.label,amount:actualBreakdowns(c.records).length}))):'';
+  const anyRepairs=source.cohorts.some(c=>c.records.some(r=>r.kind==='repair'||r.kind==='historical'&&!r.key.startsWith('hl')));
+  const anyBreakdowns=source.cohorts.some(c=>c.records.some(r=>r.kind==='breakdown'));
+  const compare=source.cohorts.length>1?(anyRepairs?barChart('Selected repair / RO cost by cohort',source.cohorts.map(c=>({label:c.label,amount:sumField(c.records.filter(r=>r.kind==='repair'||r.kind==='historical'&&!r.key.startsWith('hl')),'totalCost')??0,format:'money'}))):'')+(anyBreakdowns?barChart('Actual breakdown count by cohort',source.cohorts.map(c=>({label:c.label,amount:actualBreakdowns(c.records).length}))):''):'';
   // For arbitrary comparison tables, render the actual selected metric columns instead of inventing a cohort total.
   const comparisons=source.tables.filter(t=>t.columns.some(c=>c.key.startsWith('a_'))).map(t=>{
    const metric=t.columns.find(c=>c.key.startsWith('a_'));if(!metric)return'';
@@ -152,7 +154,7 @@ function renderDetail(result:DetailResult,options:PrintOptions,origin:string){
  return '<article class="record">'+body+'</article>';
 }
 export function buildPrintDocument(source:PrintSource,options:PrintOptions,results:readonly DetailResult[],origin:string){
- const partial=Boolean(source.partial||source.cohorts.some(c=>c.partial)||results.some(x=>x.error||x.detail?.truncated));
+ const partial=Boolean(source.partial||source.cohorts.some(c=>c.partial)||results.some(x=>x.error||x.detail?.truncated||!x.detail));
  const allJobs=detailJobs(source.cohorts),volumes=options.sections.some(s=>DETAIL_SECTIONS.includes(s))?Math.max(1,Math.ceil(allJobs.length/VOLUME_SIZE)):1;
  const detailed=options.sections.some(s=>DETAIL_SECTIONS.includes(s));
  const start=(options.volume-1)*VOLUME_SIZE;
