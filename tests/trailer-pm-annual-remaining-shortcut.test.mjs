@@ -48,7 +48,9 @@ test('technician authorization and separate Annual proof/signature enforced on s
  assert.match(route,/source='scheduled-annual'/);
  assert.match(route,/NOT EXISTS\(SELECT 1 FROM repairs previous/);
  assert.match(route,/if\(annual\.technician_id!==null/);
- assert.match(route,/if\(!pmRun\|\|!annualRun\|\|!canReuseTrailerPmAnnual/);
+ assert.match(route,/if\(!pmRun\|\|!annualRun\|\|!\(canReuseTrailerPmAnnual/);
+ assert.match(route,/canReuseTrailerBodyPmAnnual\(pmRun,annualRun\)/);
+ assert.match(route,/verifiedTrailerPmAnswer\(pmRun,pmAnswers.results,pair,user.id\)/);
  assert.match(route,/answer\.result!=='pass'/);
  assert.match(route,/answer\.updated_by_user_id!==user\.id/);
  assert.match(route,/item_text=\? AND result='pending'/);
