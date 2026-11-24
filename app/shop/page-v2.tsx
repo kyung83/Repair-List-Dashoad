@@ -1,5 +1,6 @@
 "use client";
 
+import NoteSpellcheck from './note-spellcheck';
 import {useEffect,useMemo,useState} from "react";
 import CurrentWorkHome from "./current-work-home";
 import ShopDutyWorkHome, {type ActiveShopDuty} from "./shop-duty-work-home";
@@ -126,7 +127,7 @@ export default function ShopPage(){
       <button type="button" disabled={busy} onClick={()=>void doneForNow()} style={keepButton}>{isHelping?"DONE FOR NOW — SAVE MY LABOR":"DONE FOR NOW — KEEP ASSIGNED TO ME"}</button>
       {!isHelping&&<><div style={orLine}>OR HAND OFF</div>
       {canAssignHandoff?<label style={label}>Hand off to<select value={handoffTechId} onChange={event=>setHandoffTechId(event.target.value)} style={input} disabled={busy}><option value="">Leave Unassigned — next shift can pick it up</option>{techOptions.map(tech=><option key={tech.id} value={tech.id}>{tech.name}</option>)}</select></label>:<div style={helper}>Leave Unassigned — the next shift can pick up the unfinished work.</div>}
-      <label style={label}>What is left to do? *<textarea aria-label="Shift handoff note" value={handoffNote} onChange={event=>setHandoffNote(event.target.value)} maxLength={500} rows={3} placeholder="What still needs to be completed?" style={{...input,resize:"vertical"}} disabled={busy}/></label>
+      <label style={label}>What is left to do? *<NoteSpellcheck aria-label="Shift handoff note" value={handoffNote} onChange={event=>setHandoffNote(event.target.value)} maxLength={500} rows={3} placeholder="What still needs to be completed?" style={{...input,resize:"vertical"}} disabled={busy}/></label>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}><button type="button" onClick={()=>setHandoffOpen(false)} style={cancelButton} disabled={busy}>CANCEL</button><button type="button" onClick={()=>void handoff()} style={handoffButton} disabled={busy}>{canAssignHandoff?"HAND OFF TO NEXT SHIFT":"LEAVE UNASSIGNED"}</button></div></>}
     </section>:null;
 
