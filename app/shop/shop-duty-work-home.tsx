@@ -1,5 +1,6 @@
 "use client";
 
+import NoteSpellcheck from './note-spellcheck';
 import {useEffect,useMemo,useState} from "react";
 
 type DutyItem={id:number;section:string;text:string;required:boolean;result:"done"|"attention"|"na"|null;comment:string};
@@ -114,10 +115,10 @@ export default function ShopDutyWorkHome({timer,duty,onRefresh}:Props){
 
       <section style={notesCard}>
         <label style={label}>SUPPLIES NEEDED
-          <textarea rows={3} value={supplies} onChange={event=>setSupplies(event.target.value)} placeholder="Anything low, out, or needed…" style={textarea} disabled={busy}/>
+          <NoteSpellcheck rows={3} value={supplies} onChange={event=>setSupplies(event.target.value)} placeholder="Anything low, out, or needed…" style={textarea} disabled={busy}/>
         </label>
         <label style={label}>NOTES
-          <textarea rows={3} value={notes} onChange={event=>setNotes(event.target.value)} placeholder="Anything management needs to know…" style={textarea} disabled={busy}/>
+          <NoteSpellcheck rows={3} value={notes} onChange={event=>setNotes(event.target.value)} placeholder="Anything management needs to know…" style={textarea} disabled={busy}/>
         </label>
         <button type="button" onClick={()=>void saveNotes()} disabled={busy} style={saveButton}>SAVE NOTES</button>
       </section>
