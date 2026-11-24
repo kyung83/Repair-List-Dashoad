@@ -45,7 +45,7 @@ export function breakdownBoardRows<T extends BoardRow>(rows:readonly T[],filters
     if(filters.stage==='reported'&&row.stage!==1)return false;
     if(filters.stage==='diagnostics'&&row.stage!==2)return false;
     if(filters.stage==='enroute'&&row.stage!==3)return false;
-    if(filters.stage==='onlocation'&&row.stage!==4)return false;
+    if(filters.stage==='onlocation'&&(row.stage!==4||normalized(row.status)==='ready_for_review'||row.geotab_rolling_review_at))return false;
     if(filters.stage==='geotabRolling'&&!row.geotab_rolling_review_at)return false;
     if(filters.stage==='readyForTotals'&&normalized(row.status)!=='ready_for_review')return false;
     if(filters.repairCategory&&category(row)!==filters.repairCategory)return false;
