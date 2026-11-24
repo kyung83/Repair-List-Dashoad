@@ -2,6 +2,7 @@ import { isRepairTeamMember } from '@/lib/repair-team';
 import { env } from 'cloudflare:workers';
 import { getSessionUser } from '@/lib/auth';
 import { listRepairTypes, repairTypeForRepair, requireRepairType } from '@/lib/repair-types';
+import {listRepairSubcategories,repairSubcategoryForRepair,requireRepairSubcategory} from '@/lib/repair-subcategories';
 
 function numericRepairId(value: unknown) {
   const match = String(value ?? '').match(/^(?:repair-)?(\d+)$/);
@@ -54,6 +55,8 @@ async function payload(repair:RepairRow) {
     .bind(repair.id).first<{id:number}>();
   const all = await listRepairTypes(env.DB,true);
   const types = all.filter(type => type.name.toUpperCase() !== 'INDIRECT LABOR-OTHER');
+  const currentSubcategory=await repairSubcategoryForRepair(env.DB,repair.id);
+  const subcategories=current&&current.name.toUpperCase()!=='INDIRECT LABOR-OTHER'?(await listRepairSubcategories(env.DB)).filter(s=>s.repairTypeId===current.id):[];
   const lockReason = checklistRun
     ? 'checklist_started'
     : maintenanceEventType
@@ -64,6 +67,8 @@ async function payload(repair:RepairRow) {
   return {
     repairId:`repair-${repair.id}`,
     current,
+    currentSubcategory,
+    subcategories,
     types,
     maintenanceEventType,
     maintenanceLabel:maintenanceEventType === 'annual' ? 'ANNUAL' : maintenanceEventType === 'pm' ? 'PM' : '',
@@ -95,6 +100,20 @@ export async function POST(request:Request) {
     }
     if (repair.equipment_id === null) {
       throw new Error('SHOP / NO UNIT work keeps its assigned indirect-labor type.');
+    }
+
+    if(body.action==='setSubcategory'){
+      const parent=await repairTypeForRepair(env.DB,repairId);
+      if(!parent||parent.name.toUpperCase()==='INDIRECT LABOR-OTHER')throw new Error('Choose a fleet Repair Type first.');
+      if(Number(body.repairTypeId)!==parent.id)throw new Error('The Repair Type changed. Reload and choose a subcategory again.');
+      const next=await requireRepairSubcategory(env.DB,parent.id,body.repairSubcategoryId);
+      const current=await repairSubcategoryForRepair(env.DB,repairId);
+      if((current?.id??null)!==(next?.id??null)){
+        const result=await env.DB.prepare(`UPDATE repairs SET repair_subcategory_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND repair_type_id=? AND lower(COALESCE(status,'')) NOT LIKE '%complete%' AND EXISTS(SELECT 1 FROM repair_labor_timers WHERE repair_id=? AND user_id=? AND technician_id=?)`).bind(next?.id??null,repairId,parent.id,repairId,user.id,user.technicianId).run();
+        if(!result.meta.changes)throw new Error('The repair changed or is no longer WORKING NOW. Reload before selecting a subcategory.');
+        await env.DB.prepare(`INSERT INTO repair_job_events(repair_id,user_id,technician_id,action,detail) VALUES(?,?,?,'repair_subcategory_selected',?)`).bind(repairId,user.id,user.technicianId,`${user.displayName} selected ${parent.name} subcategory: ${next?.name??'Not specified'}.`.slice(0,500)).run();
+      }
+      return Response.json({ok:true,...await payload(repair)},{headers:{'cache-control':'no-store'}});
     }
 
     const next = await requireRepairType(env.DB,body.repairTypeId);

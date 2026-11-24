@@ -68,11 +68,12 @@ async function approveWorkOrder(request: Request, body: Record<string, unknown>)
 
 async function repairTypeMap() {
   const rows = await env.DB.prepare(`
-    SELECT r.id,COALESCE(NULLIF(rt.name,''),'Uncategorized') AS repair_type
+    SELECT r.id,COALESCE(NULLIF(rt.name,''),'Uncategorized') AS repair_type,COALESCE(sc.name,'') AS repair_subcategory
     FROM repairs r
     LEFT JOIN repair_types rt ON rt.id=r.repair_type_id
-  `).all<{id:number;repair_type:string}>();
-  return new Map(rows.results.map((row)=>[Number(row.id),row.repair_type]));
+    LEFT JOIN repair_type_subcategories sc ON sc.id=r.repair_subcategory_id AND sc.repair_type_id=r.repair_type_id
+  `).all<{id:number;repair_type:string;repair_subcategory:string}>();
+  return new Map(rows.results.map((row)=>[Number(row.id),row]));
 }
 
 export async function GET(request: Request) {
@@ -81,9 +82,10 @@ export async function GET(request: Request) {
     if (!user) throw new Error('Authentication required.');
     const [data,types] = await Promise.all([getWorkOrderData(env.DB),repairTypeMap()]);
     const withType = <T extends {numericId:number;equipmentId:number|null;unit:string}>(repair:T)=>{
-      const repairType=types.get(Number(repair.numericId))??'Uncategorized';
+      const repairType=types.get(Number(repair.numericId))?.repair_type??'Uncategorized';
+      const repairSubcategory=types.get(Number(repair.numericId))?.repair_subcategory??'';
       const unit=repair.equipmentId===null&&repairType==='INDIRECT LABOR-OTHER'?'SHOP / NO UNIT':repair.unit;
-      return {...repair,repairType,unit};
+      return {...repair,repairType,repairSubcategory,unit};
     };
     const repairs = data.repairs.filter((repair) => !isRepairDeferred(repair.status)).map(withType);
     const reviewPackages = data.reviewPackages.map((workOrder)=>{

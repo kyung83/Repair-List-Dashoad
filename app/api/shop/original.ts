@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers';
+import {requireConfiguredSubcategoryBeforeLeavingWork} from '@/lib/repair-subcategories';
 import { getSessionUser, type AppUser } from '@/lib/auth';
 import { getShopLaborRate } from '@/lib/billing';
 import { usePartOnRepair } from '@/lib/inventory-db';
@@ -96,6 +97,7 @@ async function stopActiveLabor(
     throw new Error(`You already have labor running on repair #${timer.repair_id}. Stop that timer first.`);
   }
 
+  await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,Number(timer.repair_id));
   const elapsedHours = Math.max(0.01, Math.round(((Date.now() - timestampMs(timer.started_at)) / 3600000) * 100) / 100);
   const rate = await getShopLaborRate(env.DB);
   const laborDate = new Date().toISOString().slice(0, 10);
@@ -455,6 +457,7 @@ export async function POST(request: Request) {
     if (action === 'completeRepair') {
       const id = repairId(body.repairId ?? body.id);
       await requireAssignedRepair(technician.id, id);
+      await requireConfiguredSubcategoryBeforeLeavingWork(env.DB,id);
       const stopped = await stopActiveLabor(user, technician, id, false, body.notes);
       const result = await env.DB.prepare(`
         UPDATE repairs

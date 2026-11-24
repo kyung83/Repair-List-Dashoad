@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       make: params.get('make'),
       model: params.get('model'),
       repairType: params.get('repairType'),
+      repairSubcategory:params.get('repairSubcategory'),
       repairStatus: params.get('repairStatus'),
       technician: params.get('technician'),
       repairSource: params.get('repairSource'),

@@ -11,7 +11,7 @@ type TechnicianNote = {repairId:string;repairIssue:string;id:number;technicianId
 type RepairPhoto = {repairId:string;repairIssue:string;id:number;fileName:string;contentType:string;note:string;createdAt:string;url:string};
 type Repair = {
   id:string;numericId:number;equipmentId:number|null;unit:string;issue:string;status:string;assignedTo:string;technicianId:number|null;
-  repairType:string;location:string;laborHours:number;laborRate:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;completedAt:string;reviewedAt:string;
+  repairType:string;repairSubcategory?:string;location:string;laborHours:number;laborRate:number;laborCost:number;partCost:number;outsideCost:number;totalCost:number;completedAt:string;reviewedAt:string;
   geotabReviewStatus:string;geotabResolutionType:string;geotabResolutionNote:string;geotabFailureReason:string;
 };
 type ReviewPackage = {
@@ -31,7 +31,7 @@ type BillingHandoff={workOrderId:string;unit:string;totalCost:number}|null;
 function money(value:number){return Number(value||0).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});}
 function dateTime(value:string){if(!value)return "—";const normalized=value.includes("T")?value:value.replace(" ","T")+"Z";const parsed=new Date(normalized);return Number.isNaN(parsed.getTime())?value:parsed.toLocaleString();}
 function billingHref(item:Pick<ReviewPackage,"id">){return `/invoices?view=ready&workOrderId=${encodeURIComponent(item.id)}`;}
-function repairTypes(item:ReviewPackage){return [...new Set(item.repairs.map(repair=>repair.repairType||"Uncategorized"))].join(", ");}
+function repairTypes(item:ReviewPackage){return [...new Set(item.repairs.map(repair=>[repair.repairType||"Uncategorized",repair.repairSubcategory].filter(Boolean).join(' / ')))].join(", ");}
 
 export default function WorkOrdersPage(){
   const [data,setData]=useState<WorkOrderData|null>(null);
@@ -60,7 +60,7 @@ export default function WorkOrdersPage(){
       if(!needle)return true;
       return [
         item.unit,item.technician,item.completionDate,item.reviewedBy,item.reviewNote,
-        ...item.repairs.flatMap((repair)=>[repair.id,repair.issue,repair.status,repair.repairType]),
+        ...item.repairs.flatMap((repair)=>[repair.id,repair.issue,repair.status,repair.repairType,repair.repairSubcategory]),
         ...item.technicianNotes.flatMap((note)=>[note.technician,note.detail]),
         ...item.usedParts.flatMap((part)=>[part.partNumber,part.description]),
         ...item.repairPhotos.flatMap((photo)=>[photo.fileName,photo.note,photo.repairIssue]),
@@ -70,7 +70,7 @@ export default function WorkOrdersPage(){
 
   const openRepairs=useMemo(()=>{
     const needle=query.trim().toLowerCase();
-    return (data?.repairs??[]).filter((item)=>!isRepairCompleted(item.status)&&(!needle||[item.unit,item.issue,item.repairType,item.assignedTo,item.location].join(" ").toLowerCase().includes(needle)));
+    return (data?.repairs??[]).filter((item)=>!isRepairCompleted(item.status)&&(!needle||[item.unit,item.issue,item.repairType,item.repairSubcategory,item.assignedTo,item.location].join(" ").toLowerCase().includes(needle)));
   },[data,query]);
 
   function toggle(id:string){setExpanded((current)=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;});}
@@ -159,7 +159,7 @@ export default function WorkOrdersPage(){
       </table>{!visiblePackages.length&&<div style={{padding:24,color:"#68746f",textAlign:"center",fontSize:12}}>No completed work orders match this view.</div>}</div>
     </section>
 
-    <section style={{marginTop:14,border:"1px solid #cfd6db",background:"white"}}><div style={{padding:10,borderBottom:"1px solid #d7ded9",fontSize:12,fontWeight:900}}>OPEN REPAIRS — NOT YET COMPLETED</div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}><thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Repair Type</th><th style={thStyle}>Repair</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Labor</th></tr></thead><tbody>{openRepairs.slice(0,100).map((repair)=><tr key={repair.id} style={{borderTop:"1px solid #e7ebee"}}><td style={{...tdStyle,fontWeight:900}}>{repair.unit||"—"}</td><td style={{...tdStyle,fontWeight:850}}>{repair.repairType||"Uncategorized"}</td><td style={tdStyle}>{repair.issue}</td><td style={tdStyle}>{repair.assignedTo||"Unassigned"}</td><td style={tdStyle}>{repair.location||"—"}</td><td style={tdStyle}>{repair.laborHours.toFixed(2)} hr</td></tr>)}</tbody></table>{!openRepairs.length&&<div style={emptyStyle}>No open repairs match this search.</div>}</div></section>
+    <section style={{marginTop:14,border:"1px solid #cfd6db",background:"white"}}><div style={{padding:10,borderBottom:"1px solid #d7ded9",fontSize:12,fontWeight:900}}>OPEN REPAIRS — NOT YET COMPLETED</div><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:980}}><thead><tr style={headRowStyle}><th style={thStyle}>Unit</th><th style={thStyle}>Repair Type</th><th style={thStyle}>Repair</th><th style={thStyle}>Technician</th><th style={thStyle}>Location</th><th style={thStyle}>Labor</th></tr></thead><tbody>{openRepairs.slice(0,100).map((repair)=><tr key={repair.id} style={{borderTop:"1px solid #e7ebee"}}><td style={{...tdStyle,fontWeight:900}}>{repair.unit||"—"}</td><td style={{...tdStyle,fontWeight:850}}>{[repair.repairType||"Uncategorized",repair.repairSubcategory].filter(Boolean).join(' / ')}</td><td style={tdStyle}>{repair.issue}</td><td style={tdStyle}>{repair.assignedTo||"Unassigned"}</td><td style={tdStyle}>{repair.location||"—"}</td><td style={tdStyle}>{repair.laborHours.toFixed(2)} hr</td></tr>)}</tbody></table>{!openRepairs.length&&<div style={emptyStyle}>No open repairs match this search.</div>}</div></section>
 
     <footer style={{marginTop:9,color:"#74808a",fontSize:10,textAlign:"right"}}>{data?`Snapshot updated ${new Date(data.updatedAt).toLocaleString()}`:"Loading work order review..."}</footer>
   </main>;
