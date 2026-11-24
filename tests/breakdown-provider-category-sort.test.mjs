@@ -38,7 +38,7 @@ test('provider and repair category filters combine with search and stage chips f
   assert.deepEqual(breakdownBoardRows(rows,{...base,provider:'ats - gr',repairCategory:'TIRES'}).map(x=>x.id),[5]);
   assert.deepEqual(breakdownBoardRows(rows,{...base,provider:'ats - gr',search:'Clare',stage:'readyForTotals'}).map(x=>x.id),[5]);
   assert.deepEqual(breakdownBoardRows(rows,{...base,stage:'readyForTotals'}).map(x=>x.id),[9,5]);
-  assert.deepEqual(breakdownBoardRows(rows,{...base,stage:'onlocation'}).map(x=>x.id),[9,6,5],'existing On Location chip still includes stage 4');
+  assert.deepEqual(breakdownBoardRows(rows,{...base,stage:'onlocation'}).map(x=>x.id),[6],'On Location excludes the separate review queue');
 });
 test('newest remains existing server order; provider and category sorts group correctly and place unassigned last',()=>{
   assert.deepEqual(breakdownBoardRows(rows,base).map(x=>x.id),[9,8,7,6,5]);
@@ -48,7 +48,7 @@ test('newest remains existing server order; provider and category sorts group co
   assert.deepEqual(rows.map(x=>x.id),[9,8,7,6,5],'sorting does not modify the source breakdown list');
 });
 test('Ready for Totals and provider sorting stay on existing board and keep final-cost workflow untouched',()=>{
-  assert.match(page,/label:'Ready for Totals',count:summary\.readyForTotals/);
+  assert.match(page,/label:'Ready for Review',count:summary\.readyForTotals/);
   assert.match(page,/readyForTotals:breakdowns\.filter\(row=>row\.status==='ready_for_review'\)\.length/);
   assert.match(page,/aria-label="Sort breakdowns"/);
   assert.match(page,/Sort: Provider → Category/);
