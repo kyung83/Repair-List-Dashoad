@@ -1,4 +1,5 @@
 import { PM_CATEGORIES } from './pm-schedules';
+import {cleanTruckBodyType} from './pm-body-types';
 import {
   archiveEquipmentMasterItem as archiveBase,
   getEquipmentMaster,
@@ -141,6 +142,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
   const type = equipmentType(body.equipmentType);
   const category = categoryFor(type, body.category);
   const trailerClassification = trailerClassificationFor(type, body.trailerType);
+  const truckBodyType=type==='truck'&&Object.prototype.hasOwnProperty.call(body,'truckBodyType')?cleanTruckBodyType(body.truckBodyType):null;
   const modelYear = optionalWholeNumber(body.modelYear, 'Model year', 1900, 2100);
   const requestedMileage = optionalWholeNumber(body.currentMileage, 'Mileage', 0);
   const vin = text(body.vin, 40).toUpperCase();
@@ -190,12 +192,12 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
     const currentMileage = trackWithGeotab ? null : requestedMileage;
     const result = await db.prepare(`
       INSERT INTO equipment (
-        unit, category, equipment_type, trailer_type, trailer_subtype, active,
+        unit, category, equipment_type, trailer_type, trailer_subtype, truck_body_type, active,
         current_mileage, mileage_updated_at,
         vin, license_plate, license_state, model_year, make, model, engine,
         purchase_date, purchase_price, purchased_from,
         driver, location, notes, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 1, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `).bind(
       unitInput,
@@ -203,6 +205,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
       type,
       trailerClassification.trailerType,
       trailerClassification.trailerSubtype,
+      truckBodyType??'',
       currentMileage,
       currentMileage,
       vin || null,
@@ -253,6 +256,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
   await db.prepare(`
     UPDATE equipment
     SET unit = ?, category = ?, equipment_type = ?, trailer_type = ?, trailer_subtype = ?,
+        truck_body_type=CASE WHEN ?='truck' THEN COALESCE(?,truck_body_type) ELSE '' END,
         current_mileage = ?,
         mileage_updated_at = CASE
           WHEN ? = 1 THEN mileage_updated_at
@@ -269,6 +273,7 @@ export async function saveEquipmentMasterItem(db: D1Database, body: Record<strin
     type,
     trailerClassification.trailerType,
     trailerClassification.trailerSubtype,
+    type,truckBodyType,
     currentMileage,
     trackWithGeotab ? 1 : 0,
     currentMileage,
