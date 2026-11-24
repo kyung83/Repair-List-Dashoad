@@ -56,7 +56,7 @@ async function payload(repair:RepairRow) {
   const all = await listRepairTypes(env.DB,true);
   const types = all.filter(type => type.name.toUpperCase() !== 'INDIRECT LABOR-OTHER');
   const currentSubcategory=await repairSubcategoryForRepair(env.DB,repair.id);
-  const subcategories=current?.active&&current.name.toUpperCase()!=='INDIRECT LABOR-OTHER'?(await listRepairSubcategories(env.DB)).filter(s=>s.repairTypeId===current.id):[];
+  const subcategories=current&&current.name.toUpperCase()!=='INDIRECT LABOR-OTHER'?(await listRepairSubcategories(env.DB)).filter(s=>s.repairTypeId===current.id):[];
   const lockReason = checklistRun
     ? 'checklist_started'
     : maintenanceEventType
@@ -104,7 +104,7 @@ export async function POST(request:Request) {
 
     if(body.action==='setSubcategory'){
       const parent=await repairTypeForRepair(env.DB,repairId);
-      if(!parent||!parent.active||parent.name.toUpperCase()==='INDIRECT LABOR-OTHER')throw new Error('Choose an active fleet Repair Type first.');
+      if(!parent||parent.name.toUpperCase()==='INDIRECT LABOR-OTHER')throw new Error('Choose a fleet Repair Type first.');
       if(Number(body.repairTypeId)!==parent.id)throw new Error('The Repair Type changed. Reload and choose a subcategory again.');
       const next=await requireRepairSubcategory(env.DB,parent.id,body.repairSubcategoryId);
       const current=await repairSubcategoryForRepair(env.DB,repairId);
