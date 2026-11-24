@@ -4,7 +4,7 @@ import {useEffect,useState} from "react";
 import type {RepairSubcategory} from "@/lib/repair-subcategories";
 
 type RepairType={id:number;name:string;active?:boolean;checklistMode:"none"|"optional"|"required"};
-type Data={ok?:boolean;error?:string;repairId:string;current:RepairType|null;currentSubcategory?:RepairSubcategory|null;subcategories?:RepairSubcategory[];types:RepairType[];maintenanceEventType:"pm"|"annual"|null;maintenanceLabel:string;noUnit:boolean;locked:boolean;lockReason:"checklist_started"|"maintenance"|"no_unit"|null};
+type Data={ok?:boolean;error?:string;repairId:string;current:RepairType|null;currentSubcategory?:RepairSubcategory|null;checklistMode?:"none"|"optional"|"required";checklistName?:string|null;checklistPendingSubcategory?:boolean;subcategoryLocked?:boolean;subcategories?:RepairSubcategory[];types:RepairType[];maintenanceEventType:"pm"|"annual"|null;maintenanceLabel:string;noUnit:boolean;locked:boolean;lockReason:"checklist_started"|"maintenance"|"no_unit"|null};
 type Props={repairId:string};
 
 export default function CurrentRepairTypeControl({repairId}:Props){
@@ -71,13 +71,14 @@ export default function CurrentRepairTypeControl({repairId}:Props){
   }
 
   async function chooseSubcategory(value:string){
-    if(!data?.current||busy)return;
+    if(!data?.current||busy||data.subcategoryLocked)return;
     setBusy(true);setMessage("");
     try{
       const response=await fetch("/api/shop/repair-type",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"setSubcategory",repairId,repairTypeId:data.current.id,repairSubcategoryId:value?Number(value):null})});
       const payload=await response.json() as Data;
       if(!response.ok||!payload.ok)throw new Error(payload.error||"Subcategory could not be saved.");
       setData(payload);setMessage(payload.currentSubcategory?payload.currentSubcategory.name+" saved.":"Subcategory cleared and saved.");
+      window.dispatchEvent(new CustomEvent("repair-type-changed",{detail:{repairId}}));
       window.dispatchEvent(new CustomEvent("shop-repair-close-updated",{detail:{repairId}}));
     }catch(error){const text=error instanceof Error?error.message:"Subcategory could not be saved.";await load();setMessage(text);}
     finally{setBusy(false);}
@@ -91,7 +92,8 @@ export default function CurrentRepairTypeControl({repairId}:Props){
   const savedSubcategory=data.currentSubcategory;
   const subcategoryOptions=savedSubcategory&&!subcategories.some(s=>s.id===savedSubcategory.id)?[savedSubcategory,...subcategories]:subcategories;
   const missingSubcategory=Boolean(data.current&&subcategories.length&&!savedSubcategory);
-  const checklist=data.current?.checklistMode&&data.current.checklistMode!=="none";
+  const checklistMode=data.checklistMode??data.current?.checklistMode;
+  const checklist=checklistMode&&checklistMode!=="none"&&!data.checklistPendingSubcategory;
   const helpText=data.lockReason==="checklist_started"
     ? "Locked because this category checklist has started."
     : data.current
@@ -103,8 +105,8 @@ export default function CurrentRepairTypeControl({repairId}:Props){
       <option value="">Choose Repair Type…</option>
       {data.types.map(type=><option key={type.id} value={type.id}>{type.name}{type.checklistMode==="required"?" · CHECKLIST":""}</option>)}
     </select>
-    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY {subcategories.length?"· REQUIRED":""}</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="" disabled={subcategories.length>0}>{subcategories.length?"Choose required subcategory…":"No subcategory / not specified"}</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>{subcategories.length?"Select a subcategory before leaving this repair.":"This saved classification has been retired; no active subcategories are required."} The main Repair Type and checklist rules do not change.</small></label>}
-    {checklist&&<div style={checklistNote}>{data.current?.name} uses a check sheet. {data.lockReason==="checklist_started"?"The Repair Type is now locked for this work order.":"It will appear below after this selection."}</div>}
+    {data.current&&subcategoryOptions.length>0&&<label style={{display:"grid",gap:5}}><span style={label}>SUBCATEGORY {subcategories.length?"· REQUIRED":""}</span><select value={savedSubcategory?String(savedSubcategory.id):""} disabled={busy||data.subcategoryLocked} onChange={event=>void chooseSubcategory(event.target.value)} style={select}><option value="" disabled={subcategories.length>0}>{subcategories.length?"Choose required subcategory…":"No subcategory / not specified"}</option>{subcategoryOptions.map(s=><option key={s.id} value={s.id} disabled={!s.active}>{s.name}{!s.active?" · RETIRED":""}</option>)}</select><small style={help}>{subcategories.length?"Select a subcategory before leaving this repair.":"This saved classification has been retired; no active subcategories are required."} {data.subcategoryLocked?" Subcategory is locked because its checklist has started.":" The selected subcategory determines the check sheet."}</small></label>}
+    {checklist&&<div style={checklistNote}>{data.checklistName||data.current?.name} · {checklistMode==="required"?"Required checklist":"Optional checklist"}. {data.lockReason==="checklist_started"?"The started version is locked for this work order.":"Open the check sheet below."}</div>}
     {message&&<div style={message.includes("saved")?successBox:errorBox}>{message}</div>}
   </section>;
 }
