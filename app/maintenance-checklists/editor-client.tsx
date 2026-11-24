@@ -39,17 +39,17 @@ export default function MaintenanceChecklistEditorClient(){
   useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:'Checklist editor could not be loaded.'))},[]);
 
   function confirmDiscard(){return !dirty||window.confirm('Discard the unpublished checklist changes?')}
-  function switchKind(next:EventType){if(next===kind)return;if(!confirmDiscard())return;setKind(next);setBodyType('');setMessage('');if(data)applyAssigned(data,next,target)}
-  function switchTarget(next:AppliesTo){if(next===target)return;if(!confirmDiscard())return;setTarget(next);setBodyType('');setMessage('');if(data)applyAssigned(data,kind,next)}
+  function switchKind(next:EventType){if(next===kind||saving)return;if(!confirmDiscard())return;setKind(next);setBodyType('');setMessage('');if(data)applyAssigned(data,next,target)}
+  function switchTarget(next:AppliesTo){if(next===target||saving)return;if(!confirmDiscard())return;setTarget(next);setBodyType('');setMessage('');if(data)applyAssigned(data,kind,next)}
   function switchBody(next:string){if(next===bodyType||!confirmDiscard())return;setBodyType(next);setMessage('');if(data)applyAssigned(data,kind,target,next)}
-  function selectExisting(key:string){if(!data||!confirmDiscard())return;applyTemplate(data,kind,key);setMessage('')}
+  function selectExisting(key:string){if(saving||!data||!confirmDiscard())return;applyTemplate(data,kind,key);setMessage('')}
   function patch(index:number,patchValue:Partial<TemplateItem>){setItems(current=>renumber(current.map((item,itemIndex)=>itemIndex===index?{...item,...patchValue}:item)));setDirty(true)}
   function addItem(section?:string){const nextSection=section||items.at(-1)?.section||'General';setItems(current=>renumber([...current,blankItem(nextSection)]));setDirty(true)}
   function addSection(){const section=window.prompt('Name the new checklist section:','New Section')?.trim();if(section)addItem(section)}
   function move(index:number,targetIndex:number){if(targetIndex<0||targetIndex>=items.length||index===targetIndex)return;setItems(current=>{const next=[...current];const[picked]=next.splice(index,1);next.splice(targetIndex,0,picked);return renumber(next)});setDirty(true)}
   function remove(index:number){if(!window.confirm('Remove this item from the draft?'))return;setItems(current=>renumber(current.filter((_,itemIndex)=>itemIndex!==index)));setDirty(true)}
-  function startBlank(){if(!confirmDiscard())return;setSelectedKey(null);setName(bodyType?bodyType+' PM':`New ${kind==='annual'?'Annual':'PM'} Template`);setItems([blankItem('General')]);setDirty(true);setMessage('New blank template. Publishing it will also assign it to the selected equipment/body type.')}
-  function copyCurrent(){const template=data&&selectedKey?templateFor(data,kind,selectedKey):null;if(!template)return;if(!confirmDiscard())return;setSelectedKey(null);setName(bodyType?bodyType+' PM':`${template.name} Copy`);setItems(cloneItems(template.items));setDirty(true);setMessage('Copied into a new template draft. Change the name or questions, then publish.')}
+  function startBlank(){if(saving||!confirmDiscard())return;setSelectedKey(null);setName(bodyType?bodyType+' PM':`New ${kind==='annual'?'Annual':'PM'} Template`);setItems([blankItem('General')]);setDirty(true);setMessage('New blank template. Publishing it will also assign it to the selected equipment/body type.')}
+  function copyCurrent(){if(saving)return;const template=data&&selectedKey?templateFor(data,kind,selectedKey):null;if(!template)return;if(!confirmDiscard())return;setSelectedKey(null);setName(bodyType?bodyType+' PM':`${template.name} Copy`);setItems(cloneItems(template.items));setDirty(true);setMessage('Copied into a new template draft. Change the name or questions, then publish.')}
 
   async function save(){
     if(!items.length)return setMessage('Add at least one checklist item first.');
