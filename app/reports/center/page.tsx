@@ -86,9 +86,9 @@ export default function ReportingCenter(){
  const isRecordTab=['repairs','breakdowns','parts','maintenance','expenses','history'].includes(tab);
  const dataset=isRecordTab?tab as Dataset:'repairs';
  const fullDatasetKeys:Dataset[]=['repairs','breakdowns','history','maintenance','expenses','parts'];
- const fullLabels:Record<Dataset,string>={repairs:'Repairs and imported repair orders',breakdowns:'Roadside breakdowns',history:'Historical VMRS lines',maintenance:'PM and annual events',expenses:'Other recorded expenses',parts:'Part usage summaries'};
- const fleetPrintTables:PrintTable[]=fullDatasetKeys.map(ds=>({title:fullLabels[ds],rows:ds==='breakdowns'?breakdownRows:dataA[ds],columns:(defaultColumns[ds]??[]).map(column)}));
- const fleetPrintCohorts:PrintCohort[]=[{label:'Selected fleet scope',records:fullDatasetKeys.flatMap(ds=>ds==='breakdowns'?breakdownRows:dataA[ds]),partial:sourcePartial}];
+ const fullLabels:Record<Dataset,string>={repairs:'Repairs and imported repair orders',breakdowns:'Roadside breakdowns (including cleared reports)',history:'Historical VMRS lines',maintenance:'PM and annual events',expenses:'Other recorded expenses',parts:'Part usage summaries'};
+ const fleetPrintTables:PrintTable[]=fullDatasetKeys.map(ds=>({title:fullLabels[ds],rows:dataA[ds],columns:(defaultColumns[ds]??[]).map(column)}));
+ const fleetPrintCohorts:PrintCohort[]=[{label:'Selected fleet scope',records:fullDatasetKeys.flatMap(ds=>dataA[ds]),partial:sourcePartial}];
  const unitPrintCohorts=(selected:readonly TableRow[])=>{const ids=new Set(selected.map(row=>Number(row.fields.equipmentId)));return [{label:'Selected units',records:fullDatasetKeys.filter(ds=>ds!=='parts').flatMap(ds=>dataA[ds].filter(row=>ids.has(Number(row.fields.equipmentId)))),partial:sourcePartial}];};
  const activeUnit=unitFilter==null?null:units.find(x=>x.fields.equipmentId===unitFilter);
  const unitHistory=dataA.history.filter(r=>r.fields.equipmentId===unitFilter);
