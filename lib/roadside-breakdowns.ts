@@ -51,6 +51,7 @@ export type BreakdownRow = {
   snapshot_captured_at: string | null;
   created_at: string;
   updated_at: string;
+  geotab_rolling_review_at?: string | null;
 };
 
 const LIST_SELECT = `
@@ -63,11 +64,16 @@ const LIST_SELECT = `
     r.outside_cost AS cost,
     b.snapshot_source, b.geotab_driver_id, b.driver_observed_at, b.geotab_device_id,
     b.latitude, b.longitude, b.gps_observed_at, b.gps_source, b.snapshot_captured_at,
-    b.created_at, b.updated_at
+    b.created_at, b.updated_at,
+    CASE WHEN b.stage<5 AND b.rolling_at IS NULL AND c.state='pending' AND EXISTS (
+      SELECT 1 FROM equipment_geotab_devices d WHERE d.equipment_id=b.equipment_id AND d.geotab_device_id=c.device_id AND d.current=1 AND julianday(d.assigned_at)<=julianday(b.created_at)
+    ) AND (SELECT COUNT(*) FROM equipment_geotab_devices x WHERE x.equipment_id=b.equipment_id AND x.current=1)=1
+      AND (SELECT COUNT(*) FROM equipment_geotab_devices x WHERE x.geotab_device_id=c.device_id AND x.current=1)=1 THEN c.candidate_at ELSE NULL END AS geotab_rolling_review_at
   FROM roadside_breakdowns b
   JOIN repairs r ON r.id = b.repair_id
   JOIN equipment e ON e.id = b.equipment_id
   LEFT JOIN app_users u ON u.id = b.claimed_by_user_id
+  LEFT JOIN breakdown_rolling_checks c ON c.breakdown_id=b.id AND c.equipment_id=b.equipment_id
 `;
 
 function escapeHtml(value: unknown) {

@@ -240,7 +240,7 @@ export default function BreakdownReportsPage() {
         <div>
           <p style={{ margin: 0, color: "#b45309", fontWeight: 900, letterSpacing: ".14em", fontSize: 12 }}>BREAKDOWN REPORTS</p>
           <h1 style={{ margin: "7px 0 0", fontSize: 34 }}>Roadside Breakdown Cost & Performance</h1>
-          <p style={{ margin: "8px 0 0", color: "#68746f", maxWidth: 960 }}>Breakdowns stay tied to the same repair and unit cost records used by the main Reports screens. This view isolates roadside activity for cost, frequency, provider, location and downtime analysis.</p>
+          <p style={{ margin: "8px 0 0", color: "#68746f", maxWidth: 960 }}>Breakdowns stay tied to the same repair and unit cost records used by the main Reports screens. This view isolates roadside activity for cost, frequency, provider, location and downtime analysis. Downtime uses recorded or office-confirmed Rolling time only; unknown downtime is excluded from averages and totals. Closing the work order does not establish Rolling time.</p>
         </div>
         <button style={button} onClick={() => downloadCsv(`breakdowns-${data.range.startDate}-to-${data.range.endDate}.csv`, csvRows)}>Export Breakdown CSV</button>
       </header>

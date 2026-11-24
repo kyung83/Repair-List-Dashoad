@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from 'vinext/server/app-router-entry';
 import { appUserCount, authenticateUser, createSession, getSessionUser, sessionCookie, type AppUser } from '../lib/auth';
 import { syncBreakdownDriverDirectory } from '../lib/breakdown-driver-directory';
+import { checkBreakdownRolling } from '../lib/breakdown-rolling-review';
 import { syncGeotabDvir } from '../lib/geotab';
 import { syncGeotabFleetMaster } from '../lib/geotab-fleet';
 import { syncGeotabGpsFeed, syncGeotabLocationMirror } from '../lib/geotab-gps-feed';
@@ -308,6 +309,16 @@ const worker = {
     return restrictDispatchRepairBoard(request, env, response, url);
   },
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (controller.cron === '*/30 * * * *') {
+      try {
+        const result = await checkBreakdownRolling(env, controller.scheduledTime);
+        console.log(JSON.stringify({ event:'breakdown_rolling_review_schedule', ...result }));
+      } catch (error) {
+        console.error(JSON.stringify({ event:'breakdown_rolling_review_schedule_failed', error:String(error) }));
+      }
+      return;
+    }
+
     if (controller.cron === '*/5 * * * *') {
       try {
         const shiftSummaries = await processDueMaintenanceShiftSummaries(env.DB, controller.scheduledTime);

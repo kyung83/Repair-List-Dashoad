@@ -199,7 +199,7 @@ export async function recordDriverBreakdownAction(breakdownId:number,token:strin
           status='on_location',
           on_location_at=COALESCE(on_location_at,CURRENT_TIMESTAMP),
           updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND tech_arrived_at IS NULL
+      WHERE id=? AND tech_arrived_at IS NULL AND rolling_at IS NULL AND stage<5
     `).bind(breakdownId).run();
     if(Number(result.meta.changes||0)===1){
       const updated=await driverRow(breakdownId);
@@ -226,7 +226,7 @@ export async function recordDriverBreakdownAction(breakdownId:number,token:strin
           ready_for_review_at=COALESCE(ready_for_review_at,CURRENT_TIMESTAMP),
           stage=CASE WHEN stage<4 THEN 4 ELSE stage END,
           status='ready_for_review',updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND rolling_at IS NULL
+      WHERE id=? AND rolling_at IS NULL AND stage<5
     `).bind(breakdownId).run();
     if(Number(result.meta.changes||0)===1){
       const updated=await driverRow(breakdownId);

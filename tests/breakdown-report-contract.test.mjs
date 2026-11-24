@@ -24,7 +24,8 @@ test('breakdown report calculates arrival and downtime from recorded roadside ti
   assert.match(service, /arrival_minutes/);
   assert.match(service, /repair_minutes/);
   assert.match(service, /downtime_minutes/);
-  assert.match(service, /COALESCE\(b\.rolling_at,r\.completed_at\)/);
+  assert.doesNotMatch(service, /COALESCE\(b\.rolling_at,r\.completed_at\)/);
+  assert.match(service, /b\.rolling_at IS NULL THEN NULL/);
 });
 
 test('breakdown report provides unit category provider location and monthly analysis', async () => {

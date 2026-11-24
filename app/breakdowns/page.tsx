@@ -16,6 +16,8 @@ type NewProviderDraft = { name:string; phone:string; city:string; state:string; 
 type StageFilter = BoardStageFilter;
 type BusyAction = 'diagnostics'|'claim'|'provider'|'onLocation'|'unit'|'clear'|null;
 
+function breakdownStatus(row:BreakdownViewRow){return row.status==='ready_for_review'?'Ready for Review':row.geotab_rolling_review_at?'Geotab Rolling Review':STAGE_LABELS[row.stage]||row.status;}
+function breakdownStatusBadge(row:BreakdownViewRow){return row.geotab_rolling_review_at?s.badgeOrange:row.status==='ready_for_review'?s.badgeGreen:stageBadge(row.stage);}
 const STAGE_LABELS:Record<number,string>={1:'Reported',2:'Diagnostics',3:'En Route',4:'On Location',5:'Complete'};
 const OFFICE_CATEGORY_DEFAULTS=['Fuel Issue'];
 
@@ -195,6 +197,8 @@ export default function BreakdownsPage(){
   },[]);
 
   useEffect(()=>{void load();},[load]);
+  // Refresh the active list only; do not overwrite a manager's open closeout draft.
+  useEffect(()=>{if(selectedId!==null)return;const timer=window.setInterval(()=>{if(document.visibilityState==='visible')void load();},60_000);return()=>window.clearInterval(timer);},[load,selectedId]);
   useEffect(()=>{
     const pop=()=>{const id=Number(new URLSearchParams(window.location.search).get('id')||0);setSelectedId(Number.isInteger(id)&&id>0?id:null);};
     window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);
@@ -211,7 +215,8 @@ export default function BreakdownsPage(){
     open:breakdowns.length,
     reported:breakdowns.filter(row=>row.stage===1).length,
     enRoute:breakdowns.filter(row=>row.stage===3).length,
-    onLocation:breakdowns.filter(row=>row.stage===4).length,
+    onLocation:breakdowns.filter(row=>row.stage===4&&row.status!=='ready_for_review'&&!row.geotab_rolling_review_at).length,
+    geotabRolling:breakdowns.filter(row=>Boolean(row.geotab_rolling_review_at)).length,
     readyForTotals:breakdowns.filter(row=>row.status==='ready_for_review').length,
   }),[breakdowns]);
   const providerOptions=useMemo(()=>breakdownProviderNames(breakdowns),[breakdowns]);
@@ -343,7 +348,7 @@ export default function BreakdownsPage(){
       <div className={s.detailHeader}>
         <div>
           <button type="button" className={s.back} onClick={backToList}>← Back to Active Breakdowns</button>
-          <h1 className={s.detailTitle}>Breakdown #{selected.id} <span className={stageBadge(selected.stage)}>{STAGE_LABELS[selected.stage]||selected.status}</span></h1>
+          <h1 className={s.detailTitle}>Breakdown #{selected.id} <span className={breakdownStatusBadge(selected)}>{breakdownStatus(selected)}</span></h1>
           <div className={s.detailMeta}>{unitLabel(selected)} · {selected.driver_name} · {selected.city}, {selected.state}</div>
         </div>
         <div className={s.summaryCard}>
@@ -413,7 +418,7 @@ export default function BreakdownsPage(){
         <section className={s.card}>
           <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>3</span><div><h2 className={s.cardTitle}>Status</h2><p className={s.cardHelp}>The driver can update arrival and rolling from their phone. Office can still move the call forward.</p></div></div></div>
           <div className={s.statusBox}>
-            <div className={s.statusRow}><span>Current stage</span><strong>{STAGE_LABELS[selected.stage]||selected.status}</strong></div>
+            <div className={s.statusRow}><span>Current stage</span><strong>{breakdownStatus(selected)}</strong></div>
             <div className={s.statusRow}><span>Provider</span><strong>{selected.service_provider||'Not assigned'}</strong></div>
             <div className={s.statusRow}><span>ETA</span><strong>{selected.eta||'Not set'}</strong></div>
             <div className={s.statusRow}><span>On location</span><strong>{selected.on_location_at?dateTime(selected.on_location_at):'Not confirmed'}</strong></div>
@@ -423,7 +428,7 @@ export default function BreakdownsPage(){
 
         <section className={`${s.card} ${s.cardWide}`}>
           <div className={s.cardHeader}><div className={s.cardTitleWrap}><span className={s.number}>4</span><div><h2 className={s.cardTitle}>Closeout / Payment</h2><p className={s.cardHelp}>Enter the final total after the repair is complete. Driver Rolling is tracked, but it does not block office closeout.</p></div></div></div>
-          <DriverReceiptReview breakdownId={selected.id} initialCost={selected.cost} providerName={selected.service_provider} onClosed={()=>{backToList();void load();}}/>
+          <DriverReceiptReview breakdownId={selected.id} initialCost={selected.cost} providerName={selected.service_provider} onRollingReviewed={()=>void load()} onClosed={()=>{backToList();void load();}}/>
         </section>
       </div>
 
@@ -432,13 +437,13 @@ export default function BreakdownsPage(){
   }
 
   const stageChips:Array<{key:StageFilter;label:string;count:number}>=[
-    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},{key:'readyForTotals',label:'Ready for Totals',count:summary.readyForTotals},
+    {key:'all',label:'All',count:summary.open},{key:'reported',label:'Reported',count:summary.reported},{key:'diagnostics',label:'Diagnostics',count:breakdowns.filter(row=>row.stage===2).length},{key:'enroute',label:'En Route',count:summary.enRoute},{key:'onlocation',label:'On Location',count:summary.onLocation},{key:'geotabRolling',label:'Geotab Rolling Review',count:summary.geotabRolling},{key:'readyForTotals',label:'Ready for Review',count:summary.readyForTotals},
   ];
 
   return <main className={s.page}><div className={s.shell}>
     <div className={s.header}><div><p className={s.eyebrow}>ROADSIDE OPERATIONS</p><h1 className={s.title}>Active Breakdowns</h1><p className={s.subtitle}>Multiple calls stay in one compact board. The driver report is preserved separately from our diagnosis, provider/ETA, status, final cost and closeout.</p></div><div className={s.actions}><a className={s.button} href="/breakdowns/setup">Breakdown Setup</a><button className={s.button} type="button" onClick={()=>void load()} disabled={loading}>Refresh</button></div></div>
     {message?<div className={s.notice}>{message}</div>:null}
-    <section className={s.metrics}><article className={s.metric}><span>Open</span><strong>{summary.open}</strong><small>All active roadside calls</small></article><article className={s.metric}><span>Reported</span><strong>{summary.reported}</strong><small>Needs diagnostics / dispatch</small></article><article className={s.metric}><span>En Route</span><strong>{summary.enRoute}</strong><small>Provider traveling</small></article><article className={s.metric}><span>On Location</span><strong>{summary.onLocation}</strong><small>Repair underway / closeout</small></article></section>
+    <section className={s.metrics}><article className={s.metric}><span>Open</span><strong>{summary.open}</strong><small>All active roadside calls</small></article><article className={s.metric}><span>Reported</span><strong>{summary.reported}</strong><small>Needs diagnostics / dispatch</small></article><article className={s.metric}><span>En Route</span><strong>{summary.enRoute}</strong><small>Provider traveling</small></article><article className={s.metric}><span>On Location</span><strong>{summary.onLocation}</strong><small>Repair underway / closeout</small></article><article className={s.metric}><button type="button" className={s.button} style={{textAlign:'left',color:'#875c13',width:'100%'}} onClick={()=>setFilter('geotabRolling')}>Geotab Rolling Review <strong>{summary.geotabRolling}</strong></button><small>Travel detected — confirm in Section 4</small></article><article className={s.metric}><button type="button" className={s.button} style={{textAlign:'left',width:'100%'}} onClick={()=>setFilter('readyForTotals')}>Ready for Review <strong>{summary.readyForTotals}</strong></button><small>Confirmed Rolling — review cost</small></article></section>
 
     <section className={s.panel}>
       <div className={s.panelHead}><div><h2 className={s.sectionTitle}>Breakdown Board</h2><p className={s.sectionCopy}>Tap or click one breakdown to open its single working card.</p></div><span className={s.badge}>{visible.length} shown</span></div>
@@ -460,8 +465,8 @@ export default function BreakdownsPage(){
       </div>
 
       {loading?<div className={s.empty}>Loading breakdowns…</div>:!visible.length?<div className={s.empty}>No open breakdowns match this view.</div>:<>
-        <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Breakdown</th><th>Unit</th><th>Our Diagnosis / Driver Report</th><th>Status</th><th>Driver</th><th>Provider / ETA</th><th>Final Cost</th><th>Updated</th><th></th></tr></thead><tbody>{visible.map(row=><tr key={row.id} onClick={()=>openBreakdown(row.id)}><td><strong>#{row.id}</strong></td><td><span className={s.unit}>{unitLabel(row)}</span><span className={s.muted}>{row.city}, {row.state}</span></td><td><strong>{row.repair_needed||'Diagnosis not entered'}</strong><span className={s.muted}>Driver: {row.repair_category}{row.description?` — ${row.description}`:''}</span></td><td><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></td><td>{row.driver_name}<span className={s.muted}>{row.claimed_by?`Claimed by ${row.claimed_by}`:'Unclaimed'}</span></td><td>{row.service_provider||'Not assigned'}<span className={s.muted}>ETA {row.eta||'—'}</span></td><td><strong>{money(row.cost)}</strong></td><td>{dateTime(row.updated_at)}</td><td><button type="button" className={s.button} onClick={event=>{event.stopPropagation();openBreakdown(row.id);}}>Open</button></td></tr>)}</tbody></table></div>
-        <div className={s.mobileList}>{visible.map(row=><button type="button" key={row.id} className={s.mobileCard} style={{width:'100%',textAlign:'left',cursor:'pointer'}} onClick={()=>openBreakdown(row.id)}><div className={s.mobileTop}><div><span className={s.unit}>#{row.id} · {unitLabel(row)}</span><span className={s.muted}>{row.repair_needed||'Diagnosis not entered'}</span></div><span className={stageBadge(row.stage)}>{STAGE_LABELS[row.stage]||row.status}</span></div><div className={s.mobileMeta}><span>Driver: {row.repair_category}{row.description?` — ${row.description}`:''}</span><span>{row.service_provider||'No provider'} · ETA {row.eta||'—'}</span><span>{row.driver_name} · {dateTime(row.updated_at)}</span></div></button>)}</div>
+        <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Breakdown</th><th>Unit</th><th>Our Diagnosis / Driver Report</th><th>Status</th><th>Driver</th><th>Provider / ETA</th><th>Final Cost</th><th>Updated</th><th></th></tr></thead><tbody>{visible.map(row=><tr key={row.id} onClick={()=>openBreakdown(row.id)}><td><strong>#{row.id}</strong></td><td><span className={s.unit}>{unitLabel(row)}</span><span className={s.muted}>{row.city}, {row.state}</span></td><td><strong>{row.repair_needed||'Diagnosis not entered'}</strong><span className={s.muted}>Driver: {row.repair_category}{row.description?` — ${row.description}`:''}</span></td><td><span className={breakdownStatusBadge(row)}>{breakdownStatus(row)}</span></td><td>{row.driver_name}<span className={s.muted}>{row.claimed_by?`Claimed by ${row.claimed_by}`:'Unclaimed'}</span></td><td>{row.service_provider||'Not assigned'}<span className={s.muted}>ETA {row.eta||'—'}</span></td><td><strong>{money(row.cost)}</strong></td><td>{dateTime(row.updated_at)}</td><td><button type="button" className={s.button} onClick={event=>{event.stopPropagation();openBreakdown(row.id);}}>Open</button></td></tr>)}</tbody></table></div>
+        <div className={s.mobileList}>{visible.map(row=><button type="button" key={row.id} className={s.mobileCard} style={{width:'100%',textAlign:'left',cursor:'pointer'}} onClick={()=>openBreakdown(row.id)}><div className={s.mobileTop}><div><span className={s.unit}>#{row.id} · {unitLabel(row)}</span><span className={s.muted}>{row.repair_needed||'Diagnosis not entered'}</span></div><span className={breakdownStatusBadge(row)}>{breakdownStatus(row)}</span></div><div className={s.mobileMeta}><span>Driver: {row.repair_category}{row.description?` — ${row.description}`:''}</span><span>{row.service_provider||'No provider'} · ETA {row.eta||'—'}</span><span>{row.driver_name} · {dateTime(row.updated_at)}</span></div></button>)}</div>
       </>}
     </section>
   </div></main>;

@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useMemo,useState} from 'react';
+import RollingReviewPanel, {type RollingReviewEvidence} from './rolling-review-panel';
 
 type ReceiptReview={
   breakdownId:number;
@@ -9,6 +10,9 @@ type ReceiptReview={
   repairFinishedAt:string|null;
   rollingAt:string|null;
   readyForReviewAt:string|null;
+  reportedAt:string|null;
+  rollingSource:string;
+  rollingReview:RollingReviewEvidence|null;
   receipt:null|{
     id:number;aiStatus:string;model:string;vendor:string;invoiceNumber:string;invoiceDate:string;unit:string;mileage:string;
     totalAmount:string;serviceSummary:string;costs:Record<string,unknown>;uncertain:string[];aiError:string;reviewStatus:string;
@@ -29,7 +33,7 @@ const label:React.CSSProperties={display:'grid',gap:5,fontSize:11,fontWeight:900
 const button:React.CSSProperties={minHeight:42,padding:'0 13px',border:'1px solid #c8d3dd',borderRadius:9,background:'#fff',color:'#25384a',fontWeight:900,cursor:'pointer'};
 const orange:React.CSSProperties={...button,borderColor:'#2f6f60',background:'#2f6f60',color:'#fff'};
 
-export default function DriverReceiptReview({breakdownId,initialCost,providerName,onClosed}:{breakdownId:number;initialCost:number|null;providerName:string|null;onClosed:()=>void}){
+export default function DriverReceiptReview({breakdownId,initialCost,providerName,onClosed,onRollingReviewed}:{breakdownId:number;initialCost:number|null;providerName:string|null;onClosed:()=>void;onRollingReviewed?:()=>void}){
   const[review,setReview]=useState<ReceiptReview|null>(null);
   const[draft,setDraft]=useState<Draft>({vendor:'',invoiceNumber:'',invoiceDate:'',totalAmount:'',serviceSummary:''});
   const[loading,setLoading]=useState(true);
@@ -85,15 +89,17 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
   const costNumber=Number(draft.totalAmount);
   const costValid=draft.totalAmount.trim()!==''&&Number.isFinite(costNumber)&&costNumber>=0;
   const statusText=useMemo(()=>{
-    if(rolling)return'Driver marked Rolling';
+    if(rolling)return review?.rollingSource==='office_geotab'?'Office confirmed Rolling — Geotab':review?.rollingSource==='office_manual'?'Office confirmed Rolling — manual':review?.driverStatus==='rolling'?'Driver marked Rolling':'Rolling time recorded';
+    if(review?.rollingReview)return'Geotab detected travel — review required';
     if(review?.driverStatus==='repair_finished')return'Repair marked finished — Rolling not confirmed';
     if(review?.driverStatus==='tech_arrived')return'Tech on location — Rolling not confirmed';
     return'Rolling not confirmed';
-  },[review?.driverStatus,rolling]);
+  },[review?.driverStatus,review?.rollingSource,review?.rollingReview,rolling]);
 
   async function confirmClose(){
     if(!costValid){setMessage('Enter the final total cost. Enter 0.00 if there was no outside cost.');return;}
-    const rollingNote=rolling?'Driver has marked Rolling.':'Driver has NOT marked Rolling. Rolling is optional for office closeout.';
+    if(review?.rollingReview){setMessage('Review the detected travel before closing this breakdown.');return;}
+    const rollingNote=rolling?`${statusText}.`:'Rolling has NOT been confirmed. Downtime will remain unknown until a verified Rolling time is recorded. Rolling is optional for office closeout.';
     if(!window.confirm(`${rollingNote}\n\nConfirm breakdown #${breakdownId} is repaired, the final cost is ${dollars(draft.totalAmount)}, and close it?`))return;
     setBusy(true);setMessage('');
     try{
@@ -115,8 +121,10 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
     <section style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:8}}>
       <div style={statusBox}><span style={statusLabel}>Tech arrived</span><strong>{time(review.techArrivedAt)}</strong></div>
       <div style={statusBox}><span style={statusLabel}>Repair finished</span><strong>{time(review.repairFinishedAt)}</strong></div>
-      <div style={{...statusBox,borderColor:rolling?'#9fcdb1':'#e7c77f',background:rolling?'#eef9f2':'#fff9ec'}}><span style={statusLabel}>Driver status</span><strong style={{color:rolling?'#17633d':'#875c13'}}>{statusText}</strong><small style={{marginTop:3,color:'#71808b'}}>Optional — office can close either way.</small></div>
+      <div style={{...statusBox,borderColor:rolling?'#9fcdb1':'#e7c77f',background:rolling?'#eef9f2':'#fff9ec'}}><span style={statusLabel}>Driver status</span><strong style={{color:rolling?'#17633d':'#875c13'}}>{statusText}</strong><small style={{marginTop:3,color:'#71808b'}}>{rolling?time(review.rollingAt):review.rollingReview?'Review the detected travel below.':'Unconfirmed downtime is not counted.'}</small></div>
     </section>
+
+    {!rolling&&<RollingReviewPanel key={breakdownId+':'+(review.rollingReview?.candidateAt??'manual')} breakdownId={breakdownId} reportedAt={review.reportedAt} evidence={review.rollingReview} busy={busy} onBusy={setBusy} onReviewed={()=>{void load(true);onRollingReviewed?.();}}/>}
 
     {receipt?<details style={{border:'1px solid #d9e1e8',borderRadius:10,background:'#fff',padding:11}}>
       <summary style={{cursor:'pointer',fontWeight:900,color:'#263b4e'}}>Receipt uploaded — review details</summary>
@@ -142,7 +150,7 @@ export default function DriverReceiptReview({breakdownId,initialCost,providerNam
 
     {message?<div style={{padding:10,border:'1px solid #efc16c',borderRadius:9,background:'#fff8e8',color:'#654d18',fontSize:12,fontWeight:750}}>{message}</div>:null}
     <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-      <button type="button" style={{...orange,minWidth:220}} disabled={busy||!costValid} onClick={()=>void confirmClose()}>{busy?'Closing…':'Confirm & Close Breakdown'}</button>
+      <button type="button" style={{...orange,minWidth:220}} disabled={busy||!costValid||Boolean(review.rollingReview)} onClick={()=>void confirmClose()}>{busy?'Closing…':'Confirm & Close Breakdown'}</button>
       <button type="button" style={button} disabled={busy} onClick={()=>void load()}>Refresh Driver Status</button>
     </div>
     <style>{`@media(max-width:760px){.breakdown-closeout-fields{grid-template-columns:1fr!important}}`}</style>

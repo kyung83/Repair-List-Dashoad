@@ -195,10 +195,10 @@ function dataCte(clauses: string[]) {
         CASE WHEN b.claimed_at IS NULL THEN NULL ELSE MAX(0,(julianday(b.claimed_at)-julianday(b.created_at))*1440.0) END AS claim_minutes,
         CASE WHEN COALESCE(b.tech_arrived_at,b.on_location_at) IS NULL THEN NULL ELSE MAX(0,(julianday(COALESCE(b.tech_arrived_at,b.on_location_at))-julianday(b.created_at))*1440.0) END AS arrival_minutes,
         CASE
-          WHEN COALESCE(b.tech_arrived_at,b.on_location_at) IS NULL OR COALESCE(b.repair_finished_at,b.rolling_at,r.completed_at) IS NULL THEN NULL
-          ELSE MAX(0,(julianday(COALESCE(b.repair_finished_at,b.rolling_at,r.completed_at))-julianday(COALESCE(b.tech_arrived_at,b.on_location_at)))*1440.0)
+          WHEN COALESCE(b.tech_arrived_at,b.on_location_at) IS NULL OR COALESCE(b.repair_finished_at,b.rolling_at) IS NULL THEN NULL
+          ELSE MAX(0,(julianday(COALESCE(b.repair_finished_at,b.rolling_at))-julianday(COALESCE(b.tech_arrived_at,b.on_location_at)))*1440.0)
         END AS repair_minutes,
-        CASE WHEN COALESCE(b.rolling_at,r.completed_at) IS NULL THEN NULL ELSE MAX(0,(julianday(COALESCE(b.rolling_at,r.completed_at))-julianday(b.created_at))*1440.0) END AS downtime_minutes
+        CASE WHEN b.status='not_breakdown' OR b.rolling_at IS NULL THEN NULL ELSE MAX(0,(julianday(b.rolling_at)-julianday(b.created_at))*1440.0) END AS downtime_minutes
       FROM roadside_breakdowns b
       JOIN repairs r ON r.id=b.repair_id
       JOIN equipment e ON e.id=b.equipment_id

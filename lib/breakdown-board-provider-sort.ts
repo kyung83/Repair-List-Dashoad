@@ -2,14 +2,14 @@
  * Client-side Breakdown Board grouping for final-cost entry.
  * Reads existing provider snapshots and repair category; no DB/schema changes.
  */
-export type BoardStageFilter='all'|'reported'|'diagnostics'|'enroute'|'onlocation'|'readyForTotals';
+export type BoardStageFilter='all'|'reported'|'diagnostics'|'enroute'|'onlocation'|'geotabRolling'|'readyForTotals';
 export type BoardSortMode='newest'|'provider'|'category'|'providerCategory';
 export const UNASSIGNED_PROVIDER='__unassigned__';
 
 export type BoardRow={
   id:number;stage:number;status:string;unit:string;driver_name:string;city:string;state:string;
   repair_category:string;repair_needed:string|null;description:string;
-  service_provider:string|null;eta:string|null;updated_at:string;
+  service_provider:string|null;eta:string|null;updated_at:string;geotab_rolling_review_at?:string|null;
 };
 export type BoardFilters={
   stage:BoardStageFilter;
@@ -45,7 +45,8 @@ export function breakdownBoardRows<T extends BoardRow>(rows:readonly T[],filters
     if(filters.stage==='reported'&&row.stage!==1)return false;
     if(filters.stage==='diagnostics'&&row.stage!==2)return false;
     if(filters.stage==='enroute'&&row.stage!==3)return false;
-    if(filters.stage==='onlocation'&&row.stage!==4)return false;
+    if(filters.stage==='onlocation'&&(row.stage!==4||normalized(row.status)==='ready_for_review'||row.geotab_rolling_review_at))return false;
+    if(filters.stage==='geotabRolling'&&!row.geotab_rolling_review_at)return false;
     if(filters.stage==='readyForTotals'&&normalized(row.status)!=='ready_for_review')return false;
     if(filters.repairCategory&&category(row)!==filters.repairCategory)return false;
     const providerName=normalized(provider(row));
@@ -54,7 +55,7 @@ export function breakdownBoardRows<T extends BoardRow>(rows:readonly T[],filters
     if(!query)return true;
     return [row.id,row.unit,row.driver_name,row.city,row.state,row.repair_category,row.repair_needed,row.description,row.service_provider,row.eta].join(' ').toLowerCase().includes(query);
   });
-  if(filters.sort==='newest')return shown; // Preserve the original server order.
+  if(filters.sort==='newest')return shown.sort((a,b)=>Number(Boolean(b.geotab_rolling_review_at))-Number(Boolean(a.geotab_rolling_review_at))); // Prioritize Geotab review, then preserve server order.
   return shown.sort((a,b)=>{
     const byProvider=compareEmptyLast(provider(a),provider(b));
     const byCategory=compareEmptyLast(category(a),category(b));
