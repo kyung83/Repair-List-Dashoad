@@ -94,6 +94,8 @@ export async function getRollingReview(db:D1Database,breakdownId:number){
     SELECT c.candidate_at AS candidateAt,c.evidence_at AS evidenceAt,c.distance_miles AS distanceMiles,c.max_speed_mph AS maxSpeedMph,c.duration_minutes AS durationMinutes,c.device_id AS deviceId
     FROM breakdown_rolling_checks c JOIN roadside_breakdowns b ON b.id=c.breakdown_id AND b.equipment_id=c.equipment_id
     WHERE b.id=? AND b.stage<5 AND b.rolling_at IS NULL AND c.state='pending'
-      AND EXISTS(SELECT 1 FROM equipment_geotab_devices d WHERE d.equipment_id=b.equipment_id AND d.geotab_device_id=c.device_id AND d.current=1)
+      AND EXISTS(SELECT 1 FROM equipment_geotab_devices d WHERE d.equipment_id=b.equipment_id AND d.geotab_device_id=c.device_id AND d.current=1 AND julianday(d.assigned_at)<=julianday(b.created_at))
+      AND (SELECT COUNT(*) FROM equipment_geotab_devices x WHERE x.equipment_id=b.equipment_id AND x.current=1)=1
+      AND (SELECT COUNT(*) FROM equipment_geotab_devices x WHERE x.geotab_device_id=c.device_id AND x.current=1)=1
   `).bind(breakdownId).first<{candidateAt:string;evidenceAt:string;distanceMiles:number;maxSpeedMph:number;durationMinutes:number;deviceId:string}>();
 }
