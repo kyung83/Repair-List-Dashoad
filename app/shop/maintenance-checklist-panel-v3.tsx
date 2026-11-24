@@ -48,7 +48,8 @@ export default function MaintenanceChecklistPanelV3(props:Props){
       <button type="button" onClick={()=>setInspectionOpen(open=>!open)} style={maintenanceLauncherButton} aria-expanded={inspectionOpen}>
         <span style={maintenanceLauncherIcon}>▣</span>
         <span style={{minWidth:0,textAlign:'left',display:'grid',gap:3}}>
-          <strong style={{fontSize:15,color:'#17324a'}}>{maintenanceLabel}</strong>
+          <strong style={{fontSize:15,color:'#17324a'}}>{maintenanceLabel}{checklist.eventType==='pm'&&checklist.pmBodyType?' · '+checklist.pmBodyType:''}</strong>
+          {checklist.eventType==='pm'&&checklist.pmBodyType&&checklist.templateName&&<span style={{fontSize:12,color:'#365b49'}}>{checklist.templateName}{checklist.templateVersion?' · v'+checklist.templateVersion:''}</span>}
           <span style={{fontSize:12,color:'#617180'}}>{inspectionOpen?'Current PM / Annual layout is open below.':'Open the PM / Annual checklist exactly as it is today.'}{maintenanceProgress?` · ${maintenanceProgress}`:''}</span>
         </span>
         <span style={maintenanceLauncherAction}>{inspectionOpen?'CLOSE':'OPEN'}</span>
