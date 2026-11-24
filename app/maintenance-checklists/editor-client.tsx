@@ -8,7 +8,8 @@ type TemplateItem={position:number;section:string;text:string;enabled:boolean;al
 type Version={id:number;name:string;version:number;active:boolean;createdAt:string;itemCount:number};
 type Template={id:number;eventType:EventType;templateKey:string;name:string;version:number;active:boolean;createdAt:string;items:TemplateItem[];versions:Version[]};
 type KindData={templates:Template[];assignments:Record<AppliesTo,string>};
-type SetupData={pm:KindData;annual:KindData;updatedAt:string};
+type BodyAssignment={equipmentType:AppliesTo;bodyType:string;templateKey:string};
+type SetupData={pm:KindData;annual:KindData;bodyTypes:Record<AppliesTo,string[]>;bodyAssignments:BodyAssignment[];updatedAt:string};
 
 const blankItem=(section='General'):TemplateItem=>({position:0,section,text:'',enabled:true,allowPass:true,allowFail:true,allowNa:true,requireNotes:false,requirePhoto:false,requireMeasurement:false,measurementLabel:'',measurementUnit:''});
 const renumber=(items:TemplateItem[])=>items.map((item,index)=>({...item,position:index+1}));
@@ -19,6 +20,7 @@ export default function MaintenanceChecklistEditorClient(){
   const[data,setData]=useState<SetupData|null>(null);
   const[kind,setKind]=useState<EventType>('pm');
   const[target,setTarget]=useState<AppliesTo>('truck');
+  const[bodyType,setBodyType]=useState('');
   const[selectedKey,setSelectedKey]=useState<string|null>(null);
   const[name,setName]=useState('');
   const[items,setItems]=useState<TemplateItem[]>([]);
@@ -28,24 +30,26 @@ export default function MaintenanceChecklistEditorClient(){
   const[dragIndex,setDragIndex]=useState<number|null>(null);
 
   function templateFor(payload:SetupData,nextKind:EventType,key:string|null){return key?payload[nextKind].templates.find(template=>template.templateKey===key)??null:null}
-  function assignedKey(payload:SetupData,nextKind:EventType,nextTarget:AppliesTo){return payload[nextKind].assignments[nextTarget]||payload[nextKind].templates[0]?.templateKey||null}
+  function bodyAssignment(payload:SetupData,nextTarget:AppliesTo,nextBody:string){return (payload.bodyAssignments??[]).find(a=>a.equipmentType===nextTarget&&a.bodyType.toLowerCase()===nextBody.toLowerCase())?.templateKey??null}
+  function assignedKey(payload:SetupData,nextKind:EventType,nextTarget:AppliesTo,nextBody=''){return (nextKind==='pm'&&nextBody?bodyAssignment(payload,nextTarget,nextBody):null)||payload[nextKind].assignments[nextTarget]||payload[nextKind].templates[0]?.templateKey||null}
   function applyTemplate(payload:SetupData,nextKind:EventType,key:string|null){const template=templateFor(payload,nextKind,key);setSelectedKey(template?.templateKey??null);setName(template?.name??'');setItems(template?cloneItems(template.items):[]);setDirty(false)}
-  function applyAssigned(payload:SetupData,nextKind:EventType,nextTarget:AppliesTo){applyTemplate(payload,nextKind,assignedKey(payload,nextKind,nextTarget))}
+  function applyAssigned(payload:SetupData,nextKind:EventType,nextTarget:AppliesTo,nextBody=''){applyTemplate(payload,nextKind,assignedKey(payload,nextKind,nextTarget,nextBody))}
 
   async function load(){const response=await fetch('/api/maintenance-checklist-templates',{cache:'no-store'});const payload=await response.json() as SetupData&{error?:string};if(!response.ok)throw new Error(payload.error||'Checklist editor could not be loaded.');setData(payload);applyAssigned(payload,kind,target)}
   useEffect(()=>{void load().catch(error=>setMessage(error instanceof Error?error.message:'Checklist editor could not be loaded.'))},[]);
 
   function confirmDiscard(){return !dirty||window.confirm('Discard the unpublished checklist changes?')}
-  function switchKind(next:EventType){if(next===kind)return;if(!confirmDiscard())return;setKind(next);setMessage('');if(data)applyAssigned(data,next,target)}
-  function switchTarget(next:AppliesTo){if(next===target)return;if(!confirmDiscard())return;setTarget(next);setMessage('');if(data)applyAssigned(data,kind,next)}
+  function switchKind(next:EventType){if(next===kind)return;if(!confirmDiscard())return;setKind(next);setBodyType('');setMessage('');if(data)applyAssigned(data,next,target)}
+  function switchTarget(next:AppliesTo){if(next===target)return;if(!confirmDiscard())return;setTarget(next);setBodyType('');setMessage('');if(data)applyAssigned(data,kind,next)}
+  function switchBody(next:string){if(next===bodyType||!confirmDiscard())return;setBodyType(next);setMessage('');if(data)applyAssigned(data,kind,target,next)}
   function selectExisting(key:string){if(!data||!confirmDiscard())return;applyTemplate(data,kind,key);setMessage('')}
   function patch(index:number,patchValue:Partial<TemplateItem>){setItems(current=>renumber(current.map((item,itemIndex)=>itemIndex===index?{...item,...patchValue}:item)));setDirty(true)}
   function addItem(section?:string){const nextSection=section||items.at(-1)?.section||'General';setItems(current=>renumber([...current,blankItem(nextSection)]));setDirty(true)}
   function addSection(){const section=window.prompt('Name the new checklist section:','New Section')?.trim();if(section)addItem(section)}
   function move(index:number,targetIndex:number){if(targetIndex<0||targetIndex>=items.length||index===targetIndex)return;setItems(current=>{const next=[...current];const[picked]=next.splice(index,1);next.splice(targetIndex,0,picked);return renumber(next)});setDirty(true)}
   function remove(index:number){if(!window.confirm('Remove this item from the draft?'))return;setItems(current=>renumber(current.filter((_,itemIndex)=>itemIndex!==index)));setDirty(true)}
-  function startBlank(){if(!confirmDiscard())return;setSelectedKey(null);setName(`New ${kind==='annual'?'Annual':'PM'} Template`);setItems([blankItem('General')]);setDirty(true);setMessage('New blank template. Publishing it will also assign it to the selected equipment type.')}
-  function copyCurrent(){const template=data&&selectedKey?templateFor(data,kind,selectedKey):null;if(!template)return;if(!confirmDiscard())return;setSelectedKey(null);setName(`${template.name} Copy`);setItems(cloneItems(template.items));setDirty(true);setMessage('Copied into a new template draft. Change the name or questions, then publish.')}
+  function startBlank(){if(!confirmDiscard())return;setSelectedKey(null);setName(bodyType?bodyType+' PM':`New ${kind==='annual'?'Annual':'PM'} Template`);setItems([blankItem('General')]);setDirty(true);setMessage('New blank template. Publishing it will also assign it to the selected equipment/body type.')}
+  function copyCurrent(){const template=data&&selectedKey?templateFor(data,kind,selectedKey):null;if(!template)return;if(!confirmDiscard())return;setSelectedKey(null);setName(bodyType?bodyType+' PM':`${template.name} Copy`);setItems(cloneItems(template.items));setDirty(true);setMessage('Copied into a new template draft. Change the name or questions, then publish.')}
 
   async function save(){
     if(!items.length)return setMessage('Add at least one checklist item first.');
@@ -53,23 +57,28 @@ export default function MaintenanceChecklistEditorClient(){
     if(!items.some(item=>item.enabled))return setMessage('At least one checklist item must be enabled.');
     if(items.some(item=>item.enabled&&!item.allowPass&&!item.allowFail&&!item.allowNa))return setMessage('Every enabled item must allow Pass, Fail, or N/A.');
     if(items.some(item=>item.enabled&&item.requireMeasurement&&!item.measurementLabel.trim()))return setMessage('Every required measurement needs a label.');
-    const creating=!selectedKey;
-    const verb=creating?'Create this template':'Publish a new version';
+    const creating=willCreate;
+    const verb=creating?(bodyType?'Create a separate checklist for '+bodyType:'Create this template'):'Publish a new version';
     if(!window.confirm(`${verb}? PMs or Annuals already started will keep their existing questions.`))return;
     setSaving(true);setMessage('');
     try{
-      const response=await fetch('/api/maintenance-checklist-templates',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(creating?{action:'create',eventType:kind,name,items,assignTo:target}:{action:'publish',eventType:kind,templateKey:selectedKey,name,items})});
+      const response=await fetch('/api/maintenance-checklist-templates',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(creating?{action:'create',eventType:kind,name:bodyType&&selectedKey&&currentTemplate?.name===name?bodyType+' PM':name,items,assignTo:target,bodyType:kind==='pm'?bodyType:undefined}:{action:'publish',eventType:kind,templateKey:selectedKey,name,items})});
       const payload=await response.json() as SetupData&{ok?:boolean;error?:string;selectedTemplateKey?:string};
       if(!response.ok||!payload.ok)throw new Error(payload.error||'Checklist template could not be saved.');
-      setData(payload);const key=payload.selectedTemplateKey||selectedKey||assignedKey(payload,kind,target);applyTemplate(payload,kind,key);setMessage(creating?`Template created and assigned to ${target==='trailer'?'trailers':'trucks'}.`:'New template version published. New inspections will use it wherever this template is assigned.');
+      setData(payload);const key=payload.selectedTemplateKey||selectedKey||assignedKey(payload,kind,target,bodyType);applyTemplate(payload,kind,key);setMessage(creating?`Template created and assigned to ${bodyType|| (target==='trailer'?'trailers':'trucks')}.`:'New template version published. New inspections will use it wherever this template is assigned.');
     }catch(error){setMessage(error instanceof Error?error.message:'Checklist template could not be saved.')}finally{setSaving(false)}
   }
 
   const kindData=data?.[kind];
   const templates=kindData?.templates??[];
   const currentTemplate=selectedKey?templates.find(template=>template.templateKey===selectedKey)??null:null;
-  const assigned=kindData?.assignments[target]??null;
+  const explicitBody=kind==='pm'&&bodyType&&data?bodyAssignment(data,target,bodyType):null;
+  const assigned=kind==='pm'&&bodyType?explicitBody:kindData?.assignments[target]??null;
   const isAssigned=Boolean(selectedKey&&assigned===selectedKey);
+  const shared=Boolean(selectedKey&&kindData&&(Object.values(kindData.assignments).includes(selectedKey)||(data?.bodyAssignments??[]).some(a=>a.templateKey===selectedKey&&(a.equipmentType!==target||a.bodyType.toLowerCase()!==bodyType.toLowerCase()))));
+  const willCreate=!selectedKey||Boolean(kind==='pm'&&bodyType&&(!isAssigned||shared));
+  const targetLabel=bodyType|| (target==='trailer'?'Trailers':'Trucks');
+  const inherited=Boolean(kind==='pm'&&bodyType&&!explicitBody);
   const enabledCount=items.filter(item=>item.enabled).length;
   const sectionCount=useMemo(()=>new Set(items.filter(item=>item.enabled).map(item=>item.section.trim()).filter(Boolean)).size,[items]);
   const versions=currentTemplate?.versions??[];
@@ -78,28 +87,35 @@ export default function MaintenanceChecklistEditorClient(){
     if(!selectedKey)return setMessage('Publish the new template before assigning it.');
     if(dirty)return setMessage('Publish or discard the draft changes before changing the assignment.');
     setSaving(true);setMessage('');
-    try{const response=await fetch('/api/maintenance-checklist-templates',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'assign',eventType:kind,appliesTo:target,templateKey:selectedKey})});const payload=await response.json() as SetupData&{ok?:boolean;error?:string};if(!response.ok||!payload.ok)throw new Error(payload.error||'Checklist assignment could not be saved.');setData(payload);setMessage(`${currentTemplate?.name||'Template'} is now the ${kind.toUpperCase()} checklist for ${target==='trailer'?'trailers':'trucks'}. Existing inspections are unchanged.`)}catch(error){setMessage(error instanceof Error?error.message:'Checklist assignment could not be saved.')}finally{setSaving(false)}
+    try{const response=await fetch('/api/maintenance-checklist-templates',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:kind==='pm'&&bodyType?'assignBody':'assign',eventType:kind,appliesTo:target,templateKey:selectedKey,bodyType:kind==='pm'?bodyType:undefined})});const payload=await response.json() as SetupData&{ok?:boolean;error?:string};if(!response.ok||!payload.ok)throw new Error(payload.error||'Checklist assignment could not be saved.');setData(payload);setMessage(`${currentTemplate?.name||'Template'} is now the ${kind.toUpperCase()} checklist for ${targetLabel}. Existing inspections are unchanged.`)}catch(error){setMessage(error instanceof Error?error.message:'Checklist assignment could not be saved.')}finally{setSaving(false)}
   }
 
+  async function clearBody(){
+    if(!bodyType||!explicitBody||saving||!confirmDiscard())return;
+    if(!window.confirm('Remove this body-specific assignment and use the default PM checklist for '+targetLabel+'?'))return;
+    setSaving(true);setMessage('');
+    try{const response=await fetch('/api/maintenance-checklist-templates',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'clearBody',eventType:'pm',appliesTo:target,bodyType})});const payload=await response.json() as SetupData&{ok?:boolean;error?:string};if(!response.ok||!payload.ok)throw new Error(payload.error||'Assignment could not be removed.');setData(payload);applyAssigned(payload,kind,target,bodyType);setMessage('This body type now uses the default '+target+' PM checklist. Existing inspections are unchanged.');}catch(error){setMessage(error instanceof Error?error.message:'Assignment could not be removed.')}finally{setSaving(false)}
+  }
   return <main style={styles.page}>
-    <header style={styles.header}><div><p style={styles.eyebrow}>MAINTENANCE SETUP</p><h1 style={styles.title}>PM & Annual Template Builder</h1><p style={styles.subtitle}>Create reusable checklists from scratch or copy an existing one. Assign different templates to trucks and trailers. In-progress inspections always keep the version they started with.</p></div><div style={styles.stat}><span>SELECTED</span><strong>{currentTemplate?`v${currentTemplate.version}`:'NEW'}</strong><small>{enabledCount} enabled · {sectionCount} sections</small></div></header>
+    <header style={styles.header}><div><p style={styles.eyebrow}>MAINTENANCE SETUP</p><h1 style={styles.title}>PM & Annual Template Builder</h1><p style={styles.subtitle}>Create reusable checklists from scratch or copy an existing one. Assign different PM templates by truck/trailer and body type. Annual assignments stay separate. In-progress inspections always keep the version they started with.</p></div><div style={styles.stat}><span>SELECTED</span><strong>{currentTemplate?`v${currentTemplate.version}`:'NEW'}</strong><small>{enabledCount} enabled · {sectionCount} sections</small></div></header>
     {message&&<div style={styles.notice}>{message}</div>}
 
     <section style={styles.choicePanel}>
       <div><p style={styles.eyebrow}>INSPECTION TYPE</p><div style={styles.segment}><button type="button" onClick={()=>switchKind('pm')} style={kind==='pm'?styles.segmentActive:styles.segmentButton}>PM</button><button type="button" onClick={()=>switchKind('annual')} style={kind==='annual'?styles.segmentActive:styles.segmentButton}>Annual</button></div></div>
       <div><p style={styles.eyebrow}>APPLIES TO</p><div style={styles.segment}><button type="button" onClick={()=>switchTarget('truck')} style={target==='truck'?styles.segmentActive:styles.segmentButton}>Trucks</button><button type="button" onClick={()=>switchTarget('trailer')} style={target==='trailer'?styles.segmentActive:styles.segmentButton}>Trailers</button></div></div>
+      {kind==='pm'&&<div><label style={styles.label}>BODY TYPE<select style={styles.input} value={bodyType} disabled={saving} onChange={event=>switchBody(event.target.value)}><option value="">Default — all {target==='trailer'?'trailers':'trucks'} without an override</option>{(data?.bodyTypes?.[target]??[]).map(body=><option key={body} value={body}>{body}</option>)}</select></label>{target==='truck'&&!(data?.bodyTypes?.truck??[]).length&&<p style={styles.help}>Set a Truck body type in Equipment Master first.</p>}</div>}
     </section>
 
-    <section style={styles.safe}><strong>Automatic selection for technicians</strong><span>When a technician starts this work, the system uses the template assigned to that unit type. They do not have to choose a checklist.</span></section>
+    <section style={styles.safe}><strong>Automatic selection for technicians</strong><span>When a technician starts a PM, a configured body-type override takes priority; otherwise the unit's default truck/trailer checklist applies. Annual forms and scheduling stay unchanged. The existing trailer PM-to-Annual shortcut only carries verified matching checks.</span></section>
 
     <section style={styles.panel}>
       <div style={styles.panelHead}><div><p style={styles.eyebrow}>TEMPLATE LIBRARY</p><h2 style={styles.h2}>{kind==='annual'?'Annual':'PM'} templates</h2></div><div style={styles.actions}><button type="button" style={styles.secondary} onClick={startBlank}>+ New Blank Template</button><button type="button" style={styles.secondary} disabled={!currentTemplate} onClick={copyCurrent}>Copy Selected</button></div></div>
-      <div style={styles.library}>{templates.map(template=>{const truck=kindData?.assignments.truck===template.templateKey;const trailer=kindData?.assignments.trailer===template.templateKey;const selected=template.templateKey===selectedKey;return <button type="button" key={template.templateKey} onClick={()=>selectExisting(template.templateKey)} style={{...styles.templateCard,...(selected?styles.templateSelected:{})}}><span style={styles.templateName}>{template.name}</span><span style={styles.templateMeta}>v{template.version} · {template.items.filter(item=>item.enabled).length} items</span><span style={styles.tags}>{truck&&<b style={styles.tag}>TRUCKS</b>}{trailer&&<b style={styles.tag}>TRAILERS</b>}{template.templateKey==='default'&&<b style={styles.defaultTag}>ORIGINAL</b>}</span></button>})}</div>
+      <div style={styles.library}>{templates.map(template=>{const truck=kindData?.assignments.truck===template.templateKey;const trailer=kindData?.assignments.trailer===template.templateKey;const selected=template.templateKey===selectedKey;const bodyLabels=kind==='pm'?(data?.bodyAssignments??[]).filter(a=>a.templateKey===template.templateKey):[];return <button type="button" key={template.templateKey} onClick={()=>selectExisting(template.templateKey)} style={{...styles.templateCard,...(selected?styles.templateSelected:{})}}><span style={styles.templateName}>{template.name}</span><span style={styles.templateMeta}>v{template.version} · {template.items.filter(item=>item.enabled).length} items</span><span style={styles.tags}>{truck&&<b style={styles.tag}>TRUCKS</b>}{trailer&&<b style={styles.tag}>TRAILERS</b>}{template.templateKey==='default'&&<b style={styles.defaultTag}>ORIGINAL</b>}{bodyLabels.map(a=><b key={a.equipmentType+':'+a.bodyType} style={styles.tag}>{a.bodyType}</b>)}</span></button>})}</div>
       {!templates.length&&<p style={styles.help}>No templates are available yet.</p>}
-      <div style={styles.assignment}><div><strong>{target==='trailer'?'Trailer':'Truck'} assignment</strong><span>{isAssigned?'This selected template is currently assigned.':'The selected template is not currently assigned to this equipment type.'}</span></div><button type="button" style={isAssigned?styles.assignedButton:styles.primary} disabled={!selectedKey||dirty||saving||isAssigned} onClick={()=>void assignSelected()}>{isAssigned?'Assigned':'Use Selected Template'}</button></div>
+      <div style={styles.assignment}><div><strong>{targetLabel} assignment</strong><span>{inherited?'Inherits the default '+target+' PM checklist. Create or assign a body-specific template to override it.':isAssigned?'This selected template is currently assigned.':'The selected template is not currently assigned to this scope.'}</span></div><button type="button" style={isAssigned?styles.assignedButton:styles.primary} disabled={!selectedKey||dirty||saving||isAssigned} onClick={()=>void assignSelected()}>{isAssigned?'Assigned':'Use Selected Template'}</button>{bodyType&&explicitBody&&<button type="button" style={styles.secondary} disabled={saving} onClick={()=>void clearBody()}>Use default instead</button>}</div>{kind==='pm'&&bodyType&&willCreate&&selectedKey&&<p style={styles.help}>Editing this shared or inherited template and publishing will create a separate {bodyType} PM template, without changing the original.</p>}
     </section>
 
-    <section style={styles.toolbar}><label style={{...styles.label,flex:'1 1 320px'}}>Template name<input style={styles.input} value={name} onChange={event=>{setName(event.target.value);setDirty(true)}} placeholder="Example: Trailer PM - Standard"/></label><div style={styles.actions}><button type="button" style={styles.secondary} onClick={addSection}>+ Add Section</button><button type="button" style={styles.secondary} onClick={()=>addItem()}>+ Add Item</button><button type="button" disabled={saving||(!dirty&&Boolean(selectedKey))} style={{...styles.primary,opacity:(saving||(!dirty&&Boolean(selectedKey)))?0.55:1}} onClick={()=>void save()}>{saving?'Saving...':selectedKey?'Publish New Version':'Create Template'}</button></div></section>
+    <section style={styles.toolbar}><label style={{...styles.label,flex:'1 1 320px'}}>Template name<input style={styles.input} value={name} onChange={event=>{setName(event.target.value);setDirty(true)}} placeholder="Example: Trailer PM - Standard"/></label><div style={styles.actions}><button type="button" style={styles.secondary} onClick={addSection}>+ Add Section</button><button type="button" style={styles.secondary} onClick={()=>addItem()}>+ Add Item</button><button type="button" disabled={saving||(!dirty&&Boolean(selectedKey))} style={{...styles.primary,opacity:(saving||(!dirty&&Boolean(selectedKey)))?0.55:1}} onClick={()=>void save()}>{saving?'Saving...':willCreate?'Create Template':'Publish New Version'}</button></div></section>
 
     <section style={styles.panel}>
       <div style={styles.panelHead}><div><p style={styles.eyebrow}>CHECKLIST QUESTIONS</p><h2 style={styles.h2}>{name||'New Template'}</h2></div><span style={styles.badge}>{items.length} total · {enabledCount} enabled</span></div>
@@ -110,7 +126,7 @@ export default function MaintenanceChecklistEditorClient(){
         <div style={styles.options}><fieldset style={styles.option}><legend>Allowed answers</legend><label><input type="checkbox" checked={item.allowPass} onChange={event=>patch(index,{allowPass:event.target.checked})}/> Pass</label><label><input type="checkbox" checked={item.allowFail} onChange={event=>patch(index,{allowFail:event.target.checked})}/> Fail</label><label><input type="checkbox" checked={item.allowNa} onChange={event=>patch(index,{allowNa:event.target.checked})}/> N/A</label></fieldset><fieldset style={styles.option}><legend>Required proof</legend><label><input type="checkbox" checked={item.requireNotes} onChange={event=>patch(index,{requireNotes:event.target.checked})}/> Note</label><label><input type="checkbox" checked={item.requirePhoto} onChange={event=>patch(index,{requirePhoto:event.target.checked})}/> Photo</label><label><input type="checkbox" checked={item.requireMeasurement} onChange={event=>patch(index,{requireMeasurement:event.target.checked,measurementLabel:event.target.checked?(item.measurementLabel||'Measurement'):item.measurementLabel})}/> Measurement</label></fieldset><div style={styles.option}><strong>Measurement</strong><input style={styles.input} value={item.measurementLabel} onChange={event=>patch(index,{measurementLabel:event.target.value})} placeholder="Example: Brake stroke"/><input style={styles.input} value={item.measurementUnit} onChange={event=>patch(index,{measurementUnit:event.target.value})} placeholder="Unit: in, psi, °F..."/></div></div>
       </article></div>})}</div>
       {!items.length&&<div style={styles.empty}><strong>No checklist items.</strong><span>Add an item or start a blank template.</span></div>}
-      <div style={{...styles.actions,justifyContent:'flex-end',marginTop:16}}><button type="button" style={styles.secondary} onClick={()=>addItem()}>+ Add Item</button><button type="button" disabled={saving||(!dirty&&Boolean(selectedKey))} style={{...styles.primary,opacity:(saving||(!dirty&&Boolean(selectedKey)))?0.55:1}} onClick={()=>void save()}>{saving?'Saving...':selectedKey?'Publish New Version':'Create Template'}</button></div>
+      <div style={{...styles.actions,justifyContent:'flex-end',marginTop:16}}><button type="button" style={styles.secondary} onClick={()=>addItem()}>+ Add Item</button><button type="button" disabled={saving||(!dirty&&Boolean(selectedKey))} style={{...styles.primary,opacity:(saving||(!dirty&&Boolean(selectedKey)))?0.55:1}} onClick={()=>void save()}>{saving?'Saving...':willCreate?'Create Template':'Publish New Version'}</button></div>
     </section>
 
     {currentTemplate&&<section style={styles.panel}><p style={styles.eyebrow}>VERSION HISTORY</p><h2 style={styles.h2}>{currentTemplate.name}</h2><div style={styles.historyList}>{versions.map(version=><div key={version.id} style={styles.history}><div><strong>Version {version.version}{version.active?' · ACTIVE':''}</strong><span>{version.name}</span></div><div><strong>{version.itemCount} items</strong><span>{formatDate(version.createdAt)}</span></div></div>)}</div></section>}
