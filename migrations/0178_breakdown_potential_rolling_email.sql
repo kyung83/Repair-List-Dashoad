@@ -1,0 +1,1 @@
+ALTER TABLE roadside_breakdowns ADD COLUMN potential_rolling_email_claimed_at TEXT;

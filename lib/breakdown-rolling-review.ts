@@ -1,3 +1,4 @@
+import {notifyBreakdownEmailGroup} from './notifications';
 import {createGeotabClient,geotabArray,geotabGet,geotabObjectId,geotabText,type GeotabClientEnv} from './geotab-client';
 import {inspectRollingMovement,parseRollingTime,validPosition,type MotionPoint,type MotionAnchor} from './breakdown-rolling-motion';
 
@@ -83,10 +84,45 @@ export async function checkBreakdownRolling(env:Env,scheduledAt=Date.now()){
         evidence?iso(evidence.startedAt):null,evidence?iso(evidence.observedAt):null,evidence?.distanceMiles??null,evidence?.maxSpeedMph??null,evidence?.durationMinutes??null,evidence?'pending':'watching',
         row.id,row.equipment_id,row.device_id).run();
       checked++;
-      if(evidence&&Number(stored.meta.changes??0)===1)flagged++;
+      if(evidence&&Number(stored.meta.changes??0)===1){
+        flagged++;
+        try{await notifyPotentialRolling(env.DB,row.id,evidence);}catch(error){errors++;console.warn(JSON.stringify({event:'breakdown_potential_rolling_email_failed',breakdownId:row.id,error:String(error)}));}
+      }
     }catch(error){errors++;console.warn(JSON.stringify({event:'breakdown_rolling_check_failed',breakdownId:row.id,error:String(error)}));}
   }
   return {checked,flagged,errors};
+}
+
+
+/** Claim once for the lifetime of the breakdown, even if evidence is rejected later.
+ * The existing notification sender logs individual delivery failures. */
+async function notifyPotentialRolling(db:D1Database,id:number,evidence:NonNullable<ReturnType<typeof inspectRollingMovement>['evidence']>){
+  const row=await db.prepare(`
+    SELECT b.driver_name,e.unit,e.equipment_type
+    FROM roadside_breakdowns b JOIN equipment e ON e.id=b.equipment_id
+    WHERE b.id=? AND b.stage<5 AND b.rolling_at IS NULL AND b.status<>'not_breakdown'
+      AND b.potential_rolling_email_claimed_at IS NULL
+  `).bind(id).first<{driver_name:string;unit:string;equipment_type:string}>();
+  if(!row)return;
+  const claim=await db.prepare(`
+    UPDATE roadside_breakdowns SET potential_rolling_email_claimed_at=CURRENT_TIMESTAMP
+    WHERE id=? AND stage<5 AND rolling_at IS NULL AND status<>'not_breakdown'
+      AND potential_rolling_email_claimed_at IS NULL
+      AND EXISTS(SELECT 1 FROM breakdown_rolling_checks c WHERE c.breakdown_id=roadside_breakdowns.id AND c.equipment_id=roadside_breakdowns.equipment_id AND c.state='pending' AND c.candidate_at=?)
+  `).bind(id,iso(evidence.startedAt)).run();
+  if(Number(claim.meta.changes??0)!==1)return;
+  const escape=(v:unknown)=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  const time=new Intl.DateTimeFormat('en-US',{timeZone:'America/Detroit',dateStyle:'medium',timeStyle:'short'}).format(new Date(evidence.startedAt));
+  const html=[
+    '<strong>POTENTIALLY ROLLING — GEOTAB DETECTED MOVEMENT</strong>',
+    '<strong>Driver:</strong> '+escape(row.driver_name),
+    '<strong>'+(row.equipment_type==='trailer'?'Trailer':'Truck')+':</strong> '+escape(row.unit),
+    '<strong>Breakdown #:</strong> '+id,
+    '<strong>Estimated rolling time (Eastern):</strong> '+escape(time),
+    '<strong>Movement:</strong> '+evidence.distanceMiles.toFixed(1)+' miles; peak '+Math.round(evidence.maxSpeedMph)+' mph; '+Math.round(evidence.durationMinutes)+' minutes',
+    '<strong>Action required:</strong> Open Breakdowns and review the Geotab rolling evidence. The driver has not confirmed rolling; the breakdown remains open.',
+  ].join('<br>');
+  await notifyBreakdownEmailGroup(id,'Breakdown Alerts','Breakdown - '+row.driver_name,html);
 }
 
 export async function getRollingReview(db:D1Database,breakdownId:number){
